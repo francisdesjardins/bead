@@ -609,10 +609,14 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             exchanging = [.. _exchanging];
         }
 
+        // one grace for the whole stop, in real time, since what it waits on is the network's: the
+        // exchanges under way write their end, then Kestrel puts what they wrote on the wire before
+        // it closes their connections — cut at once, a 404 just written can go as a reset instead
+        using var grace = new CancellationTokenSource(EndsGrace);
+
         try
         {
-            // in real time: what it waits on is the network's
-            await Task.WhenAll(exchanging).WaitAsync(EndsGrace);
+            await Task.WhenAll(exchanging).WaitAsync(grace.Token);
         }
         catch (Exception)
         {
@@ -625,9 +629,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         {
             try
             {
-                // every connection Kestrel still holds is cut now, as the TypeScript side's are: a
-                // body still coming, or a head half sent, holds no stop back
-                await application.StopAsync(new CancellationToken(true));
+                // what Kestrel still holds when the grace runs out is cut: a body still coming, or a
+                // head half sent, holds the stop back no longer than that
+                await application.StopAsync(grace.Token);
             }
             finally
             {

@@ -729,36 +729,28 @@ public sealed class HttpTransportClientTests
     {
         await using var started = await Started.Start();
         await using var client = new HttpTransportClient(NotListening);
-        var order = new List<string>();
-        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? sending = null;
+        var closed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         await client.Connect(started.Target(), Cancelled);
+        // where the TypeScript side's caller hears the rejection before the close, a caller here
+        // resumes on a thread of its own: what holds is that the send is rejected when the close
+        // is told
         client.Close += (wasClean, wasQuick) =>
         {
-            lock (order)
-            {
-                order.Add($"close [{wasClean},{wasQuick}]");
-            }
-
-            closed.TrySetResult();
+            closed.TrySetResult($"close [{wasClean},{wasQuick}], the send {(sending is { IsFaulted: true } ? "rejected" : "not yet rejected")}");
         };
         await started.Server.CloseConnection(await Next(started.Connections));
 
-        try
-        {
-            await client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0))).WaitAsync(Patience, Cancelled);
-        }
-        catch (IOException reason)
-        {
-            lock (order)
-            {
-                order.Add($"rejected {reason.Message}");
-            }
-        }
+        sending = client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
 
-        await closed.Task.WaitAsync(Patience, Cancelled);
+        var rejected = await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return sending.WaitAsync(Patience, Cancelled);
+        });
 
-        Assert.Equal(["rejected the server refused the exchange: 404 connection-unknown", "close [False,False]"], order);
+        Assert.Equal("the server refused the exchange: 404 connection-unknown", rejected.Message);
+        Assert.Equal("close [False,False], the send rejected", await closed.Task.WaitAsync(Patience, Cancelled));
         Assert.Equal(ReadyState.Closed, client.ReadyState);
     }
 
