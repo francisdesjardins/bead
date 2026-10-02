@@ -5,8 +5,8 @@
     held in the build, and a warning the build does not pass. 0007 is the decision.
   -->
   <PropertyGroup>
-    <!-- the TypeScript side's version too: nothing is published, and a first release is 0.1.0 -->
-    <Version>0.0.0</Version>
+    <!-- the TypeScript side's version too: one version for Bead, moved by each release -->
+    <Version>0.1.0</Version>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
