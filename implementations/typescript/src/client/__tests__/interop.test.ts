@@ -14,6 +14,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { JSON_SERIALIZER, offerInteropClient, procedureOf } from '../../../interop/offer';
+import type { FetchLike } from '../../transport/client/types';
+import { noop } from '../../transport/shared/noop';
 import { createHTTPClient, type HTTPClient } from '../http-client';
 import {
   CancelError,
@@ -73,7 +75,7 @@ const TRANSPORTS = [
   {
     carriesTransfers: false,
     create: (): HTTPClient | WSClient => {
-      return createHTTPClient();
+      return createHTTPClient({ transport: { fetch: fetchInOrder() } });
     },
     label: 'HTTP',
     portOf: ({ httpPort }: IPorts) => {
@@ -83,6 +85,29 @@ const TRANSPORTS = [
 ] as const;
 
 // helpers
+
+/**
+ * A fetch that sends an envelope only once the server said it had the one before — its head came
+ * back (section 15.7) — as a socket keeps them in order: a cancel never overtakes its request, which
+ * the server would bury unseen.
+ */
+const fetchInOrder = (): FetchLike => {
+  let before: Promise<unknown> = Promise.resolve();
+
+  return (url, init) => {
+    if (init.body === undefined) {
+      return (globalThis.fetch as FetchLike)(url, init);
+    }
+
+    const sent = before.then(() => {
+      return (globalThis.fetch as FetchLike)(url, init);
+    });
+
+    before = sent.catch(noop);
+
+    return sent;
+  };
+};
 
 /** The ports a line of the server says it listens on: `{"port":n,"httpPort":m}`; none for any other line. */
 const portsOfLine = (line: string): IPorts | undefined => {
@@ -255,7 +280,9 @@ test.describe('the C# server of the interop service', () => {
         const controller = new AbortController();
         const slow = requesterOf('slow')(SLOW)({ signal: controller.signal });
 
-        await sleep(100);
+        // a call after it answered: the server has it, where its cancel must find it — by the
+        // socket's order, or by the fetch's
+        await requesterOf('echo')(null)();
         controller.abort();
         await expect(slow).rejects.toBeInstanceOf(CancelError);
         await expect(cancellationsReaching(1)).resolves.toBe(1);
