@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-02
+
 ### Added
 
 - The Bead specification, `spec/spec.md`, for layout `0xA1`: the prefix, kinds, flags and blocks,
@@ -31,12 +33,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tools/check-commits.mjs`, which holds every commit subject to Conventional Commits.
 - `tools/coverage-report.mjs`, a local command: it merges the TypeScript side's istanbul report and
   the C# side's cobertura reports, and prints what the tests leave unrun, file by file.
-- CI: `spec`, `typescript`, `dotnet`, `commits`, and `ci-ok`, the one required check. `typescript`
-  also builds the demo's static playground and holds the root's files to the formatter.
+- CI, on a pinned runner image, `ubuntu-26.04`: `spec`, `typescript` on Node 26 and on the floor,
+  24, `dotnet`, `commits`, and `ci-ok`, the one required check. `typescript` also builds the demo's
+  static playground and holds the root's files to the formatter.
 - `.githooks/`, opt-in with `git config core.hooksPath .githooks`: the Conventional Commits check
   over each message, and the checks a clone keeps for itself in `.claude/local/`, when it has them.
 - `CLAUDE.md` and `.claude/workflows/`: the standing instructions for Claude sessions, and their
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/commits/develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.1.0...develop
+[0.1.0]: https://github.com/francisdesjardins/bead/releases/tag/v0.1.0

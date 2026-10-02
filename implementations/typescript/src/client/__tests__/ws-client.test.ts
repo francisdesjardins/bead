@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
@@ -253,18 +252,30 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
         errors.push(error);
       });
 
-      const answering = client.services.getRequest(echo, { serializer })('hello')({ timeout: 50 });
+      // a call id stays reserved as long as its call's timeout: long enough here for the late
+      // answer to come back within it, and be known for late
+      const answering = client.services.getRequest(echo, { serializer })('hello')({
+        timeout: 500,
+      });
+      // its rejection awaited from the start: on a loaded machine the timeout can pass before the
+      // request is seen to arrive, and a rejection nothing awaits yet fails the run
+      const rejected = expect(answering).rejects.toBeInstanceOf(TimeoutError);
       const request = await envelopes.nextEnvelope();
 
-      await expect(answering).rejects.toBeInstanceOf(TimeoutError);
+      await rejected;
       expect((await envelopes.nextEnvelope()).envelope).toEqual({
         header: { callId: 1, kind: 0x16 },
         kind: 0x16,
       });
 
       envelopes.send(request.socket, answerTo(request, { payload: text.encode('late') }));
-      await sleep(30);
 
+      // a call after it, answered on the same socket: its result read, the late answer was too
+      const following = client.services.getRequest(echo, { serializer })('after')();
+      const next = await envelopes.nextEnvelope();
+
+      envelopes.send(next.socket, answerTo(next, { payload: text.encode('AFTER') }));
+      await expect(following).resolves.toBe('AFTER');
       expect(errors).toEqual([]);
     });
 

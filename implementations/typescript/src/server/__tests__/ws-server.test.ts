@@ -923,7 +923,8 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
             server.sessions.set({
               ...server.sessions.create(request.connectionHandle),
               connectionInactivityTimeout: Infinity,
-              sessionInactivityTimeout: 80,
+              // wide enough that the subscription below comes inside it on a loaded machine
+              sessionInactivityTimeout: 400,
             });
 
             return response('');

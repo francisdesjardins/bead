@@ -18,11 +18,13 @@ permissions:
   contents: read
 
 env:
-  # A CI pins; `engines.node` in the TypeScript side's manifest declares a floor.
-  NODE_VERSION: '24'
+  # A CI pins: the runner's image by its release, never `ubuntu-latest`, and Node by its line. Node
+  # is the current line; `engines.node` in the TypeScript side's manifest declares a floor, and the
+  # TypeScript job runs on it too.
+  NODE_VERSION: '26'
   # The vendored release, invoked as a file: no Corepack, and the runner's own Yarn 1.22 refuses a
-  # project declaring `packageManager: yarn@4.18.0`.
-  YARN: node .yarn/releases/yarn-4.18.0.cjs
+  # project declaring `packageManager: yarn@4.18.1`.
+  YARN: node .yarn/releases/yarn-4.18.1.cjs
   # The TypeScript suite is unit tests without a browser: nothing to download.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
@@ -32,11 +34,11 @@ jobs:
   # identical to the committed ones, byte for byte.
   spec:
     name: Spec
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
       - run: python spec/generators/make_vectors.py
@@ -48,27 +50,32 @@ jobs:
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint, format, comment budget, doc examples, then its
   # tests. The interop against the C# server runs in the .NET job, the only one with both runtimes.
+  # On the current line and on the floor `engines.node` declares, so the floor holds by a run.
   typescript:
-    name: TypeScript
-    runs-on: ubuntu-latest
+    name: TypeScript (Node ${{ matrix.node }})
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['26', '24']
     defaults:
       run:
         working-directory: implementations/typescript
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: ${{ matrix.node }}
       - name: Locate the Yarn cache
         id: yarn-cache
         run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
       # The download cache, not `node_modules`: cache what was downloaded, always install.
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
-          key: yarn-cache-${{ runner.os }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
-          restore-keys: yarn-cache-${{ runner.os }}-
+          key: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
       - run: $YARN check
@@ -99,7 +106,7 @@ jobs:
   # `Directory.Build.props`: a restore that would change a `packages.lock.json` fails.
   dotnet:
     name: .NET
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:
       BEAD_INTEROP_REQUIRED: 1
@@ -107,13 +114,13 @@ jobs:
       run:
         working-directory: implementations/dotnet
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: implementations/dotnet/global.json
           cache: true
           cache-dependency-path: implementations/dotnet/**/packages.lock.json
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - run: $YARN install --immutable
@@ -128,13 +135,13 @@ jobs:
   # left out, git-flow writes them.
   commits:
     name: Commits
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Check the subjects
@@ -165,7 +172,7 @@ jobs:
     name: CI ok
     if: always()
     needs: [spec, typescript, dotnet, commits]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:
       - name: Every job passed

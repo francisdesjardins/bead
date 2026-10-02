@@ -56,12 +56,6 @@ const startWorker = async () => {
   };
 };
 
-const settled = () => {
-  return new Promise((resolve) => {
-    setTimeout(resolve, 20);
-  });
-};
-
 const nextEvent = (client: WorkerTransportClient, event: 'close' | 'message') => {
   return new Promise<unknown[]>((resolve) => {
     client.once(event, (...params: unknown[]) => {
@@ -94,14 +88,17 @@ test.describe('createWorkerTransportClient', () => {
     const closed = nextEvent(client, 'close');
 
     await client.disconnect({ isClean: true });
-    await settled();
 
     expect(await closed).toEqual([true, false]);
     expect(started.errorListeners.size).toBe(0);
-    expect(serverEvents).toEqual([
-      ['message', [1, 2], connectionHandle],
-      ['close', true, connectionHandle],
-    ]);
+    await expect
+      .poll(() => {
+        return serverEvents;
+      })
+      .toEqual([
+        ['message', [1, 2], connectionHandle],
+        ['close', true, connectionHandle],
+      ]);
     expect([client.isClosed(), client.socket]).toEqual([true, null]);
     expect(CONNECT_DEFAULTS.timeout).toBe(10_000);
   });
@@ -131,8 +128,11 @@ test.describe('createWorkerTransportClient', () => {
 
     expect(await lost).toEqual([false, false]);
     expect([client.isClosed(), errorListeners.size]).toEqual([true, 0]);
-    await settled();
-    expect(server.clients).toEqual([]);
+    await expect
+      .poll(() => {
+        return server.clients;
+      })
+      .toEqual([]);
   });
 
   test('gives up on a worker that never answers, telling a server that takes the port later', async () => {
@@ -154,10 +154,12 @@ test.describe('createWorkerTransportClient', () => {
       heard.push(data);
     });
     late?.start();
-    await settled();
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.CLOSE]);
     late?.close();
-
-    expect(heard).toEqual([WORKER_MESSAGES.CLOSE]);
 
     // a dispose while it connects rejects the connect
     const disposed = client.connect({});
@@ -198,9 +200,13 @@ test.describe('createWorkerTransportClient', () => {
       heard.push('close');
     });
     await client.connect({});
-    await settled();
 
-    expect([heard, client.isOpen()]).toEqual([[[2]], true]);
+    // the port keeps its order: once the last bytes are heard, all before them were judged
+    await expect
+      .poll(() => {
+        return [heard, client.isOpen()];
+      })
+      .toEqual([[[2]], true]);
 
     // dropped: its server is told, as a port does not tell its close
     (client as ITransportClientInternal<object, never>)[dispose]();
@@ -223,8 +229,11 @@ test.describe('createWorkerTransportClient', () => {
 
     // dropped while open: the server hears its close all the same
     (client as ITransportClientInternal<object, never>)[dispose]();
-    await settled();
 
-    expect(started.serverEvents).toEqual([['close', true, 'type=WORKER;ip=local;ordinal=1']]);
+    await expect
+      .poll(() => {
+        return started.serverEvents;
+      })
+      .toEqual([['close', true, 'type=WORKER;ip=local;ordinal=1']]);
   });
 });

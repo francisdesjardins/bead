@@ -13,7 +13,7 @@ import type {
   IRequestResolverProps,
   OutgoingEnvelope,
 } from '../../shared/types';
-import { envelopeOf } from '../../shared/__tests__/fixtures';
+import { envelopeOf, spyTimers } from '../../shared/__tests__/fixtures';
 import {
   CancelError,
   createRouterClient,
@@ -119,6 +119,30 @@ const recordErrors = (router: IRouterClient) => {
   });
 
   return errors;
+};
+
+/**
+ * The timers `spied` armed and nothing stopped since: those the clock would fire, each fired by
+ * hand here, so a late machine moves no deadline past another.
+ */
+const runningOf = ({ armed, cleared }: ReturnType<typeof spyTimers>) => {
+  return armed.filter(({ timeoutId }) => {
+    return !cleared.includes(timeoutId);
+  });
+};
+
+/** The delays of `timers`, in the order they were armed. */
+const delaysOf = (timers: ReturnType<typeof spyTimers>['armed']) => {
+  return timers.map(({ delay }) => {
+    return delay;
+  });
+};
+
+/** Fires each of `timers`, as its clock would. */
+const fireEach = (timers: ReturnType<typeof spyTimers>['armed']) => {
+  for (const { fire } of timers) {
+    fire();
+  }
 };
 
 const codesOf = (errors: Error[]) => {
@@ -240,27 +264,44 @@ test.describe('createRouterClient', () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
       const errors = recordErrors(router);
+      const spied = spyTimers();
 
-      await expect(
-        router.request(new Uint8Array(0), { options: { timeout: 10 }, procedure: service })
-      ).rejects.toBeInstanceOf(TimeoutError);
+      try {
+        const failing = router
+          .request(new Uint8Array(0), { options: { timeout: 10 }, procedure: service })
+          .catch((reason: unknown) => {
+            return reason;
+          });
 
-      expect(
-        sent.map((envelope) => {
-          return [envelope?.kind, envelope?.header.callId];
-        })
-      ).toEqual([
-        [EnvelopeKind.REQUEST, 1],
-        [EnvelopeKind.CANCEL, 1],
-      ]);
+        await sleep(0);
 
-      deliver(resultOf(1));
+        // the call's own, past which it times out
+        expect(delaysOf(runningOf(spied))).toEqual([10]);
 
-      expect(errors).toEqual([]);
+        fireEach(runningOf(spied));
 
-      // reserved as long as the call was given, then free
-      await sleep(30);
-      deliver(resultOf(1));
+        expect(await failing).toBeInstanceOf(TimeoutError);
+        expect(
+          sent.map((envelope) => {
+            return [envelope?.kind, envelope?.header.callId];
+          })
+        ).toEqual([
+          [EnvelopeKind.REQUEST, 1],
+          [EnvelopeKind.CANCEL, 1],
+        ]);
+
+        deliver(resultOf(1));
+
+        expect(errors).toEqual([]);
+
+        // reserved as long as the call was given, then free
+        expect(delaysOf(runningOf(spied))).toEqual([10]);
+
+        fireEach(runningOf(spied));
+        deliver(resultOf(1));
+      } finally {
+        spied.restore();
+      }
 
       expect(codesOf(errors)).toEqual([ProtocolCode.CALL_UNKNOWN]);
     });
@@ -575,31 +616,50 @@ test.describe('createRouterClient', () => {
       });
       await expect(refused).rejects.toMatchObject({ code: ProtocolCode.ACCESS_DENIED });
 
-      await expect(
-        router.request(new Uint8Array(0), {
-          options: { timeout: 10 },
-          procedure: service,
-          subscribes: notification,
-        })
-      ).rejects.toBeInstanceOf(TimeoutError);
+      const spied = spyTimers();
 
-      deliver(notificationEnvelopeOf(1));
-      deliver(notificationEnvelopeOf(3));
+      try {
+        const failing = router
+          .request(new Uint8Array(0), {
+            options: { timeout: 10 },
+            procedure: service,
+            subscribes: notification,
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          });
 
-      expect(triggered).toEqual([]);
-      expect(codesOf(errors)).toEqual([ProtocolCode.SUBSCRIPTION_UNKNOWN]);
-      expect(
-        sent.map((envelope) => {
-          return [envelope?.kind, envelope?.header.callId];
-        })
-      ).toEqual([
-        [EnvelopeKind.REQUEST, 1],
-        [EnvelopeKind.REQUEST, 3],
-        [EnvelopeKind.CANCEL, 3],
-      ]);
+        await sleep(0);
 
-      await sleep(30);
-      deliver(notificationEnvelopeOf(3));
+        // the call's own, past which it times out
+        expect(delaysOf(runningOf(spied))).toEqual([10]);
+
+        fireEach(runningOf(spied));
+
+        expect(await failing).toBeInstanceOf(TimeoutError);
+
+        deliver(notificationEnvelopeOf(1));
+        deliver(notificationEnvelopeOf(3));
+
+        expect(triggered).toEqual([]);
+        expect(codesOf(errors)).toEqual([ProtocolCode.SUBSCRIPTION_UNKNOWN]);
+        expect(
+          sent.map((envelope) => {
+            return [envelope?.kind, envelope?.header.callId];
+          })
+        ).toEqual([
+          [EnvelopeKind.REQUEST, 1],
+          [EnvelopeKind.REQUEST, 3],
+          [EnvelopeKind.CANCEL, 3],
+        ]);
+        // reserved as long as the call was given, then free
+        expect(delaysOf(runningOf(spied))).toEqual([10]);
+
+        fireEach(runningOf(spied));
+        deliver(notificationEnvelopeOf(3));
+      } finally {
+        spied.restore();
+      }
 
       expect(codesOf(errors)).toEqual([
         ProtocolCode.SUBSCRIPTION_UNKNOWN,
@@ -656,19 +716,28 @@ test.describe('createRouterClient', () => {
 
       deliver(resultOf(1, { sessionToken: TOKEN }));
       await subscribing;
-      await router.unregisterNotification(notification);
 
-      // on its way when it was let go of: dropped in silence, and so is the failure that ends it,
-      // whose end of session is learned all the same
-      deliver(notificationEnvelopeOf(1));
-      deliver(ending);
+      const spied = spyTimers();
 
-      expect(errors).toEqual([]);
-      expect(router.sessionToken).toBeUndefined();
+      try {
+        await router.unregisterNotification(notification);
 
-      await sleep(60);
-      deliver(notificationEnvelopeOf(1));
-      deliver(ending);
+        // on its way when it was let go of: dropped in silence, and so is the failure that ends it,
+        // whose end of session is learned all the same
+        deliver(notificationEnvelopeOf(1));
+        deliver(ending);
+
+        expect(errors).toEqual([]);
+        expect(router.sessionToken).toBeUndefined();
+        // kept as long as the subscription's call was given
+        expect(delaysOf(runningOf(spied))).toEqual([20]);
+
+        fireEach(runningOf(spied));
+        deliver(notificationEnvelopeOf(1));
+        deliver(ending);
+      } finally {
+        spied.restore();
+      }
 
       expect(codesOf(errors)).toEqual([
         ProtocolCode.SUBSCRIPTION_UNKNOWN,

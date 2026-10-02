@@ -93,18 +93,24 @@ test.describe('createWorkerTransportServer', () => {
     const first = connect();
     const second = connect();
 
-    await settled();
+    await expect
+      .poll(() => {
+        return [first.heard, second.heard];
+      })
+      .toEqual([[WORKER_MESSAGES.OPEN], [WORKER_MESSAGES.OPEN]]);
     first.port.postMessage(Uint8Array.of(1, 2).buffer);
-    await settled();
+    await expect
+      .poll(() => {
+        return events;
+      })
+      .toEqual([
+        ['connection', undefined, 'type=WORKER;ip=local;ordinal=1'],
+        ['connection', undefined, 'type=WORKER;ip=local;ordinal=2'],
+        ['message', [1, 2], 'type=WORKER;ip=local;ordinal=1'],
+      ]);
 
     expect(address).toEqual({ address: 'local', port: 0 });
     expect(START_DEFAULTS).toEqual({ address: 'local', findOpenPort: false, port: 0 });
-    expect([first.heard, second.heard]).toEqual([[WORKER_MESSAGES.OPEN], [WORKER_MESSAGES.OPEN]]);
-    expect(events).toEqual([
-      ['connection', undefined, 'type=WORKER;ip=local;ordinal=1'],
-      ['connection', undefined, 'type=WORKER;ip=local;ordinal=2'],
-      ['message', [1, 2], 'type=WORKER;ip=local;ordinal=1'],
-    ]);
     expect(server.clients).toEqual([
       {
         address: 'local',
@@ -143,20 +149,27 @@ test.describe('createWorkerTransportServer', () => {
     const { connect, server } = started;
     const { heard } = connect();
 
-    await settled();
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.OPEN]);
 
     const connectionHandle =
       server.clients[0]?.connectionHandle ?? 'type=WORKER;ip=local;ordinal=1';
     const envelope = Uint8Array.of(7, 8, 9);
 
     await server.send(envelope.subarray(1), connectionHandle);
-    await settled();
 
     // the caller's bytes stay its own
-    expect([heard, [...envelope]]).toEqual([
-      [WORKER_MESSAGES.OPEN, [8, 9]],
-      [7, 8, 9],
-    ]);
+    await expect
+      .poll(() => {
+        return [heard, [...envelope]];
+      })
+      .toEqual([
+        [WORKER_MESSAGES.OPEN, [8, 9]],
+        [7, 8, 9],
+      ]);
     await expect(server.send('text', connectionHandle)).rejects.toThrow(
       new ProgrammerError('a worker connection carries envelopes, as bytes')
     );
@@ -167,26 +180,34 @@ test.describe('createWorkerTransportServer', () => {
     const { connect, events, server } = started;
     const leaving = connect();
     const staying = connect();
+    const closes = () => {
+      return events.filter(([name]) => {
+        return name !== 'connection';
+      });
+    };
 
-    await settled();
+    await expect
+      .poll(() => {
+        return [leaving.heard, staying.heard];
+      })
+      .toEqual([[WORKER_MESSAGES.OPEN], [WORKER_MESSAGES.OPEN]]);
     leaving.port.postMessage(WORKER_MESSAGES.CLOSE);
     leaving.port.postMessage(WORKER_MESSAGES.CLOSE);
     // its port closed: what comes after is heard by nobody
     leaving.port.postMessage(Uint8Array.of(1).buffer);
-    await settled();
+    await expect.poll(closes).toEqual([['close', true, 'type=WORKER;ip=local;ordinal=1']]);
 
     await expect(server.close('type=WORKER;ip=local;ordinal=2')).resolves.toBe(true);
-    await settled();
-
-    expect(
-      events.filter(([name]) => {
-        return name !== 'connection';
+    await expect
+      .poll(() => {
+        return staying.heard;
       })
-    ).toEqual([
+      .toEqual([WORKER_MESSAGES.OPEN, WORKER_MESSAGES.CLOSE]);
+
+    expect(closes()).toEqual([
       ['close', true, 'type=WORKER;ip=local;ordinal=1'],
       ['close', true, 'type=WORKER;ip=local;ordinal=2'],
     ]);
-    expect(staying.heard).toEqual([WORKER_MESSAGES.OPEN, WORKER_MESSAGES.CLOSE]);
     expect(server.gauges().counts).toEqual({ connections: 0 });
   });
 
@@ -195,8 +216,18 @@ test.describe('createWorkerTransportServer', () => {
     const { connect, events, server } = started;
     const { heard } = connect();
 
-    await settled();
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.OPEN]);
     await server.stop();
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.OPEN, WORKER_MESSAGES.CLOSE]);
+    // a connect after the stop, given the time a message takes to come through, were it to come
     connect();
     await settled();
 

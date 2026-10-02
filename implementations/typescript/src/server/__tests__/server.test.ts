@@ -8,7 +8,7 @@ import { toSessionToken } from '../../router/shared/identifiers';
 import { createServiceManager } from '../../router/shared/service-manager';
 import type { IRouterServerOptions } from '../../router/server/types';
 import type { Envelope, IProcedure, IServiceManagerOptions } from '../../router/shared/types';
-import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
+import { callIdsOf, envelopeOf, spyTimers } from '../../router/shared/__tests__/fixtures';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
@@ -166,6 +166,23 @@ const forever = { connectionInactivityTimeout: Infinity, sessionInactivityTimeou
 /** A procedure nobody answers: a request for it passes no `beforeRequest`. */
 const unknown: IProcedure = { ...echo, procedureId: 99, procedureName: 'unknown' };
 
+/**
+ * The timers `spied` armed and nothing stopped since: those the clock would fire, each fired by
+ * hand here, so a late machine moves no deadline past another.
+ */
+const runningOf = ({ armed, cleared }: ReturnType<typeof spyTimers>) => {
+  return armed.filter(({ timeoutId }) => {
+    return !cleared.includes(timeoutId);
+  });
+};
+
+/** The delays of `timers`, in the order they were armed. */
+const delaysOf = (timers: ReturnType<typeof spyTimers>['armed']) => {
+  return timers.map(({ delay }) => {
+    return delay;
+  });
+};
+
 // definition
 
 test.describe('createServer', () => {
@@ -321,27 +338,38 @@ test.describe('createServer', () => {
       connectionInactivityTimeout: 80,
       sessionInactivityTimeout: Infinity,
     });
+    const spied = spyTimers();
 
     await using server = sessionServer;
 
-    ask(first, { procedure: openSession });
+    try {
+      ask(first, { procedure: openSession });
+      await sleep(0);
 
-    // requests for a procedure nobody answers, and a message that is not an envelope: activity all
-    // the same
-    for (let count = 0; count < 3; count += 1) {
-      await sleep(40);
+      // requests for a procedure nobody answers, and a message that is not an envelope: activity all
+      // the same, each stopping the connection's timer and setting another going
+      for (let count = 0; count < 3; count += 1) {
+        if (count === 1) {
+          emitter.emit('message', Uint8Array.of(0x0a, 0x02), first);
+        } else {
+          ask(first, { procedure: unknown });
+        }
 
-      if (count === 1) {
-        emitter.emit('message', Uint8Array.of(0x0a, 0x02), first);
-      } else {
-        ask(first, { procedure: unknown });
+        await sleep(0);
       }
+
+      expect(delaysOf(spied.armed)).toEqual([80, 80, 80, 80]);
+      expect(delaysOf(runningOf(spied))).toEqual([80]);
+      expect(closed).toEqual([]);
+      expect(server.sessions.has(first)).toBe(true);
+
+      // silent past the last
+      for (const { fire } of runningOf(spied)) {
+        fire();
+      }
+    } finally {
+      spied.restore();
     }
-
-    expect(closed).toEqual([]);
-    expect(server.sessions.has(first)).toBe(true);
-
-    await sleep(160);
 
     expect(closed).toEqual([first]);
   });
@@ -355,17 +383,29 @@ test.describe('createServer', () => {
       connectionInactivityTimeout: Infinity,
       sessionInactivityTimeout: 40,
     });
+    const spied = spyTimers();
 
     await using server = sessionServer;
 
-    ask(first, { procedure: openSession });
-    await sleep(0);
+    try {
+      ask(first, { procedure: openSession });
+      await sleep(0);
 
-    expect(server.sessions.has(first)).toBe(true);
+      expect(server.sessions.has(first)).toBe(true);
+      expect(delaysOf(runningOf(spied))).toEqual([40]);
 
-    await sleep(100);
+      for (const { fire } of runningOf(spied)) {
+        fire();
+      }
+      await sleep(0);
 
-    expect(server.sessions.has(first)).toBe(false);
+      // no timer left to close the connection
+      expect(server.sessions.has(first)).toBe(false);
+      expect(runningOf(spied)).toEqual([]);
+    } finally {
+      spied.restore();
+    }
+
     expect(closed).toEqual([]);
   });
 
@@ -375,16 +415,32 @@ test.describe('createServer', () => {
       closed,
       server: sessionServer,
     } = createSessionServer({ connectionInactivityTimeout: 100, sessionInactivityTimeout: 30 });
+    const spied = spyTimers();
 
     await using server = sessionServer;
 
-    ask(first, { procedure: openSession });
-    await sleep(60);
+    try {
+      ask(first, { procedure: openSession });
+      await sleep(0);
 
-    expect(server.sessions.has(first)).toBe(false);
-    expect(closed).toEqual([]);
+      expect(delaysOf(runningOf(spied))).toEqual([100, 30]);
 
-    await sleep(100);
+      // the session's own: it ends, and the connection waits its connection timeout from there
+      for (const { fire } of runningOf(spied).slice(1)) {
+        fire();
+      }
+      await sleep(0);
+
+      expect(server.sessions.has(first)).toBe(false);
+      expect(closed).toEqual([]);
+      expect(delaysOf(runningOf(spied))).toEqual([100]);
+
+      for (const { fire } of runningOf(spied)) {
+        fire();
+      }
+    } finally {
+      spied.restore();
+    }
 
     expect(closed).toEqual([first]);
   });
@@ -410,13 +466,23 @@ test.describe('createServer', () => {
       return response('');
     });
 
-    ask(first, { procedure: openSession });
-    ask(first, { opensSubscription: true, procedure: news });
-    await sleep(0);
+    const spied = spyTimers();
 
-    expect([...server.router.notifications.candidates(news).keys()]).toEqual([first]);
+    try {
+      ask(first, { procedure: openSession });
+      ask(first, { opensSubscription: true, procedure: news });
+      await sleep(0);
 
-    await sleep(60);
+      expect([...server.router.notifications.candidates(news).keys()]).toEqual([first]);
+      expect(delaysOf(runningOf(spied))).toEqual([30]);
+
+      for (const { fire } of runningOf(spied)) {
+        fire();
+      }
+      await sleep(0);
+    } finally {
+      spied.restore();
+    }
 
     // the session's end ended the subscription, with a failure that announced it
     expect(
@@ -451,18 +517,30 @@ test.describe('createServer', () => {
     );
     await using untold = createServer({ transport: quiet.transport });
 
-    for (const { open } of [told, quiet]) {
-      open(first);
+    const spied = spyTimers();
+
+    try {
+      for (const { open } of [told, quiet]) {
+        open(first);
+      }
+
+      // the server told how long arms a timer, the other none
+      expect(delaysOf(spied.armed)).toEqual([60]);
+
+      // a message is activity, with a session or without one
+      told.ask(first, { procedure: unknown });
+      await sleep(0);
+
+      expect(delaysOf(spied.armed)).toEqual([60, 60]);
+      expect(delaysOf(runningOf(spied))).toEqual([60]);
+      expect(told.closed).toEqual([]);
+
+      for (const { fire } of runningOf(spied)) {
+        fire();
+      }
+    } finally {
+      spied.restore();
     }
-
-    // a message is activity, with a session or without one
-    await sleep(40);
-    told.ask(first, { procedure: unknown });
-    await sleep(40);
-
-    expect(told.closed).toEqual([]);
-
-    await sleep(60);
 
     expect(told.closed).toEqual([first]);
     expect(quiet.closed).toEqual([]);
@@ -512,10 +590,12 @@ test.describe('createServer', () => {
 
     control.closeResult = false;
     ask(first, { procedure: openSession });
-    await sleep(60);
 
-    expect(closed).toEqual([first]);
-    expect(server.sessions.has(first)).toBe(false);
+    await expect
+      .poll(() => {
+        return [closed, server.sessions.has(first)];
+      })
+      .toEqual([[first], false]);
   });
 
   test('a command whose timeout passes is cancelled before its connection is closed', async () => {
@@ -614,9 +694,12 @@ test.describe('createServer', () => {
 
     ask(first, { procedure: openSession });
     control.closeError = new Error('refused');
-    await sleep(80);
 
-    expect(errors).toEqual([[control.closeError, first]]);
+    await expect
+      .poll(() => {
+        return errors;
+      })
+      .toEqual([[control.closeError, first]]);
   });
 
   test('a command unanswered in time closes its connection, as the server’s default or the command says', async () => {
@@ -767,7 +850,7 @@ test.describe('createServer', () => {
 
     open(first);
     await server[Symbol.asyncDispose]();
-    await sleep(50);
+    await sleep(80);
 
     expect(closed).toEqual([]);
   });

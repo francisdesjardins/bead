@@ -1143,6 +1143,51 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         });
     }
 
+    [Fact]
+    public async Task Draws_a_connection_over_HTTP_2_before_its_empty_body_ends()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        using var http = SecureClient();
+        var ending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var request = Over(PostOf(SecureUrl, (null, null)), HttpVersion.Version20);
+
+        // its head says its body is empty, and its stream ends later: whether a connect has a body is
+        // read from its head, never from an end of stream still to come
+        request.Content = new LateEmptyContent(ending.Task);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
+
+        try
+        {
+            using var drew = await Fetch(http, request);
+
+            Assert.Equal((201, HttpVersion.Version20), ((int)drew.StatusCode, drew.Version));
+        }
+        finally
+        {
+            ending.TrySetResult();
+        }
+    }
+
+    // a body that says it is empty and ends only when told: HTTP/2's end of stream comes after its head
+    private sealed class LateEmptyContent(Task ending) : HttpContent
+    {
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            // the client holds a head back to send it with the body's first bytes: flushed, it goes
+            // now, and the stream stays open
+            await stream.FlushAsync();
+            await ending;
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+
+            return true;
+        }
+    }
+
     // createHTTPTransportServer, its edges
 
     [Fact]
