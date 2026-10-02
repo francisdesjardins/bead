@@ -28,6 +28,9 @@ const failureOf = (read: () => unknown): FailureError => {
 
 // definition
 
+// the vectors play once, as the C# side plays them: a retry would hide what fails there
+test.describe.configure({ retries: 0 });
+
 test.describe('writeHeader and readHeader', () => {
   for (const { bytes, header, name } of VECTORS.headers) {
     test(`lay ${name} out byte by byte, and read it back`, () => {

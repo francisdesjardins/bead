@@ -704,7 +704,7 @@ public sealed class WebSocketServerTests
             return echoing("hi")(seven).WaitAsync(Patience, Cancelled);
         });
 
-        Assert.Equal(((ushort)ProtocolCode.SessionRequired, (byte)0, FailureOrigin.Peer), (shut.Code, shut.Hops, shut.Origin));
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, (byte)0, FailureOrigin.Peer), (shut.Code, shut.Relays, shut.Origin));
         Assert.Empty(presented);
 
         await ends.Client.Services.GetRequest(OpenSession, TextAsked)("me")().WaitAsync(Patience, Cancelled);
@@ -719,7 +719,7 @@ public sealed class WebSocketServerTests
 
         Assert.Equal(
             ((ushort)ProtocolCode.ProcedureUnknown, (uint?)7, (byte)1, FailureOrigin.Relayed, (RouterSide?)null),
-            (refused.Code, refused.DestinationId, refused.Hops, refused.Origin, refused.Side));
+            (refused.Code, refused.DestinationId, refused.Relays, refused.Origin, refused.Side));
         // the protocol's code, from behind the relay, whose side no one knows
         Assert.Equal(FailureScope.Protocol, refused.Scope);
         Assert.NotEqual(RouterSide.Server, refused.Side);

@@ -14,9 +14,16 @@
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
     },
     "name": {
-      "description": "What a vector or a conversation is about, unique in its group.",
+      "description": "What an entry is about, unique in its file and its group.",
       "type": "string",
       "minLength": 1
+    },
+    "clauses": {
+      "description": "The units of spec/spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[1-9][0-9]*\\.[1-9][0-9]*(\\.[1-9][0-9]*)?$" }
     },
     "bytes": {
       "description": "Bytes in hexadecimal, two capital digits each, spaces aside; a bar parts a header from what follows it.",

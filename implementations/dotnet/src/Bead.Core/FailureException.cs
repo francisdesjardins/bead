@@ -5,8 +5,8 @@ namespace Bead;
 /// <summary>
 /// A failure, thrown: whose code it is, the code, why, and — deduced, never sent — which side raised
 /// it and where. Raised here, it is <see cref="FailureOrigin.Local"/>, of this router's side;
-/// received with no hop, it is the peer's; received through a relay, whose side raised it is not
-/// known.
+/// received through no relay, it is the peer's; received through a relay, whose side raised it is
+/// not known.
 /// </summary>
 public sealed class FailureException : Exception
 {
@@ -54,11 +54,11 @@ public sealed class FailureException : Exception
     }
 
     /// <summary>The relays it crossed: 0 when the peer raised it.</summary>
-    public byte Hops
+    public byte Relays
     {
         get
         {
-            return Failure.Hops;
+            return Failure.Relays;
         }
     }
 
@@ -122,7 +122,7 @@ public sealed class FailureException : Exception
     {
         ArgumentNullException.ThrowIfNull(failure);
 
-        return failure.Hops > 0
+        return failure.Relays > 0
             ? new Raised(FailureOrigin.Relayed, null)
             : new Raised(FailureOrigin.Peer, CallIds.PeerOf(side));
     }
@@ -144,11 +144,11 @@ public sealed class FailureException : Exception
         var address = isProtocol || exception.ProcedureAddress is not { } procedure
             ? ""
             : $" (service {procedure.ServiceId}, procedure {procedure.ProcedureId})";
-        var hops = failure.Hops switch
+        var relays = failure.Relays switch
         {
             0 => "",
-            1 => ", relayed 1 hop",
-            _ => $", relayed {failure.Hops} hops",
+            1 => ", through 1 relay",
+            _ => $", through {failure.Relays} relays",
         };
 
         return string.Concat(
@@ -156,7 +156,7 @@ public sealed class FailureException : Exception
             $"{side} {(isProtocol ? "protocol" : "application")} failure {failure.Code}",
             name,
             address,
-            hops,
+            relays,
             failure.Detail.Length == 0 ? "" : $": {failure.Detail}");
     }
 

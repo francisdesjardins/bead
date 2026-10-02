@@ -506,8 +506,8 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
     // a relay is a door: without a session, nothing goes through it, and the device sees nothing
     await expect(echoing('hi')({ destinationId: 7 })).rejects.toMatchObject({
       code: ProtocolCode.SESSION_REQUIRED,
-      hops: 0,
       origin: 'peer',
+      relays: 0,
     });
     expect(presented).toEqual([]);
     await client.services.getRequest(openSession, { serializer: text })('me')();
@@ -522,8 +522,8 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
     expect(refused).toMatchObject({
       code: ProtocolCode.PROCEDURE_UNKNOWN,
       destinationId: 7,
-      hops: 1,
       origin: 'relayed',
+      relays: 1,
       side: undefined,
     });
     // the protocol's code, from behind the relay, whose side no one knows

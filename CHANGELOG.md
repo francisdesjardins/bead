@@ -17,11 +17,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no key twice, one version across the spec and its files, one name to a vector or a conversation
   in its group, every group of vectors named by a section of the spec, which names no other, and a
   report of the groups each side's tests read, which fails on one a side does not.
+- The units of `spec/spec.md` each vector and conversation checks, cited in its `clauses`: a clause,
+  an item of its numbered list, a row of its table. `spec/uncited.txt` lists the units none cites,
+  and `spec/check.py` fails when that list and the files disagree.
 
 ### Changed
 
 - The Tenth Man meets every change to what every language's tests answer to: the spec, its
   conformance files, their shape and their tooling, and the gates the implementations share.
+- The conversations' steps are named by who acts, `send` and `expect` where they said `in` and
+  `out`; an expected failure gives the relays it crossed, and an expected command its flags, which
+  both sides now compare.
+- A failure's `hops` is `relays` on both sides, the spec's word, and its message says "through N
+  relays".
+- Both sides play the conformance files without retry.
 
 ## [0.1.0] - 2026-10-02
 

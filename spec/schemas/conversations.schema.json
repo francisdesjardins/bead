@@ -18,10 +18,11 @@
     "conversation": {
       "description": "What a server of the interop service does with what one client sends, step by step.",
       "type": "object",
-      "required": ["name", "steps"],
+      "required": ["name", "clauses", "steps"],
       "additionalProperties": false,
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
         "limits": { "$ref": "#/$defs/limits" },
         "pacing": { "$ref": "#/$defs/pacing" },
         "steps": {
@@ -55,15 +56,15 @@
       }
     },
     "step": {
-      "description": "One thing the client does, or the one thing it expects next: in, close, out or report.",
+      "description": "What the test does — send, close — or what the server under test does next — expect, report.",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "in": { "$ref": "common.schema.json#/$defs/bytes" },
+        "send": { "$ref": "common.schema.json#/$defs/bytes" },
         "close": { "const": true },
-        "out": { "$ref": "#/$defs/out" },
+        "expect": { "$ref": "#/$defs/expect" },
         "report": {
           "description": "A code, or exception for an error that carries none.",
           "type": ["integer", "string"],
@@ -73,7 +74,7 @@
         }
       }
     },
-    "out": {
+    "expect": {
       "description": "The next envelope the server sends, each kind with its own fields.",
       "type": "object",
       "required": ["kind"],
@@ -112,11 +113,12 @@
     "request": {
       "description": "A command the server calls, with its service and its procedure.",
       "type": "object",
-      "required": ["kind", "callId", "serviceId", "procedureId", "payload"],
+      "required": ["kind", "callId", "flags", "serviceId", "procedureId", "payload"],
       "additionalProperties": false,
       "properties": {
         "kind": { "const": 16 },
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "flags": { "$ref": "common.schema.json#/$defs/u8" },
         "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
         "procedureId": { "$ref": "common.schema.json#/$defs/u16" },
         "payload": { "$ref": "common.schema.json#/$defs/bytes" }
@@ -143,13 +145,14 @@
         "kind": { "const": 18 },
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
         "failure": {
-          "description": "Its code and its scope; its detail is informative.",
+          "description": "Its code, its scope, and the relays it crossed; its detail is informative.",
           "type": "object",
-          "required": ["code", "scope"],
+          "required": ["code", "scope", "relays"],
           "additionalProperties": false,
           "properties": {
             "code": { "$ref": "common.schema.json#/$defs/code" },
-            "scope": { "$ref": "common.schema.json#/$defs/scope" }
+            "scope": { "$ref": "common.schema.json#/$defs/scope" },
+            "relays": { "$ref": "common.schema.json#/$defs/u8" }
           }
         },
         "session": { "$ref": "#/$defs/session" }

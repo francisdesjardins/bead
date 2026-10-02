@@ -205,9 +205,9 @@ export const createRelay = ({
     }: { connectionHandle: Handle; destinationId: DestinationId; isSent: boolean }
   ): IFailure => {
     if (reason instanceof FailureError && reason.origin !== 'local') {
-      const { code, detail, hops, scope } = reason;
+      const { code, detail, relays, scope } = reason;
 
-      return { code, detail, hops: Math.min(hops + 1, 0xff), scope };
+      return { code, detail, relays: Math.min(relays + 1, 0xff), scope };
     }
 
     if (!isSent && reason instanceof FailureError && reason.scope === FailureScope.PROTOCOL) {

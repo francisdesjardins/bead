@@ -39,26 +39,27 @@ import {
 // interfaces
 
 /** The next envelope a conversation expects the server to send. */
-interface IExpectedOut {
+interface IExpected {
   callId: number;
   creditEnd?: number;
   isLast?: boolean;
   offset?: number;
   total?: number;
   session?: 'announced' | 'ended';
-  failure?: { code: number; scope: number };
+  failure?: { code: number; relays: number; scope: number };
+  flags?: number | undefined;
   kind: number;
   payload?: string;
   procedureId?: number;
   serviceId?: number;
 }
 
-/** One step of a conversation. */
+/** One step of a conversation: what the test does, or what the server does next. */
 interface IStep {
   close?: true;
-  in?: string;
-  out?: IExpectedOut;
+  expect?: IExpected;
   report?: number | 'exception';
+  send?: string;
 }
 
 interface IConversation {
@@ -80,42 +81,6 @@ const HANDLE: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001
 
 // helpers
 
-/** A transport server of one connection, which records what it sends and delivers what it is given. */
-const createConnection = () => {
-  const emitter = createEmitter<{
-    close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
-    connection: [
-      socket: unknown,
-      request: unknown,
-      connectionHandle: TransportServerConnectionHandle,
-    ];
-    message: [data: Data, connectionHandle: TransportServerConnectionHandle];
-  }>();
-  const sent: (Envelope | undefined)[] = [];
-  const transport: IServerTransportLike = {
-    close: () => {
-      return Promise.resolve(false);
-    },
-    off: emitter.off,
-    on: emitter.on,
-    stop: () => {
-      return Promise.resolve();
-    },
-    send: (data) => {
-      sent.push(
-        readEnvelope(bytesOf(data), {
-          failures: CLIENT_FAILURES,
-          maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
-        })
-      );
-
-      return Promise.resolve();
-    },
-  };
-
-  return { emitter, sent, transport };
-};
-
 /** Bytes as the conversations write them: hexadecimal, a space between bytes. */
 const hexadecimalOf = (bytes: Uint8Array): string => {
   return [...bytes]
@@ -126,7 +91,7 @@ const hexadecimalOf = (bytes: Uint8Array): string => {
 };
 
 /** What an answer announced of its connection's session: a token, its end, or nothing. */
-const sessionOf = (envelope: Envelope): Pick<IExpectedOut, 'session'> => {
+const sessionOf = (envelope: Envelope): Pick<IExpected, 'session'> => {
   const { sessionToken } = envelope.header as { sessionToken?: string | null };
 
   if (sessionToken === undefined) {
@@ -136,8 +101,13 @@ const sessionOf = (envelope: Envelope): Pick<IExpectedOut, 'session'> => {
   return { session: sessionToken === null ? 'ended' : 'announced' };
 };
 
-/** An envelope sent, as a conversation writes what it expects. */
-const outOf = (envelope: Envelope | undefined): IExpectedOut | undefined => {
+/** The bytes of an envelope sent, as a conversation writes what it expects. */
+const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
+  const envelope = readEnvelope(bytes, {
+    failures: CLIENT_FAILURES,
+    maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+  });
+
   if (envelope === undefined) {
     return undefined;
   }
@@ -145,9 +115,14 @@ const outOf = (envelope: Envelope | undefined): IExpectedOut | undefined => {
   const { callId } = envelope.header;
 
   if (envelope.kind === EnvelopeKind.FAILURE) {
-    const { code, scope } = envelope.failure;
+    const { code, relays, scope } = envelope.failure;
 
-    return { callId, failure: { code, scope }, kind: envelope.kind, ...sessionOf(envelope) };
+    return {
+      callId,
+      failure: { code, relays, scope },
+      kind: envelope.kind,
+      ...sessionOf(envelope),
+    };
   }
 
   if (envelope.kind === EnvelopeKind.RESULT || envelope.kind === EnvelopeKind.NOTIFICATION) {
@@ -178,12 +153,13 @@ const outOf = (envelope: Envelope | undefined): IExpectedOut | undefined => {
     return { callId, creditEnd: envelope.header.creditEnd, kind: envelope.kind };
   }
 
-  // a command the server sends its client
+  // a command the server sends its client, its flags the byte after its kind
   if (envelope.kind === EnvelopeKind.REQUEST) {
     const { procedureId, serviceId } = envelope.header;
 
     return {
       callId,
+      flags: bytes[2],
       kind: envelope.kind,
       payload: hexadecimalOf(envelope.payload),
       procedureId,
@@ -192,6 +168,37 @@ const outOf = (envelope: Envelope | undefined): IExpectedOut | undefined => {
   }
 
   return { callId, kind: envelope.kind };
+};
+
+/** A transport server of one connection, which records what it sends and delivers what it is given. */
+const createConnection = () => {
+  const emitter = createEmitter<{
+    close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
+    connection: [
+      socket: unknown,
+      request: unknown,
+      connectionHandle: TransportServerConnectionHandle,
+    ];
+    message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+  }>();
+  const sent: (IExpected | undefined)[] = [];
+  const transport: IServerTransportLike = {
+    close: () => {
+      return Promise.resolve(false);
+    },
+    off: emitter.off,
+    on: emitter.on,
+    stop: () => {
+      return Promise.resolve();
+    },
+    send: (data) => {
+      sent.push(expectedOf(bytesOf(data)));
+
+      return Promise.resolve();
+    },
+  };
+
+  return { emitter, sent, transport };
 };
 
 /** Lets what the server does settle: turns of the event loop, until three in a row add nothing. */
@@ -269,6 +276,9 @@ test('every procedure of the interop manifest is offered, on the side it names',
 });
 
 test.describe('the conversations', () => {
+  // played once, as the C# side plays them: a retry would hide what fails there
+  test.describe.configure({ retries: 0 });
+
   for (const { limits, name, pacing, steps } of CONVERSATIONS) {
     test(name, async () => {
       const { emitter, sent, transport } = createConnection();
@@ -288,12 +298,12 @@ test.describe('the conversations', () => {
 
       try {
         for (const step of steps) {
-          if (step.in !== undefined || step.close === true) {
-            expect({ reports, sent: sent.map(outOf) }).toEqual({ reports: [], sent: [] });
+          if (step.send !== undefined || step.close === true) {
+            expect({ reports, sent }).toEqual({ reports: [], sent: [] });
           }
 
-          if (step.in !== undefined) {
-            emitter.emit('message', fromHexadecimal(step.in), HANDLE);
+          if (step.send !== undefined) {
+            emitter.emit('message', fromHexadecimal(step.send), HANDLE);
             await settle(count);
           }
 
@@ -303,8 +313,8 @@ test.describe('the conversations', () => {
             await settle(count);
           }
 
-          if (step.out !== undefined) {
-            expect(outOf(sent.shift())).toEqual(step.out);
+          if (step.expect !== undefined) {
+            expect(sent.shift()).toEqual(step.expect);
           }
 
           if (step.report !== undefined) {
@@ -312,7 +322,7 @@ test.describe('the conversations', () => {
           }
         }
 
-        expect({ reports, sent: sent.map(outOf) }).toEqual({ reports: [], sent: [] });
+        expect({ reports, sent }).toEqual({ reports: [], sent: [] });
       } finally {
         if (isOpen) {
           emitter.emit('close', false, HANDLE);

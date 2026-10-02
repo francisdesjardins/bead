@@ -24,7 +24,7 @@ type ReadFailures = Pick<
 
 // constants
 
-// a failure's record: its code, its hops, its flags, then its detail
+// a failure's record: its code, its relays, its flags, then its detail
 const RECORD_BYTES = 4;
 
 // the one flag of a failure's record this layout reads: the code is the procedure's own
@@ -102,10 +102,10 @@ export const bytesOf = (data: Data): Uint8Array => {
 };
 
 /**
- * A failure's record, from a failure envelope's payload: its code, its hops as they came, its scope,
- * and its detail — cut to `maximumDetailBytes`, back to the start of the character the cut fell in.
- * Throws a {@link FailureError} of `envelopeMalformed` for fewer than 4 bytes, a code of 0, or a
- * flag other than the application's.
+ * A failure's record, from a failure envelope's payload: its code, its relays as they came, its
+ * scope, and its detail — cut to `maximumDetailBytes`, back to the start of the character the cut
+ * fell in. Throws a {@link FailureError} of `envelopeMalformed` for fewer than 4 bytes, a code of
+ * 0, or a flag other than the application's.
  */
 export const readFailure = (
   payload: Uint8Array,
@@ -147,7 +147,7 @@ export const readFailure = (
   return {
     code,
     detail: decoder.decode(payload.subarray(RECORD_BYTES, end)),
-    hops: view.getUint8(2),
+    relays: view.getUint8(2),
     scope: (flags & APPLICATION) === 0 ? FailureScope.PROTOCOL : FailureScope.APPLICATION,
   };
 };
@@ -231,7 +231,7 @@ export const writeFailure = (
   failure: IFailure,
   maximumDetailBytes: number = LIMIT_DEFAULTS.maximumDetailBytes
 ): Uint8Array => {
-  const { code, detail = '', hops = 0, scope } = failure;
+  const { code, detail = '', relays = 0, scope } = failure;
 
   if (!Number.isInteger(code) || code < 1 || code > 0xffff) {
     throw new ProgrammerError(
@@ -239,9 +239,9 @@ export const writeFailure = (
     );
   }
 
-  if (!Number.isInteger(hops) || hops < 0 || hops > 0xff) {
+  if (!Number.isInteger(relays) || relays < 0 || relays > 0xff) {
     throw new ProgrammerError(
-      `a failure crossed an integer from 0 to 255 relays, not ${String(hops)}`
+      `a failure crossed an integer from 0 to 255 relays, not ${String(relays)}`
     );
   }
 
@@ -255,7 +255,7 @@ export const writeFailure = (
   const { written } = encoder.encodeInto(detail, record.subarray(RECORD_BYTES));
 
   view.setUint16(0, code);
-  view.setUint8(2, hops);
+  view.setUint8(2, relays);
   view.setUint8(3, scope === FailureScope.APPLICATION ? APPLICATION : 0);
 
   return record.subarray(0, RECORD_BYTES + written);

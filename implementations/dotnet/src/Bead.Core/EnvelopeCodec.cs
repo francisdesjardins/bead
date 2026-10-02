@@ -20,7 +20,7 @@ public static partial class EnvelopeCodec
 {
     // constants
 
-    // a failure's record: its code, its hops, its flags, then its detail
+    // a failure's record: its code, the relays it crossed, its flags, then its detail
     private const int RecordBytes = 4;
 
     // the one flag of a failure's record this layout reads: the code is the procedure's own
@@ -48,12 +48,12 @@ public static partial class EnvelopeCodec
     // definition
 
     /// <summary>
-    /// A failure's record, from a failure envelope's payload: its code, its hops as they came, its
-    /// scope, and its detail — cut to <see cref="EnvelopeReadOptions.MaximumDetailBytes"/>, back to
-    /// the start of the character the cut fell in, a leading U+FEFF kept, and bytes that are not
-    /// UTF-8 read as U+FFFD. Throws a <see cref="FailureException"/> of
-    /// <see cref="ProtocolCode.EnvelopeMalformed"/> for fewer than 4 bytes, a code of 0, or a flag
-    /// other than the application's.
+    /// A failure's record, from a failure envelope's payload: its code, the relays it crossed as
+    /// they came, its scope, and its detail — cut to
+    /// <see cref="EnvelopeReadOptions.MaximumDetailBytes"/>, back to the start of the character
+    /// the cut fell in, a leading U+FEFF kept, and bytes that are not UTF-8 read as U+FFFD. Throws
+    /// a <see cref="FailureException"/> of <see cref="ProtocolCode.EnvelopeMalformed"/> for fewer
+    /// than 4 bytes, a code of 0, or a flag other than the application's.
     /// </summary>
     public static Failure ReadFailure(ReadOnlySpan<byte> payload, EnvelopeReadOptions options)
     {
@@ -93,7 +93,7 @@ public static partial class EnvelopeCodec
 
             // GetString keeps a leading U+FEFF, and reads what is not UTF-8 as U+FFFD
             Detail = Encoding.UTF8.GetString(payload[RecordBytes..end]),
-            Hops = payload[2],
+            Relays = payload[2],
             Scope = (flags & Application) == 0 ? FailureScope.Protocol : FailureScope.Application,
         };
     }
@@ -188,7 +188,7 @@ public static partial class EnvelopeCodec
         var written = RecordBytes;
 
         BinaryPrimitives.WriteUInt16BigEndian(record, failure.Code);
-        record[2] = failure.Hops;
+        record[2] = failure.Relays;
         record[3] = failure.Scope == FailureScope.Application ? Application : (byte)0;
 
         foreach (var rune in failure.Detail.EnumerateRunes())

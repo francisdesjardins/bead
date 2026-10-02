@@ -111,7 +111,7 @@ public sealed class ConversationsTests
 
         if (envelope.Failure is { } failure)
         {
-            return $"{kind} {callId} failure {failure.Code} {(int)failure.Scope}{session}";
+            return $"{kind} {callId} failure {failure.Code} {(int)failure.Scope} through {failure.Relays}{session}";
         }
 
         return envelope.Header switch
@@ -121,8 +121,8 @@ public sealed class ConversationsTests
             ChunkHeader chunk => $"{kind} {callId} from {chunk.Offset}{(chunk.IsLast ? " last" : "")} {Convert.ToHexString(envelope.Payload.Span)}",
             CreditHeader credit => $"{kind} {callId} credit {credit.CreditEnd}",
 
-            // a command the server sends its client
-            RequestHeader request => $"{kind} {callId} {request.ServiceId}/{request.ProcedureId} {Convert.ToHexString(envelope.Payload.Span)}",
+            // a command the server sends its client, with its flags, the envelope's byte 2 as sent
+            RequestHeader request => $"{kind} {callId} flags {bytes.Span[2]} {request.ServiceId}/{request.ProcedureId} {Convert.ToHexString(envelope.Payload.Span)}",
             _ => $"{kind} {callId}",
         };
     }
@@ -137,7 +137,7 @@ public sealed class ConversationsTests
 
         if (expected.TryGetProperty("failure", out var failure))
         {
-            return $"{kind} {callId} failure {failure.GetProperty("code").GetInt32()} {failure.GetProperty("scope").GetInt32()}{session}";
+            return $"{kind} {callId} failure {failure.GetProperty("code").GetInt32()} {failure.GetProperty("scope").GetInt32()} through {failure.GetProperty("relays").GetInt32()}{session}";
         }
 
         var hexadecimal = expected.TryGetProperty("payload", out var payload)
@@ -146,7 +146,7 @@ public sealed class ConversationsTests
 
         if (expected.TryGetProperty("procedureId", out var procedureId))
         {
-            return $"{kind} {callId} {expected.GetProperty("serviceId").GetInt32()}/{procedureId.GetInt32()} {hexadecimal}";
+            return $"{kind} {callId} flags {expected.GetProperty("flags").GetInt32()} {expected.GetProperty("serviceId").GetInt32()}/{procedureId.GetInt32()} {hexadecimal}";
         }
 
         if (expected.TryGetProperty("offset", out var offset))
@@ -208,12 +208,12 @@ public sealed class ConversationsTests
         {
             foreach (var step in conversation.GetProperty("steps").EnumerateArray())
             {
-                if (step.TryGetProperty("in", out var input))
+                if (step.TryGetProperty("send", out var bytes))
                 {
                     await scheduler.WhenIdle();
                     Assert.Empty(sent.Select(OutOf));
                     Assert.Empty(reports);
-                    transport.Deliver(Vectors.FromHexadecimal(input.GetString()!), Handle);
+                    transport.Deliver(Vectors.FromHexadecimal(bytes.GetString()!), Handle);
                     await scheduler.WhenIdle();
                 }
 
@@ -227,10 +227,10 @@ public sealed class ConversationsTests
                     await scheduler.WhenIdle();
                 }
 
-                if (step.TryGetProperty("out", out var output))
+                if (step.TryGetProperty("expect", out var expected))
                 {
                     Assert.NotEmpty(sent);
-                    Assert.Equal(ExpectedOf(output), OutOf(sent[0]));
+                    Assert.Equal(ExpectedOf(expected), OutOf(sent[0]));
                     sent.RemoveAt(0);
                 }
 

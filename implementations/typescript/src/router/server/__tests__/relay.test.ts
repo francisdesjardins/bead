@@ -181,9 +181,9 @@ const createTestRelay = (
 /** The failures of the answers written, as their codes, relays crossed and details. */
 const failuresOf = (answers: [RouterAnswer, IRequestHeader][]) => {
   return answers.map(([answer]) => {
-    const { code, detail, hops } = answer.failure ?? ({} as Partial<IFailure>);
+    const { code, detail, relays } = answer.failure ?? ({} as Partial<IFailure>);
 
-    return answer.failure === undefined ? [...answer.payload] : [code, hops, detail];
+    return answer.failure === undefined ? [...answer.payload] : [code, relays, detail];
   });
 };
 
@@ -385,7 +385,7 @@ test.describe('createRelay', () => {
 
     relay.register(target, { destinationId: 7 });
 
-    for (const [hops, origin, scope] of [
+    for (const [relays, origin, scope] of [
       [0, 'peer', FailureScope.APPLICATION],
       [0, 'peer', FailureScope.PROTOCOL],
       [3, 'relayed', FailureScope.PROTOCOL],
@@ -393,7 +393,7 @@ test.describe('createRelay', () => {
       [255, 'relayed', FailureScope.PROTOCOL],
     ] as const) {
       control.settle = refusing(
-        new FailureError({ code: 19, detail: 'its own detail', hops, origin, scope }),
+        new FailureError({ code: 19, detail: 'its own detail', origin, relays, scope }),
         'handed'
       );
       await relay.handlerOf(7)?.(propsOf(headerOf(1)));
@@ -404,11 +404,11 @@ test.describe('createRelay', () => {
         return answer.failure;
       })
     ).toEqual([
-      { code: 19, detail: 'its own detail', hops: 1, scope: FailureScope.APPLICATION },
-      { code: 19, detail: 'its own detail', hops: 1, scope: FailureScope.PROTOCOL },
-      { code: 19, detail: 'its own detail', hops: 4, scope: FailureScope.PROTOCOL },
-      { code: 19, detail: 'its own detail', hops: 255, scope: FailureScope.PROTOCOL },
-      { code: 19, detail: 'its own detail', hops: 255, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 1, scope: FailureScope.APPLICATION },
+      { code: 19, detail: 'its own detail', relays: 1, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 4, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 255, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 255, scope: FailureScope.PROTOCOL },
     ]);
   });
 
@@ -489,7 +489,7 @@ test.describe('createRelay', () => {
       new FailureError({
         ...CLIENT_FAILURES.payloadTooLarge,
         detail: 'a payload is 8 bytes at most, not 9',
-        hops: 3,
+        relays: 3,
       }),
       'never'
     );

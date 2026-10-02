@@ -178,7 +178,7 @@ test.describe('createNotification', () => {
 
   test('a drop tells the manager the failure the other end ended its subscription with', () => {
     const { asked, notification } = createNotified();
-    const failure = { ...CLIENT_FAILURES.capacityExceeded, detail: 'too many', hops: 0 };
+    const failure = { ...CLIENT_FAILURES.capacityExceeded, detail: 'too many', relays: 0 };
 
     notification.drop?.(failure);
 

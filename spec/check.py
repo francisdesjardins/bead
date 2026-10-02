@@ -7,8 +7,14 @@ Every spec/*.json has its schema in spec/schemas/, and every schema its file; ea
 schema, which follows JSON Schema 2020-12, and holds no key twice (RFC 7493); each repeats the
 version spec/spec.md states as its specVersion; no group holds two vectors or conversations of one
 name, which a reader looking one up by name would never reach; each group of vectors.json is named
-by a section of the spec, which names no other; and each implementation's tests read every group,
-and the conversations. Exit 1 on any of them.
+by a section of the spec, which names no other; every unit an entry cites is one of spec.md's — a
+clause, an item of its numbered list, a row of its table — and spec/uncited.txt lists exactly the
+units no entry cites; and each implementation's tests read every group, and the conversations. Exit
+1 on any of them.
+
+  python spec/check.py --write-uncited
+
+writes spec/uncited.txt from the files as they stand, for a change that cites or leaves a unit.
 
 It needs jsonschema, locked in spec/requirements.txt.
 """
@@ -31,6 +37,12 @@ COMMON = 'common'
 
 # what vectors.json holds beside its groups
 META = {'$schema', '$comment', 'specVersion'}
+
+# the units of spec.md no entry cites, which only a change to the files or the spec moves
+UNCITED = os.path.join(SPEC, 'uncited.txt')
+UNCITED_HEADER = ('# The units of spec/spec.md that no vector, conversation or case cites, in their order.\n'
+                  '# spec/check.py fails when this list and the files disagree; --write-uncited writes it.\n')
+WRITE_UNCITED = '--write-uncited' in sys.argv[1:]
 
 # where each implementation's tests are, the files among them, and how they name a group of vectors
 # and the conversations: a language that joins adds its row
@@ -169,6 +181,74 @@ for group in sorted(cited - set(groups)):
 for group in sorted(set(groups) - cited):
     problems.append(f'vectors.json holds the group {group}, which no section of spec.md names')
 
+# ── The units each entry cites, and those none cites ────────────────────────────────────────────
+
+
+def units_of(spec):
+    """The units of spec.md in their order: each clause, each item of its numbered list, and each row
+    of its table, counted from 1; a heading ends a clause, and a block of code holds none."""
+    units = []
+    clause = None
+    items = rows = 0
+    under_header = False
+    in_code = False
+
+    for line in spec.splitlines():
+        if line.startswith('```'):
+            in_code = not in_code
+        elif in_code:
+            continue
+        elif line.startswith('#'):
+            clause = None
+        elif found := re.match(r'(\d+)\.(\d+)\. ', line):
+            clause = f'{found.group(1)}.{found.group(2)}'
+            units.append(clause)
+            items = rows = 0
+            under_header = False
+        elif clause is None:
+            continue
+        elif re.match(r'\d+\. ', line):
+            items += 1
+            units.append(f'{clause}.{items}')
+        elif re.match(r'\|[\s|:-]+\|\s*$', line):
+            under_header = True
+        elif line.startswith('|') and under_header:
+            rows += 1
+            units.append(f'{clause}.{rows}')
+
+    return units
+
+
+units = units_of(text)
+known = set(units)
+citing = set()
+
+for group, entries in named.items():
+    for entry in entries:
+        for unit in entry['clauses']:
+            if unit not in known:
+                problems.append(f'{group}: {entry["name"]!r} cites {unit}, which spec.md does not have')
+
+            citing.add(unit)
+
+uncited = [unit for unit in units if unit not in citing]
+
+if WRITE_UNCITED:
+    with open(UNCITED, 'w', encoding='utf-8', newline='\n') as file:
+        file.write(UNCITED_HEADER + ''.join(f'{unit}\n' for unit in uncited))
+elif not os.path.exists(UNCITED):
+    problems.append('uncited.txt is missing: python spec/check.py --write-uncited writes it')
+else:
+    with open(UNCITED, encoding='utf-8') as file:
+        listed = [line.strip() for line in file if line.strip() and not line.startswith('#')]
+
+    for unit in sorted(set(uncited) - set(listed), key=units.index):
+        problems.append(f'{unit}: no entry cites it, and uncited.txt does not list it')
+
+    for unit in sorted(set(listed) - set(uncited)):
+        problems.append(f'uncited.txt lists {unit}, which ' +
+                        ('an entry cites' if unit in known else 'spec.md does not have'))
+
 # ── What each implementation's tests read ───────────────────────────────────────────────────────
 
 read = {}
@@ -203,7 +283,8 @@ if problems:
 
 print(f'spec: {version}; {len(documents)} files, each under its schema; '
       f'{sum(len(vectors[group]) for group in groups)} vectors in {len(groups)} groups, each named by '
-      f'the spec; {len(named["conversations"])} conversations.')
+      f'the spec; {len(named["conversations"])} conversations; {len(units) - len(uncited)} of the '
+      f'spec\'s {len(units)} units cited, the others listed in uncited.txt.')
 
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())
 

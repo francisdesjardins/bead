@@ -26,10 +26,11 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "bytes", "header"],
+        "required": ["name", "clauses", "bytes", "header"],
         "additionalProperties": false,
         "properties": {
           "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
           "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
           "header": { "$ref": "#/$defs/header" }
         }
@@ -41,10 +42,11 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "side", "bytes", "header"],
+        "required": ["name", "clauses", "side", "bytes", "header"],
         "additionalProperties": false,
         "properties": {
           "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
           "side": { "$ref": "#/$defs/side" },
           "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
           "header": {
@@ -61,10 +63,11 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "bytes", "prefix"],
+        "required": ["name", "clauses", "bytes", "prefix"],
         "additionalProperties": false,
         "properties": {
           "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
           "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
           "prefix": {
             "type": "object",
@@ -95,10 +98,11 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "bytes", "envelope"],
+        "required": ["name", "clauses", "bytes", "envelope"],
         "additionalProperties": false,
         "properties": {
           "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
           "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
           "envelope": { "$ref": "#/$defs/envelope" }
         }
@@ -115,10 +119,11 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "record", "failure"],
+        "required": ["name", "clauses", "record", "failure"],
         "additionalProperties": false,
         "properties": {
           "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
           "record": { "$ref": "common.schema.json#/$defs/bytes" },
           "failure": { "$ref": "#/$defs/failure" },
           "maximumDetailBytes": { "type": "integer", "minimum": 0 }
@@ -131,10 +136,11 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "record", "code"],
+        "required": ["name", "clauses", "record", "code"],
         "additionalProperties": false,
         "properties": {
           "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
           "record": { "$ref": "common.schema.json#/$defs/bytes" },
           "code": { "$ref": "common.schema.json#/$defs/protocolCode" }
         }
@@ -149,10 +155,11 @@
     "refusal": {
       "description": "Bytes a reader refuses, the protocol code it answers with, and the bound it reads them with, where the vector is about that bound.",
       "type": "object",
-      "required": ["name", "bytes", "code"],
+      "required": ["name", "clauses", "bytes", "code"],
       "additionalProperties": false,
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
         "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
         "code": { "$ref": "common.schema.json#/$defs/protocolCode" },
         "detail": { "type": "string" },
@@ -216,12 +223,12 @@
     "failure": {
       "description": "A failure's record, as read: its code, its scope, the relays it crossed and its detail.",
       "type": "object",
-      "required": ["code", "scope", "hops", "detail"],
+      "required": ["code", "scope", "relays", "detail"],
       "additionalProperties": false,
       "properties": {
         "code": { "$ref": "common.schema.json#/$defs/code" },
         "scope": { "$ref": "common.schema.json#/$defs/scope" },
-        "hops": { "$ref": "common.schema.json#/$defs/u8" },
+        "relays": { "$ref": "common.schema.json#/$defs/u8" },
         "detail": { "type": "string" }
       }
     },

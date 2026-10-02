@@ -484,7 +484,7 @@ test.describe('createRouterCore', () => {
         { callId: 5, kind: EnvelopeKind.FAILURE },
       ]);
       expect(sent[0]?.envelope).toMatchObject({
-        failure: { detail: 'no service 8', hops: 0, scope: FailureScope.PROTOCOL },
+        failure: { detail: 'no service 8', relays: 0, scope: FailureScope.PROTOCOL },
       });
     });
 
@@ -1261,16 +1261,16 @@ test.describe('createRouterCore', () => {
         code: 19,
         destinationId: 4,
         detail: 'why',
-        hops: 0,
         origin: 'peer',
         procedureAddress: { procedureId: 1, serviceId: 2 },
+        relays: 0,
         side: 'client',
       });
       await expect(relayed).rejects.toMatchObject({
         code: 18,
         destinationId: 4,
-        hops: 1,
         origin: 'relayed',
+        relays: 1,
         side: undefined,
       });
       await expect(application).rejects.toMatchObject({
@@ -1535,7 +1535,7 @@ test.describe('createRouterCore', () => {
         {
           connectionHandle: 'a',
           envelope: {
-            failure: { code: 12, detail: 'why', hops: 0, scope: FailureScope.APPLICATION },
+            failure: { code: 12, detail: 'why', relays: 0, scope: FailureScope.APPLICATION },
             header: { callId: 77, kind: EnvelopeKind.FAILURE },
             kind: EnvelopeKind.FAILURE,
           },

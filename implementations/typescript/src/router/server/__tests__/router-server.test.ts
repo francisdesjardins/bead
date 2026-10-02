@@ -2173,11 +2173,11 @@ test.describe('createRouterServer, relaying', () => {
     ).toEqual([
       // an answer names its call alone
       { callId: 1, kind: EnvelopeKind.RESULT },
-      { code: 21, detail: 'nothing to echo', hops: 1, scope: FailureScope.APPLICATION },
+      { code: 21, detail: 'nothing to echo', relays: 1, scope: FailureScope.APPLICATION },
       {
         code: ProtocolCode.PROCEDURE_UNKNOWN,
         detail: 'no procedure 9 in service 2',
-        hops: 1,
+        relays: 1,
         scope: FailureScope.PROTOCOL,
       },
     ]);
@@ -2309,7 +2309,7 @@ test.describe('createRouterServer, relaying', () => {
     expect(
       sent.map(({ envelope }) => {
         return envelope?.kind === EnvelopeKind.FAILURE
-          ? [envelope.failure.hops, envelope.failure.detail]
+          ? [envelope.failure.relays, envelope.failure.detail]
           : undefined;
       })
     ).toEqual([
@@ -2352,7 +2352,7 @@ test.describe('createRouterServer, relaying', () => {
 
     expect(aborted).toEqual([expect.any(CancelError)]);
     expect(answersOf(sent)).toEqual([[first, 'failure', 1, ProtocolCode.DESTINATION_LOST]]);
-    expect(sent[0]?.envelope).toMatchObject({ failure: { hops: 0 } });
+    expect(sent[0]?.envelope).toMatchObject({ failure: { relays: 0 } });
     expect(reportedOf(errors)).toEqual([[expect.stringContaining('250'), first]]);
 
     using unbounded = createRelayed();
@@ -2418,7 +2418,7 @@ test.describe('createRouterServer, relaying', () => {
     };
 
     // past the device's 4 KiB: refused at its opening, before any credit
-    expect(await ask(5_000)).toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE, hops: 0 });
+    expect(await ask(5_000)).toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE, relays: 0 });
     expect(credits).toEqual([]);
     expect(behind.pipe.sent.client).toEqual([]);
     // within it: credited, and relayed to the device it opened on

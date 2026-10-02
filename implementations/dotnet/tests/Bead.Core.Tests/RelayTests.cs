@@ -341,7 +341,7 @@ public sealed class RelayTests
 
         test.Relay.Register(target, Seven);
 
-        foreach (var (hops, origin, scope) in new (byte, FailureOrigin, FailureScope)[]
+        foreach (var (relays, origin, scope) in new (byte, FailureOrigin, FailureScope)[]
         {
             (0, FailureOrigin.Peer, FailureScope.Application),
             (0, FailureOrigin.Peer, FailureScope.Protocol),
@@ -352,15 +352,15 @@ public sealed class RelayTests
         {
             target.Settle = Refusing(
                 new FailureException(
-                    new Failure { Code = 19, Detail = "its own detail", Hops = hops, Scope = scope },
+                    new Failure { Code = 19, Detail = "its own detail", Relays = relays, Scope = scope },
                     new FailureException.Raised(origin, origin == FailureOrigin.Peer ? RouterSide.Server : null)),
                 Reach.Handed);
             await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)));
         }
 
-        Failure RelayedOf(byte hops, FailureScope scope)
+        Failure RelayedOf(byte relays, FailureScope scope)
         {
-            return new Failure { Code = 19, Detail = "its own detail", Hops = hops, Scope = scope };
+            return new Failure { Code = 19, Detail = "its own detail", Relays = relays, Scope = scope };
         }
 
         Assert.Equal(
@@ -444,7 +444,7 @@ public sealed class RelayTests
 
         // a limit of leg B's own crossed no relay, whatever relays it says it crossed
         target.Settle = Refusing(
-            new FailureException(tooLarge.Failure with { Hops = 3 }, new FailureException.Raised(FailureOrigin.Local, RouterSide.Client)),
+            new FailureException(tooLarge.Failure with { Relays = 3 }, new FailureException.Raised(FailureOrigin.Local, RouterSide.Client)),
             Reach.Never);
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(3)));
 
@@ -504,9 +504,9 @@ public sealed class RelayTests
             ],
             FailuresOf(test.Answers));
 
-        // C# only: a failure of leg A's own crossed no relay, whatever hops it says
+        // C# only: a failure of leg A's own crossed no relay, whatever relays it says it crossed
         test.RespondErrors.Enqueue(
-            new FailureException(tooLarge.Failure with { Hops = 3 }, new FailureException.Raised(FailureOrigin.Local, RouterSide.Server)));
+            new FailureException(tooLarge.Failure with { Relays = 3 }, new FailureException.Raised(FailureOrigin.Local, RouterSide.Server)));
         await Assert.ThrowsAsync<FailureException>(() =>
         {
             return Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(5)));

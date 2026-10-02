@@ -40,17 +40,17 @@ const CODE_NAMES: ReadonlyMap<number, string> = new Map(
 const messageOf = ({
   code,
   detail,
-  hops,
   origin,
   procedureAddress,
+  relays,
   scope,
   side,
 }: {
   code: number;
   detail: string;
-  hops: number;
   origin: FailureOrigin;
   procedureAddress: IProcedureAddress | undefined;
+  relays: number;
   scope: FailureScope;
   side: RouterSide | undefined;
 }): string => {
@@ -64,7 +64,7 @@ const messageOf = ({
     isProtocol || procedureAddress === undefined
       ? ''
       : ` (service ${String(procedureAddress.serviceId)}, procedure ${String(procedureAddress.procedureId)})`,
-    hops > 0 ? `, relayed ${String(hops)} ${hops === 1 ? 'hop' : 'hops'}` : '',
+    relays > 0 ? `, through ${String(relays)} ${relays === 1 ? 'relay' : 'relays'}` : '',
     detail === '' ? '' : `: ${detail}`,
   ].join('');
 };
@@ -87,8 +87,8 @@ export class DisconnectError extends GenericError {
 
 /**
  * A failure, thrown: whose code it is, the code, why, and — deduced, never sent — which side raised
- * it and where. Raised here, it is `local`, of this router's side; received with no hop, it is the
- * peer's; received through a relay, whose side raised it is not known.
+ * it and where. Raised here, it is `local`, of this router's side; received through no relay, it is
+ * the peer's; received through a relay, whose side raised it is not known.
  */
 export class FailureError extends GenericError {
   public override readonly name: string = 'FailureError';
@@ -99,23 +99,23 @@ export class FailureError extends GenericError {
   public readonly detail: string;
   /** The envelope that said it, redacted; none for a failure raised before any envelope. */
   public readonly header: RedactedHeader | undefined;
-  /** The relays it crossed: 0 when the peer raised it. */
-  public readonly hops: number;
   public readonly origin: FailureOrigin;
   /** The procedure the call asked for, which a failure envelope does not repeat. */
   public readonly procedureAddress: IProcedureAddress | undefined;
+  /** The relays it crossed: 0 when the peer raised it. */
+  public readonly relays: number;
   public readonly scope: FailureScope;
   public readonly side: RouterSide | undefined;
 
   public constructor(
     failure: IFailure & {
-      hops?: number | undefined;
       origin?: FailureOrigin | undefined;
+      relays?: number | undefined;
       side?: RouterSide | undefined;
     },
     options?: IFailureErrorOptions
   ) {
-    const { code, detail = '', hops = 0, origin = 'local', scope, side } = failure;
+    const { code, detail = '', origin = 'local', relays = 0, scope, side } = failure;
     const { destinationId, header, procedureAddress, ...errorOptions } = options ?? {};
     const address =
       procedureAddress === undefined
@@ -123,7 +123,7 @@ export class FailureError extends GenericError {
         : { procedureId: procedureAddress.procedureId, serviceId: procedureAddress.serviceId };
 
     super(
-      messageOf({ code, detail, hops, origin, procedureAddress: address, scope, side }),
+      messageOf({ code, detail, origin, procedureAddress: address, relays, scope, side }),
       errorOptions
     );
 
@@ -131,9 +131,9 @@ export class FailureError extends GenericError {
     this.destinationId = destinationId;
     this.detail = detail;
     this.header = header === undefined ? undefined : redactHeader(header);
-    this.hops = hops;
     this.origin = origin;
     this.procedureAddress = address;
+    this.relays = relays;
     this.scope = scope;
     this.side = side;
   }
@@ -161,9 +161,9 @@ export class FailureError extends GenericError {
 }
 
 /**
- * The error a failure received from the peer of a router with `failures` stands for: with no hop,
- * the peer's, of the other side; through a relay, of no known side. Where it came from is where
- * the call went.
+ * The error a failure received from the peer of a router with `failures` stands for: through no
+ * relay, the peer's, of the other side; through a relay, of no known side. Where it came from is
+ * where the call went.
  */
 export const failureErrorOf = (
   received: IReceivedFailure,
@@ -179,7 +179,7 @@ export const failureErrorOf = (
     procedureAddress?: IProcedureAddress | undefined;
   }
 ): FailureError => {
-  const isRelayed = received.hops > 0;
+  const isRelayed = received.relays > 0;
 
   return new FailureError(
     {
