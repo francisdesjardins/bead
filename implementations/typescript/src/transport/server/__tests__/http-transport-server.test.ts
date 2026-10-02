@@ -935,6 +935,40 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     await sessionClosed;
     expect(session.closed).toBe(true);
   });
+
+  test('draws a connection over HTTP/2 before its empty body ends', async () => {
+    const server = createHTTPTransportServer({
+      createServer: (listener) => {
+        return createSecureServer({ ...TLS_FIXTURE, allowHTTP1: true }, (request, response) => {
+          listener(request, response);
+        });
+      },
+    });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+    const session = connectHTTP2(`https://${host}:${String(port)}`, { ca: TLS_FIXTURE.cert });
+
+    session.on('error', () => {});
+
+    try {
+      // its head says its body is empty, and its stream ends later: whether a connect has a body is
+      // read from its head, never from an end of stream still to come
+      const stream = session.request({
+        ':method': 'POST',
+        ':path': '/bead',
+        'content-type': BEAD_MEDIA_TYPE,
+        'content-length': '0',
+      });
+      const drew = await new Promise<Record<string, unknown>>((resolve) => {
+        stream.once('response', resolve);
+      });
+
+      expect(drew[':status']).toBe(201);
+      stream.end();
+    } finally {
+      session.close();
+      await server.stop();
+    }
+  });
 });
 
 test.describe('createHTTPTransportServer, its edges', () => {

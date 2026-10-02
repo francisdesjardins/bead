@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -481,10 +480,12 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
     }
 
-    // whether the request says it has a body
+    // whether the request says it has a body: a length above 0, or a transfer coding, as its headers
+    // say it and as the TypeScript side reads them — never whether HTTP/2's end of stream has come
+    // in yet, which an empty body's last frame races
     private static bool HasBody(HttpContext context)
     {
-        return context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody ?? false;
+        return context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey(HeaderNames.TransferEncoding);
     }
 
     // a body of Bead's media type, parameters aside, sent as it is
