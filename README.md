@@ -19,6 +19,39 @@ This repository holds the protocol and its implementations, side by side:
 
 Nothing is published yet.
 
+## Why Bead
+
+A client and its server talk in more ways than requests and answers. The server pushes changes the
+client must keep up with. A large file goes up while other calls carry on. A call is cancelled
+halfway. A session outlives a dropped connection, and the server sometimes has to ask the client
+something. Bead carries all of it in one small binary envelope, whatever carries the envelope:
+WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and a publish/subscribe
+broker (coming).
+
+- **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
+  call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
+  whatever that payload's format.
+- **Subscriptions at the client's pace.** A paced subscription sends only what the client has
+  credited. What waits is kept by key, so a state keeps its latest value and an event keeps every
+  one. A queue past its bound ends the subscription out loud, never in silence.
+- **Large payloads under credit.** A transfer goes in chunks, as fast as its receiver credits them,
+  beside the calls still under way.
+- **Everything a conversation needs**: cancel, sessions, relays, and commands, the server's own
+  calls to the client.
+- **One behaviour in every language.** The spec, its 123 vectors and 72 conversations are the
+  contract. The TypeScript and C# implementations both play them, and call each other in CI over
+  both transports.
+- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
+
+Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
+from a browser over WebSocket or plain HTTP, or across a publish/subscribe broker that already joins
+services and devices (coming). Think of a dashboard or a collaborative tool that follows state as it
+changes, an app that uploads large files while it keeps working, a back office whose server needs to
+ask the client something, or a gateway that forwards calls it never reads. A browser speaks Bead
+natively, with no proxy in between. Over a broker, Bead adds what topics alone lack: calls with
+their answers and failures, cancels, each client's own pace, and transfers under credit. Both ends
+keep the same API, whatever carries the envelopes.
+
 ## Layout
 
 ```
@@ -29,7 +62,7 @@ implementations/
   dotnet/                     Bead.slnx: src/, interop/, tests/
 docs/
   decisions/                  the decision records, and their index
-  support.md                  the support matrix: each feature, each language, the test that holds it
+  support.md                  the support matrix: each feature in each language, and its test
 tools/                        repository checks and the coverage report, Node without dependencies
 .githooks/                    the repository checks before each commit, opt-in
 .github/workflows/ci.yml      the CI
@@ -64,7 +97,7 @@ git diff --exit-code -- spec
 
 In `implementations/typescript`. Node 24 or later. Yarn 4 is vendored under `.yarn/releases/`, and
 `.yarnrc.yml` points every `yarn` there; where no `yarn` is installed,
-`node .yarn/releases/yarn-4.18.0.cjs` stands for it.
+`node .yarn/releases/yarn-4.18.1.cjs` stands for it.
 
 ```sh
 cd implementations/typescript
@@ -164,11 +197,11 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 
 ## CI
 
-[`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request: `spec`
-(regenerate, then diff), `typescript` (install, check, test, the demo's static build, and
-the root's files under the same formatter), `dotnet` (format, test, and the interop both ways with
-`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects). `ci-ok` needs them all and is the only
-required check.
+[`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on a pinned
+runner image, `ubuntu-26.04`: `spec` (regenerate, then diff), `typescript` on Node 26 and on the
+floor, 24 (install, check, test, the demo's static build, and the root's files under the same
+formatter), `dotnet` (format, test, and the interop both ways with `BEAD_INTEROP_REQUIRED=1`), and
+`commits` (the subjects). `ci-ok` needs them all and is the only required check.
 
 ## Contributing
 

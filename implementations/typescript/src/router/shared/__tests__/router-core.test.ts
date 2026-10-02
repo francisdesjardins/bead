@@ -2031,7 +2031,11 @@ test.describe('createRouterCore', () => {
 
       expect(reported).toEqual([]);
 
-      await sleep(60);
+      await expect
+        .poll(() => {
+          return core.isReserved(2, 'a');
+        })
+        .toBe(false);
       core.receive(resultOf(2), 'a');
 
       expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
@@ -2247,7 +2251,7 @@ test.describe('createRouterCore', () => {
       expect(armed).toHaveLength(3);
       expect(cleared).toContain(armed[0]);
 
-      await sleep(60);
+      await sleep(100);
 
       expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([true, true]);
     });

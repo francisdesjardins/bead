@@ -631,10 +631,10 @@ test.describe('WSTransportServer, heartbeat', () => {
 
     await server.stop();
 
-    // closed, it beats no more
+    // closed, it beats no more: five of its beats pass, and none pings
     const pings = answering.pings;
 
-    await sleep(60);
+    await sleep(100);
 
     expect(answering.pings).toBe(pings);
   });
@@ -659,6 +659,7 @@ test.describe('WSTransportServer, heartbeat', () => {
   });
 
   test('beats nothing with a heartbeat of Infinity, and refuses one no timer holds', async () => {
+    using timers = spyIntervals();
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({
       heartbeat: Infinity,
@@ -670,9 +671,9 @@ test.describe('WSTransportServer, heartbeat', () => {
     fake.instances[0]?.emit('listening');
     await starting;
     fake.connect(socket);
-    await sleep(60);
 
-    expect([socket.pings, socket.wasTerminated]).toEqual([0, false]);
+    // no interval at all: Node would beat one of Infinity every millisecond
+    expect([timers.armed, socket.pings, socket.wasTerminated]).toEqual([[], 0, false]);
 
     await server.stop();
 
@@ -684,7 +685,8 @@ test.describe('WSTransportServer, heartbeat', () => {
   });
 
   test('keeps the clients that answer its pings — a browser’s as `ws`’s — and drops one that does not, on the wire', async () => {
-    const server = createWSTransportServer({ heartbeat: 40, WebSocketServer });
+    // beats wide enough that a pong never misses one on a loaded machine
+    const server = createWSTransportServer({ heartbeat: 200, WebSocketServer });
     const { port } = await server.start({ address: host, findOpenPort: true });
     const closes: boolean[] = [];
 
@@ -710,8 +712,8 @@ test.describe('WSTransportServer, heartbeat', () => {
           return closes;
         })
         .toEqual([false]);
-      // several beats more, and the two that answer are still there
-      await sleep(200);
+      // three beats more, and the two that answer are still there
+      await sleep(600);
 
       expect(closes).toEqual([false]);
       expect(server.clients).toHaveLength(2);

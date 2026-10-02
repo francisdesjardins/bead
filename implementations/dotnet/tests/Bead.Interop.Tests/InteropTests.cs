@@ -153,11 +153,16 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
             return new Connected((client.Services, client.Router), client.DisposeAsync);
         }
 
-        var httpClient = new BeadHttpClient();
+        var inOrder = new InOrder();
+        var httpClient = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { Handler = inOrder } });
 
         await httpClient.Connect(new HttpConnectOptions { Host = Host, Port = httpPort }, Cancelled);
 
-        return new Connected((httpClient.Services, httpClient.Router), httpClient.DisposeAsync);
+        return new Connected((httpClient.Services, httpClient.Router), async () =>
+        {
+            await httpClient.DisposeAsync();
+            inOrder.Dispose();
+        });
     }
 
     // definition
@@ -237,12 +242,16 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     public async Task A_call_cancelled_by_its_token_is_cancelled_at_the_server_too(string transport)
     {
         await using var client = await ConnectedOver(transport);
-        using var source = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        using var source = new CancellationTokenSource();
+        var slow = RequesterOf(client, "slow")(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { CancellationToken = source.Token });
 
+        // a call after it answered: the server has it, where its cancel must find it — by the
+        // socket's order, or by the handler's
+        await RequesterOf(client, "echo")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+        await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return RequesterOf(client, "slow")(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { CancellationToken = source.Token })
-                .WaitAsync(Patience, Cancelled);
+            return slow.WaitAsync(Patience, Cancelled);
         });
         Assert.Equal(1, await CancellationsReaching(client, 1));
     }
@@ -324,6 +333,50 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Equal("\"ada\"", (await RequesterOf(client, "whoami")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
         await RequesterOf(client, "logout")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
         Assert.Null(client.Router.SessionToken);
+    }
+
+    /// <summary>
+    /// What an HTTP client's exchanges go through: an envelope goes only once the server said it had
+    /// the one before — its head came back (section 15.7) — as a socket keeps them in order, so a
+    /// cancel never overtakes its request, which the server would bury unseen.
+    /// </summary>
+    private sealed class InOrder : DelegatingHandler
+    {
+        private readonly SemaphoreSlim _turn = new(1, 1);
+
+        public InOrder()
+            : base(new SocketsHttpHandler { AllowAutoRedirect = false })
+        {
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Content is null)
+            {
+                return await base.SendAsync(request, cancellationToken);
+            }
+
+            await _turn.WaitAsync(cancellationToken);
+
+            try
+            {
+                return await base.SendAsync(request, cancellationToken);
+            }
+            finally
+            {
+                _turn.Release();
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _turn.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     // a client connected over one transport or the other: its services, its router, and what lets it go

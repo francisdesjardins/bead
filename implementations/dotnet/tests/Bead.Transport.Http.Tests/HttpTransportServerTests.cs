@@ -1174,6 +1174,9 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     {
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
+            // the client holds a head back to send it with the body's first bytes: flushed, it goes
+            // now, and the stream stays open
+            await stream.FlushAsync();
             await ending;
         }
 
