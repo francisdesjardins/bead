@@ -242,7 +242,9 @@ test.describe('an HTTP server and client', () => {
     const { aborted, client } = connected;
 
     await expect(
-      client.services.getRequest(slow, { serializer: text })('wait')({ timeout: 100 })
+      // long enough for the call to reach the server before its cancel, which goes on a request
+      // of its own
+      client.services.getRequest(slow, { serializer: text })('wait')({ timeout: 500 })
     ).rejects.toMatchObject({ name: 'TimeoutError' });
     await expect
       .poll(() => {
@@ -286,7 +288,11 @@ test.describe('an HTTP server and client', () => {
     });
 
     // the connection is gone: the next exchange learns it, and the client closes
-    await sleep(120);
+    await expect
+      .poll(() => {
+        return connected.server.transport.clients;
+      })
+      .toEqual([]);
     await client.services
       .getRequest(read, { serializer: text })('0')()
       .catch(() => {});
