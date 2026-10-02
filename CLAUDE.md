@@ -9,8 +9,9 @@ What a session needs beyond this file lives in `.claude/`:
 - `.claude/workflows/`: the workflow scripts, launched by name. Committed.
 - `.claude/local/`: what this clone keeps for itself and git ignores, never to be committed: the
   plan (`plan.md`), the rules on names and their check (`rules.md`, `check.mjs`), the inputs of the
-  builder's design (`builder/`), and the generator of the Bead page made for the user's colleague
-  (`page/`). Read `plan.md` before a change of any size.
+  builder's design (`builder/`), the generator of the Bead page made for the user's colleague
+  (`page/`), and the scripts that replay CI on Linux in Docker (`tools/`). Read `plan.md` before a
+  change of any size.
 
 The repository's documentation looks forward: it states what holds and where the project goes,
 in the present tense. Where something came from, and how it was before, stays out of it.
