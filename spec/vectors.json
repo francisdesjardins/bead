@@ -1,4 +1,5 @@
 {
+  "$schema": "schemas/vectors.schema.json",
   "$comment": [
     "Bead's conformance vectors: the bytes of envelopes and what they say, written once and read by every implementation's tests.",
     "Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.",
@@ -8,6 +9,7 @@
     "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
     "side is the side that reads: a failure says which side raised it."
   ],
+  "specVersion": "0.1.0",
   "headers": [
     {
       "name": "a request",

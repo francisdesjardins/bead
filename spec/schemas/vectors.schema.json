@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's conformance vectors, spec/vectors.json",
+  "type": "object",
+  "required": [
+    "$comment",
+    "specVersion",
+    "headers",
+    "reads",
+    "prefixes",
+    "prefixRefusals",
+    "headerRefusals",
+    "envelopes",
+    "envelopeRefusals",
+    "failures",
+    "failureRefusals"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/vectors.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
+    "headers": {
+      "description": "Headers a reader reads and a writer writes back to their bytes.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "bytes", "header"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+          "header": { "$ref": "#/$defs/header" }
+        }
+      }
+    },
+    "reads": {
+      "description": "Headers a reader takes, which a writer need not write: what it reads, or null for a kind skipped.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "side", "bytes", "header"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "side": { "$ref": "#/$defs/side" },
+          "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+          "header": {
+            "type": ["object", "null"],
+            "if": { "type": "object" },
+            "then": { "$ref": "#/$defs/header" }
+          }
+        }
+      }
+    },
+    "prefixes": {
+      "description": "Prefixes, read whatever follows them.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "bytes", "prefix"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+          "prefix": {
+            "type": "object",
+            "required": ["layout", "kind", "callId"],
+            "additionalProperties": false,
+            "properties": {
+              "layout": { "$ref": "common.schema.json#/$defs/u8" },
+              "kind": { "$ref": "common.schema.json#/$defs/u8" },
+              "callId": { "$ref": "common.schema.json#/$defs/u32" }
+            }
+          }
+        }
+      }
+    },
+    "prefixRefusals": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/refusal" }
+    },
+    "headerRefusals": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/refusal" }
+    },
+    "envelopes": {
+      "description": "Whole envelopes, read and written back to their bytes.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "bytes", "envelope"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+          "envelope": { "$ref": "#/$defs/envelope" }
+        }
+      }
+    },
+    "envelopeRefusals": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/refusal" }
+    },
+    "failures": {
+      "description": "Failures' records, and what a reader makes of them.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "record", "failure"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "record": { "$ref": "common.schema.json#/$defs/bytes" },
+          "failure": { "$ref": "#/$defs/failure" },
+          "maximumDetailBytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "failureRefusals": {
+      "description": "Failures' records a reader refuses.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "record", "code"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "record": { "$ref": "common.schema.json#/$defs/bytes" },
+          "code": { "$ref": "common.schema.json#/$defs/protocolCode" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "side": {
+      "description": "The side that reads.",
+      "enum": ["client", "server"]
+    },
+    "refusal": {
+      "description": "Bytes a reader refuses, the protocol code it answers with, and the bound it reads them with, where the vector is about that bound.",
+      "type": "object",
+      "required": ["name", "bytes", "code"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+        "code": { "$ref": "common.schema.json#/$defs/protocolCode" },
+        "detail": { "type": "string" },
+        "maximumEnvelopeBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "envelope": {
+      "description": "A whole envelope: its kind, which its header says too; then a failure's record for a failure, nothing for a credit or a cancel, and a payload for any other.",
+      "type": "object",
+      "required": ["kind", "header"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "$ref": "common.schema.json#/$defs/kind" },
+        "header": { "$ref": "#/$defs/header" },
+        "payload": { "$ref": "common.schema.json#/$defs/bytes" },
+        "failure": { "$ref": "#/$defs/failure" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "enum": [16, 17, 19, 20] } } },
+          "then": { "required": ["payload"], "properties": { "failure": false } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 18 } } },
+          "then": { "required": ["failure"], "properties": { "payload": false } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "enum": [21, 22] } } },
+          "then": { "properties": { "payload": false, "failure": false } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 16 } } },
+          "then": { "properties": { "header": { "properties": { "kind": { "const": 16 } } } } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 17 } } },
+          "then": { "properties": { "header": { "properties": { "kind": { "const": 17 } } } } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 18 } } },
+          "then": { "properties": { "header": { "properties": { "kind": { "const": 18 } } } } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 19 } } },
+          "then": { "properties": { "header": { "properties": { "kind": { "const": 19 } } } } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 20 } } },
+          "then": { "properties": { "header": { "properties": { "kind": { "const": 20 } } } } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 21 } } },
+          "then": { "properties": { "header": { "properties": { "kind": { "const": 21 } } } } }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 22 } } },
+          "then": { "properties": { "header": { "properties": { "kind": { "const": 22 } } } } }
+        }
+      ]
+    },
+    "failure": {
+      "description": "A failure's record, as read: its code, its scope, the relays it crossed and its detail.",
+      "type": "object",
+      "required": ["code", "scope", "hops", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "common.schema.json#/$defs/code" },
+        "scope": { "$ref": "common.schema.json#/$defs/scope" },
+        "hops": { "$ref": "common.schema.json#/$defs/u8" },
+        "detail": { "type": "string" }
+      }
+    },
+    "header": {
+      "description": "The fields a header carries, each kind its own.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "$ref": "common.schema.json#/$defs/kind" } },
+      "allOf": [
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 16 } } },
+          "then": { "$ref": "#/$defs/request" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 17 } } },
+          "then": { "$ref": "#/$defs/result" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 18 } } },
+          "then": { "$ref": "#/$defs/failureHeader" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 19 } } },
+          "then": { "$ref": "#/$defs/notification" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 20 } } },
+          "then": { "$ref": "#/$defs/chunk" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 21 } } },
+          "then": { "$ref": "#/$defs/credit" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 22 } } },
+          "then": { "$ref": "#/$defs/cancel" }
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "required": ["callId", "kind", "serviceId", "procedureId"],
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": { "const": 16 },
+        "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
+        "procedureId": { "$ref": "common.schema.json#/$defs/u16" },
+        "destinationId": { "$ref": "common.schema.json#/$defs/u32" },
+        "opensSubscription": { "type": "boolean" },
+        "paced": { "type": "boolean" },
+        "sessionToken": { "$ref": "common.schema.json#/$defs/sessionToken" },
+        "total": { "$ref": "common.schema.json#/$defs/u53" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["callId", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": { "const": 17 },
+        "sessionToken": { "$ref": "#/$defs/announcement" },
+        "total": { "$ref": "common.schema.json#/$defs/u53" }
+      }
+    },
+    "failureHeader": {
+      "type": "object",
+      "required": ["callId", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": { "const": 18 },
+        "sessionToken": { "$ref": "#/$defs/announcement" }
+      }
+    },
+    "notification": {
+      "type": "object",
+      "required": ["callId", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": { "const": 19 }
+      }
+    },
+    "chunk": {
+      "type": "object",
+      "required": ["callId", "kind", "offset", "isLast"],
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": { "const": 20 },
+        "offset": { "$ref": "common.schema.json#/$defs/u53" },
+        "isLast": { "type": "boolean" }
+      }
+    },
+    "credit": {
+      "type": "object",
+      "required": ["callId", "kind", "creditEnd"],
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": { "const": 21 },
+        "creditEnd": { "$ref": "common.schema.json#/$defs/u53" },
+        "paced": { "type": "boolean" }
+      }
+    },
+    "cancel": {
+      "type": "object",
+      "required": ["callId", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": { "const": 22 }
+      }
+    },
+    "announcement": {
+      "description": "What an answer announces of its session: its token, or null for its end.",
+      "type": ["string", "null"],
+      "if": { "type": "string" },
+      "then": { "$ref": "common.schema.json#/$defs/sessionToken" }
+    }
+  }
+}

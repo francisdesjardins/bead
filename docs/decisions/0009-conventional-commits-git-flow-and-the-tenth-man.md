@@ -40,7 +40,9 @@ changed, one line a change; a record says why.
 
 **The Tenth Man Rule holds for every change that reaches across the languages**: an addition to or
 a change of the protocol, a renaming, and any behaviour the implementations share, down to the order
-of a status's values. When the others agree, one reviewer is bound to disagree, in this repository's workflows
+of a status's values; and for every change to what every language's tests answer to: the spec, its
+conformance files, their shape and their tooling, and the gates the implementations share. CI's
+mechanics, a shard or a runner's pin, are not among them. When the others agree, one reviewer is bound to disagree, in this repository's workflows
 an agent at xhigh effort: it argues that the consensus is wrong. Each of its objections is answered,
 accepted or refused with its reason, before the user decides. Not ten opinions: as many as the
 change needs, plus the one that dissents. The objections and their answers are kept with the record

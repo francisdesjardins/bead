@@ -38,27 +38,31 @@ judges every file, and a version is held once.
 
 **The root has no manifest and no task runner.** It holds what every implementation shares: `spec/`
 and its generators, `docs/`, `tools/`, `.githooks/`, the CI, the README, the CHANGELOG, the licence,
-and the standing instructions for Claude sessions, `CLAUDE.md` and `.claude/`. The generators use
-Python's standard library alone, and the root's tools are Node scripts without dependencies, so
-neither has a lockfile to keep.
+and the standing instructions for Claude sessions, `CLAUDE.md` and `.claude/`. The root's tools are
+Node scripts without dependencies. The spec's are Python 3.14's: its generators use the standard
+library alone, and its check, `spec/check.py`, needs `jsonschema`, which `spec/requirements.in`
+names and `spec/requirements.txt` locks with every hash, installed with `--require-hashes
+--only-binary=:all:`.
 
 **A language that joins comes the same way**: a folder under `implementations/`, its own native
 toolchain, and a CI job of its own.
 
 ## Consequences
 
-- A contributor installs the toolchains of the languages they touch, and Node for the root's tools.
+- A contributor installs the toolchains of the languages they touch, Node for the root's tools, and
+  Python for the spec's.
   The interop asks for both runtimes ([0004](0004-one-behaviour-in-every-language.md)), and so does
   CI's `dotnet` job.
 - The house style is stated once per language, in that language's own terms: the TypeScript side's
   `curly`, `arrow-body-style` and `max-params` are oxlint rules, and their C# counterparts are
   `.editorconfig` rules the build holds. Keeping the two alike is review's, not a tool's.
 - The root's prose and scripts have no formatter of their own: CI holds `README.md`, `CHANGELOG.md`,
-  `CLAUDE.md`, `docs/`, `spec/spec.md`, `spec/interop-service.json`, `tools/` and `.github/` to the
+  `CLAUDE.md`, `docs/`, `spec/spec.md`, `spec/interop-service.json`, `spec/schemas/`, `tools/` and
+  `.github/` to the
   TypeScript side's oxfmt, through `-c implementations/typescript/.oxfmtrc.json`, so formatting them
   needs that side installed. The conformance files are left to their generators.
 - Coverage is measured by each side's own tool, c8's istanbul report and `dotnet test --coverage`'s
   cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either; it is a
   local command, not a CI job.
-- Two lockfile formats, ten lockfiles in all today: one `yarn.lock`, and nine `packages.lock.json`.
-  An upgrade is made side by side, never by one command.
+- Three lockfile formats, eleven lockfiles in all today: one `yarn.lock`, nine `packages.lock.json`,
+  and `spec/requirements.txt`. An upgrade is made side by side, never by one command.

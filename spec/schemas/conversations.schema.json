@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's conversations, spec/conversations.json",
+  "type": "object",
+  "required": ["$comment", "specVersion", "conversations"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/conversations.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
+    "conversations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/conversation" }
+    }
+  },
+  "$defs": {
+    "conversation": {
+      "description": "What a server of the interop service does with what one client sends, step by step.",
+      "type": "object",
+      "required": ["name", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "limits": { "$ref": "#/$defs/limits" },
+        "pacing": { "$ref": "#/$defs/pacing" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+    "limits": {
+      "description": "The server's limits, where given; any other is its default.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "maximumEnvelopeBytes": { "type": "integer", "minimum": 1 },
+        "maximumPayloadBytes": { "type": "integer", "minimum": 1 },
+        "maximumTransfers": { "type": "integer", "minimum": 0 },
+        "chunkBytes": { "type": "integer", "minimum": 1 },
+        "windowBytes": { "type": "integer", "minimum": 1 },
+        "bufferedBytesBudget": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "pacing": {
+      "description": "What bounds the queues of the server's paced subscriptions.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "maximumQueuedNotifications": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "step": {
+      "description": "One thing the client does, or the one thing it expects next: in, close, out or report.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "in": { "$ref": "common.schema.json#/$defs/bytes" },
+        "close": { "const": true },
+        "out": { "$ref": "#/$defs/out" },
+        "report": {
+          "description": "A code, or exception for an error that carries none.",
+          "type": ["integer", "string"],
+          "if": { "type": "integer" },
+          "then": { "$ref": "common.schema.json#/$defs/code" },
+          "else": { "const": "exception" }
+        }
+      }
+    },
+    "out": {
+      "description": "The next envelope the server sends, each kind with its own fields.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "$ref": "common.schema.json#/$defs/kind" } },
+      "allOf": [
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 16 } } },
+          "then": { "$ref": "#/$defs/request" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 17 } } },
+          "then": { "$ref": "#/$defs/result" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 18 } } },
+          "then": { "$ref": "#/$defs/failure" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 19 } } },
+          "then": { "$ref": "#/$defs/notification" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 20 } } },
+          "then": { "$ref": "#/$defs/chunk" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 21 } } },
+          "then": { "$ref": "#/$defs/credit" }
+        },
+        {
+          "if": { "required": ["kind"], "properties": { "kind": { "const": 22 } } },
+          "then": { "$ref": "#/$defs/cancel" }
+        }
+      ]
+    },
+    "request": {
+      "description": "A command the server calls, with its service and its procedure.",
+      "type": "object",
+      "required": ["kind", "callId", "serviceId", "procedureId", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": 16 },
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
+        "procedureId": { "$ref": "common.schema.json#/$defs/u16" },
+        "payload": { "$ref": "common.schema.json#/$defs/bytes" }
+      }
+    },
+    "result": {
+      "description": "A result; one that opens a transfer gives its total.",
+      "type": "object",
+      "required": ["kind", "callId", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": 17 },
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "payload": { "$ref": "common.schema.json#/$defs/bytes" },
+        "session": { "$ref": "#/$defs/session" },
+        "total": { "$ref": "common.schema.json#/$defs/u53" }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "required": ["kind", "callId", "failure"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": 18 },
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "failure": {
+          "description": "Its code and its scope; its detail is informative.",
+          "type": "object",
+          "required": ["code", "scope"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "$ref": "common.schema.json#/$defs/code" },
+            "scope": { "$ref": "common.schema.json#/$defs/scope" }
+          }
+        },
+        "session": { "$ref": "#/$defs/session" }
+      }
+    },
+    "notification": {
+      "type": "object",
+      "required": ["kind", "callId", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": 19 },
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "payload": { "$ref": "common.schema.json#/$defs/bytes" }
+      }
+    },
+    "chunk": {
+      "type": "object",
+      "required": ["kind", "callId", "offset", "isLast", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": 20 },
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "offset": { "$ref": "common.schema.json#/$defs/u53" },
+        "isLast": { "type": "boolean" },
+        "payload": { "$ref": "common.schema.json#/$defs/bytes" }
+      }
+    },
+    "credit": {
+      "type": "object",
+      "required": ["kind", "callId", "creditEnd"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": 21 },
+        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "creditEnd": { "$ref": "common.schema.json#/$defs/u53" }
+      }
+    },
+    "cancel": {
+      "type": "object",
+      "required": ["kind", "callId"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": 22 },
+        "callId": { "$ref": "common.schema.json#/$defs/u32" }
+      }
+    },
+    "session": {
+      "description": "What an answer announced of its connection's session: a token, which is random, or its end. Absent, nothing.",
+      "enum": ["announced", "ended"]
+    }
+  }
+}

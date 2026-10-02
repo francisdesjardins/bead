@@ -2,6 +2,8 @@
 import json
 import os
 
+from spec_version import spec_version
+
 # the conformance files sit one folder up from their generators
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
@@ -359,6 +361,7 @@ conversations = [
 ]
 
 document = {
+    '$schema': 'schemas/conversations.schema.json',
     '$comment': [
         "Bead's conversations: what a server of the interop service (interop-service.json) does with what one client sends, played by every implementation's tests against its own server.",
         'in is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
@@ -367,6 +370,7 @@ document = {
         'Before each in, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.',
     ],
+    'specVersion': spec_version(),
     'conversations': [
         {'name': name, **({'limits': limits} if limits else {}), **({'pacing': rest[0]} if len(rest) > 1 else {}),
          'steps': rest[-1]}

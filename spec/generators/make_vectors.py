@@ -2,6 +2,8 @@
 import json
 import os
 
+from spec_version import spec_version
+
 # the conformance files sit one folder up from their generators
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vectors.json')
 
@@ -221,6 +223,7 @@ def entry(**fields):
 
 
 document = {
+    '$schema': 'schemas/vectors.schema.json',
     '$comment': [
         "Bead's conformance vectors: the bytes of envelopes and what they say, written once and read by every implementation's tests.",
         'Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.',
@@ -230,6 +233,7 @@ document = {
         "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
         "side is the side that reads: a failure says which side raised it.",
     ],
+    'specVersion': spec_version(),
     'headers': [entry(name=name, bytes=data, header=header) for name, data, header in headers],
     'reads': [{'name': name, 'side': side, 'bytes': data, 'header': header} for name, side, data, header in reads],
     'prefixes': [entry(name=name, bytes=data, prefix=prefix) for name, data, prefix in prefixes],

@@ -64,9 +64,13 @@ conversation plays one connection, and a relay needs a destination behind it. Ea
 own tests check them, and parity there rests on the rule that a test on one side has its twin on
 the other.
 
-**Each side reads the groups of vectors it names**, so a group neither side reads would pass
-unnoticed. A conformance report that fails both sides on a group they do not read is the gate this
-decision still owes ([0006](0006-a-rule-has-its-gate.md)).
+**Every side's tests read every group of vectors, and the conversations.** `spec/check.py`, in the
+spec job, reports group by group which sides' tests read it, and fails on a group one side's tests
+never name, so a new group fails until every side reads it. It reads the tests' sources: it sees
+the groups a test names, not the vectors it plays, and a report of the vectors each side plays is
+still owed ([0006](0006-a-rule-has-its-gate.md)). The same check holds the files' shape: each
+follows its schema in `spec/schemas/`, repeats the spec's version, and each group of vectors is
+named by a section of the spec.
 
 **The interop needs both runtimes in one place.** In CI, only the `dotnet` job has both: it installs
 the TypeScript side for its interop server, runs the C# tests, the C# client's interop among them,
@@ -80,3 +84,22 @@ today and six with a third language.
 **No side decides by default.** What one language could add on its own waits for the others, or for
 a decision that brings it to all of them; what a platform cannot do at all stays a row of the
 matrix, never a silent fork.
+
+## The Tenth Man
+
+The conformance files' schemas, their version and their check met the Tenth Man
+([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). Its objections, each with its
+answer:
+
+| Objection                                                                                                             | Answer                                                                                                                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A list of groups each side keeps by hand is a count, which an edit satisfies with no test reading the group           | Accepted: no side keeps a list; `spec/check.py` reads each side's tests for the groups they name. A report of the vectors each side plays is owed ([0006](0006-a-rule-has-its-gate.md)). |
+| The check needs `jsonschema`, against 0005's root without dependencies, and nothing verifies what the registry serves | Accepted: [0005](0005-a-toolchain-per-language.md) says so, and `spec/requirements.txt` locks it with every hash, installed with `--require-hashes --only-binary=:all:`.                 |
+| A conformance file the check does not know of goes unchecked                                                          | Accepted: every `spec/*.json` needs its schema, and every schema its file.                                                                                                               |
+| "Every refusal" lets a refusal group pass with no section naming it                                                   | Accepted: a section names each group in full; "every refusal" gathers them, and counts for none.                                                                                         |
+| A malformed file makes the check fail on an error of its own, hiding the schema's                                     | Accepted: it reports what the schemas found, and stops there.                                                                                                                            |
+| The spec's version is a rule with no gate and no policy                                                               | Accepted: [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) says when it moves, and review holds it ([0006](0006-a-rule-has-its-gate.md)).                           |
+| An envelope's payload and failure are not tied to its kind, and a key may come twice                                  | Accepted: the schema ties them, and the check refuses a key given twice (RFC 7493).                                                                                                      |
+| A validator from the TypeScript side's lockfile, rather than Python                                                   | Refused: the spec's tools stay apart from any implementation's install, as its generators do, and the hashes give Python's lock what Yarn's has.                                         |
+| Each vector and conversation should cite the clause it checks                                                         | Refused for now: a group cites its sections, and a clause on each of the 195 entries changes the files' shape; it is weighed with the transports' conformance.                           |
+| `specVersion` abbreviates ([0003](0003-one-word-one-meaning.md))                                                      | Refused: it is the spec's own word, as the folder, the `spec` job and the `spec-v` tags have it, and CloudEvents names its own `specversion`.                                            |

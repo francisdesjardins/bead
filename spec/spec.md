@@ -10,7 +10,8 @@ writes every `headers` and `envelopes` vector back to its bytes. The why of each
 decisions: [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md) for the
 envelope, [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.md) for pacing.
 
-**Status: every section is written.**
+**Version: 0.1.0**, of layout `0xA1`. Each conformance file repeats it as its `specVersion`, and
+follows its schema in [`schemas/`](schemas/). **Status: every section is written.**
 
 ## 1. Conventions
 

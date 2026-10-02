@@ -63,8 +63,10 @@ the test that shows it, and a difference that can close is work to do.
 ## The Tenth Man Rule
 
 For every change that reaches across the languages — an addition to or a change of the protocol, a
-renaming, any behaviour the implementations share, down to the order of a status's values — when
-the others agree, one agent is bound to disagree, at **xhigh** effort. It argues that the consensus is wrong. Each of its
+renaming, any behaviour the implementations share, down to the order of a status's values — and for
+every change to what every language's tests answer to — the spec, its conformance files, their
+shape and their tooling, the gates the implementations share; not CI's mechanics — when the others
+agree, one agent is bound to disagree, at **xhigh** effort. It argues that the consensus is wrong. Each of its
 objections is answered, accepted or refused with its reason, before the user decides. Not ten
 opinions: as many as the change needs, plus the one that dissents.
 

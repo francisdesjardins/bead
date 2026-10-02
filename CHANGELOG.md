@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `specVersion` in each conformance file, repeating the version `spec/spec.md` now states, `0.1.0`,
+  and when it moves, in decision 0008.
+- JSON Schemas for the conformance files, in `spec/schemas/`.
+- `spec/check.py`, which the `spec` job runs after the regeneration, from dependencies locked with
+  every hash in `spec/requirements.txt`: every file under its schema and every schema with its file,
+  no key twice, one version across the spec and its files, one name to a vector or a conversation
+  in its group, every group of vectors named by a section of the spec, which names no other, and a
+  report of the groups each side's tests read, which fails on one a side does not.
+
+### Changed
+
+- The Tenth Man meets every change to what every language's tests answer to: the spec, its
+  conformance files, their shape and their tooling, and the gates the implementations share.
+
 ## [0.1.0] - 2026-10-02
 
 ### Added

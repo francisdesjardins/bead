@@ -1,4 +1,5 @@
 {
+  "$schema": "schemas/conversations.schema.json",
   "$comment": [
     "Bead's conversations: what a server of the interop service (interop-service.json) does with what one client sends, played by every implementation's tests against its own server.",
     "in is what the client sends, in hexadecimal as vectors.json writes it; close closes the client's connection.",
@@ -7,6 +8,7 @@
     "Before each in, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
     "limits, where given, are the server's limits; any other is its default. pacing, where given, bounds the queues of its paced subscriptions."
   ],
+  "specVersion": "0.1.0",
   "conversations": [
     {
       "name": "echo answers with its request's payload",

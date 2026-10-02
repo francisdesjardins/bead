@@ -30,7 +30,13 @@ promise to be decided at once, on the day of the first release.
    earlier `0xA1` is kept. From the first publication on, a change that a reader of the layout
    before it cannot read takes the next layout byte.
 2. **The spec**: its text, its vectors, its conversations and the interop service move together,
-   and are tagged `spec-v*`.
+   and are tagged `spec-v*`. `spec/spec.md` states their version, which each conformance file
+   repeats as its `specVersion`, as CloudEvents names its own `specversion`. It follows Semantic
+   Versioning at `0.x`, without pre-releases: the minor moves when an implementation must change to
+   keep passing — an expectation changed, a field, a group or a file added — and the patch when a
+   conforming implementation passes unchanged — a vector or a conversation added for what the spec
+   already requires, a clarification. It moves in the release commit, as the manifests' versions
+   do, and a release whose spec moved tags `spec-v` and that version beside its `v*`.
 3. **The product**: each implementation's releases, under Semantic Versioning, at `0.x`, tagged
    `v*`, one version for both manifests, cut from a `release/*` branch
    ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).

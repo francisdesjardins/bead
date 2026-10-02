@@ -19,16 +19,17 @@ a walk that reads no file, a filter that runs no test, an interop that skips.
 every push and every pull request, under `ci-ok`, which needs every other job and is the one check a
 branch requires. The gates today:
 
-| Rule                                                         | Gate                                                                                              |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| The conformance files are what their generators write        | `spec`: regenerate, then `git diff --exit-code`, and no file new                                  |
-| Every implementation reads the wire alike                    | each side's tests over `spec/vectors.json` and `spec/conversations.json`                          |
-| Each side's client speaks to the other's server              | the interop both ways, in the `dotnet` job, with `BEAD_INTEROP_REQUIRED=1`                        |
-| The TypeScript side's types, lint, format and comments       | `yarn check`: `tsc`, oxlint with `--deny-warnings`, oxfmt, the comment budget, the JSDoc examples |
-| The C# side's layout, code style, analyzers and doc comments | `dotnet format --verify-no-changes`, then `dotnet test`, which builds with every warning an error |
-| A lockfile changes only on purpose                           | `yarn install --immutable`; `RestoreLockedMode` under `CI=true`                                   |
-| The root's files keep the house format                       | oxfmt `--check` over them, in the `typescript` job                                                |
-| A commit subject is a Conventional Commit                    | `tools/check-commits.mjs`, in the `commits` job                                                   |
+| Rule                                                              | Gate                                                                                                                                                                                                |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The conformance files are what their generators write             | `spec`: regenerate, then `git diff --exit-code`, and no file new                                                                                                                                    |
+| Every implementation reads the wire alike                         | each side's tests over `spec/vectors.json` and `spec/conversations.json`                                                                                                                            |
+| The conformance files keep their shape, and every side reads them | `spec`: `spec/check.py`, after the regeneration: each file under its schema, the version `spec/spec.md` states, every group of vectors named by a section of the spec and read by each side's tests |
+| Each side's client speaks to the other's server                   | the interop both ways, in the `dotnet` job, with `BEAD_INTEROP_REQUIRED=1`                                                                                                                          |
+| The TypeScript side's types, lint, format and comments            | `yarn check`: `tsc`, oxlint with `--deny-warnings`, oxfmt, the comment budget, the JSDoc examples                                                                                                   |
+| The C# side's layout, code style, analyzers and doc comments      | `dotnet format --verify-no-changes`, then `dotnet test`, which builds with every warning an error                                                                                                   |
+| A lockfile changes only on purpose                                | `yarn install --immutable`; `RestoreLockedMode` under `CI=true`; `pip install --require-hashes` over `spec/requirements.txt`                                                                        |
+| The root's files keep the house format                            | oxfmt `--check` over them, in the `typescript` job                                                                                                                                                  |
+| A commit subject is a Conventional Commit                         | `tools/check-commits.mjs`, in the `commits` job                                                                                                                                                     |
 
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
@@ -45,7 +46,9 @@ today: one word, one meaning ([0003](0003-one-word-one-meaning.md)), with the Te
 renaming ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)); the C# side's two
 parameters and its classes without a base
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); git-flow's branch names and
-the CHANGELOG's entries; a row of the support matrix for every difference between languages
+the CHANGELOG's entries; the spec's version, moved by the release that changes the spec, and its
+`spec-v` tag ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); a row of the
+support matrix for every difference between languages
 ([0004](0004-one-behaviour-in-every-language.md)).
 
 ## Consequences
@@ -57,9 +60,9 @@ leaves the review's list for the table above.
 bytes, the built assemblies with their warnings. A count can be satisfied by editing a number; a
 vector cannot.
 
-**Two gates are still owed**: a conformance report that fails a side on a group of vectors it does
-not read ([0004](0004-one-behaviour-in-every-language.md)), and a check of the C# side's parameters,
-which no analyzer of .NET's recommended set counts.
+**Two gates are still owed**: a report of the vectors each side's tests play, where `spec/check.py`
+sees the groups they name ([0004](0004-one-behaviour-in-every-language.md)), and a check of the C#
+side's parameters, which no analyzer of .NET's recommended set counts.
 
 **The hooks are a copy, not the gate.** `.githooks/` runs checks before each commit once a clone
 opts in, with `git config core.hooksPath .githooks`; CI runs them whatever a clone does.

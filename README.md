@@ -55,8 +55,9 @@ keep the same API, whatever carries the envelopes.
 ## Layout
 
 ```
-spec/                         spec.md, and the conformance files both sides read
+spec/                         spec.md, the conformance files both sides read, and check.py
   generators/                 the Python scripts that write them
+  schemas/                    their JSON Schemas
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/
@@ -91,6 +92,18 @@ generators write them, and regenerating must give the same bytes:
 python spec/generators/make_vectors.py
 python spec/generators/make_conversations.py
 git diff --exit-code -- spec
+```
+
+Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repeats the version
+`spec.md` states as its `specVersion`. `spec/check.py` holds both, and that the spec's sections and
+the groups of vectors name each other; then it reports which groups each side's tests read, and
+fails on one a side does not. It runs on Python 3.14, with `jsonschema`, which
+`spec/requirements.txt` locks with every hash:
+
+```sh
+python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts\Activate.ps1
+python -m pip install --require-hashes --only-binary=:all: -r spec/requirements.txt
+python spec/check.py
 ```
 
 ## TypeScript
@@ -198,10 +211,11 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 ## CI
 
 [`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on a pinned
-runner image, `ubuntu-26.04`: `spec` (regenerate, then diff), `typescript` on Node 26 and on the
-floor, 24 (install, check, test, the demo's static build, and the root's files under the same
-formatter), `dotnet` (format, test, and the interop both ways with `BEAD_INTEROP_REQUIRED=1`), and
-`commits` (the subjects). `ci-ok` needs them all and is the only required check.
+runner image, `ubuntu-26.04`: `spec` (regenerate, then diff, then `spec/check.py`), `typescript` on
+Node 26 and on the floor, 24 (install, check, test, the demo's static build, and the root's files
+under the same formatter), `dotnet` (format, test, and the interop both ways with
+`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects). `ci-ok` needs them all and is the only
+required check.
 
 ## Contributing
 

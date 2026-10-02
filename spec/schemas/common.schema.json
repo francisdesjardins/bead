@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "What Bead's conformance files share",
+  "$defs": {
+    "comment": {
+      "description": "What a file holds and how to read it, line by line.",
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "specVersion": {
+      "description": "The version of the spec a file belongs to, as spec/spec.md states it: Semantic Versioning.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "name": {
+      "description": "What a vector or a conversation is about, unique in its group.",
+      "type": "string",
+      "minLength": 1
+    },
+    "bytes": {
+      "description": "Bytes in hexadecimal, two capital digits each, spaces aside; a bar parts a header from what follows it.",
+      "type": "string",
+      "pattern": "^(?:[0-9A-F]{2}[ |]*)*$"
+    },
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "u53": {
+      "description": "A 64-bit field, within the integers every language holds exactly: 0 to 2^53 - 1.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "kind": {
+      "description": "REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22.",
+      "enum": [16, 17, 18, 19, 20, 21, 22]
+    },
+    "scope": {
+      "description": "PROTOCOL 0, APPLICATION 1.",
+      "enum": [0, 1]
+    },
+    "protocolCode": {
+      "description": "A code of the protocol, as spec/spec.md section 8 names them.",
+      "enum": [1, 2, 3, 4, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 48, 49, 50, 51, 64, 65]
+    },
+    "code": {
+      "description": "A failure's code, the protocol's or the procedure's own: never 0.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "sessionToken": {
+      "description": "A session's token, 16 bytes in base64url without padding.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$"
+    }
+  }
+}

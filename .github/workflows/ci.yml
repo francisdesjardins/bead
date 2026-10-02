@@ -31,7 +31,9 @@ env:
 jobs:
   # ── Spec ─────────────────────────────────────────────────────────────────────
   # The conformance files are what their generators write: regenerated, they must come out
-  # identical to the committed ones, byte for byte.
+  # identical to the committed ones, byte for byte. Then spec/check.py, from its hash-locked
+  # dependencies: each file under its schema, one version, the spec's sections and the vector
+  # groups naming each other, and each side's tests reading every group.
   spec:
     name: Spec
     runs-on: ubuntu-26.04
@@ -46,6 +48,10 @@ jobs:
       - run: git diff --exit-code -- spec
       - name: No file the generators wrote is new
         run: test -z "$(git status --porcelain -- spec)"
+      - run: >-
+          python -m pip install --disable-pip-version-check -q --require-hashes --only-binary=:all:
+          -r spec/requirements.txt
+      - run: python spec/check.py
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint, format, comment budget, doc examples, then its
@@ -89,7 +95,8 @@ jobs:
         run: >-
           implementations/typescript/node_modules/.bin/oxfmt
           -c implementations/typescript/.oxfmtrc.json --check
-          README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/interop-service.json tools .github
+          README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/interop-service.json spec/schemas
+          tools .github
 
   # ── .NET ─────────────────────────────────────────────────────────────────────
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
