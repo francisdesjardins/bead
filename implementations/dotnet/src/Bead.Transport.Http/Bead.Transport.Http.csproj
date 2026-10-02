@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bead over HTTP, on Kestrel: what Bead's http-transport-server is, on ASP.NET Core. -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Transport.Http</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Core/Bead.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Bead.Transport.Http.Tests" />
+  </ItemGroup>
+</Project>

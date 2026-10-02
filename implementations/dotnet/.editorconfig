@@ -1,0 +1,88 @@
+# Bead's C# side. Its rules are .NET's recommended set, which the build holds
+# (EnforceCodeStyleInBuild), and the few below, which hold the TypeScript side's own in C#: braces
+# always, a method's body a block, a namespace per file. 0007 is the decision.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{csproj,props,slnx,xml}]
+indent_style = space
+indent_size = 2
+
+[*.json]
+indent_style = space
+indent_size = 2
+
+[*.cs]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# one namespace a file, written once at its top
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_diagnostic.IDE0161.severity = warning
+
+# a block for every branch, as `curly` asks of the TypeScript side
+csharp_prefer_braces = true:warning
+dotnet_diagnostic.IDE0011.severity = warning
+
+# every body is a block, as `arrow-body-style` asks of the TypeScript side's functions: a lambda's,
+# which is an arrow, and a method's, a property's or an accessor's
+csharp_style_expression_bodied_methods = false:warning
+csharp_style_expression_bodied_constructors = false:warning
+csharp_style_expression_bodied_operators = false:warning
+csharp_style_expression_bodied_local_functions = false:warning
+csharp_style_expression_bodied_lambdas = false:warning
+csharp_style_expression_bodied_properties = false:warning
+csharp_style_expression_bodied_accessors = false:warning
+csharp_style_expression_bodied_indexers = false:warning
+dotnet_diagnostic.IDE0022.severity = warning
+dotnet_diagnostic.IDE0021.severity = warning
+dotnet_diagnostic.IDE0023.severity = warning
+dotnet_diagnostic.IDE0024.severity = warning
+dotnet_diagnostic.IDE0061.severity = warning
+dotnet_diagnostic.IDE0053.severity = warning
+dotnet_diagnostic.IDE0025.severity = warning
+dotnet_diagnostic.IDE0027.severity = warning
+dotnet_diagnostic.IDE0026.severity = warning
+
+# what is not used goes
+dotnet_diagnostic.IDE0005.severity = warning
+
+# `using` directives outside the namespace, System first
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+
+# private fields as `_camelCase`, as .NET names them
+dotnet_naming_rule.private_fields.symbols = private_fields
+dotnet_naming_rule.private_fields.style = underscore_camel
+dotnet_naming_rule.private_fields.severity = warning
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+# a constant or a static readonly field as `PascalCase`, as the TypeScript side writes its
+# constants
+dotnet_naming_rule.constants.symbols = constants
+dotnet_naming_rule.constants.style = pascal
+dotnet_naming_rule.constants.severity = warning
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_rule.static_readonly_fields.symbols = static_readonly_fields
+dotnet_naming_rule.static_readonly_fields.style = pascal
+dotnet_naming_rule.static_readonly_fields.severity = warning
+dotnet_naming_symbols.static_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.static_readonly_fields.required_modifiers = static, readonly
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+# the naming rules above, held by the build as `dotnet format` holds them
+dotnet_diagnostic.IDE1006.severity = warning
+
+# tests name what they show, in words: xUnit's test methods are the one place underscores read best
+[tests/**.cs]
+dotnet_diagnostic.CA1707.severity = none

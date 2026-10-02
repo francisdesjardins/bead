@@ -1,0 +1,147 @@
+// ── Demo server ───────────────────────────────────────────────────────────────
+
+// dependencies
+
+import { readFile } from 'node:fs/promises';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { WebSocketServer } from 'ws';
+import type { HealthStatus } from '../src/server/health';
+import { createHTTPServer } from '../src/server/http-server';
+import { createWSServer } from '../src/server/ws-server';
+import { isRole, offer } from './offer';
+import type { IClaims } from './procedures';
+import { pathOf, relayExchanges, relayUpgrades } from './relay';
+import { issueToken, keyOf } from './token';
+
+// constants
+
+/** The one public port: the page, the token, and the Bead servers behind the relay. */
+const HTTP_PORT = Number(process.env['DEMO_PORT'] ?? 8_080);
+
+/** The address it listens on: this machine alone, which the demo serves. */
+const HTTP_ADDRESS = '127.0.0.1';
+
+/** Where the page reaches Bead: its WebSocket upgrades, and its HTTP exchanges. */
+const BEAD_PATHNAME = '/bead';
+
+/** Where a probe reads the health of both Bead servers, on this machine alone. */
+const HEALTH_PATHNAME = '/health';
+
+/** The identity provider's key, from a secret drawn at each start: no token outlives the demo. */
+const KEY = keyOf(crypto.getRandomValues(new Uint8Array(32)));
+
+// this module runs from `dist/`, where the launcher builds it next to the page's script
+const FILES = Object.freeze({
+  '/': { path: new URL('../index.html', import.meta.url), type: 'text/html; charset=utf-8' },
+  '/page.js': { path: new URL('./page.js', import.meta.url), type: 'text/javascript' },
+  '/worker.js': { path: new URL('./worker.js', import.meta.url), type: 'text/javascript' },
+});
+
+// helpers
+
+// what the page asks of the HTTP server: a file, or a token from the identity provider
+const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<void> => {
+  const pathname = pathOf(request);
+  const role = new URLSearchParams((request.url ?? '').split('?')[1]).get('role');
+
+  if (pathname === '/token' && isRole(role)) {
+    reply.writeHead(200, { 'content-type': 'application/json' });
+
+    return (reply.end(JSON.stringify({ token: await issueToken(role, await KEY) })), undefined);
+  }
+
+  const file = FILES[pathname as keyof typeof FILES] as (typeof FILES)['/'] | undefined;
+
+  if (file === undefined) {
+    reply.writeHead(404);
+
+    return (reply.end(), undefined);
+  }
+
+  const content = await readFile(file.path, 'utf8');
+
+  reply.writeHead(200, { 'content-type': file.type });
+  reply.end(content.replaceAll('%BEAD_PATHNAME%', BEAD_PATHNAME));
+};
+
+// definition
+
+const overWebSocket = createWSServer<IClaims>({ transport: { WebSocketServer } });
+// behind the relay: the host a page named, and the address the relay says it came from
+const overHTTP = createHTTPServer<IClaims>({
+  transport: {
+    createServer: (listener) => {
+      return createServer(listener);
+    },
+    hosts: [`localhost:${String(HTTP_PORT)}`, `${HTTP_ADDRESS}:${String(HTTP_PORT)}`],
+    isProxyTrusted: true,
+  },
+});
+
+offer(overWebSocket, KEY);
+offer(overHTTP, KEY);
+
+// each Bead server on a local port the system picks, reached through the public one alone
+const [wsTarget, httpTarget] = await Promise.all([
+  overWebSocket.transport.start({ address: '127.0.0.1', findOpenPort: true }),
+  overHTTP.transport.start({ address: '127.0.0.1', findOpenPort: true }),
+]);
+const exchanges = relayExchanges(httpTarget);
+
+// both servers' health, each check under its transport's name, the worst status theirs: 503 when one
+// fails, as a probe expects; counts only, never kept by anything on the way
+const answerHealth = (reply: ServerResponse): void => {
+  const servers = { http: overHTTP.health(), websocket: overWebSocket.health() };
+  const statuses: HealthStatus[] = [servers.http.status, servers.websocket.status];
+  const status = (['fail', 'warn'] as const).find((worst) => {
+    return statuses.includes(worst);
+  });
+  const checks = Object.fromEntries(
+    Object.entries(servers).flatMap(([transport, health]) => {
+      return Object.entries(health.checks).map(([name, check]) => {
+        return [`${transport}/${name}`, check];
+      });
+    })
+  );
+
+  reply.writeHead(status === 'fail' ? 503 : 200, {
+    'cache-control': 'no-store',
+    'content-type': 'application/health+json',
+  });
+  reply.end(JSON.stringify({ checks, status: status ?? 'pass' }));
+};
+
+const pages = createServer((request, reply) => {
+  if (pathOf(request) === BEAD_PATHNAME) {
+    return (exchanges(request, reply), undefined);
+  }
+
+  if (pathOf(request) === HEALTH_PATHNAME) {
+    return (answerHealth(reply), undefined);
+  }
+
+  // what went wrong stays on the server
+  serve(request, reply).catch((reason: unknown) => {
+    process.stderr.write(`${String(reason)}\n`);
+    reply.writeHead(500);
+    reply.end();
+  });
+
+  return undefined;
+});
+
+// an upload of 8 MiB over a slow link takes its time; a head that never ends does not
+pages.headersTimeout = 10_000;
+pages.requestTimeout = 60_000;
+pages.on('upgrade', relayUpgrades({ pathname: BEAD_PATHNAME, target: wsTarget }));
+pages.listen(HTTP_PORT, HTTP_ADDRESS);
+process.stdout.write(
+  `Bead, a demo: http://localhost:${String(HTTP_PORT)} (Ctrl+C to stop)
+`
+);
+
+process.once('SIGINT', () => {
+  pages.close();
+  void overWebSocket[Symbol.asyncDispose]();
+  void overHTTP[Symbol.asyncDispose]();
+});

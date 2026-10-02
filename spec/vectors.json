@@ -1,0 +1,944 @@
+{
+  "$comment": [
+    "Bead's conformance vectors: the bytes of envelopes and what they say, written once and read by every implementation's tests.",
+    "Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.",
+    "A header is the fields an envelope's header carries; sessionToken is the token in base64url, or null for the end of a session.",
+    "kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.",
+    "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
+    "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
+    "side is the side that reads: a failure says which side raised it."
+  ],
+  "headers": [
+    {
+      "name": "a request",
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 01",
+      "header": {
+        "callId": 3,
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a result",
+      "bytes": "A1 11 00 02  00 00 00 03",
+      "header": {
+        "callId": 3,
+        "kind": 17
+      }
+    },
+    {
+      "name": "a failure",
+      "bytes": "A1 12 00 02  00 00 00 03",
+      "header": {
+        "callId": 3,
+        "kind": 18
+      }
+    },
+    {
+      "name": "a notification",
+      "bytes": "A1 13 00 02  00 00 00 0D",
+      "header": {
+        "callId": 13,
+        "kind": 19
+      }
+    },
+    {
+      "name": "a cancel",
+      "bytes": "A1 16 00 02  00 00 00 05",
+      "header": {
+        "callId": 5,
+        "kind": 22
+      }
+    },
+    {
+      "name": "a request with a destination",
+      "bytes": "A1 10 02 04  00 00 00 09  00 02 00 07  00 00 00 05",
+      "header": {
+        "callId": 9,
+        "destinationId": 5,
+        "kind": 16,
+        "procedureId": 7,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a result with a session",
+      "bytes": "A1 11 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "header": {
+        "callId": 3,
+        "kind": 17,
+        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
+      }
+    },
+    {
+      "name": "a result that ends the session",
+      "bytes": "A1 11 01 06  00 00 00 03  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "header": {
+        "callId": 3,
+        "kind": 17,
+        "sessionToken": null
+      }
+    },
+    {
+      "name": "a failure that ends the session",
+      "bytes": "A1 12 01 06  00 00 00 03  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "header": {
+        "callId": 3,
+        "kind": 18,
+        "sessionToken": null
+      }
+    },
+    {
+      "name": "a request with a session and a destination",
+      "bytes": "A1 10 03 08  00 00 00 07  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 0C",
+      "header": {
+        "callId": 7,
+        "destinationId": 12,
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2,
+        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
+      }
+    },
+    {
+      "name": "a request that opens a subscription",
+      "bytes": "A1 10 10 03  00 00 00 03  00 02 00 01",
+      "header": {
+        "callId": 3,
+        "kind": 16,
+        "opensSubscription": true,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request that opens a subscription, paced",
+      "bytes": "A1 10 30 03  00 00 00 05  00 02 00 01",
+      "header": {
+        "callId": 5,
+        "kind": 16,
+        "opensSubscription": true,
+        "paced": true,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request that opens a subscription, with a session and a destination",
+      "bytes": "A1 10 13 08  00 00 00 07  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 0C",
+      "header": {
+        "callId": 7,
+        "destinationId": 12,
+        "kind": 16,
+        "opensSubscription": true,
+        "procedureId": 1,
+        "serviceId": 2,
+        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
+      }
+    },
+    {
+      "name": "a request that opens a transfer",
+      "bytes": "A1 10 04 05  00 00 00 07  00 02 00 05  00 00 00 00 01 40 00 00",
+      "header": {
+        "callId": 7,
+        "kind": 16,
+        "procedureId": 5,
+        "serviceId": 2,
+        "total": 20971520
+      }
+    },
+    {
+      "name": "a request with a destination that opens a transfer of nothing",
+      "bytes": "A1 10 06 06  00 00 00 09  00 02 00 07  00 00 00 05  00 00 00 00 00 00 00 00",
+      "header": {
+        "callId": 9,
+        "destinationId": 5,
+        "kind": 16,
+        "procedureId": 7,
+        "serviceId": 2,
+        "total": 0
+      }
+    },
+    {
+      "name": "a result with a session that opens a transfer",
+      "bytes": "A1 11 05 08  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 00 00 00 10 00",
+      "header": {
+        "callId": 3,
+        "kind": 17,
+        "sessionToken": "AAECAwQFBgcICQoLDA0ODw",
+        "total": 4096
+      }
+    },
+    {
+      "name": "a chunk with more to come",
+      "bytes": "A1 14 40 04  00 00 00 07  00 00 00 00 00 0F FF EC",
+      "header": {
+        "callId": 7,
+        "isLast": false,
+        "kind": 20,
+        "offset": 1048556
+      }
+    },
+    {
+      "name": "the last chunk",
+      "bytes": "A1 14 00 04  00 00 00 07  00 00 00 00 01 3F FE BC",
+      "header": {
+        "callId": 7,
+        "isLast": true,
+        "kind": 20,
+        "offset": 20971196
+      }
+    },
+    {
+      "name": "a credit",
+      "bytes": "A1 15 00 04  00 00 00 07  00 00 00 00 00 4F FF EC",
+      "header": {
+        "callId": 7,
+        "creditEnd": 5242860,
+        "kind": 21
+      }
+    },
+    {
+      "name": "a credit of notifications",
+      "bytes": "A1 15 20 04  00 00 00 05  00 00 00 00 00 00 00 03",
+      "header": {
+        "callId": 5,
+        "creditEnd": 3,
+        "kind": 21,
+        "paced": true
+      }
+    },
+    {
+      "name": "a result on the last call id",
+      "bytes": "A1 11 00 02  FF FF FF FF",
+      "header": {
+        "callId": 4294967295,
+        "kind": 17
+      }
+    },
+    {
+      "name": "a request at the last of every range",
+      "bytes": "A1 10 02 04  FF FF FF FF  FF FF FF FF  FF FF FF FF",
+      "header": {
+        "callId": 4294967295,
+        "destinationId": 4294967295,
+        "kind": 16,
+        "procedureId": 65535,
+        "serviceId": 65535
+      }
+    },
+    {
+      "name": "a credit at 2^53 - 1, the largest end",
+      "bytes": "A1 15 00 04  00 00 00 07  00 1F FF FF FF FF FF FF",
+      "header": {
+        "callId": 7,
+        "creditEnd": 9007199254740991,
+        "kind": 21
+      }
+    },
+    {
+      "name": "a credit past 2^32, its high word first",
+      "bytes": "A1 15 00 04  00 00 00 01  00 00 00 01 00 00 00 05",
+      "header": {
+        "callId": 1,
+        "creditEnd": 4294967301,
+        "kind": 21
+      }
+    }
+  ],
+  "reads": [
+    {
+      "name": "a request opening a transfer of 40 MiB",
+      "side": "server",
+      "bytes": "A1 10 04 05  00 00 00 03  00 02 00 01  00 00 00 00 02 80 00 00",
+      "header": {
+        "callId": 3,
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2,
+        "total": 41943040
+      }
+    },
+    {
+      "name": "a result opening a transfer of nothing, read by a client",
+      "side": "client",
+      "bytes": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 00",
+      "header": {
+        "callId": 2,
+        "kind": 17,
+        "total": 0
+      }
+    },
+    {
+      "name": "a request to service 0, for routing to refuse",
+      "side": "server",
+      "bytes": "A1 10 00 03  00 00 00 03  00 00 00 01",
+      "header": {
+        "callId": 3,
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 0
+      }
+    },
+    {
+      "name": "an advisory kind, skipped",
+      "side": "server",
+      "bytes": "A1 80 00 02  00 00 00 03",
+      "header": null
+    },
+    {
+      "name": "the last advisory kind, skipped whatever follows",
+      "side": "server",
+      "bytes": "A1 FF FF FF  00 00 00 00",
+      "header": null
+    }
+  ],
+  "prefixes": [
+    {
+      "name": "the prefix of a layout to come",
+      "bytes": "AF 7E 55 00  80 00 00 01",
+      "prefix": {
+        "callId": 2147483649,
+        "kind": 126,
+        "layout": 175
+      }
+    }
+  ],
+  "prefixRefusals": [
+    {
+      "name": "no byte at all",
+      "bytes": "",
+      "code": 1
+    },
+    {
+      "name": "7 bytes",
+      "bytes": "A1 10 00 03  00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a first byte of 0x0A",
+      "bytes": "0A 10 00 03  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "a first byte of 0x00",
+      "bytes": "00 10 00 03  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "a first byte of 0xA0",
+      "bytes": "A0 10 00 03  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "a first byte of 0xB0",
+      "bytes": "B0 10 00 03  00 00 00 03",
+      "code": 1
+    }
+  ],
+  "headerRefusals": [
+    {
+      "name": "a layout to come, 0xA2",
+      "bytes": "A2 10 00 03  00 00 00 03  00 02 00 01",
+      "code": 2,
+      "detail": "0xA1"
+    },
+    {
+      "name": "a layout to come, 0xAF",
+      "bytes": "AF 10 00 03  00 00 00 03  00 02 00 01",
+      "code": 2,
+      "detail": "0xA1"
+    },
+    {
+      "name": "a layout to come, before a kind that is never one and a call id of 0",
+      "bytes": "A2 00 00 02  00 00 00 00",
+      "code": 2,
+      "detail": "0xA1"
+    },
+    {
+      "name": "a layout to come, before an advisory kind",
+      "bytes": "A2 80 00 02  00 00 00 03",
+      "code": 2,
+      "detail": "0xA1"
+    },
+    {
+      "name": "a kind to come, before a call id of 0",
+      "bytes": "A1 17 00 02  00 00 00 00",
+      "code": 3
+    },
+    {
+      "name": "a kind of 0x00, never one",
+      "bytes": "A1 00 00 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "a kind of 0x0F, never one",
+      "bytes": "A1 0F 00 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "a kind to come, 0x17",
+      "bytes": "A1 17 00 02  00 00 00 03",
+      "code": 3
+    },
+    {
+      "name": "a kind to come, 0x7F",
+      "bytes": "A1 7F 00 02  00 00 00 03",
+      "code": 3
+    },
+    {
+      "name": "a call id of 0",
+      "bytes": "A1 11 00 02  00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "the reserved bit 0x08 on a request",
+      "bytes": "A1 10 08 03  00 00 00 03  00 02 00 01",
+      "code": 1
+    },
+    {
+      "name": "the bit 0x40 on a request",
+      "bytes": "A1 10 40 03  00 00 00 03  00 02 00 01",
+      "code": 1
+    },
+    {
+      "name": "the reserved bit 0x80 on a request",
+      "bytes": "A1 10 80 03  00 00 00 03  00 02 00 01",
+      "code": 1
+    },
+    {
+      "name": "a request paced that opens no subscription",
+      "bytes": "A1 10 20 03  00 00 00 03  00 02 00 01",
+      "code": 1,
+      "detail": "a request paced opens a subscription"
+    },
+    {
+      "name": "a total of 2^53, no safe integer",
+      "bytes": "A1 11 04 04  00 00 00 02  00 20 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a total not counted in the header length",
+      "bytes": "A1 10 04 03  00 00 00 03  00 02 00 01  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a total on a failure",
+      "bytes": "A1 12 04 04  00 00 00 03  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a total on a notification",
+      "bytes": "A1 13 04 04  00 00 00 03  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a destination on a result",
+      "bytes": "A1 11 02 03  00 00 00 03  00 00 00 05",
+      "code": 1
+    },
+    {
+      "name": "a destination on a failure",
+      "bytes": "A1 12 02 03  00 00 00 03  00 00 00 05",
+      "code": 1
+    },
+    {
+      "name": "a session on a cancel",
+      "bytes": "A1 16 01 06  00 00 00 05  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1
+    },
+    {
+      "name": "a destination on a cancel",
+      "bytes": "A1 16 02 03  00 00 00 05  00 00 00 07",
+      "code": 1
+    },
+    {
+      "name": "a total on a cancel",
+      "bytes": "A1 16 04 04  00 00 00 05  00 00 00 00 00 00 00 08",
+      "code": 1
+    },
+    {
+      "name": "an offset of 2^53",
+      "bytes": "A1 14 00 04  00 00 00 07  00 20 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "an end of 2^64 - 1",
+      "bytes": "A1 15 00 04  00 00 00 07  FF FF FF FF FF FF FF FF",
+      "code": 1
+    },
+    {
+      "name": "a chunk on call 0",
+      "bytes": "A1 14 00 04  00 00 00 00  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a credit on call 0",
+      "bytes": "A1 15 00 04  00 00 00 00  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a session on a chunk",
+      "bytes": "A1 14 01 08  00 00 00 07  00 00 00 00 00 00 00 00  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1
+    },
+    {
+      "name": "a total on a credit",
+      "bytes": "A1 15 04 06  00 00 00 07  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 10",
+      "code": 1
+    },
+    {
+      "name": "MORE on a credit",
+      "bytes": "A1 15 40 04  00 00 00 07  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "the reserved bit 0x08 on a chunk",
+      "bytes": "A1 14 08 04  00 00 00 07  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "PACED on a chunk",
+      "bytes": "A1 14 20 04  00 00 00 07  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "SUBSCRIPTION on a credit",
+      "bytes": "A1 15 10 04  00 00 00 07  00 00 00 00 00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "MORE on a result",
+      "bytes": "A1 11 40 02  00 00 00 07",
+      "code": 1
+    },
+    {
+      "name": "SUBSCRIPTION on a result",
+      "bytes": "A1 11 10 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "PACED on a result",
+      "bytes": "A1 11 20 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "SUBSCRIPTION on a failure",
+      "bytes": "A1 12 10 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "PACED on a failure",
+      "bytes": "A1 12 20 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "SUBSCRIPTION on a notification",
+      "bytes": "A1 13 10 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "PACED on a notification",
+      "bytes": "A1 13 20 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "SUBSCRIPTION on a cancel",
+      "bytes": "A1 16 10 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "PACED on a cancel",
+      "bytes": "A1 16 20 02  00 00 00 03",
+      "code": 1
+    },
+    {
+      "name": "a session on a notification",
+      "bytes": "A1 13 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1
+    },
+    {
+      "name": "a destination on a notification",
+      "bytes": "A1 13 02 03  00 00 00 03  00 00 00 05",
+      "code": 1
+    },
+    {
+      "name": "a header length of 00 words, not its blocks'",
+      "bytes": "A1 10 00 00  00 00 00 03  00 02 00 01  00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a header length of 01 words, not its blocks'",
+      "bytes": "A1 10 00 01  00 00 00 03  00 02 00 01  00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a header length of 02 words, not its blocks'",
+      "bytes": "A1 10 00 02  00 00 00 03  00 02 00 01  00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a header length of 04 words, not its blocks'",
+      "bytes": "A1 10 00 04  00 00 00 03  00 02 00 01  00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a header running past the message",
+      "bytes": "A1 10 00 03  00 00 00 03  00 02",
+      "code": 1
+    },
+    {
+      "name": "a destination running past the message",
+      "bytes": "A1 10 02 04  00 00 00 03  00 02 00 01  00 00",
+      "code": 1
+    },
+    {
+      "name": "a destination of 0",
+      "bytes": "A1 10 02 04  00 00 00 03  00 02 00 01  00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "a procedure of 0",
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 00",
+      "code": 1
+    },
+    {
+      "name": "a request presenting an ended session",
+      "bytes": "A1 10 01 07  00 00 00 03  00 02 00 01  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "code": 1
+    }
+  ],
+  "envelopes": [
+    {
+      "name": "a request, 14 bytes for 3/2/1 and \"hi\"",
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "envelope": {
+        "kind": 16,
+        "header": {
+          "callId": 3,
+          "kind": 16,
+          "procedureId": 1,
+          "serviceId": 2
+        },
+        "payload": "68 69"
+      }
+    },
+    {
+      "name": "a result",
+      "bytes": "A1 11 00 02  00 00 00 03 | 01 02",
+      "envelope": {
+        "kind": 17,
+        "header": {
+          "callId": 3,
+          "kind": 17
+        },
+        "payload": "01 02"
+      }
+    },
+    {
+      "name": "a notification with no payload",
+      "bytes": "A1 13 00 02  00 00 00 0D",
+      "envelope": {
+        "kind": 19,
+        "header": {
+          "callId": 13,
+          "kind": 19
+        },
+        "payload": ""
+      }
+    },
+    {
+      "name": "a cancel, nothing after its header",
+      "bytes": "A1 16 00 02  00 00 00 05",
+      "envelope": {
+        "kind": 22,
+        "header": {
+          "callId": 5,
+          "kind": 22
+        }
+      }
+    },
+    {
+      "name": "a protocol failure, its record after the header",
+      "bytes": "A1 12 00 02  00 00 00 03 | 00 13 00 00  6E 6F 20 70 72 6F 63 65 64 75 72 65 20 31 20 69 6E 20 73 65 72 76 69 63 65 20 32",
+      "envelope": {
+        "kind": 18,
+        "header": {
+          "callId": 3,
+          "kind": 18
+        },
+        "failure": {
+          "code": 19,
+          "detail": "no procedure 1 in service 2",
+          "hops": 0,
+          "scope": 0
+        }
+      }
+    },
+    {
+      "name": "an application failure",
+      "bytes": "A1 12 00 02  00 00 00 03 | 00 15 00 01  6F 75 74 20 6F 66 20 72 61 6E 67 65",
+      "envelope": {
+        "kind": 18,
+        "header": {
+          "callId": 3,
+          "kind": 18
+        },
+        "failure": {
+          "code": 21,
+          "detail": "out of range",
+          "hops": 0,
+          "scope": 1
+        }
+      }
+    },
+    {
+      "name": "the smallest failure, 12 bytes",
+      "bytes": "A1 12 00 02  00 00 00 03 | 00 13 00 00",
+      "envelope": {
+        "kind": 18,
+        "header": {
+          "callId": 3,
+          "kind": 18
+        },
+        "failure": {
+          "code": 19,
+          "detail": "",
+          "hops": 0,
+          "scope": 0
+        }
+      }
+    },
+    {
+      "name": "a request opening a transfer, its payload the first bytes",
+      "bytes": "A1 10 04 05  00 00 00 03  00 02 00 01  00 00 00 00 02 80 00 00 | 01",
+      "envelope": {
+        "kind": 16,
+        "header": {
+          "callId": 3,
+          "kind": 16,
+          "procedureId": 1,
+          "serviceId": 2,
+          "total": 41943040
+        },
+        "payload": "01"
+      }
+    },
+    {
+      "name": "a result opening a transfer of nothing",
+      "bytes": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 00",
+      "envelope": {
+        "kind": 17,
+        "header": {
+          "callId": 2,
+          "kind": 17,
+          "total": 0
+        },
+        "payload": ""
+      }
+    },
+    {
+      "name": "a chunk with more to come",
+      "bytes": "A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 05 | 01 02 03",
+      "envelope": {
+        "kind": 20,
+        "header": {
+          "callId": 7,
+          "isLast": false,
+          "kind": 20,
+          "offset": 5
+        },
+        "payload": "01 02 03"
+      }
+    },
+    {
+      "name": "a credit, nothing after its header",
+      "bytes": "A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 0A",
+      "envelope": {
+        "kind": 21,
+        "header": {
+          "callId": 7,
+          "creditEnd": 10,
+          "kind": 21
+        }
+      }
+    }
+  ],
+  "envelopeRefusals": [
+    {
+      "name": "a cancel with a byte after its header",
+      "bytes": "A1 16 00 02  00 00 00 05 | 00",
+      "code": 1,
+      "detail": "a cancel carries no payload, not 1 bytes"
+    },
+    {
+      "name": "a chunk without a byte",
+      "bytes": "A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00",
+      "code": 1,
+      "detail": "a chunk carries one byte at least"
+    },
+    {
+      "name": "a credit with a byte after its header",
+      "bytes": "A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01",
+      "code": 1,
+      "detail": "a credit carries no payload, not 1 bytes"
+    },
+    {
+      "name": "an envelope past its bound",
+      "bytes": "A1 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "maximumEnvelopeBytes": 13,
+      "code": 4,
+      "detail": "an envelope is 13 bytes at most, not 14"
+    },
+    {
+      "name": "a layout to come past the bound, its length checked first",
+      "bytes": "A2 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "maximumEnvelopeBytes": 13,
+      "code": 4
+    },
+    {
+      "name": "7 bytes past a bound of 4, short of a prefix first",
+      "bytes": "A1 10 00 03  00 00 00",
+      "maximumEnvelopeBytes": 4,
+      "code": 1
+    },
+    {
+      "name": "a first byte no layout is, past the bound",
+      "bytes": "B0 10 00 03  00 00 00 03  00 02 00 01 | 68 69",
+      "maximumEnvelopeBytes": 13,
+      "code": 1
+    }
+  ],
+  "failures": [
+    {
+      "name": "the hops as they came, and no detail as empty",
+      "record": "00 12 03 00",
+      "failure": {
+        "code": 18,
+        "detail": "",
+        "hops": 3,
+        "scope": 0
+      }
+    },
+    {
+      "name": "the last code, of the application",
+      "record": "FF FF 00 01",
+      "failure": {
+        "code": 65535,
+        "detail": "",
+        "hops": 0,
+        "scope": 1
+      }
+    },
+    {
+      "name": "a detail cut at 5 bytes, back to the start of the character cut",
+      "record": "00 13 00 00  61 62 63 64 C3 A9 66",
+      "maximumDetailBytes": 5,
+      "failure": {
+        "code": 19,
+        "detail": "abcd",
+        "hops": 0,
+        "scope": 0
+      }
+    },
+    {
+      "name": "a detail cut at 3 bytes, on a character boundary",
+      "record": "00 13 00 00  61 62 63 64 C3 A9 66",
+      "maximumDetailBytes": 3,
+      "failure": {
+        "code": 19,
+        "detail": "abc",
+        "hops": 0,
+        "scope": 0
+      }
+    },
+    {
+      "name": "a leading U+FEFF kept",
+      "record": "00 13 00 00  EF BB BF 61",
+      "failure": {
+        "code": 19,
+        "detail": "﻿a",
+        "hops": 0,
+        "scope": 0
+      }
+    },
+    {
+      "name": "a byte that is not UTF-8, read as U+FFFD",
+      "record": "00 13 00 00  61 FF",
+      "failure": {
+        "code": 19,
+        "detail": "a�",
+        "hops": 0,
+        "scope": 0
+      }
+    },
+    {
+      "name": "a detail ending inside a character, one U+FFFD",
+      "record": "00 13 00 00  61 E2 82",
+      "failure": {
+        "code": 19,
+        "detail": "a�",
+        "hops": 0,
+        "scope": 0
+      }
+    },
+    {
+      "name": "a character cut short by another, one U+FFFD before it",
+      "record": "00 13 00 00  F0 9F 98 41",
+      "failure": {
+        "code": 19,
+        "detail": "�A",
+        "hops": 0,
+        "scope": 0
+      }
+    },
+    {
+      "name": "a surrogate spelled in UTF-8, one U+FFFD a byte",
+      "record": "00 13 00 00  ED A0 80",
+      "failure": {
+        "code": 19,
+        "detail": "���",
+        "hops": 0,
+        "scope": 0
+      }
+    }
+  ],
+  "failureRefusals": [
+    {
+      "name": "no byte at all",
+      "record": "",
+      "code": 1
+    },
+    {
+      "name": "3 bytes, fewer than a record",
+      "record": "00 13 00",
+      "code": 1
+    },
+    {
+      "name": "a code of 0",
+      "record": "00 00 00 00",
+      "code": 1
+    },
+    {
+      "name": "the flag 0x02",
+      "record": "00 13 00 02",
+      "code": 1
+    },
+    {
+      "name": "the flag 0x04",
+      "record": "00 13 00 04",
+      "code": 1
+    },
+    {
+      "name": "the flag 0x80",
+      "record": "00 13 00 80",
+      "code": 1
+    },
+    {
+      "name": "the flags 0x03",
+      "record": "00 13 00 03",
+      "code": 1
+    }
+  ]
+}

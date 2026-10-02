@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bead's envelope, written and read at fixed offsets: what the routers of both sides build on. -->
+  <PropertyGroup>
+    <RootNamespace>Bead</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the tests run a router on a scheduler they wait on, so they know when it settled -->
+    <InternalsVisibleTo Include="Bead.Core.Tests" />
+    <!-- the transports share what makes a client reconnect, as the TypeScript side's createTransportClient -->
+    <InternalsVisibleTo Include="Bead.Transport.Http" />
+    <InternalsVisibleTo Include="Bead.Transport.WebSockets" />
+  </ItemGroup>
+</Project>

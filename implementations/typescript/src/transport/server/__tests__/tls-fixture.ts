@@ -1,0 +1,24 @@
+/**
+ * A key and the certificate it signed itself, for `localhost` and 127.0.0.1, good until 2126: for the
+ * tests of a server over TLS alone. It guards nothing — anyone may read it here.
+ */
+export const TLS_FIXTURE = Object.freeze({
+  cert: `-----BEGIN CERTIFICATE-----
+MIIBmjCCAUGgAwIBAgIUP4UczNFBowowMSh0U63OGdJL4Y0wCgYIKoZIzj0EAwIw
+FDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI2MDkzMDA1Mjg0NFoYDzIxMjYwOTA2
+MDUyODQ0WjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwWTATBgcqhkjOPQIBBggqhkjO
+PQMBBwNCAAT1wVAvZqtAUXTdWGIGQPdbYXuLAH8LaMUZ2RDe45nE3vlRGW+trdeb
+Spc1C5051YZ8kaSGx8WaqaJmwCxvCCxMo28wbTAdBgNVHQ4EFgQUo+pMjGUwcP2b
+b7jUHhN5rJ2GVYAwHwYDVR0jBBgwFoAUo+pMjGUwcP2bb7jUHhN5rJ2GVYAwDwYD
+VR0TAQH/BAUwAwEB/zAaBgNVHREEEzARgglsb2NhbGhvc3SHBH8AAAEwCgYIKoZI
+zj0EAwIDRwAwRAIgBJ615Fg0220CPpLimCXxjBTBGtZ3rW1rPtWzafaLvtkCIC57
+1zHXf4peYTZDXawXKCbQe8hJzM0qxh7K8j+wPz0J
+-----END CERTIFICATE-----
+`,
+  key: `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOK27HlYYTvZWNX0P
+xvAw7AyXGDlQ02ozYvs7wiDSIqyhRANCAAT1wVAvZqtAUXTdWGIGQPdbYXuLAH8L
+aMUZ2RDe45nE3vlRGW+trdebSpc1C5051YZ8kaSGx8WaqaJmwCxvCCxM
+-----END PRIVATE KEY-----
+`,
+});

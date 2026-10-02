@@ -1,0 +1,1281 @@
+// ── HTTP transport server ─────────────────────────────────────────────────────
+
+// dependencies
+
+import { isIP } from 'node:net';
+import {
+  BEAD_BATCH_MEDIA_TYPE,
+  BEAD_MEDIA_TYPE,
+  CLOSE_EVENT,
+  CONNECTION_EVENT,
+  CONNECTION_TOKEN_HEADER,
+  CONNECTION_UNKNOWN,
+  ERROR_EVENT,
+  LISTEN_HEADER,
+  MESSAGE_EVENT,
+  REFUSAL_HEADER,
+  SEQUENCE_HEADER,
+  TIMER_MAX,
+  TRANSPORT_HTTP,
+} from '../shared/constants';
+import { createPromise } from '../shared/create-promise';
+import { GenericError, ProgrammerError } from '../shared/errors';
+import { gaugesOf } from '../shared/gauges';
+import { timestamp } from '../shared/timestamp';
+import type { Data } from '../shared/types';
+import { createTransportServer, generateDrawnHandle } from './transport-server';
+import type {
+  HTTPRequestListener,
+  HTTPTransportServer,
+  IDrawingRequest,
+  IDrawnConnection,
+  IHTTPRequestLike,
+  IHTTPResponseLike,
+  IHTTPServerLike,
+  IHTTPSessionLike,
+  IHTTPTransportServerOptions,
+  ITransportServerAddress,
+  ITransportServerStartOptions,
+  TransportServerConnectionHandle,
+} from './types';
+
+export {
+  BEAD_BATCH_MEDIA_TYPE,
+  BEAD_MEDIA_TYPE,
+  CONNECTION_TOKEN_HEADER,
+  CONNECTION_UNKNOWN,
+  LISTEN_HEADER,
+  REFUSAL_HEADER,
+  SEQUENCE_HEADER,
+} from '../shared/constants';
+export type {
+  HTTPRequestListener,
+  HTTPTransportServer,
+  IDrawingRequest,
+  IDrawnConnection,
+  IHTTPRequestLike,
+  IHTTPResponseLike,
+  IHTTPServerLike,
+  IHTTPTransportServerOptions,
+} from './types';
+
+// interfaces
+
+/** An exchange as the listener meets it: its request, and the response it writes. */
+interface IExchangeIn {
+  request: IHTTPRequestLike;
+  response: IHTTPResponseLike;
+}
+
+/** How an exchange ends, when the transport ends it: its status, its reason, its headers. */
+interface IEnd {
+  headers?: Record<string, string> | undefined;
+  /** The reason a refusal of the transport's own is marked with; none for a 201 or a 204. */
+  reason?: string | undefined;
+  status: number;
+}
+
+/** An exchange of a request, from its first 8 bytes to its answer. */
+interface IExchange {
+  /** A cancel came for it while its body was still coming: it is read to its end, then 204. */
+  isCancelled: boolean;
+  /** Its request went on to the router, which owes it an answer. */
+  isDelivered: boolean;
+  /** The transport ended it — an answer, a 204, a refusal, its connection closed — so its close is no loss. */
+  isEnded: boolean;
+  readonly response: IHTTPResponseLike;
+  /** Ends its connection, as lost, once its request waited past `exchangeTimeout` for its answer. */
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+/** An envelope of the server's own, waiting in its connection's outbox until a listen acknowledges it. */
+interface IOutgoing {
+  readonly bytes: Uint8Array;
+  readonly sequence: number;
+}
+
+/** A listen held until something comes for it, or its wait is over. */
+interface IListen {
+  readonly connection: IDrawn;
+  readonly response: IHTTPResponseLike;
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+/**
+ * A connection's own state, which nothing outside the transport reaches: what the registry holds for
+ * it, as a socket transport's holds its socket. Events show a frozen copy of its ordinal alone, the
+ * token staying here.
+ */
+interface IDrawn extends IDrawnConnection {
+  readonly address: string;
+  /** The call ids of the client's a cancel came for before their request, each until it lapses. */
+  readonly buried: Map<number, ReturnType<typeof setTimeout>>;
+  readonly connectionHandle: TransportServerConnectionHandle;
+  readonly connectionToken: string;
+  idle: ReturnType<typeof setTimeout> | undefined;
+  /** Its client said at connect that it listens: the server may send of its own. */
+  readonly isListening: boolean;
+  /** The listen held, when one is. */
+  listen: IListen | undefined;
+  /** The exchanges under way, whatever they carry, listens included: the connection is idle at none. */
+  open: number;
+  /** What the server sent of its own and no listen acknowledged yet, in order. */
+  outbox: IOutgoing[];
+  outboxBytes: number;
+  /** The number of the last envelope put in the outbox; the first is 1. */
+  sequence: number;
+  /** The exchanges of requests, by call id, from their first 8 bytes to their answer. */
+  readonly waiting: Map<number, IExchange>;
+}
+
+/** A body as it comes: one buffer it grows into, so no chunk it came in is kept. */
+interface IBody {
+  bytes: Uint8Array;
+  length: number;
+}
+
+// constants
+
+/** The bytes of body the exchanges under way may hold together, by default: 256 MiB. */
+export const BODY_BYTES_BUDGET = 268_435_456;
+
+/** How long a request handed on waits for its answer, by default: 5 minutes. */
+export const EXCHANGE_TIMEOUT = 300_000;
+
+/** How long a connection may go with no exchange under way, by default: 5 minutes. */
+export const INACTIVITY_TIMEOUT = 300_000;
+
+/** The largest body by default: a router's largest envelope. */
+export const MAXIMUM_BODY_BYTES = 16_778_240;
+
+/** The connections drawn at once, by default. */
+export const MAXIMUM_CONNECTIONS = 10_000;
+
+/** The connections one address holds at once, by default. */
+export const MAXIMUM_CONNECTIONS_PER_ADDRESS = 64;
+
+/** The bytes one connection's outbox holds, by default: two of the largest envelopes. */
+export const MAXIMUM_OUTBOX_BYTES = 33_556_480;
+
+/**
+ * The longest a listen waits for something to bring back, by default: 30 seconds, under the 60 an
+ * intermediary such as nginx gives a request.
+ */
+export const MAXIMUM_WAIT = 30_000;
+
+/** The requests one connection has waiting at once, by default. */
+export const MAXIMUM_WAITING_EXCHANGES = 64;
+
+/** The path the transport answers on, by default. */
+export const PATHNAME = '/bead';
+
+/** What an omitted start option resolves to. */
+export const START_DEFAULTS = Object.freeze({
+  address: '0.0.0.0',
+  findOpenPort: false,
+  port: 80,
+} satisfies ITransportServerStartOptions);
+
+/**
+ * What the transport reads of an envelope, and nothing else, as 0001 lays out the prefix every
+ * layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the call id
+ * in its fifth to eighth.
+ */
+export const ENVELOPE_PREFIX = Object.freeze({
+  bytes: 8,
+  firstLayout: 0xa1,
+  lastLayout: 0xaf,
+});
+
+/** The kinds the transport tells apart: a request waits for its answer; a cancel ends one. */
+export const ENVELOPE_KINDS = Object.freeze({
+  REQUEST: 0x10,
+  RESULT: 0x11,
+  FAILURE: 0x12,
+  CANCEL: 0x16,
+});
+
+/**
+ * How long a cancel that came before its request buries that call id: 5 seconds, the least a
+ * requester reserves one for. A request that comes later still runs, and its answer is dropped as
+ * late by the requester.
+ */
+export const BURIAL_MILLISECONDS = 5_000;
+
+/** The reasons each refusal of the transport's own is marked with, in `bead-refusal`. */
+export const REFUSALS = Object.freeze({
+  BUSY: 'busy',
+  CALL_WAITING: 'call-waiting',
+  CONNECTION_UNKNOWN,
+  HOST: 'host-refused',
+  LISTEN_UNDECLARED: 'listen-undeclared',
+  MALFORMED: 'malformed',
+  METHOD: 'method-refused',
+  ORIGIN: 'origin-refused',
+  PATH: 'path-unknown',
+  TOO_LARGE: 'too-large',
+  TYPE: 'type-refused',
+});
+
+// a token: 16 bytes from `crypto`, in base64url without padding, as a session's
+const TOKEN_BYTES = 16;
+const TOKEN_PATTERN = /^[\w-]{22}$/u;
+
+// what a body is first given room for, before it grows
+const FIRST_BODY_BYTES = 65_536;
+
+// the length before each envelope of a batch
+const LENGTH_BYTES = 4;
+
+// what a listen that brings nothing back ends with
+const NOTHING: IEnd = Object.freeze({ status: 204 });
+
+// what every response on the path carries: never stored, never sniffed
+const RESPONSE_HEADERS = Object.freeze({
+  'cache-control': 'no-store',
+  'x-content-type-options': 'nosniff',
+});
+
+// the addresses of this machine, from which a proxy in front of the transport comes
+const LOOPBACK: ReadonlySet<string> = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+// the 404 that tells a client its connection is gone
+const UNKNOWN_CONNECTION: IEnd = Object.freeze({
+  reason: REFUSALS.CONNECTION_UNKNOWN,
+  status: 404,
+});
+
+// helpers
+
+const headerOf = (request: IHTTPRequestLike, name: string): string | undefined => {
+  const value = request.headers[name];
+
+  return Array.isArray(value) ? value[0] : value;
+};
+
+// the host a request names: `Host` over HTTP/1, `:authority` over HTTP/2
+const hostOf = (request: IHTTPRequestLike): string | undefined => {
+  return headerOf(request, 'host') ?? headerOf(request, ':authority');
+};
+
+// the path a request names, and its query, which a listen reads: read as a string, so no target
+// throws
+const targetOf = (request: IHTTPRequestLike): { path: string; query: URLSearchParams } => {
+  const target = request.url ?? '/';
+  const index = target.indexOf('?');
+
+  return index === -1
+    ? { path: target, query: new URLSearchParams() }
+    : { path: target.slice(0, index), query: new URLSearchParams(target.slice(index + 1)) };
+};
+
+// a count a listen gives: absent is 0, and anything but digits is none
+const countOf = (query: URLSearchParams, name: string): number | undefined => {
+  const value = query.get(name) ?? '0';
+
+  return /^\d{1,15}$/u.test(value) ? Number(value) : undefined;
+};
+
+// whether a connect says its client listens: `?1` or `?0`, absent being `?0`; anything else is none
+const listeningOf = (request: IHTTPRequestLike): boolean | undefined => {
+  const value = headerOf(request, LISTEN_HEADER) ?? '?0';
+
+  return value === '?1' || (value === '?0' ? false : undefined);
+};
+
+// the length an envelope goes after in a batch
+const lengthOf = (bytes: Uint8Array): Uint8Array => {
+  const length = new Uint8Array(LENGTH_BYTES);
+
+  new DataView(length.buffer).setUint32(0, bytes.length);
+
+  return length;
+};
+
+// whether a request says it has a body
+const hasBody = (request: IHTTPRequestLike): boolean => {
+  return (
+    (headerOf(request, 'content-length') ?? '0') !== '0' ||
+    headerOf(request, 'transfer-encoding') !== undefined
+  );
+};
+
+// a body of Bead's media type, parameters aside, sent as it is
+const isBeadBody = (request: IHTTPRequestLike): boolean => {
+  const type = headerOf(request, 'content-type')?.split(';')[0]?.trim().toLowerCase();
+  const encoding = headerOf(request, 'content-encoding')?.trim().toLowerCase();
+
+  return type === BEAD_MEDIA_TYPE && (encoding === undefined || encoding === 'identity');
+};
+
+// the envelope a router hands over, as bytes; a string or a Blob it never sends
+const bytesOf = (data: Data): Uint8Array | undefined => {
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+
+  return ArrayBuffer.isView(data)
+    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    : undefined;
+};
+
+// a chunk copied into the body, which doubles its room as it needs, up to `limit`
+const append = (body: IBody, { chunk, limit }: { chunk: Uint8Array; limit: number }): void => {
+  const length = body.length + chunk.length;
+
+  if (length > body.bytes.length) {
+    const grown = new Uint8Array(Math.min(Math.max(length, 2 * body.bytes.length), limit));
+
+    grown.set(body.bytes.subarray(0, body.length));
+    body.bytes = grown;
+  }
+
+  body.bytes.set(chunk, body.length);
+  body.length = length;
+};
+
+const drawToken = (): string => {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(TOKEN_BYTES))).toString('base64url');
+};
+
+// a whole number above 0; a timer's no more than a timer holds, or, when it may be, Infinity
+const assertOption = (
+  name: string,
+  { timer, value }: { timer?: 'bounded' | 'unbounded'; value: number }
+) => {
+  const isWhole = Number.isInteger(value) && value > 0;
+  const isHeld = isWhole && value <= TIMER_MAX;
+  const isValid =
+    timer === undefined ? isWhole : isHeld || (timer === 'unbounded' && value === Infinity);
+  const holds = {
+    bounded: ' a timer holds',
+    none: '',
+    unbounded: ' a timer holds, or Infinity',
+  }[timer ?? 'none'];
+
+  if (!isValid) {
+    throw new ProgrammerError(`${name} is a whole number above 0${holds}, not ${String(value)}`);
+  }
+};
+
+// a timer that keeps no process alive: a browser's has no `unref`
+const unref = (timer: ReturnType<typeof setTimeout>): void => {
+  (timer as { unref?: () => unknown }).unref?.();
+};
+
+// writes an exchange's end, once: its status and headers, marked when it is a refusal
+const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd): void => {
+  if (!response.headersSent) {
+    response.writeHead(status, {
+      ...RESPONSE_HEADERS,
+      ...headers,
+      ...(reason === undefined ? {} : { [REFUSAL_HEADER]: reason }),
+    });
+  }
+
+  response.end();
+};
+
+// definition
+
+/**
+ * A transport server over HTTP, which keeps no connection and so draws one. A `POST` with no body
+ * and no token connects: the server draws a 16-byte connection token from `crypto`, emits
+ * `connection`, and answers 201 with it in `bead-connection-token`; each exchange after presents the
+ * token, and a `DELETE` ends the connection. The router, the sessions and the relays see a
+ * connection, as over a socket; the token, a secret, enters no handle, event or report.
+ *
+ * Each `POST` carries one envelope, of type `application/prs.bead`. The transport reads its layout,
+ * kind and call id, and nothing else: a request's exchange waits under its call id — from its first
+ * 8 bytes — for the answer the router sends on it, whose head goes out as the request is handed on,
+ * so the requester knows the router has it; any other envelope is handed on and its exchange ends
+ * 204. A cancel ends the exchange of its call; one that comes before its request buries that call
+ * id for {@link BURIAL_MILLISECONDS}. Each refusal of the transport's own is marked in
+ * `bead-refusal`. An exchange lost — its response closed before the transport ended it — closes the
+ * connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and a
+ * connection idle past `inactivityTimeout`.
+ *
+ * What the server sends of its own reaches a client that said at connect that it listens —
+ * `bead-listen: ?1`, which the 201 says back. It waits in the connection's outbox, numbered, until a
+ * listen — a `GET` with `after` and `wait` — brings back all that waits, in a batch of
+ * `application/prs.bead-batch`, the number of its first in `bead-sequence`; the next listen
+ * acknowledges by `after` what its client heard whole, and what it did not comes again. A listen waits up to `wait`, no longer than `maximumWait`, for something
+ * to bring back; a second takes the first's place. An outbox past `maximumOutboxBytes` closes its
+ * connection. A connection whose client does not listen carries answers alone: anything else
+ * rejects its `send`.
+ *
+ * @example
+ * const server = createHTTPTransportServer({ createServer: (listener) => createServer(listener) });
+ * server.on('message', (data, connectionHandle) => {});
+ * const { port } = await server.start({ findOpenPort: true });
+ */
+export const createHTTPTransportServer = (
+  options: IHTTPTransportServerOptions
+): HTTPTransportServer => {
+  const {
+    bodyBytesBudget = BODY_BYTES_BUDGET,
+    createServer,
+    exchangeTimeout = EXCHANGE_TIMEOUT,
+    hosts,
+    inactivityTimeout = INACTIVITY_TIMEOUT,
+    isProxyTrusted = false,
+    maximumBodyBytes = MAXIMUM_BODY_BYTES,
+    maximumConnections = MAXIMUM_CONNECTIONS,
+    maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
+    maximumOutboxBytes = MAXIMUM_OUTBOX_BYTES,
+    maximumWait = MAXIMUM_WAIT,
+    maximumWaitingExchanges = MAXIMUM_WAITING_EXCHANGES,
+    origins = [],
+    pathname = PATHNAME,
+  } = options;
+
+  assertOption('bodyBytesBudget', { value: bodyBytesBudget });
+  assertOption('exchangeTimeout', { timer: 'unbounded', value: exchangeTimeout });
+  assertOption('inactivityTimeout', { timer: 'unbounded', value: inactivityTimeout });
+  assertOption('maximumBodyBytes', { value: maximumBodyBytes });
+  assertOption('maximumConnections', { value: maximumConnections });
+  assertOption('maximumConnectionsPerAddress', { value: maximumConnectionsPerAddress });
+  assertOption('maximumOutboxBytes', { value: maximumOutboxBytes });
+  assertOption('maximumWait', { timer: 'bounded', value: maximumWait });
+  assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
+
+  // what the transport keeps of each connection, by handle
+  const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
+
+  const transport = createTransportServer<IDrawnConnection, IDrawingRequest>(
+    (server, connections) => {
+      let httpServer: IHTTPServerLike | undefined;
+      let ordinal = 0;
+      // the bytes of body the exchanges under way hold, all together, counted as they come
+      let bodyBytes = 0;
+      // and by token
+      const byToken = new Map<string, IDrawn>();
+      // the connections each address holds; an address that holds none is not kept
+      const perAddress = new Map<string, number>();
+      // an HTTP/2 server's sessions, which its close leaves open, each until it ends
+      const sessions = new Set<IHTTPSessionLike>();
+
+      const heldBy = (address: string): number => {
+        return perAddress.get(address) ?? 0;
+      };
+
+      // the client's address: the socket's, or, behind a proxy on this machine the transport trusts,
+      // the last one it forwarded — an address, or nothing of it is taken
+      const addressOf = (request: IHTTPRequestLike): string | undefined => {
+        const { remoteAddress } = request.socket;
+        const forwarded = headerOf(request, 'x-forwarded-for')?.split(',').at(-1)?.trim();
+
+        return isProxyTrusted &&
+          remoteAddress !== undefined &&
+          LOOPBACK.has(remoteAddress) &&
+          forwarded !== undefined &&
+          isIP(forwarded) !== 0
+          ? forwarded
+          : remoteAddress;
+      };
+
+      // a browser's exchange from the server's own origin, or one it was told; any other client's
+      // has no `Origin`, and comes from anywhere
+      const isAllowedOrigin = (request: IHTTPRequestLike): boolean => {
+        const origin = headerOf(request, 'origin');
+
+        if (origin === undefined || origins.includes(origin)) {
+          return true;
+        }
+
+        try {
+          return new URL(origin).host === hostOf(request);
+        } catch {
+          return false;
+        }
+      };
+
+      // ends an exchange the transport answers itself; one whose body it will not read is closed
+      // behind a refusal over HTTP/1, since what follows would read as the next request
+      const finish = ({ request, response }: IExchangeIn, end: IEnd): void => {
+        const isClosing = end.status >= 400 && request.httpVersionMajor === 1 && hasBody(request);
+
+        endWith(
+          response,
+          isClosing ? { ...end, headers: { ...end.headers, connection: 'close' } } : end
+        );
+      };
+
+      // a connection idle — no exchange under way — closes past its timeout
+      const rest = (connection: IDrawn): void => {
+        clearTimeout(connection.idle);
+        connection.idle = undefined;
+
+        if (inactivityTimeout === Infinity || connection.open > 0) {
+          return;
+        }
+
+        connection.idle = setTimeout(() => {
+          closeDrawn(connection, false);
+        }, inactivityTimeout);
+        unref(connection.idle);
+      };
+
+      // out of the registry before its close is told; each exchange still waiting learns its
+      // connection is gone — by the marked 404, or, its head out already, by its socket cut, as a
+      // lost exchange is
+      const closeDrawn = (connection: IDrawn, isClean: boolean): void => {
+        const { address, connectionHandle, connectionToken } = connection;
+
+        if (drawn.get(connectionHandle) !== connection) {
+          return;
+        }
+
+        drawn.delete(connectionHandle);
+        byToken.delete(connectionToken);
+        connections.delete(connectionHandle);
+        const others = heldBy(address) - 1;
+
+        if (others === 0) {
+          perAddress.delete(address);
+        } else {
+          perAddress.set(address, others);
+        }
+        clearTimeout(connection.idle);
+
+        for (const burial of connection.buried.values()) {
+          clearTimeout(burial);
+        }
+
+        connection.buried.clear();
+
+        for (const exchange of connection.waiting.values()) {
+          exchange.isEnded = true;
+          clearTimeout(exchange.timer);
+
+          if (exchange.response.headersSent) {
+            exchange.response.destroy();
+          } else {
+            endWith(exchange.response, UNKNOWN_CONNECTION);
+          }
+        }
+
+        connection.waiting.clear();
+        connection.outbox = [];
+        connection.outboxBytes = 0;
+
+        if (connection.listen !== undefined) {
+          answer(connection.listen, UNKNOWN_CONNECTION);
+        }
+
+        server.emit(CLOSE_EVENT, isClean, connectionHandle);
+      };
+
+      // a listen ends: with what waits for it, as a batch, or, nothing waiting, with `end`
+      const answer = (listen: IListen, end: IEnd): void => {
+        const { connection, response } = listen;
+        const { outbox } = connection;
+
+        if (connection.listen === listen) {
+          connection.listen = undefined;
+        }
+
+        clearTimeout(listen.timer);
+
+        if (outbox.length === 0) {
+          return (endWith(response, end), undefined);
+        }
+
+        // what waits follows what was acknowledged, one by one: the first is the last minus the rest
+        const length = outbox.reduce((total, { bytes }) => {
+          return total + LENGTH_BYTES + bytes.length;
+        }, 0);
+
+        response.writeHead(200, {
+          ...RESPONSE_HEADERS,
+          'content-length': String(length),
+          'content-type': BEAD_BATCH_MEDIA_TYPE,
+          [SEQUENCE_HEADER]: String(connection.sequence - outbox.length + 1),
+        });
+
+        for (const { bytes } of outbox) {
+          response.write(lengthOf(bytes));
+          response.write(bytes);
+        }
+
+        response.end();
+      };
+
+      // an envelope of the server's own waits in its connection's outbox, numbered, for a listen to
+      // bring it back; past the outbox's bound the connection closes, as one whose client fell behind
+      const enqueue = (connection: IDrawn, bytes: Uint8Array): void => {
+        if (connection.outboxBytes + bytes.length > maximumOutboxBytes) {
+          return (closeDrawn(connection, false), undefined);
+        }
+
+        connection.sequence += 1;
+        connection.outbox.push({ bytes: bytes.slice(), sequence: connection.sequence });
+        connection.outboxBytes += bytes.length;
+
+        if (connection.listen !== undefined) {
+          answer(connection.listen, NOTHING);
+        }
+      };
+
+      // a listen: what it acknowledges goes, and it brings back what is left — at once, or once
+      // something comes within its wait. One listen at a time: a second ends the first, which brings
+      // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
+      const listen = (exchange: IExchangeIn, connection: IDrawn): void => {
+        const { request, response } = exchange;
+        const { query } = targetOf(request);
+        const after = countOf(query, 'after');
+        const wait = countOf(query, 'wait');
+
+        if (!connection.isListening) {
+          return (finish(exchange, { reason: REFUSALS.LISTEN_UNDECLARED, status: 409 }), undefined);
+        }
+
+        if (
+          hasBody(request) ||
+          after === undefined ||
+          wait === undefined ||
+          after > connection.sequence
+        ) {
+          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+        }
+
+        const kept = connection.outbox.filter(({ sequence }) => {
+          return sequence > after;
+        });
+        const held: IListen = { connection, response, timer: undefined };
+        const client = connections.get(connection.connectionHandle);
+
+        connection.outbox = kept;
+        connection.outboxBytes = kept.reduce((total, { bytes }) => {
+          return total + bytes.length;
+        }, 0);
+        connection.open += 1;
+        clearTimeout(connection.idle);
+
+        if (client !== undefined) {
+          client.lastActivityTimestamp = timestamp();
+        }
+
+        response.on('close', () => {
+          clearTimeout(held.timer);
+
+          if (connection.listen === held) {
+            connection.listen = undefined;
+          }
+
+          connection.open -= 1;
+
+          if (drawn.get(connection.connectionHandle) === connection) {
+            rest(connection);
+          }
+        });
+
+        if (connection.listen !== undefined) {
+          answer(connection.listen, NOTHING);
+        }
+
+        if (connection.outbox.length > 0 || wait === 0) {
+          return (answer(held, NOTHING), undefined);
+        }
+
+        connection.listen = held;
+        held.timer = setTimeout(
+          () => {
+            answer(held, NOTHING);
+          },
+          Math.min(wait, maximumWait)
+        );
+        unref(held.timer);
+      };
+
+      // a cancel that came before its request: the request, when it comes, is dropped; only the
+      // client's call ids, and so many as a connection has requests waiting
+      const bury = (connection: IDrawn, callId: number): void => {
+        if (callId % 2 === 0 || connection.buried.size >= maximumWaitingExchanges) {
+          return;
+        }
+
+        clearTimeout(connection.buried.get(callId));
+
+        const burial = setTimeout(() => {
+          connection.buried.delete(callId);
+        }, BURIAL_MILLISECONDS);
+
+        unref(burial);
+        connection.buried.set(callId, burial);
+      };
+
+      const onConnect = (exchange: IExchangeIn): void => {
+        const { request } = exchange;
+        const address = addressOf(request);
+        const isListening = listeningOf(request);
+
+        // a connect carries no body, and says whether it listens in the one way; a socket already
+        // gone reports no address
+        if (hasBody(request) || address === undefined || isListening === undefined) {
+          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+        }
+
+        if (drawn.size >= maximumConnections || heldBy(address) >= maximumConnectionsPerAddress) {
+          const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
+
+          return (finish(exchange, busy), undefined);
+        }
+
+        const connectionToken = drawToken();
+        const connectionHandle = generateDrawnHandle({
+          ip: address,
+          ordinal: (ordinal += 1),
+          type: TRANSPORT_HTTP,
+        });
+        const connection: IDrawn = {
+          address,
+          buried: new Map(),
+          connectionHandle,
+          connectionToken,
+          idle: undefined,
+          isListening,
+          listen: undefined,
+          open: 0,
+          ordinal,
+          outbox: [],
+          outboxBytes: 0,
+          sequence: 0,
+          waiting: new Map(),
+        };
+        // what its events show of it: the order it was drawn in, and what drew it, headers aside —
+        // a frozen copy, never the state the registry holds, which keeps the token
+        const shown: IDrawnConnection = Object.freeze({ ordinal });
+        const drawing: IDrawingRequest = Object.freeze({
+          method: request.method,
+          remoteAddress: address,
+          remotePort: request.socket.remotePort,
+          url: request.url,
+        });
+
+        drawn.set(connectionHandle, connection);
+        byToken.set(connectionToken, connection);
+        perAddress.set(address, heldBy(address) + 1);
+        connections.set(connectionHandle, {
+          address,
+          connectionHandle,
+          lastActivityTimestamp: undefined,
+          port: request.socket.remotePort ?? 0,
+          socket: connection,
+          type: TRANSPORT_HTTP,
+        });
+        rest(connection);
+        // a listener meets the connection registered, before its client has its token
+        server.emit(CONNECTION_EVENT, shown, drawing, connectionHandle);
+
+        // the listen taken, said back, so a client whose header something on the way dropped never
+        // listens where it would be refused
+        const drew = {
+          headers: {
+            [CONNECTION_TOKEN_HEADER]: connectionToken,
+            ...(isListening ? { [LISTEN_HEADER]: '?1' } : {}),
+          },
+          status: 201,
+        };
+
+        return (finish(exchange, drew), undefined);
+      };
+
+      // one envelope: read into one buffer, its prefix checked from its first 8 bytes, then handed on
+      const receive = (exchange: IExchangeIn, connection: IDrawn): void => {
+        const { request, response } = exchange;
+        const { connectionHandle } = connection;
+        const declared = Number(headerOf(request, 'content-length') ?? Number.NaN);
+
+        if (Number.isFinite(declared) && declared > maximumBodyBytes) {
+          return (finish(exchange, { reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
+        }
+
+        // a bound on what one connection has under way, cancels included, well past what its
+        // waiting requests may be: those are refused at their prefix
+        if (connection.open >= 2 * maximumWaitingExchanges) {
+          return (finish(exchange, { reason: REFUSALS.BUSY, status: 429 }), undefined);
+        }
+
+        const state: IExchange = {
+          isCancelled: false,
+          isDelivered: false,
+          isEnded: false,
+          response,
+          timer: undefined,
+        };
+        const body: IBody = {
+          bytes: new Uint8Array(
+            Number.isFinite(declared) ? Math.min(declared, FIRST_BODY_BYTES) : FIRST_BODY_BYTES
+          ),
+          length: 0,
+        };
+        let charged = 0;
+        let received = 0;
+        let prefix: { callId: number; kind: number } | undefined;
+        // under way until both its request and its response are done
+        let sides = 2;
+
+        connection.open += 1;
+        clearTimeout(connection.idle);
+
+        const client = connections.get(connectionHandle);
+
+        if (client !== undefined) {
+          client.lastActivityTimestamp = timestamp();
+        }
+
+        const release = (): void => {
+          bodyBytes -= charged;
+          charged = 0;
+        };
+
+        const done = (): void => {
+          sides -= 1;
+
+          if (sides === 0) {
+            connection.open -= 1;
+
+            if (drawn.get(connectionHandle) === connection) {
+              rest(connection);
+            }
+          }
+        };
+
+        // ends it now, before its body or its answer; what still comes is counted, and dropped
+        const endEarly = (end: IEnd): void => {
+          state.isEnded = true;
+          clearTimeout(state.timer);
+
+          if (prefix !== undefined && connection.waiting.get(prefix.callId) === state) {
+            connection.waiting.delete(prefix.callId);
+          }
+
+          finish(exchange, end);
+        };
+
+        // what the first 8 bytes say: a request waits under its call id from now on
+        const classify = (head: Uint8Array): void => {
+          const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
+          const layout = view.getUint8(0);
+          const kind = view.getUint8(1);
+          const callId = view.getUint32(4);
+
+          if (layout < ENVELOPE_PREFIX.firstLayout || layout > ENVELOPE_PREFIX.lastLayout) {
+            return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          }
+
+          if (kind !== ENVELOPE_KINDS.REQUEST) {
+            return ((prefix = { callId, kind }), undefined);
+          }
+
+          // a client's call ids are odd, and none is 0
+          if (callId % 2 === 0) {
+            return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          }
+
+          if (connection.waiting.has(callId)) {
+            return (endEarly({ reason: REFUSALS.CALL_WAITING, status: 409 }), undefined);
+          }
+
+          if (connection.waiting.size >= maximumWaitingExchanges) {
+            return (endEarly({ reason: REFUSALS.BUSY, status: 429 }), undefined);
+          }
+
+          prefix = { callId, kind };
+
+          if (connection.buried.has(callId)) {
+            clearTimeout(connection.buried.get(callId));
+            connection.buried.delete(callId);
+            state.isCancelled = true;
+          }
+
+          return (connection.waiting.set(callId, state), undefined);
+        };
+
+        response.on('close', () => {
+          release();
+          clearTimeout(state.timer);
+
+          // closed before the transport ended it: lost, as a dropped socket's frames are
+          if (!state.isEnded) {
+            closeDrawn(connection, false);
+          }
+
+          done();
+        });
+
+        request.on('close', () => {
+          release();
+          done();
+        });
+
+        request.on('data', (chunk) => {
+          received += chunk.length;
+          charged += chunk.length;
+          bodyBytes += chunk.length;
+
+          // past the limit, it is refused, and then no more of it is read
+          if (received > maximumBodyBytes) {
+            if (!state.isEnded) {
+              endEarly({ reason: REFUSALS.TOO_LARGE, status: 413 });
+            }
+
+            return (request.destroy(), undefined);
+          }
+
+          if (bodyBytes > bodyBytesBudget && !state.isEnded) {
+            const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
+
+            return (endEarly(busy), undefined);
+          }
+
+          if (state.isEnded || state.isCancelled) {
+            return undefined;
+          }
+
+          append(body, { chunk, limit: maximumBodyBytes });
+
+          if (prefix === undefined && body.length >= ENVELOPE_PREFIX.bytes) {
+            classify(body.bytes.subarray(0, ENVELOPE_PREFIX.bytes));
+          }
+
+          return undefined;
+        });
+
+        request.on('error', () => {
+          release();
+        });
+
+        request.on('end', () => {
+          release();
+
+          if (state.isEnded) {
+            return undefined;
+          }
+
+          // its connection closed while its body came: its client learns it is gone
+          if (drawn.get(connectionHandle) !== connection) {
+            state.isEnded = true;
+
+            return (endWith(response, UNKNOWN_CONNECTION), undefined);
+          }
+
+          if (prefix === undefined) {
+            return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          }
+
+          const { callId, kind } = prefix;
+
+          // its cancel came first, or while it came: dropped, and ended empty
+          if (state.isCancelled) {
+            return (endEarly({ status: 204 }), undefined);
+          }
+
+          const envelope = body.bytes.slice(0, body.length);
+
+          if (kind === ENVELOPE_KINDS.REQUEST) {
+            state.isDelivered = true;
+            server.emit(MESSAGE_EVENT, envelope, connectionHandle);
+
+            // still waiting — not answered as it came — its head goes now, so its client knows the
+            // router has it; and it waits for its answer no longer than it may
+            if (connection.waiting.get(callId) === state) {
+              if (!response.headersSent) {
+                response.writeHead(200, { ...RESPONSE_HEADERS, 'content-type': BEAD_MEDIA_TYPE });
+                response.flushHeaders?.();
+              }
+
+              if (exchangeTimeout !== Infinity) {
+                state.timer = setTimeout(() => {
+                  closeDrawn(connection, false);
+                }, exchangeTimeout);
+                unref(state.timer);
+              }
+            }
+
+            return undefined;
+          }
+
+          server.emit(MESSAGE_EVENT, envelope, connectionHandle);
+
+          if (kind === ENVELOPE_KINDS.CANCEL) {
+            const cancelled = connection.waiting.get(callId);
+
+            // a cancel is never answered: the exchange of its call ends empty — a 200 with no body
+            // once its head went — or, its body still coming, once whole; one that has not come is
+            // buried
+            if (cancelled === undefined) {
+              bury(connection, callId);
+            } else if (cancelled.isDelivered) {
+              connection.waiting.delete(callId);
+              cancelled.isEnded = true;
+              clearTimeout(cancelled.timer);
+              endWith(cancelled.response, { status: 204 });
+            } else {
+              cancelled.isCancelled = true;
+            }
+          }
+
+          return (endEarly({ status: 204 }), undefined);
+        });
+      };
+
+      const onExchange: HTTPRequestListener = (request, response) => {
+        const exchange = { request, response };
+        const host = hostOf(request);
+
+        if (hosts !== undefined && (host === undefined || !hosts.includes(host))) {
+          return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
+        }
+
+        if (targetOf(request).path !== pathname) {
+          return (finish(exchange, { reason: REFUSALS.PATH, status: 404 }), undefined);
+        }
+
+        if (!isAllowedOrigin(request)) {
+          return (finish(exchange, { reason: REFUSALS.ORIGIN, status: 403 }), undefined);
+        }
+
+        if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
+          const refused = {
+            headers: { allow: 'GET, POST, DELETE' },
+            reason: REFUSALS.METHOD,
+            status: 405,
+          };
+
+          return (finish(exchange, refused), undefined);
+        }
+
+        const connectionToken = headerOf(request, CONNECTION_TOKEN_HEADER);
+
+        if (connectionToken === undefined && request.method === 'POST') {
+          if (!isBeadBody(request)) {
+            return (finish(exchange, { reason: REFUSALS.TYPE, status: 415 }), undefined);
+          }
+
+          return (onConnect(exchange), undefined);
+        }
+
+        if (connectionToken === undefined || !TOKEN_PATTERN.test(connectionToken)) {
+          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+        }
+
+        const connection = byToken.get(connectionToken);
+
+        if (connection === undefined) {
+          return (finish(exchange, UNKNOWN_CONNECTION), undefined);
+        }
+
+        if (request.method === 'DELETE') {
+          closeDrawn(connection, true);
+
+          return (finish(exchange, { status: 204 }), undefined);
+        }
+
+        if (request.method === 'GET') {
+          return (listen(exchange, connection), undefined);
+        }
+
+        if (!isBeadBody(request)) {
+          return (finish(exchange, { reason: REFUSALS.TYPE, status: 415 }), undefined);
+        }
+
+        return (receive(exchange, connection), undefined);
+      };
+
+      return {
+        defaults: START_DEFAULTS,
+        type: TRANSPORT_HTTP,
+
+        start: async ({ address, findOpenPort, port, signal }) => {
+          let opened: IHTTPServerLike | undefined;
+          let isListening = false;
+
+          try {
+            return await createPromise<ITransportServerAddress>(
+              (resolve, reject) => {
+                const instance = createServer(onExchange);
+
+                opened = instance;
+
+                instance.on(ERROR_EVENT, (error) => {
+                  if (isListening) {
+                    return (server.emit(ERROR_EVENT, error, ''), undefined);
+                  }
+
+                  return (reject(error), undefined);
+                });
+
+                instance.on('session', (session) => {
+                  sessions.add(session);
+                  session.once('close', () => {
+                    sessions.delete(session);
+                  });
+                });
+
+                instance.listen(findOpenPort ? 0 : port, address, () => {
+                  const addressInfo = instance.address();
+
+                  isListening = true;
+                  httpServer = instance;
+
+                  resolve({
+                    address,
+                    port:
+                      typeof addressInfo === 'object' && addressInfo !== null
+                        ? addressInfo.port
+                        : port,
+                  });
+                });
+              },
+              { signal }
+            );
+          } catch (reason) {
+            // an error before listening, or an abort: close what was opened, listening or not
+            httpServer = undefined;
+            opened?.close();
+
+            throw reason;
+          }
+        },
+
+        stop: () => {
+          const instance = httpServer;
+
+          httpServer = undefined;
+
+          for (const connection of drawn.values()) {
+            closeDrawn(connection, false);
+          }
+
+          // the port is free once `close` returns; its callback, which waits on keep-alive sockets
+          // and HTTP/2 sessions, is not awaited, and those are ended where the server can
+          instance?.close();
+          instance?.closeAllConnections?.();
+
+          for (const session of sessions) {
+            session.close();
+          }
+
+          sessions.clear();
+
+          return Promise.resolve();
+        },
+
+        // what it keeps of its connections, at its ceilings where it has them
+        gauges: () => {
+          const kept = {
+            buriedCallIds: 0,
+            largestOutboxBytes: 0,
+            listens: 0,
+            outboxBytes: 0,
+            outboxEnvelopes: 0,
+            waitingExchanges: 0,
+          };
+
+          for (const connection of drawn.values()) {
+            kept.buriedCallIds += connection.buried.size;
+            kept.largestOutboxBytes = Math.max(kept.largestOutboxBytes, connection.outboxBytes);
+            kept.listens += connection.listen === undefined ? 0 : 1;
+            kept.outboxBytes += connection.outboxBytes;
+            kept.outboxEnvelopes += connection.outbox.length;
+            kept.waitingExchanges += connection.waiting.size;
+          }
+
+          return gaugesOf({
+            ceilings: {
+              bodyBytes: bodyBytesBudget,
+              connections: maximumConnections,
+              largestOutboxBytes: maximumOutboxBytes,
+            },
+            connectionHandles: drawn.keys(),
+            counts: {
+              ...kept,
+              addresses: perAddress.size,
+              bodyBytes,
+              http2Sessions: sessions.size,
+            },
+          });
+        },
+
+        // the registry holds what `connect` put there: the connection's own state
+        close: ({ socket }) => {
+          closeDrawn(socket as IDrawn, true);
+
+          return Promise.resolve();
+        },
+
+        // an answer ends the exchange of its request; anything else — a late answer too — waits for
+        // a listen, when its client listens
+        send: (data, { socket }) => {
+          const bytes = bytesOf(data);
+
+          if (bytes === undefined || bytes.length < ENVELOPE_PREFIX.bytes) {
+            return Promise.reject(
+              new ProgrammerError('an HTTP exchange carries one envelope, as bytes')
+            );
+          }
+
+          const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          const kind = view.getUint8(1);
+          const callId = view.getUint32(4);
+          const connection = socket as IDrawn;
+          const isAnswer = kind === ENVELOPE_KINDS.RESULT || kind === ENVELOPE_KINDS.FAILURE;
+          const exchange = isAnswer ? connection.waiting.get(callId) : undefined;
+
+          if (exchange === undefined) {
+            if (connection.isListening) {
+              enqueue(connection, bytes);
+
+              return Promise.resolve();
+            }
+
+            if (isAnswer) {
+              return Promise.resolve();
+            }
+
+            return Promise.reject(
+              new GenericError(
+                `this connection does not listen: an envelope of kind 0x${kind.toString(16)} goes nowhere`
+              )
+            );
+          }
+
+          connection.waiting.delete(callId);
+          exchange.isEnded = true;
+          clearTimeout(exchange.timer);
+
+          const { response } = exchange;
+
+          return createPromise((resolve, reject) => {
+            response.on('finish', () => {
+              resolve();
+            });
+            response.on('close', () => {
+              if (!response.writableFinished) {
+                reject(new GenericError('the exchange closed before its answer went out'));
+              }
+            });
+
+            if (!response.headersSent) {
+              response.writeHead(200, {
+                ...RESPONSE_HEADERS,
+                'content-length': String(bytes.length),
+                'content-type': BEAD_MEDIA_TYPE,
+              });
+            }
+
+            response.end(bytes);
+          });
+        },
+      };
+    }
+  );
+
+  return Object.assign(transport, {
+    isTwoWay: (connectionHandle: TransportServerConnectionHandle) => {
+      return drawn.get(connectionHandle)?.isListening === true;
+    },
+  });
+};

@@ -1,0 +1,9 @@
+#!/bin/sh
+# The message, before git records it: UTF-8, with a subject that is a Conventional Commit (a merge
+# keeps git's own subject, as tools/check-commits.mjs allows in CI), then the checks this clone
+# keeps for itself in .claude/local/, when it has them.
+set -e
+node tools/check-commits.mjs --message "$1"
+if [ -f .claude/local/check.mjs ]; then
+  node .claude/local/check.mjs "$1"
+fi

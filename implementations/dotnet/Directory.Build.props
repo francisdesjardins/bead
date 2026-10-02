@@ -1,0 +1,24 @@
+<Project>
+  <!--
+    Every project of Bead's C# side is judged by the same rules, as the TypeScript side is by its
+    one configuration (0005): one framework, the analyzers at their recommended set, the code style
+    held in the build, and a warning the build does not pass. 0007 is the decision.
+  -->
+  <PropertyGroup>
+    <!-- the TypeScript side's version too: nothing is published, and a first release is 0.1.0 -->
+    <Version>0.0.0</Version>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- every public member says what it is; and IDE0005, unused usings, runs at build only with it -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- in CI, a restore that would change a lock file fails, as Yarn's immutable install does -->
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+  </PropertyGroup>
+</Project>

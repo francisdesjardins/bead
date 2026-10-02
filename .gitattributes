@@ -1,0 +1,22 @@
+# Text is stored and checked out with LF on every machine: the spec's generators write LF, and the
+# conformance files are compared byte for byte.
+* text=auto eol=lf
+
+# The vendored Yarn release runs as it was released: no normalisation may touch it.
+/implementations/typescript/.yarn/releases/** binary
+
+# Binary by nature, should one ever be committed.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.gz binary
+*.zip binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.snk binary

@@ -1,0 +1,2098 @@
+{
+  "$comment": [
+    "Bead's conversations: what a server of the interop service (interop-service.json) does with what one client sends, played by every implementation's tests against its own server.",
+    "in is what the client sends, in hexadecimal as vectors.json writes it; close closes the client's connection.",
+    "out is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its service and its procedure too. A failure compares its code and its scope; its detail is informative. session, on an answer, says what it announced: announced for a token, which is random, ended for 16 zero bytes; none, nothing. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
+    "report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.",
+    "Before each in, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
+    "limits, where given, are the server's limits; any other is its default. pacing, where given, bounds the queues of its paced subscriptions."
+  ],
+  "conversations": [
+    {
+      "name": "echo answers with its request's payload",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 7B 22 61 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "7B 22 61 22 3A 31 7D"
+          }
+        }
+      ]
+    },
+    {
+      "name": "fail answers with its own failure, of the application",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 02 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 7,
+              "scope": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a service unknown is answered SERVICE_UNKNOWN",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 09 00 01 | 7B 7D"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 18,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 63 | 7B 7D"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 19,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an admission that refuses is answered with its refusal",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 05 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 33,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN",
+      "steps": [
+        {
+          "in": "A1 10 02 04  00 00 00 01  00 01 00 01  00 00 00 05 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 16,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request that opens a transfer, to a server that takes none, is answered PAYLOAD_TOO_LARGE",
+      "limits": {
+        "maximumTransfers": 0
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 00 | 22"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 34,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request that opens a subscription to a procedure that notifies nothing is answered, and holds nothing",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 01 | 22 78 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 79 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 79 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 06 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "report": "exception"
+        }
+      ]
+    },
+    {
+      "name": "a payload that is not JSON is answered PAYLOAD_UNDECODABLE",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | FF"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 05 | FF"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 33,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0E | FF"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an answer too large for one envelope, from a server that sends no transfer, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE",
+      "limits": {
+        "maximumEnvelopeBytes": 64,
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "maximumTransfers": 0
+      },
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 36 30 7D"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "report": 34
+        }
+      ]
+    },
+    {
+      "name": "a result that fits in one envelope only without the session an answer may announce is refused as one that does not",
+      "limits": {
+        "maximumEnvelopeBytes": 64,
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "maximumTransfers": 0
+      },
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 34 35 7D"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "report": 34
+        }
+      ]
+    },
+    {
+      "name": "the server asks its client a command, and answers with what the client answered",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 16,
+            "callId": 2,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "in": "A1 11 00 02  00 00 00 02 | 22 6E 6F 6F 6E 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 6E 6F 6F 6E 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a command the client fails fails the call that asked it, which is reported",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 16,
+            "callId": 2,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "in": "A1 12 00 02  00 00 00 02 | 00 07 00 01"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "report": 7
+        }
+      ]
+    },
+    {
+      "name": "an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 16,
+            "callId": 2,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "in": "A1 11 40 02  00 00 00 02"
+        },
+        {
+          "out": {
+            "kind": 22,
+            "callId": 2
+          }
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "report": 1
+        },
+        {
+          "in": "A1 11 00 02  00 00 00 02 | 22 6C 61 74 65 22"
+        }
+      ]
+    },
+    {
+      "name": "a request that opens a subscription to ticks is answered, and each tick notifies it on its call id",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request to ticks that opens no subscription subscribes nothing",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a call id a subscription holds is in use: a request on it is reported, never answered",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 67 61 69 6E 22"
+        },
+        {
+          "report": 1
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a cancel ends a subscription, and nothing more goes on its call id",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a later subscription to the same procedure is answered and holds nothing: the first keeps it",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 10 03  00 00 00 03  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a notification may come before the answer of the call it travels on",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 0A | 7B 22 68 6F 6C 64 22 3A 31 7D"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a call answered while the first is unanswered waits, and takes the place when the first is cancelled",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 0A | 7B 22 68 6F 6C 64 22 3A 31 7D"
+        },
+        {
+          "in": "A1 10 10 03  00 00 00 03  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 3,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a call answered while the first is unanswered waits, and takes the place when the first fails",
+      "steps": [
+        {
+          "in": "A1 10 10 03  00 00 00 01  00 01 00 0A | 7B 22 68 6F 6C 64 22 3A 31 2C 22 66 61 69 6C 22 3A 74 72 75 65 7D"
+        },
+        {
+          "in": "A1 10 10 03  00 00 00 03  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 7,
+              "scope": 1
+            }
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 07  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 3,
+            "payload": "32"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a paced subscription is sent a notification per credit, the first credited by its request",
+      "steps": [
+        {
+          "in": "A1 10 30 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 15 20 04  00 00 00 01  00 00 00 00 00 00 00 02"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "32"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a keyed notification replaces the one of its key waiting, in its place",
+      "steps": [
+        {
+          "in": "A1 10 30 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 2C 22 6B 65 79 22 3A 22 61 22 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 07  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 33 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 09  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 34 2C 22 6B 65 79 22 3A 22 61 22 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 15 20 04  00 00 00 01  00 00 00 00 00 00 00 03"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "34"
+          }
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "33"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a credit no higher than the last grants nothing",
+      "steps": [
+        {
+          "in": "A1 10 30 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 15 20 04  00 00 00 01  00 00 00 00 00 00 00 01"
+        },
+        {
+          "in": "A1 15 20 04  00 00 00 01  00 00 00 00 00 00 00 02"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "32"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a credit lower than the last takes nothing back: the highest stands",
+      "steps": [
+        {
+          "in": "A1 10 30 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 15 20 04  00 00 00 01  00 00 00 00 00 00 00 03"
+        },
+        {
+          "in": "A1 15 20 04  00 00 00 01  00 00 00 00 00 00 00 02"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "32"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 07  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 33 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "33"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 09  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 34 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a queue past its bounds ends an answered subscription with a failure on its call id",
+      "pacing": {
+        "maximumQueuedNotifications": 2
+      },
+      "steps": [
+        {
+          "in": "A1 10 30 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 07  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 33 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 09  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 34 7D"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 35,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 0B  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 35 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 11,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a queue past its bounds while its call is unanswered is that call's answer",
+      "pacing": {
+        "maximumQueuedNotifications": 2
+      },
+      "steps": [
+        {
+          "in": "A1 10 30 03  00 00 00 01  00 01 00 0A | 7B 22 68 6F 6C 64 22 3A 34 7D"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 07  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 33 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 09  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 34 7D"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 35,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a procedure that requires a session refuses a connection without one with SESSION_REQUIRED",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 0E | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a session opened is announced by the next answer, and only by it",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0E | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 61 64 61 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a session ended is announced by the next answer, and only by it",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0D | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C",
+            "session": "ended"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0E | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a session opened again is announced again, its token drawn anew",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 62 6F 62 22 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 62 6F 62 22",
+            "session": "announced"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a session that ends ends its connection's subscriptions, the first answer to go out announcing it",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          }
+        },
+        {
+          "in": "A1 10 10 03  00 00 00 03  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 05  00 01 00 0D | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0
+            },
+            "session": "ended"
+          }
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 07  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request presenting a session is read, and its session ignored",
+      "steps": [
+        {
+          "in": "A1 10 01 07  00 00 00 01  00 01 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F | 22 78 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request on the server's own parity is reported, never answered",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 02  00 01 00 01 | 6E 75 6C 6C"
+        },
+        {
+          "report": 1
+        }
+      ]
+    },
+    {
+      "name": "a request on a call id still open is reported, never answered",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 67 61 69 6E 22"
+        },
+        {
+          "report": 1
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 04 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "31"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a cancel ends its call, and the answer its resolver gives after goes nowhere",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 04 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "31"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a call id cancelled is opened again, and the first call's answer does not answer the second",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 67 61 69 6E 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 67 61 69 6E 22"
+          }
+        },
+        {
+          "in": "A1 10 00 03  00 00 00 03  00 01 00 04 | 6E 75 6C 6C"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "31"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a connection that closes ends its calls, and their answers go nowhere",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "close": true
+        }
+      ]
+    },
+    {
+      "name": "a cancel on the server's own parity is reported",
+      "steps": [
+        {
+          "in": "A1 16 00 02  00 00 00 02"
+        },
+        {
+          "report": 1
+        }
+      ]
+    },
+    {
+      "name": "a cancel for no call crossed its answer, and is dropped in silence",
+      "steps": [
+        {
+          "in": "A1 16 00 02  00 00 00 05"
+        }
+      ]
+    },
+    {
+      "name": "a message shorter than a prefix is reported",
+      "steps": [
+        {
+          "in": "A1 10 00"
+        },
+        {
+          "report": 1
+        }
+      ]
+    },
+    {
+      "name": "a first byte no layout is, is reported",
+      "steps": [
+        {
+          "in": "0A 10 00 03  00 00 00 03  00 01 00 01"
+        },
+        {
+          "report": 1
+        }
+      ]
+    },
+    {
+      "name": "a request of a layout to come is answered LAYOUT_UNSUPPORTED, on its call id",
+      "steps": [
+        {
+          "in": "A2 10 00 03  00 00 00 07  00 01 00 01"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 7,
+            "failure": {
+              "code": 2,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request of a layout to come, on the server's own parity, is reported",
+      "steps": [
+        {
+          "in": "A2 10 00 03  00 00 00 08  00 01 00 01"
+        },
+        {
+          "report": 2
+        }
+      ]
+    },
+    {
+      "name": "a malformed request is answered ENVELOPE_MALFORMED, on its call id",
+      "steps": [
+        {
+          "in": "A1 10 08 03  00 00 00 09  00 01 00 01"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 9,
+            "failure": {
+              "code": 1,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a malformed request on a call id still open is reported, never answered",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "in": "A1 10 08 03  00 00 00 01  00 01 00 01"
+        },
+        {
+          "report": 1
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        }
+      ]
+    },
+    {
+      "name": "a request past the envelope's bound is answered ENVELOPE_TOO_LARGE, on its call id",
+      "limits": {
+        "maximumEnvelopeBytes": 64,
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 22"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 4,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a kind to come is reported KIND_UNSUPPORTED",
+      "steps": [
+        {
+          "in": "A1 17 00 02  00 00 00 05"
+        },
+        {
+          "report": 3
+        }
+      ]
+    },
+    {
+      "name": "an advisory kind is skipped",
+      "steps": [
+        {
+          "in": "A1 80 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
+      "name": "a result for no call is reported CALL_UNKNOWN",
+      "steps": [
+        {
+          "in": "A1 11 00 02  00 00 00 04"
+        },
+        {
+          "report": 20
+        }
+      ]
+    },
+    {
+      "name": "a failure for no call is reported CALL_UNKNOWN",
+      "steps": [
+        {
+          "in": "A1 12 00 02  00 00 00 06 | 00 13 00 00"
+        },
+        {
+          "report": 20
+        }
+      ]
+    },
+    {
+      "name": "a notification is reported KIND_UNSUPPORTED by a server, which takes none",
+      "steps": [
+        {
+          "in": "A1 13 00 02  00 00 00 03"
+        },
+        {
+          "report": 3
+        }
+      ]
+    },
+    {
+      "name": "a chunk for no call is reported CALL_UNKNOWN",
+      "steps": [
+        {
+          "in": "A1 14 00 04  00 00 00 03  00 00 00 00 00 00 00 00 | 01"
+        },
+        {
+          "report": 20
+        }
+      ]
+    },
+    {
+      "name": "a chunk on a call open without a transfer is reported ENVELOPE_MALFORMED",
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "in": "A1 14 00 04  00 00 00 01  00 00 00 00 00 00 00 00 | 01"
+        },
+        {
+          "report": 1
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        }
+      ]
+    },
+    {
+      "name": "a credit of notifications, for no subscription, is dropped in silence by a server, which sends them",
+      "steps": [
+        {
+          "in": "A1 15 20 04  00 00 00 03  00 00 00 00 00 00 00 01"
+        }
+      ]
+    },
+    {
+      "name": "a credit of bytes, for no transfer, is dropped in silence",
+      "steps": [
+        {
+          "in": "A1 15 00 04  00 00 00 03  00 00 00 00 00 00 00 10"
+        }
+      ]
+    },
+    {
+      "name": "a request that comes as a transfer is credited to its total, then answered by a transfer its client credits",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 64 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 100
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "in": "A1 14 00 04  00 00 00 01  00 00 00 00 00 00 00 5C | 6E 6F 70 71 72 73 74 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65",
+            "total": 100
+          }
+        },
+        {
+          "in": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 64"
+        },
+        {
+          "out": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 32,
+            "isLast": false,
+            "payload": "66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+          }
+        },
+        {
+          "out": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 80,
+            "isLast": true,
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a transfer is credited a window past the bytes received from the start, once half a window can go",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 5C | 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 268
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 BC | 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 8C | 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 300
+          }
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        }
+      ]
+    },
+    {
+      "name": "a result is sent as far as its credit, a full chunk at a time, and a credit lower than the last grants nothing",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65",
+            "total": 100
+          }
+        },
+        {
+          "in": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 4F"
+        },
+        {
+          "in": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 50"
+        },
+        {
+          "out": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 32,
+            "isLast": false,
+            "payload": "66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+          }
+        },
+        {
+          "in": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 3C"
+        },
+        {
+          "in": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 64"
+        },
+        {
+          "out": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 80,
+            "isLast": true,
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a chunk past its credit is answered CREDIT_EXCEEDED, and a late one under it is dropped in silence",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 AC | 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 49,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 AC | 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B"
+        },
+        {
+          "report": 49
+        }
+      ]
+    },
+    {
+      "name": "a chunk before the last that is not full is answered CHUNK_INVALID",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a chunk that says more follow though it reaches the total is answered CHUNK_INVALID",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 64 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 100
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 5C | 6E 6F 70 71 72 73 74 22"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a chunk over bytes received in part is answered CHUNK_INVALID, and one received whole is dropped in silence",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D"
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 44 | 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a chunk that does not read ends its transfer as CHUNK_INVALID",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "in": "A1 14 40 04  00 00 00 01  00 20 00 00 00 00 00 00 | 01"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an opening that holds its whole total is answered CHUNK_INVALID",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 04 | 22 61 62 22"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an opening that declares a total of 0 is answered PAYLOAD_TOO_LARGE",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 00"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 34,
+              "scope": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a transfer past those a connection receives at once is answered CAPACITY_EXCEEDED",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "maximumTransfers": 1
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "in": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 35,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        }
+      ]
+    },
+    {
+      "name": "an opening past the budget left is answered CAPACITY_EXCEEDED, and a transfer it starves is credited once it frees",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "bufferedBytesBudget": 256,
+        "maximumPayloadBytes": 256
+      },
+      "steps": [
+        {
+          "in": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "in": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "in": "A1 10 04 05  00 00 00 05  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "out": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 35,
+              "scope": 0
+            }
+          }
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "out": {
+            "kind": 21,
+            "callId": 3,
+            "creditEnd": 172
+          }
+        }
+      ]
+    },
+    {
+      "name": "a cancel ends the transfer of a result, and a credit after it is dropped in silence",
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "in": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+        },
+        {
+          "out": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65",
+            "total": 100
+          }
+        },
+        {
+          "in": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "in": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 64"
+        }
+      ]
+    }
+  ]
+}

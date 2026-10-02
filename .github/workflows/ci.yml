@@ -1,0 +1,178 @@
+name: CI
+
+# Every job on every push and pull request: the spec is shared, so a change anywhere can break
+# either side. `ci-ok` is the only required check; it fails when any other job did not pass.
+on:
+  # Branches only: a tag pushed by a release points at a commit its branch's run already checked.
+  push:
+    branches: ['**']
+  pull_request:
+  # The suite against an unchanged tree, which is how a flake is told from a failure.
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # A CI pins; `engines.node` in the TypeScript side's manifest declares a floor.
+  NODE_VERSION: '24'
+  # The vendored release, invoked as a file: no Corepack, and the runner's own Yarn 1.22 refuses a
+  # project declaring `packageManager: yarn@4.18.0`.
+  YARN: node .yarn/releases/yarn-4.18.0.cjs
+  # The TypeScript suite is unit tests without a browser: nothing to download.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+jobs:
+  # ── Spec ─────────────────────────────────────────────────────────────────────
+  # The conformance files are what their generators write: regenerated, they must come out
+  # identical to the committed ones, byte for byte.
+  spec:
+    name: Spec
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: python spec/generators/make_vectors.py
+      - run: python spec/generators/make_conversations.py
+      - run: git diff --exit-code -- spec
+      - name: No file the generators wrote is new
+        run: test -z "$(git status --porcelain -- spec)"
+
+  # ── TypeScript ───────────────────────────────────────────────────────────────
+  # The TypeScript side's own gate: types, lint, format, comment budget, doc examples, then its
+  # tests. The interop against the C# server runs in the .NET job, the only one with both runtimes.
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: implementations/typescript
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      # The download cache, not `node_modules`: cache what was downloaded, always install.
+      - uses: actions/cache@v5
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-cache-${{ runner.os }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          restore-keys: yarn-cache-${{ runner.os }}-
+      # `--immutable` fails if `yarn.lock` would change.
+      - run: $YARN install --immutable
+      - run: $YARN check
+      - run: $YARN test --grep-invert "the C# server of the interop service"
+      # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
+      - run: $YARN playground:build:file
+      # The root's own files, from the README to this CI, under the TypeScript side's formatter. The
+      # conformance files are left to their generators.
+      - name: Format of the root's files
+        working-directory: .
+        run: >-
+          implementations/typescript/node_modules/.bin/oxfmt
+          -c implementations/typescript/.oxfmtrc.json --check
+          README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/interop-service.json tools .github
+
+  # ── .NET ─────────────────────────────────────────────────────────────────────
+  # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
+  # the analyzers; `dotnet test` builds with every warning an error, then runs the tests — and the
+  # interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts with
+  # Node, then the TypeScript client against the C# server. Only the TypeScript side is installed,
+  # for its interop server.
+  #
+  # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
+  # could only be a path to the other side gone wrong.
+  #
+  # From `implementations/dotnet`: `dotnet` finds `global.json`, which holds the SDK and the test
+  # runner, by walking up from where it runs. `CI=true` turns on `RestoreLockedMode` in
+  # `Directory.Build.props`: a restore that would change a `packages.lock.json` fails.
+  dotnet:
+    name: .NET
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BEAD_INTEROP_REQUIRED: 1
+    defaults:
+      run:
+        working-directory: implementations/dotnet
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: implementations/dotnet/global.json
+          cache: true
+          cache-dependency-path: implementations/dotnet/**/packages.lock.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - run: dotnet format Bead.slnx --verify-no-changes
+      - run: dotnet test --solution Bead.slnx
+      - run: $YARN test:interop
+        working-directory: implementations/typescript
+
+  # ── Commits ──────────────────────────────────────────────────────────────────
+  # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
+  # left out, git-flow writes them.
+  commits:
+    name: Commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check the subjects
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            set -- "$BASE..$HEAD"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            set -- "$BEFORE..$AFTER"
+          else
+            # a new branch (its `before` is all zeros), a push that rewrote the branch (its `before`
+            # is a commit no ref holds any more), or a run by hand: what no other branch on the
+            # remote holds. Under `--remotes`, `--exclude` matches the name without `refs/remotes/`.
+            set -- "$AFTER" --not --exclude="origin/$BRANCH" --remotes=origin
+          fi
+          node tools/check-commits.mjs "$@"
+
+  # ── CI ok ────────────────────────────────────────────────────────────────────
+  # The only required check: green when every job above passed, red otherwise, including when one
+  # was cancelled or skipped.
+  ci-ok:
+    name: CI ok
+    if: always()
+    needs: [spec, typescript, dotnet, commits]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

@@ -1,0 +1,71 @@
+{
+  "name": "@francisdesjardins/bead",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP and a Web Worker transport, each a client and a server, a client and a server router with the service, session and notification managers, and the client and server over them.",
+  "license": "Apache-2.0",
+  "author": "Francis Desjardins <francis.desjardins@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/francisdesjardins/bead.git",
+    "directory": "implementations/typescript"
+  },
+  "type": "module",
+  "exports": {
+    "./client": "./src/client/client.ts",
+    "./http-client": "./src/client/http-client.ts",
+    "./http-server": "./src/server/http-server.ts",
+    "./http-transport-client": "./src/transport/client/http-transport-client.ts",
+    "./http-transport-server": "./src/transport/server/http-transport-server.ts",
+    "./notification-manager": "./src/router/server/notification-manager.ts",
+    "./router-client": "./src/router/client/router-client.ts",
+    "./router-server": "./src/router/server/router-server.ts",
+    "./service-manager": "./src/router/shared/service-manager.ts",
+    "./session-manager": "./src/router/server/session-manager.ts",
+    "./server": "./src/server/server.ts",
+    "./transport-client": "./src/transport/client/transport-client.ts",
+    "./transport-server": "./src/transport/server/transport-server.ts",
+    "./worker-client": "./src/client/worker-client.ts",
+    "./worker-server": "./src/server/worker-server.ts",
+    "./worker-transport-client": "./src/transport/client/worker-transport-client.ts",
+    "./worker-transport-server": "./src/transport/server/worker-transport-server.ts",
+    "./ws-client": "./src/client/ws-client.ts",
+    "./ws-server": "./src/server/ws-server.ts",
+    "./ws-transport-client": "./src/transport/client/ws-transport-client.ts",
+    "./ws-transport-server": "./src/transport/server/ws-transport-server.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "comment-budget": "node tools/check-comment-budget.mjs",
+    "demo": "node demo/serve.ts",
+    "playground:build:file": "node demo/playground.ts",
+    "docs:examples": "node tools/check-examples.mjs",
+    "docs:examples:fix": "node tools/check-examples.mjs --fix",
+    "check": "yarn type-check && yarn lint --deny-warnings && yarn format:check && yarn comment-budget && yarn docs:examples",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint --type-aware",
+    "lint:fix": "oxlint --type-aware --fix",
+    "test": "playwright test",
+    "test:coverage": "c8 playwright test",
+    "test:interop": "playwright test src/client/__tests__/interop.test.ts",
+    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit",
+    "verify:all": "yarn check && yarn test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^24.13.6",
+    "@types/ws": "^8.18.1",
+    "c8": "12.0.0",
+    "esbuild": "0.28.2",
+    "oxfmt": "0.68.0",
+    "oxlint": "^1.83.0",
+    "oxlint-tsgolint": "7.0.2002",
+    "typescript-7": "npm:typescript@7.0.2",
+    "ws": "^8.21.3"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "yarn@4.18.0"
+}

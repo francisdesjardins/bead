@@ -1,0 +1,63 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+
+  // The lint surface is [.oxlintrc.base.json](./.oxlintrc.base.json), and this project adds to it
+  // the shape its functions take.
+  "extends": ["./.oxlintrc.base.json"],
+  // A function here is an arrow bound to a `const`: no `this`, no `arguments`, no `new`, no
+  // rebinding, and no hoisting, so a file reads in the order it is written — dependencies, helpers,
+  // then what they serve. A `function` stays where only one does what is needed — overload
+  // signatures, an assertion function, a generator, a function called with `new` — each behind an
+  // `oxlint-disable-next-line` that says which.
+  "rules": {
+    "func-style": ["error", "expression"],
+    "prefer-arrow-callback": "error"
+  },
+  "overrides": [
+    {
+      // the one declaration among the sources, which its JSDoc names as the exception
+      "files": ["src/transport/shared/thrown-message.ts"],
+      "rules": {
+        "func-style": "off"
+      }
+    },
+    {
+      // the examples' harness wraps a snippet that awaits in a function of its own: the wrapper is
+      // the tool's, not the library's
+      "files": ["**/scripts/examples/generated/**/*.tsx"],
+      "rules": {
+        "func-style": "off"
+      }
+    },
+    {
+      // the gates, plain Node modules whose functions are declarations
+      "files": ["tools/**"],
+      "rules": {
+        "func-style": "off",
+        "prefer-arrow-callback": "off"
+      }
+    },
+    {
+      // the gates' CLIs, the commands `check` runs: stdout is their whole output contract
+      "files": ["tools/check-comment-budget.mjs", "tools/check-examples.mjs"],
+      "rules": {
+        "no-console": "off",
+        "curly": "off",
+        "arrow-body-style": "off"
+      }
+    }
+  ],
+  // **Not inherited through `extends`** — not even by a child that declares none — so the list is
+  // written out here in full. Measured against oxlint 1.83.0.
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/playwright-report/**",
+    "**/playwright/.cache/**",
+    "**/playwright/.cache-coverage/**",
+    "**/test-results/**",
+    "**/coverage/**",
+    "**/*.d.ts",
+    ".yarn/**"
+  ]
+}

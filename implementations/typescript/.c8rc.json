@@ -1,0 +1,21 @@
+{
+  "all": true,
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.d.ts",
+    "src/**/__tests__/**",
+    "src/index.ts",
+    "src/**/index.ts",
+    "src/client/types.ts",
+    "src/router/client/types.ts",
+    "src/router/server/types.ts",
+    "src/router/shared/types.ts",
+    "src/server/types.ts",
+    "src/transport/client/types.ts",
+    "src/transport/server/types.ts",
+    "src/transport/shared/types.ts"
+  ],
+  "reporter": ["text-summary", "html", "lcov", "json"],
+  "reportsDir": "coverage",
+  "checkCoverage": false
+}

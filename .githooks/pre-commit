@@ -1,0 +1,6 @@
+#!/bin/sh
+# Before each commit, the checks this clone keeps for itself in .claude/local/, when it has them.
+# Opt in once per clone: git config core.hooksPath .githooks
+if [ -f .claude/local/check.mjs ]; then
+  exec node .claude/local/check.mjs
+fi

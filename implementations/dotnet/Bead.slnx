@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/interop/">
+    <Project Path="interop/Bead.Interop.Server/Bead.Interop.Server.csproj" />
+    <Project Path="interop/Bead.Interop/Bead.Interop.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Bead.Core/Bead.Core.csproj" />
+    <Project Path="src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
+    <Project Path="src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Bead.Core.Tests/Bead.Core.Tests.csproj" />
+    <Project Path="tests/Bead.Interop.Tests/Bead.Interop.Tests.csproj" />
+    <Project Path="tests/Bead.Transport.Http.Tests/Bead.Transport.Http.Tests.csproj" />
+    <Project Path="tests/Bead.Transport.WebSockets.Tests/Bead.Transport.WebSockets.Tests.csproj" />
+  </Folder>
+</Solution>

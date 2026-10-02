@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The C# server of Bead's interop service, over WebSocket and HTTP: what a client of any implementation calls. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Bead.Interop.Server</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Interop/Bead.Interop.csproj" />
+    <ProjectReference Include="../../src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
+    <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+  </ItemGroup>
+</Project>

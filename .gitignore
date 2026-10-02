@@ -1,0 +1,35 @@
+# What each toolchain writes. Each implementation may keep its own `.gitignore` beside this one;
+# implementations/typescript does, for what Yarn writes.
+
+# .NET: build outputs and test results, under every project
+bin/
+obj/
+TestResults/
+*.user
+.vs/
+
+# TypeScript: dependencies, builds, test and coverage reports
+node_modules/
+dist/
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Python: the spec's generators leave their bytecode beside them
+__pycache__/
+*.py[cod]
+
+# Editors and systems
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# What this clone keeps for itself and never commits: the working notes and plans of its sessions
+.claude/local/
+
+# What a single Claude session leaves behind: its local settings and its worktrees. The rest of
+# .claude/ is shared and committed.
+.claude/settings.local.json
+.claude/worktrees/

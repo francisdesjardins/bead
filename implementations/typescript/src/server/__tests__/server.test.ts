@@ -1,0 +1,866 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+import { expect, test } from '@playwright/test';
+import { createRouterServer } from '../../router/server/router-server';
+import { createSessionManager } from '../../router/server/session-manager';
+import { EnvelopeKind } from '../../router/shared/constants';
+import { bytesOf, readEnvelope } from '../../router/shared/envelope';
+import { toSessionToken } from '../../router/shared/identifiers';
+import { createServiceManager } from '../../router/shared/service-manager';
+import type { IRouterServerOptions } from '../../router/server/types';
+import type { Envelope, IProcedure, IServiceManagerOptions } from '../../router/shared/types';
+import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
+import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import { createEmitter } from '../../transport/shared/emitter';
+import { ProgrammerError } from '../../transport/shared/errors';
+import type { Data } from '../../transport/shared/types';
+import {
+  CLIENT_FAILURES,
+  createServer,
+  DisconnectError,
+  ProtocolCode,
+  TimeoutError,
+  type IServerOptions,
+  type IServerTransportLike,
+} from '../server';
+
+// helpers
+
+type Handle = TransportServerConnectionHandle;
+
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+const text = {
+  decode: (bytes: Uint8Array) => {
+    return decoder.decode(bytes);
+  },
+  encode: (value: string) => {
+    return encoder.encode(value);
+  },
+};
+
+const openSession: IProcedure = {
+  procedureId: 1,
+  procedureName: 'openSession',
+  serviceId: 1,
+  serviceRevision: 1,
+};
+const echo: IProcedure = {
+  procedureId: 2,
+  procedureName: 'echo',
+  serviceId: 1,
+  serviceRevision: 1,
+};
+
+/** A transport server that records what it sends and closes, and hands on what a test delivers. */
+const createScriptedTransport = () => {
+  const emitter = createEmitter<{
+    close: [wasClean: boolean, connectionHandle: Handle];
+    connection: [socket: unknown, request: unknown, connectionHandle: Handle];
+    message: [data: Data, connectionHandle: Handle];
+  }>();
+  const sent: { connectionHandle: Handle; envelope: Envelope | undefined }[] = [];
+  // the client's call ids, odd, one after the other
+  const nextCallId = callIdsOf('client');
+  const closed: Handle[] = [];
+  const control = {
+    closeError: undefined as Error | undefined,
+    /** What a close waits on before it settles, when set. */
+    closeHold: undefined as Promise<void> | undefined,
+    /** What a close resolves to: `false` for a connection the transport no longer holds. */
+    closeResult: true,
+    stops: 0,
+  };
+
+  const transport: IServerTransportLike = {
+    off: emitter.off,
+    on: emitter.on,
+    close: async (connectionHandle) => {
+      closed.push(connectionHandle);
+      await control.closeHold;
+
+      if (control.closeError !== undefined) {
+        throw control.closeError;
+      }
+
+      return control.closeResult;
+    },
+    send: (data, connectionHandle) => {
+      sent.push({
+        connectionHandle,
+        envelope: readEnvelope(bytesOf(data), {
+          failures: CLIENT_FAILURES,
+          maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+        }),
+      });
+
+      return Promise.resolve();
+    },
+    stop: () => {
+      control.stops += 1;
+
+      return Promise.resolve();
+    },
+  };
+
+  /** A request for `procedure` from `connectionHandle`, on the next of the client's call ids. */
+  // a request of `procedure`'s, one that opens a subscription when `opensSubscription` says so
+  const ask = (
+    connectionHandle: Handle,
+    { opensSubscription, procedure }: { opensSubscription?: true; procedure: IProcedure }
+  ) => {
+    emitter.emit(
+      'message',
+      envelopeOf({
+        header: {
+          callId: nextCallId(),
+          kind: EnvelopeKind.REQUEST,
+          opensSubscription,
+          procedureId: procedure.procedureId,
+          serviceId: procedure.serviceId,
+        },
+        kind: EnvelopeKind.REQUEST,
+        payload: text.encode('hi'),
+      }),
+      connectionHandle
+    );
+  };
+
+  const open = (connectionHandle: Handle) => {
+    emitter.emit('connection', {}, {}, connectionHandle);
+  };
+
+  return { ask, closed, control, emitter, open, sent, transport };
+};
+
+/** A server whose `openSession` stores a session with `timeouts`, and whose `echo` needs one. */
+const createSessionServer = (
+  timeouts: { connectionInactivityTimeout: number; sessionInactivityTimeout: number },
+  options?: IServerOptions
+) => {
+  const scripted = createScriptedTransport();
+  const server = createServer({ transport: scripted.transport }, options);
+
+  server.services.getRequestResolver(openSession, { serializer: text })((request, response) => {
+    const session = server.sessions.set({
+      ...server.sessions.create(request.connectionHandle),
+      ...timeouts,
+    });
+
+    return response(session.sessionToken ?? '');
+  });
+  server.services.getRequestResolver(echo, {
+    beforeRequest: server.requireSession,
+    serializer: text,
+  })((request, response) => {
+    return response(request.payload);
+  });
+
+  return { ...scripted, server };
+};
+
+const forever = { connectionInactivityTimeout: Infinity, sessionInactivityTimeout: Infinity };
+
+/** A procedure nobody answers: a request for it passes no `beforeRequest`. */
+const unknown: IProcedure = { ...echo, procedureId: 99, procedureName: 'unknown' };
+
+// definition
+
+test.describe('createServer', () => {
+  test('builds each layer on the one under it, the router with the sessions’ tokens', async () => {
+    const { open, transport } = createScriptedTransport();
+    const built: unknown[] = [];
+    const sessions = createSessionManager();
+    let builtRouter: unknown;
+    let routerOptions: IRouterServerOptions | undefined;
+    let servicesOptions: IServiceManagerOptions<Handle> | undefined;
+
+    await using server = createServer(
+      {
+        router: (below, options) => {
+          const router = createRouterServer(below, options);
+
+          built.push(['router', below === transport]);
+          builtRouter = router;
+          routerOptions = options;
+
+          return router;
+        },
+        services: (below, options) => {
+          built.push(['services', below === builtRouter]);
+          servicesOptions = options;
+
+          return createServiceManager(below, options);
+        },
+        sessions: () => {
+          built.push(['sessions']);
+
+          return sessions;
+        },
+        transport,
+      },
+      { closeOnCommandTimeout: true, limits: { maximumPayloadBytes: 8 } }
+    );
+
+    expect(built).toEqual([['sessions'], ['router', true], ['services', true]]);
+    // the router is built with the server's limits, and relays to a session alone unless told
+    expect(routerOptions?.limits).toEqual({ maximumPayloadBytes: 8 });
+    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireSession });
+    expect(server.router).toBe(builtRouter);
+    expect(server.sessions).toBe(sessions);
+    expect(server.transport).toBe(transport);
+
+    // the router reads each connection's token from the sessions; the services close through the server
+    open(first);
+    sessions.set({
+      ...sessions.create(first),
+      sessionToken: toSessionToken(new Uint8Array(16).fill(4)),
+    });
+
+    expect(routerOptions?.sessionTokenOf?.(first)).toBe(toSessionToken(new Uint8Array(16).fill(4)));
+    expect(servicesOptions?.closeConnection).toBeInstanceOf(Function);
+    expect(servicesOptions?.defaults).toEqual({ closeOnTimeout: true });
+  });
+
+  test('a session is made by a request, and its connection learns the token once', async () => {
+    const { ask, sent, server: sessionServer } = createSessionServer(forever);
+
+    await using server = sessionServer;
+
+    // without a session, only the procedure that opens one answers
+    ask(first, { procedure: echo });
+    ask(first, { procedure: openSession });
+    await sleep(0);
+    ask(first, { procedure: echo });
+    await sleep(0);
+
+    const sessionToken = server.sessions.sessionTokenOf(first);
+
+    expect(sessionToken).toBeDefined();
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.header, envelope.failure.code]
+          : [
+              envelope?.header,
+              text.decode(
+                envelope !== undefined && 'payload' in envelope
+                  ? envelope.payload
+                  : new Uint8Array(0)
+              ),
+            ];
+      })
+    ).toEqual([
+      [{ callId: 1, kind: EnvelopeKind.FAILURE }, ProtocolCode.SESSION_REQUIRED],
+      [{ callId: 3, kind: EnvelopeKind.RESULT, sessionToken }, sessionToken],
+      [{ callId: 5, kind: EnvelopeKind.RESULT }, 'hi'],
+    ]);
+  });
+
+  test('the end of a session is announced on the next answer, and a session replaced is announced', async () => {
+    const { ask, sent, server: sessionServer } = createSessionServer(forever);
+    const closeSession: IProcedure = { ...echo, procedureId: 3, procedureName: 'closeSession' };
+
+    await using server = sessionServer;
+
+    server.services.getRequestResolver(closeSession, { serializer: text })((request, response) => {
+      // deleted before it answers, so its answer announces the end
+      server.sessions.delete(request.connectionHandle);
+
+      return response('bye');
+    });
+
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const opened = server.sessions.sessionTokenOf(first);
+
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const replaced = server.sessions.sessionTokenOf(first);
+
+    ask(first, { procedure: closeSession });
+    ask(first, { procedure: echo });
+    await sleep(0);
+
+    expect(replaced).not.toBe(opened);
+    expect(
+      sent.map(({ envelope }) => {
+        const header = envelope?.header as { sessionToken?: unknown } | undefined;
+
+        return header !== undefined && 'sessionToken' in header ? header.sessionToken : 'none';
+      })
+    ).toEqual([opened, replaced, null, 'none']);
+  });
+
+  test('requireSession refuses a connection without a session, with SESSION_REQUIRED', async () => {
+    const { open, transport } = createScriptedTransport();
+
+    await using server = createServer({ transport });
+
+    open(first);
+
+    expect(server.requireSession({ connectionHandle: first })).toBe(false);
+    expect(server.requireSession.refusal).toBe(server.router.failures.sessionRequired);
+
+    server.sessions.set({ ...server.sessions.create(first), ...forever });
+
+    expect(server.requireSession({ connectionHandle: first })).toBe(true);
+  });
+
+  test('each message is activity: a connection that speaks keeps going, a silent one is closed', async () => {
+    const {
+      ask,
+      closed,
+      emitter,
+      server: sessionServer,
+    } = createSessionServer({
+      connectionInactivityTimeout: 80,
+      sessionInactivityTimeout: Infinity,
+    });
+
+    await using server = sessionServer;
+
+    ask(first, { procedure: openSession });
+
+    // requests for a procedure nobody answers, and a message that is not an envelope: activity all
+    // the same
+    for (let count = 0; count < 3; count += 1) {
+      await sleep(40);
+
+      if (count === 1) {
+        emitter.emit('message', Uint8Array.of(0x0a, 0x02), first);
+      } else {
+        ask(first, { procedure: unknown });
+      }
+    }
+
+    expect(closed).toEqual([]);
+    expect(server.sessions.has(first)).toBe(true);
+
+    await sleep(160);
+
+    expect(closed).toEqual([first]);
+  });
+
+  test('a session unused past its timeout ends, and its connection stays', async () => {
+    const {
+      ask,
+      closed,
+      server: sessionServer,
+    } = createSessionServer({
+      connectionInactivityTimeout: Infinity,
+      sessionInactivityTimeout: 40,
+    });
+
+    await using server = sessionServer;
+
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    expect(server.sessions.has(first)).toBe(true);
+
+    await sleep(100);
+
+    expect(server.sessions.has(first)).toBe(false);
+    expect(closed).toEqual([]);
+  });
+
+  test('a session that ended leaves its connection its connection timeout', async () => {
+    const {
+      ask,
+      closed,
+      server: sessionServer,
+    } = createSessionServer({ connectionInactivityTimeout: 100, sessionInactivityTimeout: 30 });
+
+    await using server = sessionServer;
+
+    ask(first, { procedure: openSession });
+    await sleep(60);
+
+    expect(server.sessions.has(first)).toBe(false);
+    expect(closed).toEqual([]);
+
+    await sleep(100);
+
+    expect(closed).toEqual([first]);
+  });
+
+  test('a session that ended takes its connection’s subscriptions: nothing more reaches it', async () => {
+    const {
+      ask,
+      closed,
+      sent,
+      server: sessionServer,
+    } = createSessionServer({
+      connectionInactivityTimeout: Infinity,
+      sessionInactivityTimeout: 30,
+    });
+    const news: IProcedure = { ...echo, procedureId: 5, procedureName: 'news' };
+
+    await using server = sessionServer;
+
+    const resolver = server.services.getNotificationResolver(news, {
+      beforeRequest: server.requireSession,
+      serializer: { ...text, encodeNotification: text.encode },
+    })((_request, response) => {
+      return response('');
+    });
+
+    ask(first, { procedure: openSession });
+    ask(first, { opensSubscription: true, procedure: news });
+    await sleep(0);
+
+    expect([...server.router.notifications.candidates(news).keys()]).toEqual([first]);
+
+    await sleep(60);
+
+    // the session's end ended the subscription, with a failure that announced it
+    expect(
+      sent.slice(-1).map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.header, envelope.failure.code]
+          : envelope;
+      })
+    ).toEqual([
+      [
+        { callId: 3, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        ProtocolCode.SESSION_REQUIRED,
+      ],
+    ]);
+
+    sent.length = 0;
+    await resolver.notify('flash');
+
+    expect(server.sessions.has(first)).toBe(false);
+    expect(server.router.notifications.subscriptions()).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(closed).toEqual([]);
+  });
+
+  test('a connection that never opens a session is closed once silent, when the server says how long', async () => {
+    const quiet = createScriptedTransport();
+    const told = createScriptedTransport();
+
+    await using server = createServer(
+      { transport: told.transport },
+      { connectionInactivityTimeout: 60 }
+    );
+    await using untold = createServer({ transport: quiet.transport });
+
+    for (const { open } of [told, quiet]) {
+      open(first);
+    }
+
+    // a message is activity, with a session or without one
+    await sleep(40);
+    told.ask(first, { procedure: unknown });
+    await sleep(40);
+
+    expect(told.closed).toEqual([]);
+
+    await sleep(60);
+
+    expect(told.closed).toEqual([first]);
+    expect(quiet.closed).toEqual([]);
+    expect([server.sessions.getAll(), untold.sessions.getAll()]).toEqual([[], []]);
+  });
+
+  test('a session stored once its connection closed goes at once, and a new connection of that handle has none', async () => {
+    const { ask, emitter, open, transport } = createScriptedTransport();
+    const gate = Promise.withResolvers<undefined>();
+
+    await using server = createServer({ transport });
+
+    server.services.getRequestResolver(openSession, { serializer: text })(
+      async (request, response) => {
+        // a credential check, say, while the client leaves
+        await gate.promise;
+        server.sessions.set({ ...server.sessions.create(request.connectionHandle), ...forever });
+
+        return response('');
+      }
+    );
+
+    ask(first, { procedure: openSession });
+    emitter.emit('close', false, first);
+    gate.resolve(undefined);
+    await sleep(0);
+
+    expect(server.sessions.getAll()).toEqual([]);
+
+    open(first);
+
+    expect(server.requireSession({ connectionHandle: first })).toBe(false);
+  });
+
+  test('a close that finds the connection gone already takes its session all the same', async () => {
+    const {
+      ask,
+      closed,
+      control,
+      server: sessionServer,
+    } = createSessionServer({
+      connectionInactivityTimeout: 20,
+      sessionInactivityTimeout: Infinity,
+    });
+
+    await using server = sessionServer;
+
+    control.closeResult = false;
+    ask(first, { procedure: openSession });
+    await sleep(60);
+
+    expect(closed).toEqual([first]);
+    expect(server.sessions.has(first)).toBe(false);
+  });
+
+  test('a command whose timeout passes is cancelled before its connection is closed', async () => {
+    const { ask, transport } = createScriptedTransport();
+    const order: string[] = [];
+    const close = transport.close.bind(transport);
+    const send = transport.send.bind(transport);
+    const ping = { ...echo, procedureId: 3, procedureName: 'ping' };
+
+    transport.close = (connectionHandle) => {
+      order.push('close');
+
+      return close(connectionHandle);
+    };
+    transport.send = (data, connectionHandle) => {
+      const envelope = readEnvelope(bytesOf(data), {
+        failures: CLIENT_FAILURES,
+        maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+      });
+
+      order.push(envelope?.kind === EnvelopeKind.CANCEL ? 'cancel' : 'other');
+
+      return send(data, connectionHandle);
+    };
+
+    await using server = createServer({ transport }, { closeOnCommandTimeout: true });
+
+    ask(first, { procedure: openSession });
+
+    await expect(
+      server.services.getCommand(ping, { serializer: text })('ping')({
+        connectionHandle: first,
+        timeout: 10,
+      })
+    ).rejects.toBeInstanceOf(TimeoutError);
+    expect(
+      order.filter((step) => {
+        return step !== 'other';
+      })
+    ).toEqual(['cancel', 'close']);
+  });
+
+  test('a connection is asked to close once, however many times it earns it', async () => {
+    const { ask, closed, control, transport } = createScriptedTransport();
+    const release = Promise.withResolvers<undefined>();
+    const ping = { ...echo, procedureId: 3, procedureName: 'ping' };
+
+    await using server = createServer({ transport }, { closeOnCommandTimeout: true });
+
+    control.closeHold = release.promise.then(() => {
+      return undefined;
+    });
+    ask(first, { procedure: openSession });
+
+    const command = server.services.getCommand(ping, { serializer: text })('ping');
+
+    await Promise.all(
+      [
+        command({ connectionHandle: first, timeout: 10 }),
+        command({ connectionHandle: first, timeout: 10 }),
+      ].map((answering) => {
+        return answering.catch(() => {
+          return undefined;
+        });
+      })
+    );
+
+    expect(closed).toEqual([first]);
+
+    release.resolve(undefined);
+  });
+
+  test('a connection that closes takes its session, and a close that fails is reported', async () => {
+    const {
+      ask,
+      control,
+      emitter,
+      server: sessionServer,
+    } = createSessionServer({
+      connectionInactivityTimeout: 30,
+      sessionInactivityTimeout: Infinity,
+    });
+    const errors: [Error, string][] = [];
+
+    await using server = sessionServer;
+
+    server.router.on('error', (error, connectionHandle) => {
+      errors.push([error, connectionHandle]);
+    });
+
+    ask(first, { procedure: openSession });
+    await sleep(0);
+    emitter.emit('close', true, first);
+
+    expect(server.sessions.has(first)).toBe(false);
+
+    ask(first, { procedure: openSession });
+    control.closeError = new Error('refused');
+    await sleep(80);
+
+    expect(errors).toEqual([[control.closeError, first]]);
+  });
+
+  test('a command unanswered in time closes its connection, as the server’s default or the command says', async () => {
+    const { ask, closed, transport } = createScriptedTransport();
+    const ping = { ...echo, procedureId: 3, procedureName: 'ping' };
+    const command = (server: ReturnType<typeof createServer>, closeOnTimeout?: boolean) => {
+      return server.services
+        .getCommand(ping, { serializer: text })('ping')({
+          closeOnTimeout,
+          connectionHandle: first,
+          timeout: 10,
+        })
+        .catch((reason: unknown) => {
+          return reason;
+        });
+    };
+
+    {
+      await using server = createServer({ transport }, { closeOnCommandTimeout: true });
+
+      // a connection the router knows, which never answers
+      ask(first, { procedure: openSession });
+
+      expect(await command(server)).toBeInstanceOf(TimeoutError);
+      expect(await command(server, false)).toBeInstanceOf(TimeoutError);
+      expect(closed).toEqual([first]);
+    }
+
+    closed.length = 0;
+
+    {
+      await using server = createServer({ transport });
+
+      ask(first, { procedure: openSession });
+
+      await command(server);
+
+      expect(closed).toEqual([]);
+
+      await command(server, true);
+
+      expect(closed).toEqual([first]);
+    }
+  });
+
+  test('dispose lets go of the sessions’ events too, and a resolver that finishes after it stores nothing', async () => {
+    const { ask, transport } = createScriptedTransport();
+    const inner = createSessionManager();
+    const offs: string[] = [];
+    const sessions: typeof inner = {
+      ...inner,
+      off: (event, listener) => {
+        offs.push(event);
+        inner.off(event, listener);
+
+        return sessions;
+      },
+    };
+    const gate = Promise.withResolvers<undefined>();
+    const server = createServer({
+      sessions: () => {
+        return sessions;
+      },
+      transport,
+    });
+
+    server.services.getRequestResolver(openSession, { serializer: text })(
+      async (request, response) => {
+        await gate.promise;
+        server.sessions.set({ ...server.sessions.create(request.connectionHandle), ...forever });
+
+        return response('');
+      }
+    );
+
+    ask(first, { procedure: openSession });
+    await server[Symbol.asyncDispose]();
+    gate.resolve(undefined);
+    await sleep(0);
+
+    expect(offs.toSorted()).toEqual([
+      'connectionInactivityTimeoutReached',
+      'created',
+      'deleted',
+      'sessionInactivityTimeoutReached',
+    ]);
+    expect(inner.getAll()).toEqual([]);
+  });
+
+  test('relays as its options say, its own admission and timeout kept, requireSession where it gives none', async () => {
+    const beforeRoute = () => {
+      return true;
+    };
+    const relays: unknown[] = [];
+    const serverOf = (relay: IServerOptions['relay']) => {
+      return createServer(
+        {
+          router: (below, options) => {
+            relays.push(options.relay);
+
+            return createRouterServer(below, options);
+          },
+          transport: createScriptedTransport().transport,
+        },
+        { relay }
+      );
+    };
+
+    await using server = serverOf({ beforeRoute, timeout: 250 });
+    await using timed = serverOf({ timeout: 250 });
+
+    expect(relays).toEqual([
+      { beforeRoute, timeout: 250 },
+      { beforeRoute: timed.requireSession, timeout: 250 },
+    ]);
+    expect(server.router.destinations()).toEqual([]);
+  });
+
+  test('limits that do not hold together refuse the server, which leaves nothing on its transport', () => {
+    const { emitter, transport } = createScriptedTransport();
+
+    expect(() => {
+      return createServer({ transport }, { limits: { chunkBytes: 63 } });
+    }).toThrow(ProgrammerError);
+    expect(
+      (['close', 'connection', 'message'] as const).map((event) => {
+        return emitter.listenerCount(event);
+      })
+    ).toEqual([0, 0, 0]);
+  });
+
+  test('a negative inactivity timeout refuses the server, which leaves nothing on its transport', () => {
+    const { emitter, transport } = createScriptedTransport();
+
+    expect(() => {
+      return createServer({ transport }, { connectionInactivityTimeout: -2_000 });
+    }).toThrow(ProgrammerError);
+    expect(
+      (['close', 'connection', 'message'] as const).map((event) => {
+        return emitter.listenerCount(event);
+      })
+    ).toEqual([0, 0, 0]);
+  });
+
+  test('dispose stops the timer of a connection with no session: nothing is closed after it', async () => {
+    const { closed, open, transport } = createScriptedTransport();
+    const server = createServer({ transport }, { connectionInactivityTimeout: 20 });
+
+    open(first);
+    await server[Symbol.asyncDispose]();
+    await sleep(50);
+
+    expect(closed).toEqual([]);
+  });
+
+  test('dispose lets go of the transport, rejects what waits, forgets the sessions, and stops', async () => {
+    const { ask, control, emitter, server } = createSessionServer(forever);
+
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const waiting = server.services.getCommand(echo, { serializer: text })('ping')({
+      connectionHandle: first,
+    });
+
+    await server[Symbol.asyncDispose]();
+
+    await expect(waiting).rejects.toBeInstanceOf(DisconnectError);
+    expect(server.sessions.has(first)).toBe(false);
+    expect(control.stops).toBe(1);
+    expect(
+      (['close', 'connection', 'message'] as const).map((event) => {
+        return emitter.listenerCount(event);
+      })
+    ).toEqual([0, 0, 0]);
+  });
+
+  test.describe('gauges and health', () => {
+    test('count each layer, set against the connections it holds when its transport counts none, back to nothing as each closes', async () => {
+      const { ask, emitter, open, server } = createSessionServer(forever);
+
+      open(first);
+
+      // no session yet: idle, until its timeout closes it
+      expect(server.gauges().server.counts).toEqual({ closing: 0, connections: 1, idle: 1 });
+
+      ask(first, { procedure: openSession });
+      await expect
+        .poll(() => {
+          return server.sessions.has(first);
+        })
+        .toBe(true);
+
+      const gauges = server.gauges();
+
+      expect([gauges.server, gauges.sessions, gauges.transport]).toEqual([
+        {
+          anomalies: [],
+          ceilings: {},
+          counts: { closing: 0, connections: 1, idle: 0 },
+          orphans: 0,
+        },
+        { anomalies: [], ceilings: {}, counts: { sessions: 1, timedConnections: 1 }, orphans: 0 },
+        { anomalies: [], ceilings: {}, counts: {}, orphans: 0 },
+      ]);
+      expect(gauges.router.counts).toMatchObject({ connections: 1, pendingCalls: 0 });
+      expect(server.health().status).toBe('pass');
+
+      emitter.emit('close', true, first);
+
+      expect(server.gauges().server.counts).toEqual({ closing: 0, connections: 0, idle: 0 });
+      expect(server.gauges().sessions.counts).toEqual({ sessions: 0, timedConnections: 0 });
+      expect(server.health().status).toBe('pass');
+      await server[Symbol.asyncDispose]();
+    });
+
+    test('fail what a layer keeps for a connection the transport does not hold, and say why', async () => {
+      const { server } = createSessionServer(forever);
+      const gone: Handle = 'type=WS;ip=127.0.0.1;port=50009';
+
+      // a timer set by hand for a connection that is not there
+      server.sessions.timers.setConnectionInactivityTimeout(
+        setTimeout(() => {}, 1_000),
+        gone
+      );
+
+      const { checks, status } = server.health();
+
+      expect([status, checks['sessions:orphans'], checks['sessions:anomalies']]).toEqual([
+        'fail',
+        [
+          {
+            observedValue: 1,
+            output: '1 connections kept that the transport no longer holds',
+            status: 'fail',
+          },
+        ],
+        [{ observedValue: 1, output: '1 connections keep timers with no session', status: 'fail' }],
+      ]);
+
+      server.sessions.timers.delete(gone);
+
+      expect(server.health().status).toBe('pass');
+      await server[Symbol.asyncDispose]();
+    });
+  });
+});

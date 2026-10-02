@@ -1,0 +1,229 @@
+import { expect, test } from '@playwright/test';
+import { GenericError } from '../../../transport/shared/errors';
+import { CLIENT_FAILURES, FailureScope, ProtocolCode, SERVER_FAILURES } from '../constants';
+import { DisconnectError, FailureError, failureErrorOf, redactHeader } from '../errors';
+import { toSessionToken } from '../identifiers';
+import type { IFailureHeader, IResultHeader } from '../types';
+
+// definition
+
+test.describe('DisconnectError', () => {
+  test('is a GenericError of its own name', () => {
+    const error = new DisconnectError('closed before the answer');
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect(error.name).toBe('DisconnectError');
+    expect(error.message).toBe('closed before the answer');
+  });
+});
+test.describe('FailureError', () => {
+  const token = toSessionToken(new Uint8Array(16).fill(7));
+
+  test('carries the failure and where it belongs, and keeps a redacted copy of the header', () => {
+    const header: IFailureHeader = { callId: 3, kind: 0x12, sessionToken: token };
+    const cause = new Error('underneath');
+    const error = new FailureError(
+      {
+        ...SERVER_FAILURES.procedureUnknown,
+        detail: 'no procedure 1 in service 2',
+        origin: 'peer',
+      },
+      { cause, destinationId: 5, header, procedureAddress: { procedureId: 1, serviceId: 2 } }
+    );
+
+    header.callId = 99;
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect(error.name).toBe('FailureError');
+    expect(error).toMatchObject({
+      code: 19,
+      destinationId: 5,
+      detail: 'no procedure 1 in service 2',
+      hops: 0,
+      origin: 'peer',
+      procedureAddress: { procedureId: 1, serviceId: 2 },
+      scope: FailureScope.PROTOCOL,
+      side: 'server',
+    });
+    expect(error.header).toEqual({ callId: 3, hasSessionToken: true, kind: 0x12 });
+    expect(error.header).not.toHaveProperty('sessionToken');
+    expect(JSON.stringify(error)).not.toContain(token);
+    expect(error.cause).toBe(cause);
+  });
+
+  test('is local, with no hop, no detail and nothing it belongs to, when not told', () => {
+    const error = new FailureError(CLIENT_FAILURES.payloadTooLarge);
+
+    expect(error).toMatchObject({
+      code: 34,
+      destinationId: undefined,
+      detail: '',
+      header: undefined,
+      hops: 0,
+      origin: 'local',
+      procedureAddress: undefined,
+      side: 'client',
+    });
+    expect(error.message).toBe('local client protocol failure 34 PAYLOAD_TOO_LARGE');
+  });
+
+  test('says what it is', () => {
+    expect(
+      new FailureError({
+        ...SERVER_FAILURES.procedureUnknown,
+        detail: 'no procedure 1 in service 2',
+        origin: 'peer',
+      }).message
+    ).toBe('server protocol failure 19 PROCEDURE_UNKNOWN: no procedure 1 in service 2');
+    expect(
+      new FailureError(
+        {
+          code: 21,
+          detail: 'out of range',
+          origin: 'peer',
+          scope: FailureScope.APPLICATION,
+          side: 'server',
+        },
+        { procedureAddress: { procedureId: 1, serviceId: 2 } }
+      ).message
+    ).toBe('server application failure 21 (service 2, procedure 1): out of range');
+    expect(
+      new FailureError({
+        code: 21,
+        origin: 'peer',
+        scope: FailureScope.APPLICATION,
+        side: 'client',
+      }).message
+    ).toBe('client application failure 21');
+    expect(
+      new FailureError({ code: 18, hops: 1, origin: 'relayed', scope: FailureScope.PROTOCOL })
+        .message
+    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, relayed 1 hop');
+    expect(
+      new FailureError({
+        code: 18,
+        detail: 'gone',
+        hops: 2,
+        origin: 'relayed',
+        scope: FailureScope.PROTOCOL,
+      }).message
+    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, relayed 2 hops: gone');
+    // a code no name is known for stays a number
+    expect(
+      new FailureError({ code: 23, origin: 'peer', scope: FailureScope.PROTOCOL, side: 'server' })
+        .message
+    ).toBe('server protocol failure 23');
+    // an empty detail says nothing
+    expect(new FailureError({ ...SERVER_FAILURES.accessDenied, detail: '' }).message).toBe(
+      'local server protocol failure 33 ACCESS_DENIED'
+    );
+  });
+
+  test('"isProtocol" matches the protocol codes, and the side when given; through a relay, the code alone', () => {
+    const error = new FailureError({ ...SERVER_FAILURES.serviceUnknown, origin: 'peer' });
+
+    expect(error.isProtocol(ProtocolCode.SERVICE_UNKNOWN)).toBe(true);
+    expect(error.isProtocol([ProtocolCode.PROCEDURE_UNKNOWN, ProtocolCode.SERVICE_UNKNOWN])).toBe(
+      true
+    );
+    expect(error.isProtocol(ProtocolCode.PROCEDURE_UNKNOWN)).toBe(false);
+    expect(error.isProtocol(ProtocolCode.SERVICE_UNKNOWN, 'server')).toBe(true);
+    expect(error.isProtocol(ProtocolCode.SERVICE_UNKNOWN, 'client')).toBe(false);
+    expect(error.isApplication()).toBe(false);
+
+    const relayed = new FailureError({
+      code: 18,
+      hops: 1,
+      origin: 'relayed',
+      scope: FailureScope.PROTOCOL,
+    });
+
+    // its scope travelled with it; who raised it did not
+    expect(relayed.isProtocol(ProtocolCode.SERVICE_UNKNOWN)).toBe(true);
+    expect(relayed.isProtocol(ProtocolCode.PROCEDURE_UNKNOWN)).toBe(false);
+    expect(relayed.isProtocol(ProtocolCode.SERVICE_UNKNOWN, 'server')).toBe(false);
+    expect(relayed.isProtocol(ProtocolCode.SERVICE_UNKNOWN, 'client')).toBe(false);
+  });
+
+  test('"isApplication" matches the procedure’s own codes, never a protocol code of the same number', () => {
+    const error = new FailureError({ code: 21, scope: FailureScope.APPLICATION, side: 'server' });
+
+    expect(error.isApplication()).toBe(true);
+    expect(error.isApplication(21)).toBe(true);
+    expect(error.isApplication([7, 21])).toBe(true);
+    expect(error.isApplication(7)).toBe(false);
+    expect(error.isProtocol(ProtocolCode.SUBSCRIPTION_UNKNOWN)).toBe(false);
+
+    const protocol = new FailureError(SERVER_FAILURES.subscriptionUnknown);
+
+    expect(protocol.isApplication()).toBe(false);
+    expect(protocol.isApplication(21)).toBe(false);
+  });
+});
+
+test.describe('failureErrorOf', () => {
+  const header: IFailureHeader = { callId: 3, kind: 0x12 };
+
+  test('is the peer’s, of the other side, with no hop', () => {
+    const fromServer = failureErrorOf(
+      { code: 19, detail: '', hops: 0, scope: FailureScope.PROTOCOL },
+      {
+        destinationId: 4,
+        failures: CLIENT_FAILURES,
+        header,
+        procedureAddress: { procedureId: 1, serviceId: 2 },
+      }
+    );
+
+    expect(fromServer).toMatchObject({
+      destinationId: 4,
+      origin: 'peer',
+      procedureAddress: { procedureId: 1, serviceId: 2 },
+      side: 'server',
+    });
+    expect(fromServer.header).toEqual({ callId: 3, hasSessionToken: false, kind: 0x12 });
+    expect(
+      failureErrorOf(
+        { code: 19, detail: '', hops: 0, scope: FailureScope.PROTOCOL },
+        { failures: SERVER_FAILURES, header }
+      ).side
+    ).toBe('client');
+  });
+
+  test('is of no known side through a relay, and names where its call went', () => {
+    const relayed = failureErrorOf(
+      { code: 18, detail: '', hops: 1, scope: FailureScope.PROTOCOL },
+      { destinationId: 4, failures: CLIENT_FAILURES, header }
+    );
+
+    expect(relayed).toMatchObject({
+      destinationId: 4,
+      hops: 1,
+      origin: 'relayed',
+      side: undefined,
+    });
+  });
+});
+
+test.describe('redactHeader', () => {
+  test('leaves the token out and says whether there was one', () => {
+    const token = toSessionToken(new Uint8Array(16).fill(9));
+    const result: IResultHeader = { callId: 2, kind: 0x11, sessionToken: token };
+
+    expect(redactHeader(result)).toEqual({ callId: 2, hasSessionToken: true, kind: 0x11 });
+    // an ended session is announced, but names none
+    expect(redactHeader({ ...result, sessionToken: null })).toEqual({
+      callId: 2,
+      hasSessionToken: false,
+      kind: 0x11,
+    });
+    expect(redactHeader({ callId: 3, kind: 0x13 })).toEqual({
+      callId: 3,
+      hasSessionToken: false,
+      kind: 0x13,
+    });
+    expect(
+      redactHeader({ callId: 1, kind: 0x10, procedureId: 1, serviceId: 2, sessionToken: token })
+    ).toEqual({ callId: 1, hasSessionToken: true, kind: 0x10, procedureId: 1, serviceId: 2 });
+  });
+});

@@ -1,0 +1,13 @@
+{
+  // The shared strictness is [tsconfig.base.json](./tsconfig.base.json) beside this file.
+  //
+  // No `jsx` and no `allowImportingTsExtensions`: nothing here renders, which is this package's
+  // entry rule rather than an omission.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "demo/**/*", "interop/**/*", "playwright.config.ts"],
+  "exclude": ["node_modules"]
+}

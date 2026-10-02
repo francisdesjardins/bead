@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bead over WebSocket, on Kestrel: what Bead's ws-transport-server is, on ASP.NET Core. -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Transport.WebSockets</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Core/Bead.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the tests see each application a start builds, and give a connection a socket of theirs -->
+    <InternalsVisibleTo Include="Bead.Transport.WebSockets.Tests" />
+  </ItemGroup>
+</Project>

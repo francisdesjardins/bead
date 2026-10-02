@@ -1,0 +1,110 @@
+// interfaces
+
+export interface ICreatePromiseOptions {
+  /** Milliseconds to wait before the executor runs. */
+  delay?: number | undefined;
+  /**
+   * Aborting it rejects with a {@link CancelError} carrying the signal's reason; one already aborted
+   * does so without running the executor.
+   */
+  signal?: AbortSignal | undefined;
+  /**
+   * Milliseconds the executor gets once the delay is over; the {@link TimeoutError} reports the
+   * delay and the timeout together. `0` or absent never times out.
+   */
+  timeout?: number | undefined;
+}
+
+export interface IEmitter<E extends EmitterEventMap<E>> {
+  emit<K extends keyof E>(event: K, ...params: E[K]): boolean;
+  /** How many registrations `event` has: a `once` counts until it fires. */
+  listenerCount(event: keyof E): number;
+  off<K extends keyof E>(event: K, listener: EmitterListener<E[K]>): void;
+  on<K extends keyof E>(event: K, listener: EmitterListener<E[K]>): void;
+  once<K extends keyof E>(event: K, listener: EmitterListener<E[K]>): void;
+  removeAllListeners(event?: keyof E): void;
+}
+
+/** One `on` or `once` of one listener: the emitter counts registrations, not listeners. */
+export interface IEmitterRegistration<P extends unknown[]> {
+  hasFired: boolean;
+  isOnce: boolean;
+  listener: EmitterListener<P>;
+}
+
+export interface IEventIteratorOptions {
+  /** Aborting it ends the iteration, as a `break` would. */
+  signal?: AbortSignal | undefined;
+}
+
+/** The event half every transport end shares; each registration returns the end itself. */
+export interface IEventMethods<E extends EmitterEventMap<E>, End> {
+  emit<K extends keyof E>(event: K, ...params: E[K]): boolean;
+  /** Every `event` from now on, as its arguments, for `for await`. */
+  events<K extends keyof E>(
+    event: K,
+    options?: IEventIteratorOptions
+  ): AsyncIterableIterator<E[K], undefined>;
+  off<K extends keyof E>(event: K, listener: EmitterListener<E[K]>): End;
+  on<K extends keyof E>(event: K, listener: EmitterListener<E[K]>): End;
+  once<K extends keyof E>(event: K, listener: EmitterListener<E[K]>): End;
+  removeAllListeners(event?: keyof E): End;
+}
+
+/** The ready-state half every transport end shares. */
+export interface IReadyStateMethods {
+  isClosed(): boolean;
+  isClosing(): boolean;
+  isConnecting(): boolean;
+  isOpen(): boolean;
+  isReconnecting(): boolean;
+  isUninitialized(): boolean;
+}
+
+/**
+ * What a part holds right now, for diagnosis: each count by its name, the ceiling of a count that has
+ * one under the same name, the connections it keeps anything for, and each anomaly — what should never
+ * be — told in a sentence that names no connection, token or address.
+ */
+export interface IGauges<Handle extends string = string> {
+  readonly anomalies: readonly string[];
+  readonly ceilings: Readonly<Record<string, number>>;
+  readonly connectionHandles: ReadonlySet<Handle>;
+  readonly counts: Readonly<Record<string, number>>;
+}
+
+/** A message as a port or a worker's scope delivers it: its data, and the ports it carried. */
+export interface IWorkerMessageEventLike {
+  readonly data: unknown;
+  readonly ports: readonly IWorkerPortLike[];
+}
+
+/** The part of a `MessagePort` a worker transport touches — met by a browser's and by Node's. */
+export interface IWorkerPortLike {
+  addEventListener(type: 'message', listener: (event: IWorkerMessageEventLike) => void): void;
+  close(): void;
+  postMessage(message: unknown, transfer?: readonly unknown[]): void;
+  start(): void;
+}
+
+/** A moment, or a span between two, as milliseconds and as seconds plus microseconds. */
+export interface ITimestamp {
+  ms: number;
+  sec: number;
+  usec: number;
+}
+
+// types
+
+/** What a transport receives and sends: what a WebSocket, `ws` or a socket deliver. */
+export type Data = string | ArrayBuffer | ArrayBufferView | Blob;
+
+/** Event name → the arguments its listeners receive. */
+export type EmitterEventMap<E> = { [K in keyof E]: unknown[] };
+
+export type EmitterListener<P extends unknown[]> = (...params: P) => void;
+
+export type PromiseExecutor<T> = (
+  resolve: (value: T | PromiseLike<T>) => void,
+  reject: (reason: Error) => void
+) => void;

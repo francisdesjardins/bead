@@ -1,0 +1,1004 @@
+using System.Buffers.Binary;
+using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
+
+namespace Bead.Transport.Http;
+
+/// <summary>How an HTTP transport client holds its connection, and listens.</summary>
+public sealed record HttpTransportClientOptions
+{
+    /// <summary>
+    /// What its exchanges go through; a handler of its own when none, which follows no redirect. The
+    /// tests' way, as the TypeScript side's give it a <c>fetch</c>.
+    /// </summary>
+    public HttpMessageHandler? Handler { get; init; }
+
+    /// <summary>
+    /// How long it goes on listening again, its listens lost, before it counts its connection lost: 5
+    /// minutes by default, a server's own inactivity timeout; infinite for ever.
+    /// </summary>
+    public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Whether it listens for what the server sends of its own, once the server says it back at connect.</summary>
+    public bool IsListening { get; init; } = true;
+
+    /// <summary>The largest answer, and the largest envelope a batch brings, it reads: an envelope's limit by default.</summary>
+    public int? MaximumBodyBytes { get; init; }
+
+    /// <summary>How long it waits before it listens again after a listen that brought nothing: none by default.</summary>
+    public TimeSpan Pause { get; init; } = TimeSpan.Zero;
+
+    /// <summary>How long each listen asks the server to wait: 25 seconds by default, under a server's 30 and an intermediary's 60.</summary>
+    public TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(25);
+
+    /// <summary>What its timeouts and waits run on; the system's clock when none.</summary>
+    public TimeProvider? Time { get; init; }
+}
+
+/// <summary>Where a client connects — <c>http://host:port/pathname</c>, or <c>https://</c> when secured — and how long it waits.</summary>
+public sealed record HttpConnectOptions
+{
+    /// <summary>The server's host.</summary>
+    public required string Host { get; init; }
+
+    /// <summary>The server's port.</summary>
+    public required int Port { get; init; }
+
+    /// <summary>Whether the connection is over TLS.</summary>
+    public bool Secured { get; init; }
+
+    /// <summary>The path the server answers on, prefixed with a single leading slash.</summary>
+    public string Pathname { get; init; } = HttpTransport.Pathname;
+
+    /// <summary>How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds unless told; zero never times out.</summary>
+    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
+}
+
+/// <summary>
+/// A transport client over HTTP, on a connection the server draws for it: <see cref="Connect"/>
+/// posts no envelope and takes the token the server answers 201 with, each send posts one envelope
+/// with that token, and <see cref="CloseConnection"/> deletes the connection. A send settles on the
+/// head of its answer, so a caller knows whether the server had its envelope: a 2xx settles — the
+/// answer comes as a message when it does; a refusal the server marks fails, nothing having been
+/// tried, and the one that says the connection is gone closes it, once that failure is heard;
+/// anything else leaves the outcome unknown: it settles, and closes the connection, as a socket
+/// that drops does.
+/// </summary>
+/// <remarks>
+/// What the server sends of its own, a client that listens — the default, once the server says it
+/// back at connect — hears by a listen: a <c>GET</c> the server holds up to its wait, which brings
+/// back a batch, each envelope heard as it comes whole. A listen lost is listened again from where
+/// it was, at once, then later and later, drawn apart, until one reaches the server — or until its
+/// inactivity timeout has passed, which loses the connection. It goes from
+/// <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed, and
+/// connects again once Closed — or reconnects, with the options of its last connect.
+/// </remarks>
+public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposable
+{
+    private const int LengthBytes = 4;
+
+    // how long a disconnect waits on the server before it lets the connection go all the same
+    private static readonly TimeSpan DisconnectTimeout = TimeSpan.FromSeconds(5);
+
+    // how long it waits before listening again after its listens were lost: nothing after the first,
+    // then a second, twice as long each time, up to 30 — each drawn between half of it and all of it
+    private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan LastRetry = TimeSpan.FromSeconds(30);
+
+    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
+
+    private readonly HttpTransportClientOptions _options;
+    private readonly TimeProvider _time;
+    private readonly int _maximumBodyBytes;
+
+    // what every move from one state to another decides by
+    private readonly Lock _gate = new();
+    private volatile ReadyState _readyState = ReadyState.Uninitialized;
+    private HttpClient? _http;
+
+    // the options of the last connect its guard let through, which a reconnection connects with
+    private HttpConnectOptions? _lastConnectOptions;
+
+    // what aborts a connect under way: a dispose does
+    private CancellationTokenSource? _connecting;
+
+    // the connection the server drew; one this side let go of is none, and its end tells nothing
+    private Drawn? _drawn;
+    private Action? _reconnect;
+
+    /// <summary>
+    /// A transport client, not yet connected. A wait, a pause or an inactivity timeout no timer holds
+    /// is an <see cref="ArgumentOutOfRangeException"/>.
+    /// </summary>
+    public HttpTransportClient(HttpTransportClientOptions? options = null)
+    {
+        _options = options ?? new HttpTransportClientOptions();
+        AssertDelay((nameof(HttpTransportClientOptions.InactivityTimeout), _options.InactivityTimeout), true);
+        AssertDelay((nameof(HttpTransportClientOptions.Pause), _options.Pause), false);
+        AssertDelay((nameof(HttpTransportClientOptions.Wait), _options.Wait), false);
+        _time = _options.Time ?? TimeProvider.System;
+        _maximumBodyBytes = _options.MaximumBodyBytes ?? LimitDefaults.MaximumEnvelopeBytes;
+    }
+
+    /// <inheritdoc/>
+    public event Action<TransportMessage>? Message;
+
+    /// <summary>
+    /// The connection closed: clean when this side's close was told so, never when the server or the
+    /// network ended it; quick when this side dropped it. A connection a dispose drops, or a
+    /// reconnection replaces, tells none.
+    /// </summary>
+    public event Action<bool, bool>? Close;
+
+    /// <summary>
+    /// A reconnection starts: what was sent on the connection it replaces will not be answered there.
+    /// Reached through <see cref="IRouterClientTransport"/>: <see cref="Reconnect"/> names the method here.
+    /// </summary>
+    event Action? IRouterClientTransport.Reconnect
+    {
+        add
+        {
+            lock (_gate)
+            {
+                _reconnect += value;
+            }
+        }
+
+        remove
+        {
+            lock (_gate)
+            {
+                _reconnect -= value;
+            }
+        }
+    }
+
+    /// <summary>Where it is in its life: Uninitialized until its first connect.</summary>
+    public ReadyState ReadyState
+    {
+        get
+        {
+            return _readyState;
+        }
+    }
+
+    /// <summary>Whether the server took its listen at connect: what it sends of its own reaches this client.</summary>
+    public bool IsListening
+    {
+        get
+        {
+            return _drawn?.IsListening ?? false;
+        }
+    }
+
+    /// <summary>
+    /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
+    /// an <see cref="InvalidOperationException"/> unless Uninitialized or Closed, and with an
+    /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled already.
+    /// Then it throws a <see cref="TimeoutException"/> past its timeout, an
+    /// <see cref="OperationCanceledException"/> once its token is cancelled, and an
+    /// <see cref="HttpRequestException"/> when the server draws none, ending Closed.
+    /// </summary>
+    public Task Connect(HttpConnectOptions options, CancellationToken cancellationToken = default)
+    {
+        return Connecting(options, (cancellationToken, false));
+    }
+
+    /// <summary>
+    /// Posts one envelope, settling on the head of its answer; refused with a
+    /// <see cref="DisconnectException"/> unless Open. A refusal the server marks is an
+    /// <see cref="IOException"/>: nothing of it was tried.
+    /// </summary>
+    public Task Send(ReadOnlyMemory<byte> bytes)
+    {
+        Drawn? connection;
+        ReadyState readyState;
+
+        lock (_gate)
+        {
+            connection = _drawn;
+            readyState = _readyState;
+        }
+
+        return readyState == ReadyState.Open && connection is not null
+            ? Posting((connection, bytes))
+            : Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+    }
+
+    /// <summary>
+    /// Deletes the connection — the server ends it first, so what waits there learns it, then what
+    /// waits here goes — and raises its close, which says it was clean as
+    /// <see cref="TransportDisconnectOptions.IsClean"/> does; quick, it lets the connection go at once,
+    /// the server told unwaited. Refused with a <see cref="DisconnectException"/> unless Open.
+    /// </summary>
+    public async Task CloseConnection(TransportDisconnectOptions? options = null)
+    {
+        var isClean = options?.IsClean ?? true;
+        var isQuick = options?.IsQuick ?? false;
+        Drawn connection;
+
+        lock (_gate)
+        {
+            if (_readyState != ReadyState.Open || _drawn is null)
+            {
+                throw new DisconnectException($"the transport client is {NameOf(_readyState)}, not open");
+            }
+
+            _readyState = ReadyState.Closing;
+            connection = _drawn;
+            _drawn = null;
+        }
+
+        if (isQuick)
+        {
+            await connection.Exchanges.CancelAsync();
+            Release(connection);
+        }
+        else
+        {
+            try
+            {
+                using var deleting = new CancellationTokenSource(DisconnectTimeout, _time);
+                using var deleted = await Deleting(connection, deleting.Token);
+            }
+            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException)
+            {
+                // gone already, or unreachable: the connection ends here all the same
+            }
+
+            await connection.Exchanges.CancelAsync();
+        }
+
+        lock (_gate)
+        {
+            _readyState = ReadyState.Closed;
+        }
+
+        Close?.Invoke(isClean, isQuick);
+    }
+
+    /// <summary>
+    /// Connects again with the options of the last connect its guard let through, replacing an open
+    /// connection without a close, and raises <see cref="IRouterClientTransport.Reconnect"/> as it
+    /// starts — as the WebSocket transport client does, attempt for attempt.
+    /// </summary>
+    public async Task Reconnect(TransportReconnectOptions? options = null)
+    {
+        var reconnect = options ?? new TransportReconnectOptions();
+        var token = reconnect.CancellationToken;
+        HttpConnectOptions target;
+        Drawn? replaced;
+        Action? starting;
+
+        lock (_gate)
+        {
+            if (_readyState == ReadyState.Reconnecting)
+            {
+                throw new InvalidOperationException("the transport client is already reconnecting");
+            }
+
+            if (_lastConnectOptions is null)
+            {
+                throw new InvalidOperationException("the transport client was never connected");
+            }
+
+            if (_readyState is ReadyState.Connecting or ReadyState.Closing)
+            {
+                throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
+            }
+
+            // before the drop below, so a token cancelled already leaves an open connection alone
+            if (token.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(TransportReconnection.Cancelled, token);
+            }
+
+            // taken out as the state turns to reconnecting, so its end, however soon, tells nothing
+            target = _lastConnectOptions;
+            replaced = _drawn;
+            _drawn = null;
+            _readyState = ReadyState.Reconnecting;
+            starting = _reconnect;
+        }
+
+        try
+        {
+            // the connection replaced goes whatever a listener does
+            try
+            {
+                starting?.Invoke();
+            }
+            finally
+            {
+                if (replaced is not null)
+                {
+                    await replaced.Exchanges.CancelAsync();
+                    Release(replaced);
+                }
+            }
+
+            await TransportReconnection.Attempting(
+                (token) =>
+                {
+                    return Connecting(target, (token, true));
+                },
+                (reconnect, _time));
+
+            // the last attempt opened as the token was cancelled: what it opened goes with it
+            if (token.IsCancellationRequested)
+            {
+                try
+                {
+                    await CloseConnection();
+                }
+                catch (DisconnectException)
+                {
+                    // closed meanwhile: there is nothing left to close
+                }
+
+                throw new OperationCanceledException(TransportReconnection.Cancelled, token);
+            }
+        }
+        catch
+        {
+            lock (_gate)
+            {
+                _readyState = ReadyState.Closed;
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Closes an open connection as <see cref="CloseConnection"/> does, its close raised; otherwise
+    /// lets go of what it holds — a connect under way fails — and of its HTTP client, which a next
+    /// connect builds anew.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_readyState == ReadyState.Open)
+        {
+            try
+            {
+                await CloseConnection();
+            }
+            catch (DisconnectException)
+            {
+                // closed or replaced meanwhile: what is left is dropped below
+            }
+        }
+
+        CancellationTokenSource? connecting;
+        Drawn? connection;
+        HttpClient? http;
+
+        lock (_gate)
+        {
+            connecting = _connecting;
+            connection = _drawn;
+            _connecting = null;
+            _drawn = null;
+
+            if (_readyState == ReadyState.Open)
+            {
+                _readyState = ReadyState.Closed;
+            }
+
+            http = _readyState == ReadyState.Reconnecting ? null : _http;
+            _http = http is null ? _http : null;
+        }
+
+        if (connecting is not null)
+        {
+            await connecting.CancelAsync();
+        }
+
+        if (connection is not null)
+        {
+            await connection.Exchanges.CancelAsync();
+            Release(connection);
+        }
+
+        http?.Dispose();
+    }
+
+    // a whole number of milliseconds from 0 a timer holds; or, when it may be, infinite
+    private static void AssertDelay((string Name, TimeSpan Value) delay, bool mayBeInfinite)
+    {
+        var isHeld = delay.Value >= TimeSpan.Zero && delay.Value <= LongestTimer && delay.Value.Ticks % TimeSpan.TicksPerMillisecond == 0;
+
+        if (!isHeld && !(mayBeInfinite && delay.Value == Timeout.InfiniteTimeSpan))
+        {
+            throw new ArgumentOutOfRangeException(
+                delay.Name,
+                $"{delay.Name} is a whole number of milliseconds from 0 a timer holds{(mayBeInfinite ? ", or infinite" : "")}, not {delay.Value.TotalMilliseconds}");
+        }
+    }
+
+    // a state as a message words it: "open", "closing"…
+    private static string NameOf(ReadyState readyState)
+    {
+        return readyState.ToString().ToLowerInvariant();
+    }
+
+    // http://host:port/pathname, or https://; an IPv6 literal bracketed, or its colons would read as
+    // the port's
+    private static Uri UriOf(HttpConnectOptions options)
+    {
+        var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
+        var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
+
+        return new Uri($"{(options.Secured ? "https" : "http")}://{host}:{options.Port}{path}");
+    }
+
+    // the media type of a response, parameters aside
+    private static string? TypeOf(HttpResponseMessage response)
+    {
+        return response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant();
+    }
+
+    private static string? HeaderOf(HttpResponseMessage response, string name)
+    {
+        return response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
+    }
+
+    // how long to wait before listening again after `losses` listens lost in a row, drawn apart so
+    // the clients one restart dropped together come back apart, as EventSource's do
+    private static TimeSpan RetryDelayOf(int losses)
+    {
+        if (losses == 1)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var delay = TimeSpan.FromTicks(Math.Min(LastRetry.Ticks, FirstRetry.Ticks * (1L << Math.Min(losses - 2, 30))));
+
+        return (delay / 2) + (delay / 2 * Random.Shared.NextDouble());
+    }
+
+    // the HTTP client its exchanges go through, built as a connect needs it
+    private HttpClient HttpOf()
+    {
+        lock (_gate)
+        {
+            return _http ??= NewHttp();
+        }
+    }
+
+    private HttpClient NewHttp()
+    {
+        return _options.Handler is { } handler
+            ? new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan }
+            : new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+    }
+
+    // a request carrying the connection's token, as each exchange after the connect does
+    private static HttpRequestMessage RequestOf(Drawn connection, (HttpMethod Method, Uri Uri) target)
+    {
+        var request = new HttpRequestMessage(target.Method, target.Uri);
+
+        request.Headers.Add(HttpTransport.ConnectionTokenHeader, connection.ConnectionToken);
+
+        return request;
+    }
+
+    private Task<HttpResponseMessage> Deleting(Drawn connection, CancellationToken cancellationToken)
+    {
+        return HttpOf().SendAsync(RequestOf(connection, (HttpMethod.Delete, connection.Uri)), HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+    }
+
+    // a DELETE nobody waits on: the server told the connection goes. Once a dispose let go of the
+    // HTTP client, it goes through one of its own, let go of in turn, so none outlives the client
+    private void Release(Drawn connection)
+    {
+        HttpClient? own;
+        HttpClient http;
+
+        lock (_gate)
+        {
+            own = _http is null ? NewHttp() : null;
+            http = _http ?? own!;
+        }
+
+        _ = Released();
+
+        async Task Released()
+        {
+            try
+            {
+                using var deleting = new CancellationTokenSource(DisconnectTimeout, _time);
+                using var request = RequestOf(connection, (HttpMethod.Delete, connection.Uri));
+                using var deleted = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deleting.Token);
+            }
+            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+            {
+                // gone already, or unreachable: nothing more is owed
+            }
+            finally
+            {
+                own?.Dispose();
+            }
+        }
+    }
+
+    // the connection is gone: its exchanges abort, and the client closes, as over a socket dropped
+    private void Lose(Drawn connection, bool isReleased)
+    {
+        bool isClosing;
+
+        lock (_gate)
+        {
+            if (_drawn != connection)
+            {
+                return;
+            }
+
+            _drawn = null;
+            isClosing = _readyState != ReadyState.Reconnecting;
+
+            if (isClosing)
+            {
+                _readyState = ReadyState.Closed;
+            }
+        }
+
+        connection.Exchanges.Cancel();
+
+        if (isReleased)
+        {
+            Release(connection);
+        }
+
+        if (isClosing)
+        {
+            Close?.Invoke(false, false);
+        }
+    }
+
+    // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
+    // only while the client reconnects, and leaves the state to its reconnection when it fails
+    private async Task Connecting(HttpConnectOptions options, (CancellationToken Token, bool IsAttempt) call)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var (token, isAttempt) = call;
+        var uri = UriOf(options);
+        CancellationTokenSource connecting;
+
+        lock (_gate)
+        {
+            if (isAttempt ? _readyState != ReadyState.Reconnecting : _readyState is not (ReadyState.Uninitialized or ReadyState.Closed))
+            {
+                throw new InvalidOperationException($"the transport client is already {NameOf(_readyState)}");
+            }
+
+            _lastConnectOptions = options;
+
+            // honoured before anything moves, so one cancelled already leaves the state as it was
+            token.ThrowIfCancellationRequested();
+
+            if (!isAttempt)
+            {
+                _readyState = ReadyState.Connecting;
+            }
+
+            connecting = _connecting = new CancellationTokenSource();
+        }
+
+        Drawn connection;
+
+        try
+        {
+            using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _time) : null;
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, connecting.Token, timeout?.Token ?? CancellationToken.None);
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new ByteArrayContent([]) };
+
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
+
+            if (_options.IsListening)
+            {
+                request.Headers.Add(HttpTransport.ListenHeader, "?1");
+            }
+
+            HttpResponseMessage response;
+
+            try
+            {
+                response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
+            }
+            catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
+            {
+                throw new TimeoutException($"timed out after {options.Timeout.TotalMilliseconds}ms", reason);
+            }
+            catch (OperationCanceledException reason) when (connecting.IsCancellationRequested && !token.IsCancellationRequested)
+            {
+                throw new HttpRequestException("the transport client was disposed as it connected", reason);
+            }
+
+            using (response)
+            {
+                var connectionToken = HeaderOf(response, HttpTransport.ConnectionTokenHeader);
+
+                if (response.StatusCode != HttpStatusCode.Created || connectionToken is null)
+                {
+                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}");
+                }
+
+                // taken where the server said it back, and nowhere else
+                connection = new Drawn((connectionToken, uri), _options.IsListening && HeaderOf(response, HttpTransport.ListenHeader) == "?1");
+            }
+
+            lock (_gate)
+            {
+                // a dispose as it opened let it go: there is nothing to keep
+                if (_connecting != connecting)
+                {
+                    Release(connection);
+
+                    throw new HttpRequestException("the transport client was disposed as it connected");
+                }
+
+                _connecting = null;
+                _drawn = connection;
+                _readyState = ReadyState.Open;
+            }
+        }
+        catch
+        {
+            lock (_gate)
+            {
+                if (_connecting == connecting)
+                {
+                    _connecting = null;
+                }
+
+                if (!isAttempt)
+                {
+                    _readyState = ReadyState.Closed;
+                }
+            }
+
+            throw;
+        }
+        finally
+        {
+            connecting.Dispose();
+        }
+
+        if (connection.IsListening)
+        {
+            _ = Listening(connection);
+        }
+    }
+
+    // one envelope posted, settling on the head of its answer, the answer itself read after: a
+    // caller waiting on it resumes as it settles, before what follows, as a rejection's handlers run
+    // before a timer of 0
+    private Task Posting((Drawn Connection, ReadOnlyMemory<byte> Bytes) sent)
+    {
+        var settled = new TaskCompletionSource();
+
+        // what none of its outcomes expected settles it, unless one did
+        _ = Exchanging(sent, settled).ContinueWith(
+            (exchanging) =>
+            {
+                settled.TrySetException(exchanging.Exception!.InnerExceptions);
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return settled.Task;
+    }
+
+    private async Task Exchanging((Drawn Connection, ReadOnlyMemory<byte> Bytes) sent, TaskCompletionSource settled)
+    {
+        var (connection, bytes) = sent;
+        HttpResponseMessage response;
+
+        try
+        {
+            using var request = RequestOf(connection, (HttpMethod.Post, connection.Uri));
+
+            request.Content = new ReadOnlyMemoryContent(bytes);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
+            response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
+        }
+        catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            // lost before its head: whether the server had it is not known, so it counts as handed
+            // over, and the connection closes, as a dropped socket's
+            Lose(connection, true);
+            settled.SetResult();
+
+            return;
+        }
+
+        if (response.IsSuccessStatusCode)
+        {
+            _ = Answering((connection, response));
+            settled.SetResult();
+
+            return;
+        }
+
+        using (response)
+        {
+            // a status nothing marked — a gateway's, a redirect's — says nothing of whether the server
+            // had it: lost
+            if (HeaderOf(response, HttpTransport.RefusalHeader) is not { } refusal)
+            {
+                Lose(connection, true);
+                settled.SetResult();
+
+                return;
+            }
+
+            // refused by the transport before the router saw it: nothing of it was tried
+            settled.SetException(new IOException($"the server refused the exchange: {(int)response.StatusCode} {refusal}"));
+
+            // its connection gone: told after the refusal is heard, so its caller learns first that
+            // it was never tried
+            if (refusal == HttpRefusals.ConnectionUnknown)
+            {
+                Lose(connection, false);
+            }
+        }
+    }
+
+    // the answer a 200 carries, read up to an envelope's limit; anything else loses the connection
+    private async Task Answering((Drawn Connection, HttpResponseMessage Response) answered)
+    {
+        var (connection, response) = answered;
+
+        using (response)
+        {
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return;
+            }
+
+            if (TypeOf(response) != HttpTransport.MediaType || response.Content.Headers.ContentLength > _maximumBodyBytes)
+            {
+                Lose(connection, true);
+
+                return;
+            }
+
+            byte[] body;
+
+            try
+            {
+                body = await response.Content.ReadAsByteArrayAsync(connection.Exchanges.Token);
+            }
+            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+            {
+                Lose(connection, true);
+
+                return;
+            }
+
+            if (body.Length > _maximumBodyBytes)
+            {
+                Lose(connection, true);
+
+                return;
+            }
+
+            // an exchange ended empty — cancelled — has nothing to say, and one past its connection's
+            // end — lost, or disconnecting — is no answer of this one's
+            if (body.Length > 0 && _drawn == connection)
+            {
+                Hear(body);
+            }
+        }
+    }
+
+    // listened for while the connection stands: a listen lost is listened again from where it was —
+    // at once, then later and later — until one reaches the server, which says whether the
+    // connection stands, or until the inactivity timeout has passed since the first was lost
+    private async Task Listening(Drawn connection)
+    {
+        var cursor = new Cursor();
+        var losses = 0;
+        var lostSince = DateTimeOffset.MinValue;
+
+        while (_drawn == connection)
+        {
+            var listened = await ListenOnce((connection, cursor));
+
+            if (listened == Listened.Lost)
+            {
+                losses += 1;
+                lostSince = losses == 1 ? _time.GetUtcNow() : lostSince;
+
+                var left = _options.InactivityTimeout == Timeout.InfiniteTimeSpan
+                    ? TimeSpan.MaxValue
+                    : _options.InactivityTimeout - (_time.GetUtcNow() - lostSince);
+
+                if (left <= TimeSpan.Zero)
+                {
+                    Lose(connection, true);
+
+                    return;
+                }
+
+                var retry = RetryDelayOf(losses);
+
+                await PauseFor((connection, retry < left ? retry : left));
+
+                continue;
+            }
+
+            if (listened is not (Listened.Heard or Listened.Nothing))
+            {
+                Lose(connection, listened != Listened.Gone);
+
+                return;
+            }
+
+            losses = 0;
+
+            if (listened == Listened.Nothing)
+            {
+                await PauseFor((connection, _options.Pause));
+            }
+        }
+    }
+
+    // an envelope an answer or a listen brought back; a listener that throws stops nothing: its throw
+    // is left to a task nobody waits on, told as an exception unobserved, and the client goes on
+    private void Hear(byte[] envelope)
+    {
+        try
+        {
+            Message?.Invoke(new TransportMessage(envelope, false));
+        }
+        catch (Exception reason)
+        {
+            _ = Task.FromException(reason);
+        }
+    }
+
+    // a wait between two listens, which the connection's end cuts short
+    private async Task PauseFor((Drawn Connection, TimeSpan Delay) pause)
+    {
+        if (pause.Delay <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            await Task.Delay(pause.Delay, _time, pause.Connection.Exchanges.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // the connection went: the listening ends
+        }
+    }
+
+    // one listen: each envelope it brings back heard as it comes whole, the cursor advanced before —
+    // or what came instead: nothing, the connection gone, a refusal of the server's, a batch that
+    // does not read, or the listen lost before it brought anything whole
+    private async Task<Listened> ListenOnce((Drawn Connection, Cursor Cursor) listen)
+    {
+        var (connection, cursor) = listen;
+        var query = string.Create(CultureInfo.InvariantCulture, $"?after={cursor.After}&wait={(long)_options.Wait.TotalMilliseconds}");
+        HttpResponseMessage response;
+
+        try
+        {
+            using var request = RequestOf(connection, (HttpMethod.Get, new Uri(connection.Uri + query)));
+
+            response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
+        }
+        catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            return Listened.Lost;
+        }
+
+        using (response)
+        {
+            if (response.StatusCode != HttpStatusCode.OK || TypeOf(response) != HttpTransport.BatchMediaType)
+            {
+                if (response.StatusCode == HttpStatusCode.NoContent)
+                {
+                    return Listened.Nothing;
+                }
+
+                var refusal = HeaderOf(response, HttpTransport.RefusalHeader);
+
+                return refusal is null ? Listened.Lost : refusal == HttpRefusals.ConnectionUnknown ? Listened.Gone : Listened.Refused;
+            }
+
+            // numbered from the one after the last it heard, or it is no batch of this listen's
+            if (HeaderOf(response, HttpTransport.SequenceHeader) != (cursor.After + 1).ToString(CultureInfo.InvariantCulture))
+            {
+                return Listened.Broken;
+            }
+
+            var heard = 0;
+
+            try
+            {
+                using var stream = await response.Content.ReadAsStreamAsync(connection.Exchanges.Token);
+                var length = new byte[LengthBytes];
+
+                while (true)
+                {
+                    // a batch ends where an envelope ends
+                    var lengthRead = await stream.ReadAtLeastAsync(length, LengthBytes, false, connection.Exchanges.Token);
+
+                    if (lengthRead == 0)
+                    {
+                        break;
+                    }
+
+                    var bytes = BinaryPrimitives.ReadUInt32BigEndian(length);
+
+                    if (lengthRead < LengthBytes || bytes == 0 || bytes > _maximumBodyBytes)
+                    {
+                        return Listened.Broken;
+                    }
+
+                    var envelope = new byte[bytes];
+
+                    if (await stream.ReadAtLeastAsync(envelope, envelope.Length, false, connection.Exchanges.Token) < envelope.Length)
+                    {
+                        return Listened.Broken;
+                    }
+
+                    // gone as it was heard: what is left goes unheard
+                    if (_drawn != connection)
+                    {
+                        return Listened.Heard;
+                    }
+
+                    cursor.After += 1;
+                    heard += 1;
+                    Hear(envelope);
+                }
+            }
+            catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
+            {
+                // cut on its way: what came whole was heard, and the rest comes again
+                return heard > 0 ? Listened.Heard : Listened.Lost;
+            }
+
+            return heard > 0 ? Listened.Heard : Listened.Broken;
+        }
+    }
+
+    // what came of one listen
+    private enum Listened
+    {
+        Heard,
+        Nothing,
+        Lost,
+        Gone,
+        Refused,
+        Broken,
+    }
+
+    // the number of the last envelope a listen heard, which the next acknowledges
+    private sealed class Cursor
+    {
+        public long After { get; set; }
+    }
+
+    // a connection the server drew: its token, where its exchanges go, whether the server took its
+    // listen, and what aborts its exchanges
+    private sealed class Drawn((string ConnectionToken, Uri Uri) names, bool isListening)
+    {
+        public string ConnectionToken { get; } = names.ConnectionToken;
+
+        public Uri Uri { get; } = names.Uri;
+
+        public bool IsListening { get; } = isListening;
+
+        public CancellationTokenSource Exchanges { get; } = new();
+    }
+}

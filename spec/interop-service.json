@@ -1,0 +1,102 @@
+{
+  "$comment": [
+    "Bead's interop service: the procedures every implementation's interop server offers alike, so a client of one calls a server of another, and the conversations of conversations.json play against any of them.",
+    "Payloads are JSON, in UTF-8, written without a space. A payload that is not JSON is answered with PAYLOAD_UNDECODABLE.",
+    "answers says what a procedure answers; admits, what its admission lets through, when it has one.",
+    "offeredBy client: a command, which a client offers and its server calls; any other procedure, the server offers.",
+    "notifies: what a notification procedure notifies its subscribers."
+  ],
+  "serviceId": 1,
+  "serviceRevision": 1,
+  "procedures": [
+    {
+      "procedureId": 1,
+      "procedureName": "echo",
+      "request": "any JSON value",
+      "answers": "its request's payload, the same value"
+    },
+    {
+      "procedureId": 2,
+      "procedureName": "fail",
+      "request": "any JSON value",
+      "answers": "an application failure: code 7, detail \"this procedure fails, on purpose\""
+    },
+    {
+      "procedureId": 3,
+      "procedureName": "slow",
+      "request": "{\"milliseconds\":n}",
+      "answers": "n, once n milliseconds passed; cancelled first, it counts one cancellation for its connection, then answers n all the same, an answer that must not go out"
+    },
+    {
+      "procedureId": 4,
+      "procedureName": "cancellations",
+      "request": "any JSON value",
+      "answers": "how many calls to slow its connection cancelled so far, a number"
+    },
+    {
+      "procedureId": 5,
+      "procedureName": "denied",
+      "request": "any JSON value",
+      "admits": "nobody: every request is refused with ACCESS_DENIED, detail \"this procedure admits nobody\"",
+      "answers": "null, never reached"
+    },
+    {
+      "procedureId": 6,
+      "procedureName": "broken",
+      "request": "any JSON value",
+      "answers": "nothing: it throws \"this procedure breaks, on purpose\" before it answers, which its server answers with PROCEDURE_FAILED and reports"
+    },
+    {
+      "procedureId": 7,
+      "procedureName": "bytes",
+      "request": "{\"length\":n}",
+      "answers": "a string of n letters x"
+    },
+    {
+      "procedureId": 8,
+      "procedureName": "ask",
+      "request": "any JSON value",
+      "answers": "what its client's clock answers, asked \"What time is it where you are?\" within 10 s; a clock that fails fails it, answered with PROCEDURE_FAILED"
+    },
+    {
+      "procedureId": 9,
+      "procedureName": "clock",
+      "offeredBy": "client",
+      "request": "a JSON string, the question",
+      "answers": "\"noon\""
+    },
+    {
+      "procedureId": 10,
+      "procedureName": "ticks",
+      "notifies": "each value tick notifies, as a JSON number, on its connection",
+      "request": "{\"hold\":n}, {\"hold\":n,\"fail\":true}, or any other JSON value",
+      "answers": "null: at once; or, held, once n ticks of its connection notified, having subscribed its requester before it waits; held and failing, an application failure there instead: code 7, detail \"this procedure fails, on purpose\""
+    },
+    {
+      "procedureId": 11,
+      "procedureName": "tick",
+      "request": "{\"value\":v} or {\"value\":v,\"key\":k}",
+      "answers": "null, once it notified v to its connection's subscription to ticks — keyed by k when given — and the ticks it held have answered"
+    },
+    {
+      "procedureId": 12,
+      "procedureName": "login",
+      "request": "{\"name\":s}",
+      "answers": "s, once it opened a new session for its connection, s its data, with no timeout"
+    },
+    {
+      "procedureId": 13,
+      "procedureName": "logout",
+      "request": "any JSON value",
+      "admits": "a connection with a session; any other is refused with SESSION_REQUIRED",
+      "answers": "null, once it ended its connection's session"
+    },
+    {
+      "procedureId": 14,
+      "procedureName": "whoami",
+      "request": "any JSON value",
+      "admits": "a connection with a session; any other is refused with SESSION_REQUIRED",
+      "answers": "the name its connection's session holds"
+    }
+  ]
+}

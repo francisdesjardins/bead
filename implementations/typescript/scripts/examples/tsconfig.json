@@ -1,0 +1,78 @@
+{
+  // The compiler contract a doc example is held to: the package's, minus what a snippet cannot meet.
+  //
+  // Its own config rather than the package's, because an `@example` is a snippet: it shows a call
+  // and stops, so `noUnusedLocals` or `noImplicitAny` would report the shape of a snippet rather
+  // than a mistake in it. Everything that decides whether it would compile in a reader's app is
+  // kept exactly as the package has it.
+  //
+  // Generated inputs come from `tools/check-examples.mjs`; `generated/` is not committed.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "noEmit": true,
+
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+
+    // Snippet allowances — see above.
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitAny": false,
+    "allowUnreachableCode": true,
+
+    // Every published specifier, mapped to source. **All of them, or the check is not hermetic:**
+    // an unmapped one falls through to node resolution and answers from whatever `dist/` happens
+    // to exist on the machine.
+    "paths": {
+      "@francisdesjardins/bead/client": ["../../src/client/client.ts"],
+      "@francisdesjardins/bead/http-client": ["../../src/client/http-client.ts"],
+      "@francisdesjardins/bead/http-server": ["../../src/server/http-server.ts"],
+      "@francisdesjardins/bead/http-transport-client": [
+        "../../src/transport/client/http-transport-client.ts"
+      ],
+      "@francisdesjardins/bead/http-transport-server": [
+        "../../src/transport/server/http-transport-server.ts"
+      ],
+      "@francisdesjardins/bead/notification-manager": [
+        "../../src/router/server/notification-manager.ts"
+      ],
+      "@francisdesjardins/bead/router-client": ["../../src/router/client/router-client.ts"],
+      "@francisdesjardins/bead/router-server": ["../../src/router/server/router-server.ts"],
+      "@francisdesjardins/bead/service-manager": ["../../src/router/shared/service-manager.ts"],
+      "@francisdesjardins/bead/session-manager": ["../../src/router/server/session-manager.ts"],
+      "@francisdesjardins/bead/server": ["../../src/server/server.ts"],
+      "@francisdesjardins/bead/transport-client": [
+        "../../src/transport/client/transport-client.ts"
+      ],
+      "@francisdesjardins/bead/transport-server": [
+        "../../src/transport/server/transport-server.ts"
+      ],
+      "@francisdesjardins/bead/worker-client": ["../../src/client/worker-client.ts"],
+      "@francisdesjardins/bead/worker-server": ["../../src/server/worker-server.ts"],
+      "@francisdesjardins/bead/worker-transport-client": [
+        "../../src/transport/client/worker-transport-client.ts"
+      ],
+      "@francisdesjardins/bead/worker-transport-server": [
+        "../../src/transport/server/worker-transport-server.ts"
+      ],
+      "@francisdesjardins/bead/ws-client": ["../../src/client/ws-client.ts"],
+      "@francisdesjardins/bead/ws-server": ["../../src/server/ws-server.ts"],
+      "@francisdesjardins/bead/ws-transport-client": [
+        "../../src/transport/client/ws-transport-client.ts"
+      ],
+      "@francisdesjardins/bead/ws-transport-server": [
+        "../../src/transport/server/ws-transport-server.ts"
+      ]
+    }
+  },
+  "include": ["globals.d.ts", "generated/**/*.tsx"]
+}

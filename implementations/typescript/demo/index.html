@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bead — a binary call protocol, its server in a Web Worker</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --paper: #eef2f0;
+        --surface: #ffffff;
+        --raised: #f6f8f7;
+        --ink: #14201c;
+        --muted: #5d6b66;
+        --line: #dce3e0;
+        --accent: #0b6e5a;
+        --accent-soft: rgb(11 110 90 / 0.1);
+        --warn: #b4460f;
+        --ok: #15803d;
+        --ok-soft: rgb(21 128 61 / 0.12);
+        --bad: #b91c1c;
+        --bad-soft: rgb(185 28 28 / 0.1);
+        --caution: #a16207;
+        --caution-soft: rgb(161 98 7 / 0.12);
+        --mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+        font:
+          13px/1.45 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #0b100e;
+          --surface: #131b18;
+          --raised: #18221e;
+          --ink: #e2ebe7;
+          --muted: #93a39d;
+          --line: #25302c;
+          --accent: #3cc7a6;
+          --accent-soft: rgb(60 199 166 / 0.13);
+          --warn: #f0a45b;
+          --ok: #4ade80;
+          --ok-soft: rgb(74 222 128 / 0.12);
+          --bad: #f87171;
+          --bad-soft: rgb(248 113 113 / 0.12);
+          --caution: #facc15;
+          --caution-soft: rgb(250 204 21 / 0.12);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      /* served as files alone, the page has its worker and no server: what needs one is not shown */
+      body[data-bead-transport='worker'] [data-served],
+      body:not([data-bead-transport='worker']) [data-static] {
+        display: none;
+      }
+
+      h1,
+      h2,
+      p,
+      ol,
+      ul,
+      dl,
+      dd {
+        margin: 0;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code {
+        font: 12px var(--mono);
+        overflow-wrap: anywhere;
+      }
+
+      .note {
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+
+      /* ── the bar: what this is, how it is connected, and who ─────────────── */
+
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 20px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+
+      .brand {
+        display: grid;
+        gap: 1px;
+        margin-right: auto;
+      }
+
+      .back {
+        font-size: 12px;
+        text-decoration: none;
+      }
+
+      h1 {
+        font-size: 17px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      h1 span {
+        margin-left: 6px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 400;
+        letter-spacing: 0;
+      }
+
+      .transports {
+        display: flex;
+        gap: 4px;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--raised);
+      }
+
+      .transports span {
+        display: contents;
+      }
+
+      .transports a {
+        padding: 3px 11px;
+        border-radius: 999px;
+        color: var(--muted);
+        font-weight: 550;
+        text-decoration: none;
+      }
+
+      .transports a:hover {
+        color: var(--ink);
+      }
+
+      .transports a[aria-current] {
+        background: var(--surface);
+        color: var(--accent);
+        box-shadow: 0 0 0 1px var(--line);
+      }
+
+      .status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .status div {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        padding: 3px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--raised);
+      }
+
+      .status dt {
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .status dd {
+        overflow-wrap: anywhere;
+      }
+
+      /* a connection says how it stands by a light, as a status bar does */
+      #connection::before {
+        content: '';
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 6px;
+        border-radius: 50%;
+        background: var(--caution);
+        vertical-align: 1px;
+      }
+
+      #connection[data-state='open']::before {
+        background: var(--ok);
+      }
+
+      #connection[data-state='closed']::before {
+        background: var(--bad);
+      }
+
+      /* ── the board: what to do, what stands, what went across ───────────── */
+
+      .dashboard {
+        display: grid;
+        gap: 12px;
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 12px 16px 16px;
+      }
+
+      .column {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .card {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+        padding: 11px 13px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+      }
+
+      h2 {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .buttons {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      button {
+        min-height: 30px;
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--raised);
+        color: var(--ink);
+        font: inherit;
+        font-weight: 550;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          border-color 0.12s,
+          background 0.12s;
+      }
+
+      button:hover {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      button:focus-visible,
+      .transports a:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      /* a write, refused without the permission */
+      button.write {
+        box-shadow: inset 3px 0 0 var(--warn);
+      }
+
+      #result {
+        min-height: 38px;
+        font-size: 14px;
+        font-weight: 500;
+        overflow-wrap: anywhere;
+      }
+
+      .metric {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      #counter {
+        color: var(--accent);
+        font: 650 34px/1 var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .label {
+        margin-right: 4px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      /* a glyph's 1448 pixels a side, shown small: they cross as a transfer either way */
+      .glyph {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .glyph canvas {
+        width: 112px;
+        height: 112px;
+        flex: none;
+        border-radius: 10px;
+        box-shadow: 0 0 0 1px var(--line);
+      }
+
+      .glyph canvas[hidden] {
+        display: none;
+      }
+
+      .facts {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 6px 12px;
+        align-items: baseline;
+      }
+
+      .facts dt {
+        color: var(--muted);
+      }
+
+      .facts dd {
+        overflow-wrap: anywhere;
+      }
+
+      /* the verdict, coloured as health checks are read */
+      #health {
+        justify-self: start;
+        padding: 1px 9px;
+        border-radius: 999px;
+        background: var(--caution-soft);
+        color: var(--caution);
+        font-weight: 650;
+      }
+
+      #health[data-status='pass'] {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+
+      #health[data-status='fail'],
+      #health[data-status='unread'] {
+        background: var(--bad-soft);
+        color: var(--bad);
+      }
+
+      .gauges {
+        display: grid;
+        gap: 6px;
+        padding: 0;
+        list-style: none;
+      }
+
+      .gauges li {
+        display: grid;
+        grid-template-columns: 70px minmax(0, 1fr);
+        gap: 8px;
+        align-items: baseline;
+      }
+
+      .layer {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .chip {
+        padding: 1px 7px;
+        border-radius: 6px;
+        background: var(--raised);
+        box-shadow: 0 0 0 1px var(--line);
+        font: 11.5px var(--mono);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+
+      .chip.quiet {
+        color: var(--muted);
+        box-shadow: none;
+        background: none;
+      }
+
+      /* ── the logs: newest first, each line by the way it went ───────────── */
+
+      .log ol {
+        height: 50vh;
+        overflow: auto;
+        padding: 0;
+        list-style: none;
+        font: 12px/1.55 var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .log li {
+        padding: 2px 0 2px 8px;
+        border-bottom: 1px solid var(--line);
+        box-shadow: inset 2px 0 0 var(--accent);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .log li[data-direction='tx'] {
+        box-shadow: inset 2px 0 0 var(--muted);
+        color: var(--muted);
+      }
+
+      /* one screen on a desktop: three columns, and the logs scroll within their own */
+      @media (min-width: 1100px) {
+        body {
+          display: grid;
+          grid-template-rows: auto minmax(0, 1fr);
+          height: 100vh;
+          height: 100dvh;
+          overflow: hidden;
+        }
+
+        .dashboard {
+          grid-template-columns:
+            minmax(270px, 310px) minmax(300px, 1fr)
+            minmax(380px, 1.35fr);
+          width: 100%;
+          max-width: 1680px;
+          min-height: 0;
+        }
+
+        .column {
+          min-height: 0;
+          overflow: auto;
+        }
+
+        .logs {
+          grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+          align-content: stretch;
+          overflow: hidden;
+        }
+
+        .log {
+          grid-template-rows: auto auto minmax(0, 1fr);
+          min-height: 0;
+        }
+
+        .log ol {
+          height: auto;
+          min-height: 0;
+        }
+      }
+
+      /* a laptop's shorter screen: what gives is the spacing and the glyph's size, never a word */
+      @media (min-width: 1100px) and (max-height: 820px) {
+        .dashboard,
+        .column {
+          gap: 10px;
+        }
+
+        .dashboard {
+          padding-top: 10px;
+          padding-bottom: 12px;
+        }
+
+        .card {
+          gap: 6px;
+          padding: 9px 12px;
+        }
+
+        .glyph canvas {
+          width: 84px;
+          height: 84px;
+        }
+
+        #counter {
+          font-size: 28px;
+        }
+      }
+    </style>
+  </head>
+  <body data-bead-pathname="%BEAD_PATHNAME%">
+    <header class="topbar">
+      <div class="brand">
+        <a class="back" href="/" data-static>← Home</a>
+        <h1>
+          Bead
+          <span data-served>a client and a server, on one port</span>
+          <span data-static>a client, and its server in a Web Worker</span>
+        </h1>
+      </div>
+      <nav class="transports" aria-label="Transport">
+        <span data-served
+          ><a href="?transport=ws" title="One socket, both ways">WebSocket</a
+          ><a
+            href="?transport=http"
+            title="What the server sends of its own comes back by a long poll, a GET it holds up to 30 s"
+            >HTTP</a
+          ></span
+        >
+        <a
+          href="?transport=worker"
+          title="The Bead server and the identity provider run in the page itself: nothing else answers but the files"
+          >Web Worker</a
+        >
+      </nav>
+      <dl class="status">
+        <div>
+          <dt>Connection</dt>
+          <dd id="connection">connecting…</dd>
+        </div>
+        <div>
+          <dt>Identity</dt>
+          <dd id="identity">no session</dd>
+        </div>
+      </dl>
+    </header>
+
+    <main class="dashboard">
+      <div class="column">
+        <section class="card" aria-labelledby="identity-h">
+          <h2 id="identity-h">Identity</h2>
+          <p class="note">
+            A fake JWT: a read needs a session, a write the <code>write</code> right.
+          </p>
+          <div class="buttons">
+            <button type="button" data-action="reader">Log in as a reader</button>
+            <button type="button" data-action="writer">Log in as a writer</button>
+            <button type="button" data-action="forged">Forged token</button>
+            <button type="button" data-action="logout">Log out</button>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="counter-h">
+          <h2 id="counter-h">Counter</h2>
+          <p class="note">Subscribe, then burst: see the counter's value.</p>
+          <div class="buttons">
+            <button type="button" data-action="read">Read</button>
+            <button type="button" class="write" data-action="increment">Increment</button>
+            <button type="button" class="write" data-action="burst">Burst of 5</button>
+            <button type="button" id="subscribe" data-action="subscribe">
+              Subscribe (value + signal)
+            </button>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="transfers-h">
+          <h2 id="transfers-h">Transfers</h2>
+          <p class="note">A glyph drawn at random, 8 MiB: it crosses in chunks.</p>
+          <div class="buttons">
+            <button type="button" class="write" data-action="upload">Send a glyph</button>
+            <button type="button" data-action="download">Receive a glyph</button>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="calls-h">
+          <h2 id="calls-h">Calls</h2>
+          <p class="note">Slow, cancelled, timed out, failed — and the server asking back.</p>
+          <div class="buttons">
+            <button type="button" data-action="slow">Slow call (5 s)</button>
+            <button type="button" data-action="cancel">Cancel it</button>
+            <button type="button" data-action="timeout">Timeout (1 s)</button>
+            <button type="button" data-action="fail">Procedure fails</button>
+            <button type="button" data-action="ask">Server asks my time</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="column">
+        <section class="card" aria-labelledby="result-h">
+          <h2 id="result-h">Result</h2>
+          <p id="result">—</p>
+        </section>
+
+        <section class="card" aria-labelledby="value-h">
+          <h2 id="value-h">Counter's value</h2>
+          <div class="metric"><span id="counter">—</span></div>
+          <p class="note">2 subscriptions: the value, paced; the signal, merged by the page</p>
+          <p class="note"><span class="label">Last burst</span> <span id="burst">—</span></p>
+          <p class="note">
+            Subscribed, five changes come as two notifications, paced — the first, then the latest —
+            and five signals merged into two reads.
+          </p>
+        </section>
+
+        <section class="card" aria-labelledby="glyph-h">
+          <h2 id="glyph-h">Glyph</h2>
+          <div class="glyph">
+            <canvas
+              id="glyph"
+              width="1448"
+              height="1448"
+              role="img"
+              aria-label="The last glyph that went across, drawn at random"
+              hidden
+            ></canvas>
+            <span id="glyph-caption" class="note">none yet: send one, or receive one</span>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="server-h">
+          <h2 id="server-h">Server</h2>
+          <p class="note">
+            Read by a <code>stats</code> call every second, left out of the logs — and counted among
+            the calls it answers.
+          </p>
+          <p class="note" id="tabs" hidden>
+            Open this page in a second tab: each tab is a client of this one server, which counts
+            them, and they share its counter.
+          </p>
+          <dl class="facts">
+            <dt>Health</dt>
+            <dd id="health">—</dd>
+            <dt>Answers</dt>
+            <dd id="durations">—</dd>
+          </dl>
+          <ul id="gauges" class="gauges" aria-label="What each layer holds, and its ceiling"></ul>
+        </section>
+      </div>
+
+      <div class="column logs">
+        <section class="card log" aria-labelledby="calls-log-h">
+          <h2 id="calls-log-h">Calls, newest first</h2>
+          <p class="note">
+            → goes out, ← comes in. In the console too, with no reload:
+            <code>localStorage.setItem('bead:debug', '*')</code>, or a filter such as
+            <code>d(rx), -token</code>, and <code>e(notification)</code> for the envelopes.
+          </p>
+          <ol id="calls"></ol>
+        </section>
+        <section class="card log" aria-labelledby="envelopes-log-h">
+          <h2 id="envelopes-log-h">Envelopes, newest first</h2>
+          <p class="note">What crossed the transport, as the client read and wrote it.</p>
+          <ol id="envelopes"></ol>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="./page.js"></script>
+  </body>
+</html>

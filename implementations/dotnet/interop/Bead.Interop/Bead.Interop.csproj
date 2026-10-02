@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bead's interop service, as the C# side offers it: what spec/interop-service.json describes. -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Interop</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the manifest every implementation's interop server reads -->
+    <Content Include="../../../../spec/interop-service.json" Link="interop-service.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
