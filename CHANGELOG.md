@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-02
+
 ### Added
 
 - The Bead specification, `spec/spec.md`, for layout `0xA1`: the prefix, kinds, flags and blocks,
@@ -40,4 +42,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/commits/develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.1.0...develop
+[0.1.0]: https://github.com/francisdesjardins/bead/releases/tag/v0.1.0
