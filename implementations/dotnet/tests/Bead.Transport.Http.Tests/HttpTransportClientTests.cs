@@ -819,22 +819,18 @@ public sealed class HttpTransportClientTests
     [Fact]
     public async Task Closes_once_the_server_says_the_connection_is_gone_after_rejecting_the_exchange_that_learned_it()
     {
-        await using var started = await Started.Start();
-        await using var client = new HttpTransportClient(NotListening);
-        Task? sending = null;
+        await using var faked = await ConnectFake(NotListening);
+        var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
         var closed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await client.Connect(started.Target(), Cancelled);
         // where the TypeScript side's caller hears the rejection before the close, a caller here
         // resumes on a thread of its own: what holds is that the send is rejected when the close
-        // is told
-        client.Close += (wasClean, wasQuick) =>
+        // is told. The answer comes once the send is held, so the close always finds it.
+        faked.Client.Close += (wasClean, wasQuick) =>
         {
-            closed.TrySetResult($"close [{wasClean},{wasQuick}], the send {(sending is { IsFaulted: true } ? "rejected" : "not yet rejected")}");
+            closed.TrySetResult($"close [{wasClean},{wasQuick}], the send {(sending.IsFaulted ? "rejected" : "not yet rejected")}");
         };
-        await started.Server.CloseConnection(await Next(started.Connections));
-
-        sending = client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        (await faked.Fetch.CallOf(1)).Answer(RefusalOf(404, HttpRefusals.ConnectionUnknown));
 
         var rejected = await Assert.ThrowsAsync<IOException>(() =>
         {
@@ -843,7 +839,7 @@ public sealed class HttpTransportClientTests
 
         Assert.Equal("the server refused the exchange: 404 connection-unknown", rejected.Message);
         Assert.Equal("close [False,False], the send rejected", await closed.Task.WaitAsync(Patience, Cancelled));
-        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
     }
 
     [Fact]
