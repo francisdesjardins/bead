@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -481,10 +480,12 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
     }
 
-    // whether the request says it has a body
+    // whether the request says it has a body: a length above 0, or a transfer coding, as its headers
+    // say it and as the TypeScript side reads them — never whether HTTP/2's end of stream has come
+    // in yet, which an empty body's last frame races
     private static bool HasBody(HttpContext context)
     {
-        return context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody ?? false;
+        return context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey(HeaderNames.TransferEncoding);
     }
 
     // a body of Bead's media type, parameters aside, sent as it is
@@ -609,10 +610,14 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             exchanging = [.. _exchanging];
         }
 
+        // one grace for the whole stop, in real time, since what it waits on is the network's: the
+        // exchanges under way write their end, then Kestrel puts what they wrote on the wire before
+        // it closes their connections — cut at once, a 404 just written can go as a reset instead
+        using var grace = new CancellationTokenSource(EndsGrace);
+
         try
         {
-            // in real time: what it waits on is the network's
-            await Task.WhenAll(exchanging).WaitAsync(EndsGrace);
+            await Task.WhenAll(exchanging).WaitAsync(grace.Token);
         }
         catch (Exception)
         {
@@ -625,9 +630,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         {
             try
             {
-                // every connection Kestrel still holds is cut now, as the TypeScript side's are: a
-                // body still coming, or a head half sent, holds no stop back
-                await application.StopAsync(new CancellationToken(true));
+                // what Kestrel still holds when the grace runs out is cut: a body still coming, or a
+                // head half sent, holds the stop back no longer than that
+                await application.StopAsync(grace.Token);
             }
             finally
             {

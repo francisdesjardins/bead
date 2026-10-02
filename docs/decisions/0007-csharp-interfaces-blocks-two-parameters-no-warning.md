@@ -142,9 +142,10 @@ test ran. CI's `dotnet` job runs both, then the interop
   came; its last activity is a `DateTimeOffset` from the transport's `TimeProvider`, where the
   TypeScript side's is `{ ms, sec, usec }` from `Date.now()`. A connection that takes a handle still
   held is listed at its own arrival, where a JavaScript `Map` keeps the older one's place.
-- A stop over HTTP lets the exchanges under way write their end, a second at most, before Kestrel
-  cuts what it holds: Node writes a 404 into its socket as the stop ends the exchange, where
-  Kestrel's handler writes it a moment later, and a cut that comes first loses it.
+- A stop over HTTP lets the exchanges under way write their end, and Kestrel put it on the wire, a
+  second at most, before it cuts what it holds: Node writes a 404 into its socket as the stop ends
+  the exchange, where Kestrel's handler writes it a moment later, and a cut that comes first loses
+  it, as a reset where the platform is Linux.
 - A transport server's `Connection` event carries the connection's handle alone, where the
   TypeScript side's carries its socket and the request that opened it: Kestrel's `HttpContext` is
   pooled, and outlives no request.
