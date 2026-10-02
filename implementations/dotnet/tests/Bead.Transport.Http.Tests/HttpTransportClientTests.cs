@@ -181,6 +181,29 @@ public sealed class HttpTransportClientTests
         };
     }
 
+    // a handler on which every listen is lost: it draws a listening connection, and takes its DELETE
+    private static Fetch LosingFetch()
+    {
+        return new Fetch((call) =>
+        {
+            if (call.Method == HttpMethod.Get)
+            {
+                throw new HttpRequestException("fetch failed");
+            }
+
+            return call.Method == HttpMethod.Post ? DrawnOf(true) : new Answer { Status = 204 };
+        });
+    }
+
+    // how many listens a handler took
+    private static int ListensOf(Fetch fetch)
+    {
+        return fetch.Calls.Count((call) =>
+        {
+            return call.Method == HttpMethod.Get;
+        });
+    }
+
     // how long the client waited before it listened again past `made` calls: the clock moved a
     // millisecond at a time until it did
     private static TimeSpan WaitedFor((Fetch Fetch, int Made) listening, FakeTimeProvider time)
@@ -640,6 +663,75 @@ public sealed class HttpTransportClientTests
         public ValueTask DisposeAsync()
         {
             return Server.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// The test's clock, whose timers end a millisecond before their due time, as a timer can against
+    /// a clock read on a loaded machine; one never due stays so.
+    /// </summary>
+    private sealed class HastyTime(TimeProvider time) : TimeProvider
+    {
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return time.TimestampFrequency;
+            }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return time.GetUtcNow();
+        }
+
+        public override long GetTimestamp()
+        {
+            return time.GetTimestamp();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return time.CreateTimer(callback, state, dueTime > TimeSpan.Zero ? dueTime - Millisecond : dueTime, period);
+        }
+    }
+
+    /// <summary>
+    /// The test's timers, each ending when due, on a clock read apart from them: one that leaps an
+    /// hour at each reading, as a machine woken from sleep or a clock set moves, or one that stands
+    /// still.
+    /// </summary>
+    private sealed class WaywardTime(TimeProvider time, bool isLeaping) : TimeProvider
+    {
+        private readonly DateTimeOffset _stood = time.GetUtcNow();
+        private long _readings;
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return time.TimestampFrequency;
+            }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            if (!isLeaping)
+            {
+                return _stood;
+            }
+
+            return time.GetUtcNow() + TimeSpan.FromHours(Interlocked.Increment(ref _readings));
+        }
+
+        public override long GetTimestamp()
+        {
+            return time.GetTimestamp();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return time.CreateTimer(callback, state, dueTime, period);
         }
     }
 
@@ -1340,15 +1432,7 @@ public sealed class HttpTransportClientTests
     [Fact]
     public async Task Counts_its_connection_lost_once_its_listens_were_lost_for_its_inactivity_timeout_and_tells_the_server()
     {
-        using var fetch = new Fetch((call) =>
-        {
-            if (call.Method == HttpMethod.Get)
-            {
-                throw new HttpRequestException("fetch failed");
-            }
-
-            return call.Method == HttpMethod.Post ? DrawnOf(true) : new Answer { Status = 204 };
-        });
+        using var fetch = LosingFetch();
         var time = new FakeTimeProvider();
         await using var client = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.FromMilliseconds(40), Time = time });
         var closes = ClosesOf(client);
@@ -1399,6 +1483,133 @@ public sealed class HttpTransportClientTests
 
         await at.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
         await Next(closedAt);
+    }
+
+    [Fact]
+    public async Task Times_its_inactivity_on_a_timer_never_on_its_clock_whether_the_clock_leaps_or_stands_still()
+    {
+        // a clock that leaps an hour at each reading buys nothing and costs nothing: three listens,
+        // the last at its timeout
+        using var leaping = LosingFetch();
+        var time = new FakeTimeProvider();
+        await using var onLeaps = new HttpTransportClient(new HttpTransportClientOptions
+        {
+            Handler = leaping,
+            InactivityTimeout = TimeSpan.FromMilliseconds(40),
+            Time = new WaywardTime(time, true),
+        });
+        var closesOnLeaps = ClosesOf(onLeaps);
+
+        await onLeaps.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        time.Advance(TimeSpan.FromMilliseconds(39));
+
+        Assert.Equal((ReadyState.Open, 2), (onLeaps.ReadyState, ListensOf(leaping)));
+
+        time.Advance(Millisecond);
+
+        Assert.Equal((false, false), await Next(closesOnLeaps));
+        Assert.Equal((HttpMethod.Delete, 3), (leaping.Calls[^1].Method, ListensOf(leaping)));
+
+        // one that stands still holds nothing open past its timeout: whichever wait is drawn, the one
+        // under way then is cut, and the listen after it is the last
+        using var standing = LosingFetch();
+        var stillTime = new FakeTimeProvider();
+        await using var onStill = new HttpTransportClient(new HttpTransportClientOptions
+        {
+            Handler = standing,
+            InactivityTimeout = TimeSpan.FromMilliseconds(700),
+            Time = new WaywardTime(stillTime, false),
+        });
+        var closesOnStill = ClosesOf(onStill);
+
+        await onStill.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        stillTime.Advance(TimeSpan.FromMilliseconds(699));
+
+        Assert.Equal(ReadyState.Open, onStill.ReadyState);
+
+        stillTime.Advance(Millisecond);
+
+        Assert.Equal((false, false), await Next(closesOnStill));
+        Assert.Equal(HttpMethod.Delete, standing.Calls[^1].Method);
+    }
+
+    // its timeout ends on its own timer, so a timer that ends early ends it early, and buys no
+    // listen more
+    [Fact]
+    public async Task Listens_three_times_within_its_inactivity_timeout_even_on_timers_that_end_early_and_never_a_fourth()
+    {
+        var gets = 0;
+        using var fetch = new Fetch((call) =>
+        {
+            if (call.Method != HttpMethod.Get)
+            {
+                return call.Method == HttpMethod.Post ? DrawnOf(true) : new Answer { Status = 204 };
+            }
+
+            // a fourth is one too many: told gone, so that a burst ends there
+            if (Interlocked.Increment(ref gets) > 3)
+            {
+                return RefusalOf(404, HttpRefusals.ConnectionUnknown);
+            }
+
+            throw new HttpRequestException("fetch failed");
+        });
+        var time = new FakeTimeProvider();
+        await using var client = new HttpTransportClient(new HttpTransportClientOptions
+        {
+            Handler = fetch,
+            InactivityTimeout = TimeSpan.FromMilliseconds(40),
+            Time = new HastyTime(time),
+        });
+        var closes = ClosesOf(client);
+
+        await client.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
+        time.Advance(TimeSpan.FromMilliseconds(38));
+
+        Assert.Equal((ReadyState.Open, 2), (client.ReadyState, Volatile.Read(ref gets)));
+
+        time.Advance(Millisecond);
+
+        Assert.Equal((false, false), await Next(closes));
+
+        // and nothing after it
+        time.Advance(TimeSpan.FromMinutes(1));
+
+        Assert.Equal(3, Volatile.Read(ref gets));
+        Assert.Equal(HttpMethod.Delete, fetch.Calls[^1].Method);
+    }
+
+    [Fact]
+    public async Task A_listen_heard_ends_the_count_and_its_inactivity_timeout_runs_again_from_the_next_first_loss()
+    {
+        var time = new FakeTimeProvider();
+        await using var faked = await ConnectFake(ListeningOn(time) with { InactivityTimeout = TimeSpan.FromMilliseconds(40) });
+        var fetch = faked.Fetch;
+
+        // lost, listened again at once, and heard 30 ms later
+        (await fetch.CallOf(1)).Fail();
+
+        var heard = await fetch.CallOf(2);
+
+        time.Advance(TimeSpan.FromMilliseconds(30));
+        heard.Answer(Batch(1, EnvelopeOf(EnvelopeKind.Notification, (1, 0))));
+        await fetch.CallOf(3);
+
+        // past where the first count would have ended, lost twice again
+        time.Advance(TimeSpan.FromMilliseconds(20));
+        fetch.Calls[3].Fail();
+        (await fetch.CallOf(4)).Fail();
+
+        // 40 ms from this first loss, not from the one before
+        time.Advance(TimeSpan.FromMilliseconds(39));
+
+        Assert.Equal((ReadyState.Open, 5), (faked.Client.ReadyState, fetch.Count));
+
+        time.Advance(Millisecond);
+        (await fetch.CallOf(5)).Fail();
+
+        Assert.Equal((false, false), await faked.Closed());
+        Assert.Equal(HttpMethod.Delete, (await fetch.CallOf(6)).Method);
     }
 
     [Fact]

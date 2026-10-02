@@ -421,51 +421,89 @@ export const createHTTPTransportClient = (
           : 'broken';
       };
 
-      // a wait between two listens, which the connection's end cuts short
-      const pauseFor = (connection: IDrawn, delay: number): Promise<void> => {
+      // a wait between two listens, which `signal` cuts short: the connection's end, or the end of
+      // its inactivity timeout
+      const pauseFor = (signal: AbortSignal, delay: number): Promise<void> => {
         return createPromise(
           (resolve) => {
             resolve();
           },
-          { delay, signal: connection.controller.signal }
+          { delay, signal }
         ).catch(noop);
       };
 
+      // the inactivity timeout of a count of losses, armed at its first, which aborts `expiry` as it
+      // ends: at once when it is 0, and never when it is Infinity, which a timer would take for 1 ms
+      const expireAfter = (expiry: AbortController): ReturnType<typeof setTimeout> | undefined => {
+        if (inactivityTimeout === 0) {
+          return (expiry.abort(), undefined);
+        }
+
+        if (inactivityTimeout === Infinity) {
+          return undefined;
+        }
+
+        return setTimeout(() => {
+          expiry.abort();
+        }, inactivityTimeout);
+      };
+
       // listened for while the connection stands. A listen lost is listened again from where it was —
-      // at once, then later and later — until one reaches the server, which says whether the
-      // connection stands, or until `inactivityTimeout` has passed since the first was lost
+      // at once, then later and later — until one reaches the server, or until `inactivityTimeout`
+      // has passed since the first was lost: the wait under way ends, and the next listen is the last
       const listen = async (connection: IDrawn): Promise<void> => {
         const cursor = { after: 0 };
         let losses = 0;
-        let lostSince = 0;
+        // a timer measures the timeout, never a reading of the clock, which a clock set or a machine
+        // woken from sleep moves: the listens it allows are the same on any machine, however loaded
+        let expiry: AbortController | undefined;
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-        while (drawn === connection) {
-          const listened = await listenOnce(connection, cursor);
+        try {
+          while (drawn === connection) {
+            const listened = await listenOnce(connection, cursor);
 
-          if (listened === 'lost') {
-            losses += 1;
-            lostSince = losses === 1 ? Date.now() : lostSince;
-
-            const left = inactivityTimeout - (Date.now() - lostSince);
-
-            if (left <= 0) {
-              return (lose(connection, { isReleased: true }), undefined);
+            // its connection gone meanwhile — disconnected, disposed: nothing is counted on it
+            if (drawn !== connection) {
+              return;
             }
 
-            await pauseFor(connection, Math.min(retryDelayOf(losses), left));
+            if (listened === 'lost') {
+              losses += 1;
 
-            continue;
+              if (expiry === undefined) {
+                expiry = new AbortController();
+                timeoutId = expireAfter(expiry);
+              }
+
+              if (expiry.signal.aborted) {
+                return (lose(connection, { isReleased: true }), undefined);
+              }
+
+              await pauseFor(
+                AbortSignal.any([connection.controller.signal, expiry.signal]),
+                retryDelayOf(losses)
+              );
+
+              continue;
+            }
+
+            if (listened !== 'heard' && listened !== 'nothing') {
+              return (lose(connection, { isReleased: listened !== 'gone' }), undefined);
+            }
+
+            // it reached the server: the count ends, and its timeout with it
+            clearTimeout(timeoutId);
+            expiry = undefined;
+            losses = 0;
+
+            if (listened === 'nothing') {
+              await pauseFor(connection.controller.signal, pause);
+            }
           }
-
-          if (listened !== 'heard' && listened !== 'nothing') {
-            return (lose(connection, { isReleased: listened !== 'gone' }), undefined);
-          }
-
-          losses = 0;
-
-          if (listened === 'nothing') {
-            await pauseFor(connection, pause);
-          }
+        } finally {
+          // the connection's end disarms it, so nothing fires after
+          clearTimeout(timeoutId);
         }
       };
 

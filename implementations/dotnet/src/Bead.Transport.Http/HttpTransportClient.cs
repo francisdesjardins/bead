@@ -798,53 +798,66 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // listened for while the connection stands: a listen lost is listened again from where it was —
     // at once, then later and later — until one reaches the server, which says whether the
-    // connection stands, or until the inactivity timeout has passed since the first was lost
+    // connection stands, or until the inactivity timeout has ended since the first was lost
     private async Task Listening(Drawn connection)
     {
         var cursor = new Cursor();
         var losses = 0;
-        var lostSince = DateTimeOffset.MinValue;
 
-        while (_drawn == connection)
+        // the inactivity timeout, armed at a first loss, on a timer: a clock read against a timer
+        // can disagree with it by a moment, enough to buy a listen more. Once it ends, the listen
+        // after it, or the one in flight, is the last
+        CancellationTokenSource? expiring = null;
+
+        try
         {
-            var listened = await ListenOnce((connection, cursor));
-
-            if (listened == Listened.Lost)
+            while (_drawn == connection)
             {
-                losses += 1;
-                lostSince = losses == 1 ? _time.GetUtcNow() : lostSince;
+                var listened = await ListenOnce((connection, cursor));
 
-                var left = _options.InactivityTimeout == Timeout.InfiniteTimeSpan
-                    ? TimeSpan.MaxValue
-                    : _options.InactivityTimeout - (_time.GetUtcNow() - lostSince);
-
-                if (left <= TimeSpan.Zero)
+                if (listened == Listened.Lost)
                 {
-                    Lose(connection, true);
+                    losses += 1;
+
+                    if (losses == 1 && _options.InactivityTimeout != Timeout.InfiniteTimeSpan)
+                    {
+                        expiring = new CancellationTokenSource(_options.InactivityTimeout, _time);
+                    }
+
+                    if (expiring is { IsCancellationRequested: true })
+                    {
+                        Lose(connection, true);
+
+                        return;
+                    }
+
+                    await PauseFor((connection, RetryDelayOf(losses)), expiring?.Token ?? CancellationToken.None);
+
+                    continue;
+                }
+
+                if (listened is not (Listened.Heard or Listened.Nothing))
+                {
+                    Lose(connection, listened != Listened.Gone);
 
                     return;
                 }
 
-                var retry = RetryDelayOf(losses);
+                // it reached the server: the count ends, its timer with it
+                expiring?.Dispose();
+                expiring = null;
+                losses = 0;
 
-                await PauseFor((connection, retry < left ? retry : left));
-
-                continue;
+                if (listened == Listened.Nothing)
+                {
+                    await PauseFor((connection, _options.Pause), CancellationToken.None);
+                }
             }
-
-            if (listened is not (Listened.Heard or Listened.Nothing))
-            {
-                Lose(connection, listened != Listened.Gone);
-
-                return;
-            }
-
-            losses = 0;
-
-            if (listened == Listened.Nothing)
-            {
-                await PauseFor((connection, _options.Pause));
-            }
+        }
+        finally
+        {
+            // the connection's end disarms it: nothing fires after it
+            expiring?.Dispose();
         }
     }
 
@@ -862,21 +875,24 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
-    // a wait between two listens, which the connection's end cuts short
-    private async Task PauseFor((Drawn Connection, TimeSpan Delay) pause)
+    // a wait between two listens, which the connection's end cuts short, and so does the end of the
+    // inactivity timeout, when one runs
+    private async Task PauseFor((Drawn Connection, TimeSpan Delay) pause, CancellationToken expiring)
     {
         if (pause.Delay <= TimeSpan.Zero)
         {
             return;
         }
 
+        using var cut = CancellationTokenSource.CreateLinkedTokenSource(pause.Connection.Exchanges.Token, expiring);
+
         try
         {
-            await Task.Delay(pause.Delay, _time, pause.Connection.Exchanges.Token);
+            await Task.Delay(pause.Delay, _time, cut.Token);
         }
         catch (OperationCanceledException)
         {
-            // the connection went: the listening ends
+            // the connection went, and the listening ends; or the timeout did, and the next is the last
         }
     }
 
