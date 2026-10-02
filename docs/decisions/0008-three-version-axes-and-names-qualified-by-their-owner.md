@@ -25,12 +25,15 @@ promise to be decided at once, on the day of the first release.
    and `0xA2` to `0xAF` are the layouts to come, each keeping the 8-byte prefix
    ([0001](0001-the-envelope-sits-at-fixed-offsets.md)). A reader refuses a layout it does not read
    with `LAYOUT_UNSUPPORTED`, and should name the layouts it reads in the detail, on the call it can
-   still answer.
+   still answer. **Until the wire is first published, it is revised in place:** a change decided
+   here rewrites `0xA1`, its spec, its vectors and both implementations at once, and no reader of an
+   earlier `0xA1` is kept. From the first publication on, a change that a reader of the layout
+   before it cannot read takes the next layout byte.
 2. **The spec**: its text, its vectors, its conversations and the interop service move together,
    and are tagged `spec-v*`.
 3. **The product**: each implementation's releases, under Semantic Versioning, at `0.x`, tagged
-   `v*`. Both manifests read `0.0.0` today; the first release is `0.1.0`, cut from a
-   `release/0.1.0` branch ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+   `v*`, one version for both manifests, cut from a `release/*` branch
+   ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 
 **A name is qualified by its owner.** The TypeScript package is `@francisdesjardins/bead` on npm.
 The C# packages are `FrancisDesjardins.Bead.*` on NuGet, which has no scopes, while their assemblies
