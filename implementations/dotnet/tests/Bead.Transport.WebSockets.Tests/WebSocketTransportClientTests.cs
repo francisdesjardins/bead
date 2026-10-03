@@ -913,15 +913,25 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Refuses_to_reconnect_while_a_close_is_under_way()
     {
-        await _client.Connect(Target, Cancelled);
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
 
-        var closing = _client.CloseConnection();
-
-        Assert.Equal("the transport client cannot reconnect while closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        using (peer)
+        using (await Listener.Answer(peer, head))
         {
-            return _client.Reconnect();
-        })).Message);
-        await closing.WaitAsync(Patience, Cancelled);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            // the server's end reads nothing, so the close stays under way until the dispose
+            var closing = _client.CloseConnection();
+
+            Assert.Equal("the transport client cannot reconnect while closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return _client.Reconnect();
+            })).Message);
+            await _client.DisposeAsync();
+            await closing.WaitAsync(Patience, Cancelled);
+        }
     }
 
     [Fact]
