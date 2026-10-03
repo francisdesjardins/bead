@@ -1,8 +1,27 @@
 namespace Bead;
 
-/// <summary>What a server needs of its transport, beyond its router's needs: closing a connection, and stopping.</summary>
+/// <summary>
+/// What a server needs of its transport, beyond its router's needs: closing a connection, stopping,
+/// and, over HTTP, being told when a listen is held and when it ends.
+/// </summary>
 public interface IServerTransport : IRouterServerTransport
 {
+    /// <summary>
+    /// A listen held on a connection, true, once its refusals passed, and its end, false, while the
+    /// connection stands: over HTTP alone, whose listen is no silence (spec 13.7). A transport that
+    /// has no listen never raises it, as this default.
+    /// </summary>
+    event Action<bool, string>? Listen
+    {
+        add
+        {
+        }
+
+        remove
+        {
+        }
+    }
+
     /// <summary>Closes a connection; false when the transport held none by that handle.</summary>
     Task<bool> CloseConnection(string connectionHandle);
 
@@ -29,10 +48,12 @@ public sealed record ServerOptions
     public PacingLimits? Pacing { get; init; }
 
     /// <summary>
-    /// How long a connection without a session may stay silent before it is closed; infinite when
-    /// none, unless a facade says otherwise. From 1 to <see cref="Clocks.LongestTimer"/>
-    /// milliseconds, rounded to the nearest whole one; one neither infinite nor in that range, zero
-    /// among them, is an <see cref="ArgumentOutOfRangeException"/>.
+    /// How long a connection without a session may stay silent before it is closed — one that never
+    /// opened a session, or one whose session ended, counted from that end; over HTTP, a listen held
+    /// is no silence, and the count starts anew at its end. Infinite when none, unless a facade says
+    /// otherwise. From 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest
+    /// whole one; one neither infinite nor in that range, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan? ConnectionInactivityTimeout { get; init; }
 
@@ -73,8 +94,10 @@ public sealed record ServerOptions
 /// that closes a session deletes it before it answers, so the next answer announces the end. Each
 /// message is activity. Past a session's connection timeout, its connection is closed; past its
 /// session timeout, the session ends — each subscription of its connection with SESSION_REQUIRED —
-/// and the connection stays, its silence counted afresh. A connection that closes takes its session,
-/// and a session stored for a connection already closed goes at once.
+/// and the connection stays, its silence counted afresh against the server's own timeout. A listen
+/// held over HTTP is no silence: no connection timeout runs while one is, and each counts anew from
+/// its end; a session timeout counts messages alone (spec 13.7). A connection that closes takes its
+/// session, and a session stored for a connection already closed goes at once.
 /// </summary>
 /// <typeparam name="TData">What a session keeps.</typeparam>
 public sealed class Server<TData> : IAsyncDisposable
@@ -90,8 +113,11 @@ public sealed class Server<TData> : IAsyncDisposable
     // the connections being closed, so each is asked to close once
     private readonly HashSet<string> _closing = [];
 
-    // a connection with no session: how long it may stay silent, and the timer that closes it
-    private readonly Dictionary<string, (TimeSpan Timeout, ITimer? Timer)> _idle = [];
+    // the connections with no session, each with the timer that closes it once silent, when one runs
+    private readonly Dictionary<string, ITimer?> _idle = [];
+
+    // the listens each connection holds: a second comes before the first it replaces ends
+    private readonly Dictionary<string, int> _listens = [];
 
     /// <summary>
     /// A server over <paramref name="transport"/>, its layers built in order, all on its transport's
@@ -128,6 +154,7 @@ public sealed class Server<TData> : IAsyncDisposable
         // the router reads the envelope finds its connection open already
         transport.Connection += OnConnection;
         transport.Message += OnMessage;
+        transport.Listen += OnListen;
         transport.Close += OnClose;
 
         // limits that do not hold together refuse the router: the server lets go of its transport
@@ -150,6 +177,7 @@ public sealed class Server<TData> : IAsyncDisposable
         {
             transport.Connection -= OnConnection;
             transport.Message -= OnMessage;
+            transport.Listen -= OnListen;
             transport.Close -= OnClose;
             Sessions.Dispose();
 
@@ -164,6 +192,7 @@ public sealed class Server<TData> : IAsyncDisposable
                 Defaults = new RequestDefaults { CloseOnTimeout = options?.CloseOnCommandTimeout },
             });
         Sessions.Created += OnSessionCreated;
+        Sessions.Updated += OnSessionStored;
         Sessions.Deleted += OnSessionDeleted;
         Sessions.ConnectionInactivityTimeoutReached += OnConnectionInactive;
         Sessions.SessionInactivityTimeoutReached += OnSessionInactive;
@@ -204,8 +233,8 @@ public sealed class Server<TData> : IAsyncDisposable
         lock (_gate)
         {
             own = Bead.Gauges.Of(
-                new Dictionary<string, long> { ["closing"] = _closing.Count, ["connections"] = _connections.Count, ["idle"] = _idle.Count },
-                _connections.Concat(_idle.Keys));
+                new Dictionary<string, long> { ["closing"] = _closing.Count, ["connections"] = _connections.Count, ["idle"] = _idle.Count, ["listening"] = _listens.Count },
+                _connections.Concat(_idle.Keys).Concat(_listens.Keys));
             held = Transport.Gauges() ?? Bead.Gauges.Of(new Dictionary<string, long>(), _connections);
         }
 
@@ -234,20 +263,23 @@ public sealed class Server<TData> : IAsyncDisposable
     {
         Transport.Connection -= OnConnection;
         Transport.Message -= OnMessage;
+        Transport.Listen -= OnListen;
         Transport.Close -= OnClose;
         Sessions.Created -= OnSessionCreated;
+        Sessions.Updated -= OnSessionStored;
         Sessions.Deleted -= OnSessionDeleted;
         Sessions.ConnectionInactivityTimeoutReached -= OnConnectionInactive;
         Sessions.SessionInactivityTimeoutReached -= OnSessionInactive;
 
         lock (_gate)
         {
-            foreach (var (_, timer) in _idle.Values)
+            foreach (var timer in _idle.Values)
             {
                 timer?.Dispose();
             }
 
             _idle.Clear();
+            _listens.Clear();
             _connections.Clear();
         }
 
@@ -261,9 +293,9 @@ public sealed class Server<TData> : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (_idle.Remove(connectionHandle, out var idle))
+            if (_idle.Remove(connectionHandle, out var timer))
             {
-                idle.Timer?.Dispose();
+                timer?.Dispose();
             }
         }
     }
@@ -274,6 +306,7 @@ public sealed class Server<TData> : IAsyncDisposable
         lock (_gate)
         {
             _connections.Remove(connectionHandle);
+            _listens.Remove(connectionHandle);
         }
 
         StopWaiting(connectionHandle);
@@ -317,15 +350,14 @@ public sealed class Server<TData> : IAsyncDisposable
         }
     }
 
-    // a connection without a session is closed once silent for its own timeout
-    private void Wait(string connectionHandle, TimeSpan timeout)
+    // a connection without a session is closed once silent for the server's own timeout, counted
+    // afresh; ! none runs while a listen is held, whose end arms it
+    private void Wait(string connectionHandle)
     {
         lock (_gate)
         {
-            var (kept, timer) = _idle.GetValueOrDefault(connectionHandle, (timeout, null));
-
-            timer?.Dispose();
-            _idle[connectionHandle] = (kept, kept == Timeout.InfiniteTimeSpan
+            _idle.GetValueOrDefault(connectionHandle)?.Dispose();
+            _idle[connectionHandle] = _connectionInactivityTimeout == Timeout.InfiniteTimeSpan || _listens.ContainsKey(connectionHandle)
                 ? null
                 : _clock.CreateTimer(
                     (_) =>
@@ -333,9 +365,28 @@ public sealed class Server<TData> : IAsyncDisposable
                         Close(connectionHandle);
                     },
                     null,
-                    kept,
-                    Timeout.InfiniteTimeSpan));
+                    _connectionInactivityTimeout,
+                    Timeout.InfiniteTimeSpan);
         }
+    }
+
+    // a session's connection timer, stopped while a listen is held; its session timer runs on
+    private void HoldSession(string connectionHandle)
+    {
+        Sessions.ResetConnectionInactivityTimeout(new Session<TData> { ConnectionHandle = connectionHandle }, Timeout.InfiniteTimeSpan);
+    }
+
+    // the end of the last listen held: the connection's silence counts anew from it
+    private void Resume(string connectionHandle)
+    {
+        if (Sessions.Get(connectionHandle) is { } session)
+        {
+            Sessions.ResetConnectionInactivityTimeout(session, session.ConnectionInactivityTimeout ?? Timeout.InfiniteTimeSpan);
+
+            return;
+        }
+
+        Wait(connectionHandle);
     }
 
     private void OnConnection(string connectionHandle)
@@ -345,7 +396,7 @@ public sealed class Server<TData> : IAsyncDisposable
             _connections.Add(connectionHandle);
         }
 
-        Wait(connectionHandle, _connectionInactivityTimeout);
+        Wait(connectionHandle);
     }
 
     // each message is activity, whatever the router makes of it; a connection that speaks is open
@@ -358,7 +409,53 @@ public sealed class Server<TData> : IAsyncDisposable
 
         if (!Sessions.Touch(connectionHandle))
         {
-            Wait(connectionHandle, _connectionInactivityTimeout);
+            Wait(connectionHandle);
+
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (_listens.ContainsKey(connectionHandle))
+            {
+                HoldSession(connectionHandle);
+            }
+        }
+    }
+
+    // the first listen held stops the connection's timers, and the end of the last arms them afresh;
+    // a listen of a connection the server does not hold counts nothing. Under the lock, so a listen
+    // that ends and the one taking its place, told on two threads, leave what the count says
+    private void OnListen(bool isHeld, string connectionHandle)
+    {
+        lock (_gate)
+        {
+            var before = _listens.GetValueOrDefault(connectionHandle);
+            var after = before + (isHeld ? 1 : -1);
+
+            if (!_connections.Contains(connectionHandle) || after < 0)
+            {
+                return;
+            }
+
+            if (after == 0)
+            {
+                _listens.Remove(connectionHandle);
+                Resume(connectionHandle);
+
+                return;
+            }
+
+            _listens[connectionHandle] = after;
+
+            if (before == 0 && _idle.ContainsKey(connectionHandle))
+            {
+                Wait(connectionHandle);
+            }
+            else if (before == 0)
+            {
+                HoldSession(connectionHandle);
+            }
         }
     }
 
@@ -386,12 +483,25 @@ public sealed class Server<TData> : IAsyncDisposable
         }
 
         StopWaiting(session.ConnectionHandle);
+        OnSessionStored(session);
+    }
+
+    // a session stored anew restarts its connection timer, which a listen held keeps stopped
+    private void OnSessionStored(Session<TData> session)
+    {
+        lock (_gate)
+        {
+            if (_listens.ContainsKey(session.ConnectionHandle))
+            {
+                HoldSession(session.ConnectionHandle);
+            }
+        }
     }
 
     // a session that ended takes with it what its connection subscribed to — each subscription with
-    // SESSION_REQUIRED — and leaves the connection its connection timeout, or the server's own when
-    // it holds none; the drop goes to the router at once, ahead of the answer of the procedure that
-    // ended the session
+    // SESSION_REQUIRED — and leaves the connection the server's own timeout, counted from the end;
+    // the drop goes to the router at once, ahead of the answer of the procedure that ended the
+    // session
     private void OnSessionDeleted(Session<TData> session)
     {
         bool isConnected;
@@ -407,13 +517,24 @@ public sealed class Server<TData> : IAsyncDisposable
         }
 
         _ = Router.DropSubscriptions(session.ConnectionHandle, Failure.OfProtocol(ProtocolCode.SessionRequired));
-        Wait(session.ConnectionHandle, session.ConnectionInactivityTimeout ?? _connectionInactivityTimeout);
+        Wait(session.ConnectionHandle);
     }
 
-    // a connection silent too long is gone: closing it ends its session too
+    // a connection silent too long is gone: closing it ends its session too. ! One whose listen is
+    // held is not silent, whatever armed its timer meanwhile — the listen's end arms it afresh
     private void OnConnectionInactive(Session<TData> session)
     {
-        Close(session.ConnectionHandle);
+        bool isListening;
+
+        lock (_gate)
+        {
+            isListening = _listens.ContainsKey(session.ConnectionHandle);
+        }
+
+        if (!isListening)
+        {
+            Close(session.ConnectionHandle);
+        }
     }
 
     // a session unused too long ends; its connection stays, to open another

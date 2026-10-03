@@ -498,12 +498,16 @@ or the failure of section 13.6, should one go out first — announces the end.
 on its call id, `SESSION_REQUIRED`; a call still unanswered is left to its own answer. The connection
 stays, to open another session.
 
-13.7. A session has two inactivity timeouts, which every message of its connection starts anew: past
-its session timeout, the session ends, and the connection stays; past its connection timeout, the
-connection is closed, and takes its session. A connection without a session is closed once silent
-past the server's own connection timeout, when it has one. Each of these timeouts may be without
-end. A connection that closes takes its session; a session opened for a connection already closed
-ends at once.
+13.7. A session has two inactivity timeouts: past its session timeout, the session ends, and the
+connection stays; past its connection timeout, the connection is closed, and takes its session. A
+connection without a session — none yet, or its session ended — is closed once silent past the
+server's own connection timeout, when it has one, counted from its session's end for one that had
+one. Each of these timeouts may be without end, and is when not given. A message of its connection
+starts every one anew; a session timeout counts messages alone. Over HTTP, a listen held is not
+silence: while one is held, no connection timeout runs, and silence counts anew from its end
+(section 15.9). Over WebSocket, a peer that only hears is silent: it speaks now and then, or is
+given a connection timeout without end. A connection that closes takes its session; a session opened
+for a connection already closed ends at once.
 
 ## 14. Relays
 
@@ -569,9 +573,10 @@ where each requester's rights are checked.
 _Transports: `spec/transports.json`._
 
 15.1. A transport carries envelopes between two sides, whole and in order on each connection, and
-tells when a connection opens and when it closes. It reads nothing of an envelope but what this
-section says; what it refuses of its own is no envelope, and the router never sees it. A connection
-that closes ends what was under way on it (sections 9.4, 12.10, 13.7).
+tells when a connection opens and when it closes, and, over HTTP, when a listen is held and when it
+ends (section 13.7). It reads nothing of an envelope but what this section says; what it refuses of
+its own is no envelope, and the router never sees it. A connection that closes ends what was under
+way on it (sections 9.4, 12.10, 13.7).
 
 ### WebSocket
 
@@ -681,8 +686,10 @@ envelope holds.
 | `maximumWait`                  | 30 s                         | the longest a server holds a listen                                               |
 | `exchangeTimeout`              | 5 min                        | how long an exchange handed on waits for its answer, at both ends                 |
 | `inactivityTimeout`            | 5 min                        | how long a connection with no exchange under way stays                            |
+| `connectionInactivityTimeout`  | 30 s                         | the server's own connection timeout (section 13.7)                                |
 
-`exchangeTimeout` and `inactivityTimeout` may be without end; `maximumWait` may not.
+`exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
+`maximumWait` may not.
 
 Past the first four it answers 429 or 503, as section 15.6's table says. It takes the hosts a request
 may name, `hosts`, against a page that rebinds its name to the server's address, and the origins a

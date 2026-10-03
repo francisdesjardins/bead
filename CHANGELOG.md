@@ -45,9 +45,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   buried 5 seconds, then handed on; in the conversations, a command past its 10 seconds, its call id
   reserved as long, an answer within dropped and one after reported `CALL_UNKNOWN`.
 - The `spec` job regenerates `spec/transports.json` and `spec/clocks.json` too.
+- Fifteen more cases that advance the clock a server is given. In the conversations: a request's
+  transfer gone silent, `TRANSFER_STALLED`, and its call then held abandoned; a command waiting on
+  its result's transfer, not its own time; a result that gets no credit; a relay's leg B past its
+  destination's timeout. Over HTTP: the idle and the exchange timeouts; a listen held for its wait,
+  and for the server's bound; a listen holding a connection's timeouts, with a session or none; the
+  server's own timeout, by default and from a session's end; a session ending during a held listen.
+  Over WebSocket: a session's timeout, its connection staying, and its connection's, each message
+  starting it anew. `spec/check.py` holds an advance over a socket to the due its `until` named; the
+  transports' file names the HTTP server's own `connectionInactivityTimeout` among its defaults and
+  options, and the conversations' limits take a transfer's inactivity.
 
 ### Changed
 
+- A listen held over HTTP holds its connection's timeouts — the server's own, and a session's
+  connection timeout — silence counting anew from its end, by a new optional event of the
+  transport's, `listen` and `Listen`; a session's session timeout and `lastActivity` count messages
+  alone. A connection whose session ended takes the server's own connection timeout, counted from
+  that end, where it kept the session's; a session stored without its timeouts holds both without
+  end, where it held 600 ms and 30 s (decision 0012). The server's gauges count `listening`, the C#
+  session manager gains `ResetConnectionInactivityTimeout` and `ResetSessionInactivityTimeout`, and
+  section 15.12 names the HTTP server's own `connectionInactivityTimeout`, 30 s.
+- The interop service's `login` takes `sessionTimeout` and `connectionTimeout`, and `register`'s
+  timeout is held as every duration is.
 - Every layer of both sides takes its time from a clock it is given, exposes it, and refuses one
   that differs from the clock of the layer beneath it (decision 0011): `Clock`, a `TimeProvider`,
   where the C# side's options said `Time`; `clock`, the part of the globals Bead calls, on the

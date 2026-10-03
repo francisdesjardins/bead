@@ -42,6 +42,12 @@
       "minimum": 1,
       "maximum": 2147483647
     },
+    "duration": {
+      "description": "A duration a side is given, a bound or a timeout, in milliseconds as spec 1.4 holds one: 1 to 2^31 - 1.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
     "clauses": {
       "description": "The units of spec/spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
       "type": "array",

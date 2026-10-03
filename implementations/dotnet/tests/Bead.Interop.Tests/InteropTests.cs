@@ -335,6 +335,37 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Null(client.Router.SessionToken);
     }
 
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task Login_and_register_hold_a_duration_as_section_1_4_does_a_fraction_rounded_one_under_a_millisecond_or_past_2_31_minus_1_refused_with_PROCEDURE_FAILED_nothing_opened_or_registered(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        async Task<ushort> CodeOf(Requester<JsonElement> requester)
+        {
+            return (await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return requester().WaitAsync(Patience, Cancelled);
+            })).Code;
+        }
+
+        foreach (var refused in new[] { "{\"name\":\"ada\",\"sessionTimeout\":0.4}", "{\"connectionTimeout\":2147483648,\"name\":\"ada\"}", "{\"name\":\"ada\",\"sessionTimeout\":-1}" })
+        {
+            Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(RequesterOf(client, "login")(JsonOf(refused))));
+        }
+
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(RequesterOf(client, "whoami")(JsonOf("null"))));
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(RequesterOf(client, "register")(JsonOf("{\"destination\":41,\"timeout\":0}"))));
+        Assert.Equal("41", (await RequesterOf(client, "register")(JsonOf("{\"destination\":41,\"timeout\":1.5}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("true", (await RequesterOf(client, "unregister")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
+
+        // a session timeout given ends its session once past, rounded; silence counts it alone
+        Assert.Equal("\"ada\"", (await RequesterOf(client, "login")(JsonOf("{\"connectionTimeout\":2147483647,\"name\":\"ada\",\"sessionTimeout\":99.6}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        await Task.Delay(400, Cancelled);
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(RequesterOf(client, "whoami")(JsonOf("null"))));
+    }
+
     /// <summary>
     /// What an HTTP client's exchanges go through: an envelope goes only once the server said it had
     /// the one before — its head came back (section 15.7) — as a socket keeps them in order, so a

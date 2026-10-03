@@ -158,11 +158,25 @@ public sealed class TransportsTests
                 "hosts" => options with { Hosts = TextsOf(value) },
                 "origins" => options with { Origins = TextsOf(value) },
                 "isProxyTrusted" => options with { IsProxyTrusted = value.GetBoolean() },
+
+                // the server layer's, which ConnectionInactivityTimeoutOf reads
+                "connectionInactivityTimeout" => options,
                 _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
             };
         }
 
         return options;
+    }
+
+    // the HTTP server's own connection timeout, on its server layer: the case's where it gives one
+    private static TimeSpan ConnectionInactivityTimeoutOf(JsonElement entry)
+    {
+        if (entry.TryGetProperty("options", out var given) && given.TryGetProperty("connectionInactivityTimeout", out var timeout))
+        {
+            return TimeOf(timeout);
+        }
+
+        return HttpServerOptions.ConnectionInactivityTimeoutDefault;
     }
 
     // a WebSocket transport's options, the case's where it gives them, by the names section 15.3 gives
@@ -237,13 +251,14 @@ public sealed class TransportsTests
 
     // the server layer as HttpServer composes it, built by hand: HttpServer sizes its transport's
     // body on its router's envelope, where a case bounds the body on its own, as the TypeScript
-    // side's harness does; its clock and scheduler the harness's; all else as HttpServer sets it
+    // side's harness does; its clock and scheduler the harness's; its own connection timeout the
+    // case's, where it gives one; all else as HttpServer sets it
     private static Served OverHttp(JsonElement entry, (SteppingClock Clock, SerialScheduler Scheduler) runsOn)
     {
         var transport = new HttpTransportServer(OptionsOf(entry) with { Clock = runsOn.Clock });
         var server = new Server<string>(transport, new ServerOptions
         {
-            ConnectionInactivityTimeout = HttpServerOptions.ConnectionInactivityTimeoutDefault,
+            ConnectionInactivityTimeout = ConnectionInactivityTimeoutOf(entry),
             Limits = RouterLimits.WholeEnvelopeOf(LimitsOf(entry)),
             ResolverScheduler = runsOn.Scheduler,
             Scheduler = runsOn.Scheduler,
@@ -399,6 +414,9 @@ public sealed class TransportsTests
             "maximumWait" => (long)http.MaximumWait.TotalMilliseconds,
             "exchangeTimeout" => (long)http.ExchangeTimeout.TotalMilliseconds,
             "inactivityTimeout" => (long)http.InactivityTimeout.TotalMilliseconds,
+
+            // the HTTP server's own, which its server layer holds
+            "connectionInactivityTimeout" => (long)HttpServerOptions.ConnectionInactivityTimeoutDefault.TotalMilliseconds,
 
             // the WebSocket server takes its router's largest envelope when its transport's options give none
             "maximumMessageBytes" => webSocket.MaximumMessageBytes ?? RouterLimits.Default.MaximumEnvelopeBytes,
@@ -927,12 +945,16 @@ public sealed class TransportsTests
             Assert.Equal($"{gauge} {value}", $"{gauge} {CountOf(gauge)}");
         }
 
-        // a timer armed on the server's clock, due that many milliseconds from now, within a patience
+        // the earliest timer armed on the server's clock, due that many milliseconds from now, and the
+        // only one so due, within a patience
+        // ! one armed before it and not yet cleared, on Kestrel's threads, would fire first as the
+        // clock advances
         private async Task UntilArmed(JsonElement milliseconds)
         {
             var due = TimeOf(milliseconds);
+            var dues = await _served.Clock.UntilEarliest(due, Patience);
 
-            Assert.Contains(due, await _served.Clock.UntilArmed(due, Patience));
+            Assert.True(SteppingClock.IsEarliest(dues, due), $"the earliest timer armed, alone so due, among {string.Join(", ", dues)}");
         }
 
         private long CountOf(string gauge)

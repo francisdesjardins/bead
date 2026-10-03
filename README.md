@@ -85,8 +85,8 @@ its sections names the vector groups that check it. Beside it:
 | File                                                | What it holds                                                                                                                               |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                 | 123 named vectors in 9 groups: headers and envelopes read and written back to their bytes, and the refusals, each with its code             |
-| [`conversations.json`](spec/conversations.json)     | 85 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets |
-| [`transports.json`](spec/transports.json)           | 39 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                    |
+| [`conversations.json`](spec/conversations.json)     | 89 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets |
+| [`transports.json`](spec/transports.json)           | 50 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                    |
 | [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                    |
 | [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, and its procedures                                                                               |
 
@@ -233,6 +233,12 @@ required check.
 - [`docs/decisions/`](docs/decisions/README.md) holds why Bead is shaped as it is, one record a
   decision, changed rather than appended to; the CHANGELOG says what changed, a record says why
   ([0009](docs/decisions/0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+- A comment a reader must not miss opens with its tag, after its marker (`//`, `#`), as the
+  [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments)
+  extension shows them: `!` an alert, a trap or an invariant that breaks something when changed;
+  `?` an open question; `TODO` work to do beside the code; `*` the key point of a block. Every other
+  comment stays plain, and doc comments carry no tag. In an editor without the extension, the tags
+  read as they are.
 
 ## Licence
 

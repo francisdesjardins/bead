@@ -81,6 +81,16 @@ standard it follows.
 Comments are written in the voice of the code around them. Keep each implementation's inside as it
 is: its own toolchain, lockfile, linter, formatter and test runner, run from its own folder.
 
+**Comment tags**, as the Better Comments extension (`aaron-bond.better-comments`) shows them: a
+comment that a reader must not miss opens with its tag, after its marker (`//`, `#`):
+
+- `!` an alert: a trap, or an invariant that breaks something when changed;
+- `?` an open question;
+- `TODO` work to do beside the code, the plan keeping the larger work;
+- `*` the key point of a block.
+
+Every other comment stays plain, and doc comments (JSDoc, `///`) carry no tag.
+
 **C#** (`implementations/dotnet`, decision 0007):
 
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,

@@ -15,6 +15,7 @@ import type {
 } from '../src/router/shared/types';
 import type { IServer, IServerTransportLike } from '../src/server/types';
 import type { TransportServerConnectionHandle } from '../src/transport/server/types';
+import { assertHeldFinite } from '../src/transport/shared/clock';
 
 // interfaces
 
@@ -59,6 +60,16 @@ export const JSON_SERIALIZER = Object.freeze({
 });
 
 // helpers
+
+/**
+ * A duration a payload gives, in milliseconds, held as spec 1.4 holds one given: rounded, and
+ * refused under a millisecond or past 2³¹ − 1, as given, by a throw its server answers with
+ * PROCEDURE_FAILED. `undefined` when not given; JSON writes no never, so a number past the ceiling,
+ * `Infinity` once parsed, is refused too.
+ */
+const durationOf = (name: string, given: unknown): number | undefined => {
+  return given === undefined ? undefined : assertHeldFinite(name, given);
+};
 
 /** The procedure of the interop service named `procedureName`. */
 export const procedureOf = (procedureName: string): IProcedure => {
@@ -259,12 +270,22 @@ export const offerInterop = (server: InteropServer): void => {
     }
   );
 
-  // a new session each time, as the one it replaces ends: its token is drawn anew
+  // a new session each time, as the one it replaces ends: its token is drawn anew. A timeout not
+  // given is left out, for the sessions' default, without end
   services.getRequestResolver(procedureOf('login'), { serializer: JSON_SERIALIZER })(
     (request, response) => {
-      const { name } = request.payload as { name: string };
+      const { connectionTimeout, name, sessionTimeout } = request.payload as {
+        connectionTimeout?: unknown;
+        name: string;
+        sessionTimeout?: unknown;
+      };
 
-      sessions.set({ ...sessions.create(request.connectionHandle), data: name });
+      sessions.set({
+        ...sessions.create(request.connectionHandle),
+        connectionInactivityTimeout: durationOf('connectionTimeout', connectionTimeout),
+        data: name,
+        sessionInactivityTimeout: durationOf('sessionTimeout', sessionTimeout),
+      });
 
       return response(name);
     }
@@ -303,8 +324,12 @@ export const offerInterop = (server: InteropServer): void => {
   // is the caller's to hear about, not a mistake of the server's
   services.getRequestResolver(procedureOf('register'), { serializer: JSON_SERIALIZER })(
     (request, response) => {
-      const { destination, timeout } = request.payload as { destination: number; timeout?: number };
+      const { destination, timeout: given } = request.payload as {
+        destination: number;
+        timeout?: unknown;
+      };
       const { connectionHandle } = request;
+      const timeout = durationOf('timeout', given);
       const isRegistered = router.destinations().some(({ destinationId }) => {
         return destinationId === destination;
       });

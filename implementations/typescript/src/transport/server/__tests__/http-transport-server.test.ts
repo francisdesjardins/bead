@@ -1891,6 +1891,56 @@ test.describe('createHTTPTransportServer, listening', () => {
     await server.stop();
   });
 
+  test('tells a listen held, once past its refusals, and its end while its connection stands: one refused tells nothing and restarts nothing, and a second and the first it replaces each tell theirs', async () => {
+    const clock = createTestClock();
+    const { connectScripted, listenOf, server } = await startScripted({
+      clock,
+      inactivityTimeout: 2_000,
+    });
+    const told: unknown[] = [];
+
+    server.on('listen', (isHeld, connectionHandle) => {
+      told.push([isHeld, connectionHandle]);
+    });
+
+    const deaf = connectScripted();
+    const { connectionHandle, connectionToken } = connectScripted(undefined, {
+      isListening: true,
+    });
+
+    // undeclared, 409, and asking what it cannot, 400: no timer stopped nor armed
+    const refused = timersBy(clock, () => {
+      expect(
+        [
+          listenOf(deaf.connectionToken),
+          listenOf(connectionToken, 'wait=soon'),
+          listenOf(connectionToken, 'after=1'),
+        ].map(({ response }) => {
+          return response.status;
+        })
+      ).toEqual([409, 400, 400]);
+    });
+
+    expect([told, refused]).toEqual([[], { armed: [], cleared: [] }]);
+
+    // a second in the place of the first, which ends empty: each tells its own, the second first,
+    // so a server's count never falls to none between them
+    listenOf(connectionToken, 'wait=20000');
+    listenOf(connectionToken, 'wait=20000');
+
+    expect(told).toEqual([
+      [true, connectionHandle],
+      [true, connectionHandle],
+      [false, connectionHandle],
+    ]);
+
+    // its connection closed: the listen it held ends untold
+    await server.close(connectionHandle);
+
+    expect(told).toHaveLength(3);
+    await server.stop();
+  });
+
   test('closes a connection whose outbox holds more than its bound, and its listen learns it is gone', async () => {
     const { connectScripted, events, listenOf, server } = await startScripted({
       maximumOutboxBytes: 20,

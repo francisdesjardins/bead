@@ -224,12 +224,18 @@ public static class InteropService
             await response.Answer(Null);
         });
 
-        // a new session each time, as the one it replaces ends: its token is drawn anew
+        // a new session each time, as the one it replaces ends: its token is drawn anew. A timeout not
+        // given is left out, for the sessions' default, without end
         services.GetRequestResolver(ProcedureOf("login"), dependencies)((request, response) =>
         {
             var name = request.Payload.GetProperty("name").GetString();
 
-            sessionManager.Set(sessionManager.Create(request.ConnectionHandle) with { Data = name });
+            sessionManager.Set(sessionManager.Create(request.ConnectionHandle) with
+            {
+                ConnectionInactivityTimeout = DurationOf(request.Payload, "connectionTimeout"),
+                Data = name,
+                SessionInactivityTimeout = DurationOf(request.Payload, "sessionTimeout"),
+            });
 
             return response.Answer(JsonSerializer.SerializeToElement(name));
         });
@@ -330,9 +336,7 @@ public static class InteropService
         services.GetRequestResolver(ProcedureOf("register"), dependencies)((request, response) =>
         {
             var destinationId = request.Payload.GetProperty("destination").GetUInt32();
-            var timeout = request.Payload.TryGetProperty("timeout", out var given)
-                ? TimeSpan.FromMilliseconds(given.GetInt64())
-                : (TimeSpan?)null;
+            var timeout = DurationOf(request.Payload, "timeout");
             bool isTaken;
 
             lock (registered)
@@ -391,6 +395,19 @@ public static class InteropService
         {
             return JsonSerializer.SerializeToElement<object?>(null);
         }
+    }
+
+    // a duration a payload gives, in milliseconds, held as spec 1.4 holds one given: rounded, and
+    // refused under a millisecond or past 2³¹ − 1, as given, by a throw its server answers with
+    // PROCEDURE_FAILED; none when not given. JSON writes no never, so -1, .NET's, is refused too
+    private static TimeSpan? DurationOf(JsonElement payload, string name)
+    {
+        if (!payload.TryGetProperty(name, out var given))
+        {
+            return null;
+        }
+
+        return Clocks.AssertHeldFinite((name, name), TimeSpan.FromMilliseconds(given.GetDouble()));
     }
 
     // a ticks answer held: the ticks it waits for still, and what lets it answer, then says it did

@@ -113,8 +113,10 @@ public sealed record HttpTransportStartOptions
 /// that drops does; so do a request unanswered past its exchange timeout and a connection idle past
 /// its inactivity timeout. What the server sends of its own waits, numbered, in the outbox of a
 /// connection whose client said at connect that it listens, until a <c>GET</c> listen brings it back
-/// in a batch. Each exchange waits in its own request, on Kestrel's thread, for what ends it; what
-/// the transport holds is kept under one lock, and its events are raised outside it.
+/// in a batch; each listen held, once past its refusals, raises <see cref="Listen"/> with true, and
+/// its end, while its connection stands, with false. Each exchange waits in its own request, on
+/// Kestrel's thread, for what ends it; what the transport holds is kept under one lock, and its
+/// events are raised outside it.
 /// </remarks>
 public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -190,6 +192,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
     /// <inheritdoc/>
     public event Action<bool, string>? Close;
+
+    /// <inheritdoc/>
+    public event Action<bool, string>? Listen;
 
     /// <summary>
     /// Each listen, its connection found by its token, before it is held: the tests' way to close
@@ -794,7 +799,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         if (HttpMethods.IsGet(request.Method))
         {
-            await Listen(context, connection);
+            await Hold(context, connection);
 
             return;
         }
@@ -1345,7 +1350,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // a listen: what it acknowledges goes, and it brings back what is left — at once, or once
     // something comes within its wait. One listen at a time: a second ends the first, which brings
     // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
-    private async Task Listen(HttpContext context, Drawn connection)
+    private async Task Hold(HttpContext context, Drawn connection)
     {
         Holding?.Invoke(connection.ConnectionHandle);
 
@@ -1419,6 +1424,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         try
         {
+            Listen?.Invoke(true, connection.ConnectionHandle);
+
             var ending = await listening.Ended.Task.WaitAsync(context.RequestAborted);
 
             if (ending.Sequence is { } sequence)
@@ -1444,6 +1451,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
         finally
         {
+            bool isDrawn;
+
             lock (_gate)
             {
                 listening.Timer?.Dispose();
@@ -1454,11 +1463,17 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 }
 
                 connection.Open -= 1;
+                isDrawn = _drawn.GetValueOrDefault(connection.ConnectionHandle) == connection;
 
-                if (_drawn.GetValueOrDefault(connection.ConnectionHandle) == connection)
+                if (isDrawn)
                 {
                     Rest(connection);
                 }
+            }
+
+            if (isDrawn)
+            {
+                Listen?.Invoke(false, connection.ConnectionHandle);
             }
         }
     }

@@ -16,7 +16,7 @@ import type {
 } from '../router/shared/types';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import type { IClock } from '../transport/shared/clock';
-import type { IGauges } from '../transport/shared/types';
+import type { Data, EmitterListener, IGauges } from '../transport/shared/types';
 import type { IHealth, ServerGauges } from './health';
 
 // interfaces
@@ -114,9 +114,10 @@ export interface IServerOptions {
   limits?: RouterLimitsOptions | undefined;
   /**
    * Milliseconds a connection with no session may stay silent before it is closed — one that never
-   * opened a session. One whose session ended keeps that session's connection timeout. From 1 to
-   * {@link LONGEST_TIMER}, rounded to the nearest whole one, or `Infinity` for never, the default;
-   * anything else, 0 among them, is a {@link ProgrammerError}.
+   * opened a session, or one whose session ended, counted from that end; over HTTP, a listen held
+   * is no silence, and the count starts anew at its end. From 1 to {@link LONGEST_TIMER}, rounded to
+   * the nearest whole one, or `Infinity` for never, the default; anything else, 0 among them, is a
+   * {@link ProgrammerError}.
    */
   connectionInactivityTimeout?: number | undefined;
   /**
@@ -139,7 +140,8 @@ export interface IServerOptions {
 /**
  * The part of a transport server a server uses, besides what its router does — met by this
  * package's. It asks only for connections named by a handle, and to be told when one opens, speaks or
- * closes; a transport over a broker meets it once its handles have a shape of their own.
+ * closes, and, over HTTP, when a listen is held and when it ends; a transport over a broker meets it
+ * once its handles have a shape of their own.
  */
 export interface IServerTransportLike extends IRouterServerTransportLike {
   close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
@@ -148,5 +150,46 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
    * for. One that counts nothing leaves the server's own for those.
    */
   gauges?(): IGauges<TransportServerConnectionHandle>;
+  off(
+    event: 'close',
+    listener: EmitterListener<
+      [wasClean: boolean, connectionHandle: TransportServerConnectionHandle]
+    >
+  ): unknown;
+  off(
+    event: 'connection',
+    listener: EmitterListener<
+      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+    >
+  ): unknown;
+  off(
+    event: 'listen',
+    listener: EmitterListener<[isHeld: boolean, connectionHandle: TransportServerConnectionHandle]>
+  ): unknown;
+  off(
+    event: 'message',
+    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+  ): unknown;
+  on(
+    event: 'close',
+    listener: EmitterListener<
+      [wasClean: boolean, connectionHandle: TransportServerConnectionHandle]
+    >
+  ): unknown;
+  on(
+    event: 'connection',
+    listener: EmitterListener<
+      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+    >
+  ): unknown;
+  /** A listen held on a connection, `isHeld`, and its end; one that has no listen never says it. */
+  on(
+    event: 'listen',
+    listener: EmitterListener<[isHeld: boolean, connectionHandle: TransportServerConnectionHandle]>
+  ): unknown;
+  on(
+    event: 'message',
+    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+  ): unknown;
   stop(): Promise<void>;
 }

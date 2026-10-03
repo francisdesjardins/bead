@@ -44,7 +44,10 @@
         "maximumTransfers": { "type": "integer", "minimum": 0 },
         "chunkBytes": { "type": "integer", "minimum": 1 },
         "windowBytes": { "type": "integer", "minimum": 1 },
-        "bufferedBytesBudget": { "type": "integer", "minimum": 0 }
+        "bufferedBytesBudget": { "type": "integer", "minimum": 0 },
+        "maximumChunkRuns": { "type": "integer", "minimum": 1 },
+        "transferInactivityTimeout": { "$ref": "common.schema.json#/$defs/duration" },
+        "maximumDetailBytes": { "type": "integer", "minimum": 0 }
       }
     },
     "pacing": {
@@ -53,7 +56,8 @@
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "maximumQueuedNotifications": { "type": "integer", "minimum": 1 }
+        "maximumQueuedNotifications": { "type": "integer", "minimum": 1 },
+        "maximumQueuedNotificationBytes": { "type": "integer", "minimum": 1 }
       }
     },
     "step": {
