@@ -40,6 +40,12 @@ cases = [
         readings(monotonic=3500)]),
     ('timers due at once fire in the order they were armed', [
         arm('a', 1000), arm('b', 1000), {'advance': 1000}, fired(('a', 1000), ('b', 1000))]),
+    ('a periodic timer is armed again as it is taken: it fires after the timers armed before it fired', [
+        arm('p', 1000, period=1000), arm('a', 2000), {'advance': 2000},
+        fired(('p', 1000), ('a', 2000), ('p', 2000))]),
+    ('a periodic timer is armed again before its callback runs: it fires before the timers its callback arms', [
+        arm('p', 1000, period=1000, then=arm('q', 1000)), {'advance': 2000},
+        fired(('p', 1000), ('p', 2000), ('q', 2000))]),
     ('a timer due past an advance waits for the next one', [
         arm('a', 2000), {'advance': 1999}, fired(), {'advance': 1}, fired(('a', 2000))]),
     ('the wall clock starts where the file says, and moves with the monotonic one', [
@@ -56,7 +62,8 @@ document = {
     '$comment': [
         "Bead's clock cases: what every side's test clock does when a case advances it, so that advance means one thing in every conformance file (decision 0011). A side plays them on the test clock its harnesses give the side under test, with nothing else running on it.",
         'arm arms a timer now, named timer, due in due milliseconds, every period after that when given; its callback notes its firing and its monotonic reading, then arms then, when given, counted from that reading.',
-        "advance steps the clock: it settles the side, takes the earliest timer due within its milliseconds, sets both readings to that due, fires it, settles, and so on; then it sets both readings to the advance's end. A callback reads its own due, a periodic timer fires once for each period crossed, each at its own due, and timers due at once fire in the order they were armed.",
+        "advance steps the clock: it settles the side, takes the earliest timer due within its milliseconds, sets both readings to that due, fires it, settles, and so on; then it sets both readings to the advance's end. A callback reads its own due; timers due at once fire in the order they were armed; and a periodic timer fires once for each period crossed, each at its own due, armed again as it is taken, before its callback runs, so it fires after every timer armed before it fired and before any its callback arms.",
+        'A timer is due in whole milliseconds, a fraction dropped, from 1 to 2147483647 (2³¹ − 1), and repeats every as many: a test clock refuses a timer for less than a millisecond or past that ceiling, and an advance within another, as Bead arms none.',
         'fired is the list of the timers that fired since the case began or since the last fired, in their order, each with the monotonic reading its callback read, in milliseconds since the case began.',
         'wall moves the wall clock alone, forward or back, in milliseconds, and moves no timer. readings checks the monotonic reading, in milliseconds since the case began, and the wall one, an RFC 3339 instant in UTC.',
         'wallClock is where the wall clock starts.',
