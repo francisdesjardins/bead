@@ -1,10 +1,11 @@
 {
   "$schema": "schemas/conversations.schema.json",
   "$comment": [
-    "Bead's conversations: what a server of the interop service (interop-service.json) does with what one client sends, played by every implementation's tests against its own server.",
+    "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
     "A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client's connection.",
     "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. session, on an answer, says what it announced: announced for a token, which is random, ended for 16 zero bytes; none, nothing. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
     "report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.",
+    "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.",
     "Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
     "limits, where given, are the server's limits; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
@@ -2363,6 +2364,848 @@
         },
         {
           "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 64"
+        }
+      ]
+    },
+    {
+      "name": "a destination registered on the wire takes a request relayed, and its result crosses back",
+      "clauses": [
+        "14.1",
+        "14.2",
+        "14.5.1"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 78 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 78 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a failure of the destination's crosses one relay more",
+      "clauses": [
+        "14.5.2",
+        "14.6"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 02  00 00 00 0C | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 2,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 12 00 02  00 00 00 02 | 00 07 00 01",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 7,
+              "scope": 1,
+              "relays": 1
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a failure that crossed 255 relays crosses at 255",
+      "clauses": [
+        "7.5",
+        "14.6"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 02  00 00 00 0C | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 2,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 12 00 02  00 00 00 02 | 00 07 FF 01",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 7,
+              "scope": 1,
+              "relays": 255
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relay asks for a session by default, and its own failure crosses no relay",
+      "clauses": [
+        "14.3.1",
+        "14.6"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 01  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a destination not registered, to a requester admitted, is answered DESTINATION_UNKNOWN",
+      "clauses": [
+        "14.3.2"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 63 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 16,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request that opens a subscription through a relay is answered SUBSCRIPTION_UNSUPPORTED",
+      "clauses": [
+        "14.3.3"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 12 04  00 00 00 03  00 01 00 0A  00 00 00 0C | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 22,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a destination whose connection carries nothing back is answered DESTINATION_UNREACHABLE",
+      "clauses": [
+        "14.3.4"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device",
+          "twoWay": false
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a destination dies with its connection, whoever opens it next, until it is registered anew",
+      "clauses": [
+        "14.3.4",
+        "14.4"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "close": true,
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 05  00 01 00 01  00 00 00 0C | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 8,
+              "scope": 1,
+              "relays": 0
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 10 | 6E 75 6C 6C",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "74 72 75 65"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 0C | 22 7A 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 7A 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 7A 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 7A 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a destination taken out is answered DESTINATION_UNKNOWN",
+      "clauses": [
+        "14.1"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 10 | 6E 75 6C 6C",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "74 72 75 65"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 16,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a cancel on leg A cancels leg B, and leg A is answered nothing",
+      "clauses": [
+        "14.4",
+        "14.5.6"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 6C 61 74 65 22",
+          "on": "device"
+        }
+      ]
+    },
+    {
+      "name": "leg A's connection gone cancels leg B",
+      "clauses": [
+        "14.4"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "device"
+        },
+        {
+          "close": true,
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          },
+          "on": "device"
+        }
+      ]
+    },
+    {
+      "name": "leg B's connection gone once it had the request is answered DESTINATION_LOST, and reported with leg A's connection",
+      "clauses": [
+        "14.5.5",
+        "14.6"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "session": "announced"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "device"
+        },
+        {
+          "close": true,
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 65,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "report": "exception",
+          "on": "client"
         }
       ]
     }

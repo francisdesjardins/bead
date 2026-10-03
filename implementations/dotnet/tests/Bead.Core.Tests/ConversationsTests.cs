@@ -5,14 +5,15 @@ namespace Bead.Tests;
 
 /// <summary>
 /// Bead's conversations, <c>spec/conversations.json</c>, played against the C# server of the
-/// interop service: what one client sends, what the server sends back and reports. The
-/// TypeScript server plays the same file.
+/// interop service: what its clients send, each on its own connection, what the server sends back
+/// on each and reports. The TypeScript server plays the same file.
 /// </summary>
 public sealed class ConversationsTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    // the one connection of a conversation that opens none, opened before its first step
+    private const string OnlyConnection = "connection";
 
     private static readonly JsonElement Root = Load();
 
@@ -178,10 +179,12 @@ public sealed class ConversationsTests
     public async Task Plays(string name)
     {
         var conversation = ConversationOf(name);
+        var steps = conversation.GetProperty("steps");
         var scheduler = new SerialScheduler();
         var transport = new ScriptedTransport();
-        var reports = new List<string>();
-        var isOpen = true;
+
+        // what the server reported, each with the connection it came with
+        var reports = new List<(string Report, string ConnectionHandle)>();
 
         await using var server = new Server<string>(
             transport,
@@ -195,94 +198,220 @@ public sealed class ConversationsTests
 
         var router = server.Router;
 
-        router.Error += (reason, _) =>
+        router.Error += (reason, connectionHandle) =>
         {
-            reports.Add(reason is FailureException failure ? failure.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) : "exception");
+            reports.Add((
+                reason is FailureException failure ? failure.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) : "exception",
+                connectionHandle));
         };
         InteropService.Offer(server);
-        transport.Open(Handle);
 
-        var sent = transport.Sent;
+        // what was sent on each connection and reported, and the conversation did not expect yet
+        IEnumerable<string> Pending()
+        {
+            return transport.Left().Select((left) =>
+            {
+                return $"{left.Name}: {OutOf(left.Bytes)}";
+            }).Concat(reports.Select((report) =>
+            {
+                return $"{transport.NameOf(report.ConnectionHandle)}: report {report.Report}";
+            }));
+        }
+
+        // nothing more was sent, on any connection, or reported
+        async Task NothingMore()
+        {
+            await scheduler.WhenIdle();
+            Assert.Empty(Pending());
+        }
+
+        // a conversation that opens none plays one connection, opened before its first step
+        if (!steps.EnumerateArray().Any((step) =>
+        {
+            return step.TryGetProperty("open", out _);
+        }))
+        {
+            transport.Open(OnlyConnection, true);
+        }
 
         try
         {
-            foreach (var step in conversation.GetProperty("steps").EnumerateArray())
+            foreach (var step in steps.EnumerateArray())
             {
+                var connection = step.TryGetProperty("on", out var on) ? on.GetString()! : OnlyConnection;
+
+                if (step.TryGetProperty("open", out var opened))
+                {
+                    await NothingMore();
+                    transport.Open(opened.GetString()!, !step.TryGetProperty("twoWay", out var twoWay) || twoWay.GetBoolean());
+                    await scheduler.WhenIdle();
+                }
+
                 if (step.TryGetProperty("send", out var bytes))
                 {
-                    await scheduler.WhenIdle();
-                    Assert.Empty(sent.Select(OutOf));
-                    Assert.Empty(reports);
-                    transport.Deliver(Vectors.FromHexadecimal(bytes.GetString()!), Handle);
+                    await NothingMore();
+                    transport.Deliver(Vectors.FromHexadecimal(bytes.GetString()!), connection);
                     await scheduler.WhenIdle();
                 }
 
                 if (step.TryGetProperty("close", out _))
                 {
-                    await scheduler.WhenIdle();
-                    Assert.Empty(sent.Select(OutOf));
-                    Assert.Empty(reports);
-                    isOpen = false;
-                    transport.Closed(Handle);
+                    await NothingMore();
+                    transport.Closed(connection);
                     await scheduler.WhenIdle();
                 }
 
+                // the next envelope sent on its connection; when none was, what came instead
                 if (step.TryGetProperty("expect", out var expected))
                 {
-                    Assert.NotEmpty(sent);
-                    Assert.Equal(ExpectedOf(expected), OutOf(sent[0]));
-                    sent.RemoveAt(0);
+                    Assert.Equal(
+                        ExpectedOf(expected),
+                        transport.Next(connection) is { } sent ? OutOf(sent) : $"nothing, but [{string.Join(", ", Pending())}]");
                 }
 
+                // the next report; on a connection named, it came with that connection's handle
                 if (step.TryGetProperty("report", out var report))
                 {
                     Assert.NotEmpty(reports);
                     Assert.Equal(
                         report.ValueKind == JsonValueKind.Number ? report.GetInt32().ToString(System.Globalization.CultureInfo.InvariantCulture) : report.GetString(),
-                        reports[0]);
+                        reports[0].Report);
+
+                    if (step.TryGetProperty("on", out _))
+                    {
+                        Assert.Equal(transport.HandleOf(connection), reports[0].ConnectionHandle);
+                    }
+
                     reports.RemoveAt(0);
                 }
             }
 
-            await scheduler.WhenIdle();
-            Assert.Empty(sent.Select(OutOf));
-            Assert.Empty(reports);
+            await NothingMore();
         }
         finally
         {
-            if (isOpen)
-            {
-                transport.Closed(Handle);
-            }
-
+            transport.CloseEach();
             await scheduler.WhenIdle();
         }
     }
 
-    // a transport of connections a test opens, delivers to and closes, which records what it sends
+    // a transport of connections a test opens by name, delivers to and closes, which records what
+    // it sends on each. A name keeps its handle: a connection opened again under it is a new
+    // connection under the same handle
     private sealed class ScriptedTransport : IServerTransport
     {
+        // what is sent and asked on the router's scheduler, and taken on the test's
+        private readonly Lock _gate = new();
+
+        // by name, its handle, the first named on the port 50001, the next on 50002; and back
+        private readonly Dictionary<string, string> _handles = [];
+        private readonly Dictionary<string, string> _names = [];
+
+        // by handle, what was sent on it and not yet taken, in order
+        private readonly Dictionary<string, Queue<ReadOnlyMemory<byte>>> _sent = [];
+
+        // the handles of the connections open, and of those that carry nothing back
+        private readonly HashSet<string> _open = [];
+        private readonly HashSet<string> _oneWay = [];
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;
 
         public event Action<bool, string>? Close;
 
-        public List<ReadOnlyMemory<byte>> Sent { get; } = [];
-
-        public void Open(string connectionHandle)
+        public string HandleOf(string name)
         {
-            Connection?.Invoke(connectionHandle);
+            if (!_handles.TryGetValue(name, out var handle))
+            {
+                handle = $"type=WS;ip=127.0.0.1;port={50001 + _handles.Count}";
+                _handles[name] = handle;
+                _names[handle] = name;
+            }
+
+            return handle;
         }
 
-        public void Deliver(byte[] bytes, string connectionHandle)
+        public string NameOf(string connectionHandle)
         {
-            Message?.Invoke(new TransportMessage(bytes, false), connectionHandle);
+            return _names.GetValueOrDefault(connectionHandle, connectionHandle);
         }
 
-        public void Closed(string connectionHandle)
+        public void Open(string name, bool isTwoWay)
         {
-            Close?.Invoke(false, connectionHandle);
+            var handle = HandleOf(name);
+
+            lock (_gate)
+            {
+                if (isTwoWay)
+                {
+                    _oneWay.Remove(handle);
+                }
+                else
+                {
+                    _oneWay.Add(handle);
+                }
+            }
+
+            _open.Add(handle);
+            Connection?.Invoke(handle);
+        }
+
+        public void Deliver(byte[] bytes, string name)
+        {
+            Message?.Invoke(new TransportMessage(bytes, false), HandleOf(name));
+        }
+
+        public void Closed(string name)
+        {
+            var handle = HandleOf(name);
+
+            _open.Remove(handle);
+            Close?.Invoke(false, handle);
+        }
+
+        // closes every connection still open
+        public void CloseEach()
+        {
+            foreach (var handle in _open.ToList())
+            {
+                _open.Remove(handle);
+                Close?.Invoke(false, handle);
+            }
+        }
+
+        // the next envelope sent on a connection, taken; none while none waits
+        public ReadOnlyMemory<byte>? Next(string name)
+        {
+            var handle = HandleOf(name);
+
+            lock (_gate)
+            {
+                return _sent.TryGetValue(handle, out var sent) && sent.TryDequeue(out var bytes) ? bytes : null;
+            }
+        }
+
+        // what was sent and not yet taken, each with the name of its connection
+        public IReadOnlyList<(string Name, ReadOnlyMemory<byte> Bytes)> Left()
+        {
+            lock (_gate)
+            {
+                return [.. _sent.SelectMany((sent) =>
+                {
+                    return sent.Value.Select((bytes) =>
+                    {
+                        return (NameOf(sent.Key), bytes);
+                    });
+                })];
+            }
+        }
+
+        public bool IsTwoWay(string connectionHandle)
+        {
+            lock (_gate)
+            {
+                return !_oneWay.Contains(connectionHandle);
+            }
         }
 
         public Task<bool> CloseConnection(string connectionHandle)
@@ -297,7 +426,16 @@ public sealed class ConversationsTests
 
         public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
         {
-            Sent.Add(bytes.ToArray());
+            lock (_gate)
+            {
+                if (!_sent.TryGetValue(connectionHandle, out var sent))
+                {
+                    sent = [];
+                    _sent[connectionHandle] = sent;
+                }
+
+                sent.Enqueue(bytes.ToArray());
+            }
 
             return Task.CompletedTask;
         }

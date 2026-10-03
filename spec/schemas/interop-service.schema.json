@@ -10,6 +10,13 @@
     "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
     "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
     "serviceRevision": { "type": "integer", "minimum": 1 },
+    "relay": {
+      "description": "What the interop server's relay admits.",
+      "type": "object",
+      "required": ["admits"],
+      "additionalProperties": false,
+      "properties": { "admits": { "type": "string", "minLength": 1 } }
+    },
     "procedures": {
       "type": "array",
       "minItems": 1,

@@ -1,8 +1,8 @@
 // ── Conversations ─────────────────────────────────────────────────────────────
 
 // Bead's conversations, `spec/conversations.json`, played against Bead's TypeScript server of the interop
-// service: what one client sends, what the server sends back and reports. The C# server plays the
-// same file.
+// service: what its clients send, on one connection or on each a conversation opens, what the server
+// sends back on each and reports. The C# server plays the same file.
 
 // dependencies
 
@@ -54,12 +54,21 @@ interface IExpected {
   serviceId?: number;
 }
 
-/** One step of a conversation: what the test does, or what the server does next. */
+/** One step of a conversation: what the test does, or what the server does next, on its connection. */
 interface IStep {
   close?: true;
   expect?: IExpected;
+  on?: string;
+  open?: string;
   report?: number | 'exception';
   send?: string;
+  twoWay?: false;
+}
+
+/** What the server reported to its application, and the connection it came with. */
+interface IReport {
+  code: number | 'exception';
+  connectionHandle: TransportServerConnectionHandle;
 }
 
 interface IConversation {
@@ -77,7 +86,8 @@ const CONVERSATIONS = (
   ) as { conversations: IConversation[] }
 ).conversations;
 
-const HANDLE: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
+// the connection a conversation that opens none plays, opened before its first step
+const ONLY_CONNECTION = 'client';
 
 // helpers
 
@@ -170,8 +180,12 @@ const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
   return { callId, kind: envelope.kind };
 };
 
-/** A transport server of one connection, which records what it sends and delivers what it is given. */
-const createConnection = () => {
+/**
+ * A transport server of the connections a conversation names, each under a handle of its own that a
+ * connection opened again under the same name takes: it records what it sends on each, and delivers
+ * what it is given.
+ */
+const createConnections = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
     connection: [
@@ -181,24 +195,99 @@ const createConnection = () => {
     ];
     message: [data: Data, connectionHandle: TransportServerConnectionHandle];
   }>();
-  const sent: (IExpected | undefined)[] = [];
+  const handles = new Map<string, TransportServerConnectionHandle>();
+  const opened = new Set<TransportServerConnectionHandle>();
+  const oneWay = new Set<TransportServerConnectionHandle>();
+  const sent = new Map<TransportServerConnectionHandle, (IExpected | undefined)[]>();
+  const handleOf = (name: string): TransportServerConnectionHandle => {
+    const port = 50_001 + handles.size;
+    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port}` as const);
+
+    handles.set(name, handle);
+
+    return handle;
+  };
+  const queueOf = (connectionHandle: TransportServerConnectionHandle) => {
+    const queue = sent.get(connectionHandle) ?? [];
+
+    sent.set(connectionHandle, queue);
+
+    return queue;
+  };
   const transport: IServerTransportLike = {
     close: () => {
       return Promise.resolve(false);
+    },
+    isTwoWay: (connectionHandle) => {
+      return !oneWay.has(connectionHandle);
     },
     off: emitter.off,
     on: emitter.on,
     stop: () => {
       return Promise.resolve();
     },
-    send: (data) => {
-      sent.push(expectedOf(bytesOf(data)));
+    send: (data, connectionHandle) => {
+      queueOf(connectionHandle).push(expectedOf(bytesOf(data)));
 
       return Promise.resolve();
     },
   };
 
-  return { emitter, sent, transport };
+  return {
+    close: (name: string): void => {
+      opened.delete(handleOf(name));
+      emitter.emit('close', false, handleOf(name));
+    },
+    /** Closes every connection still open. */
+    closeAll: (): void => {
+      for (const handle of opened) {
+        emitter.emit('close', false, handle);
+      }
+
+      opened.clear();
+    },
+    /** How many envelopes were sent and are not taken yet, on every connection. */
+    count: (): number => {
+      return [...sent.values()].reduce((total, queue) => {
+        return total + queue.length;
+      }, 0);
+    },
+    handleOf,
+    message: (name: string, data: Data): void => {
+      emitter.emit('message', data, handleOf(name));
+    },
+    /** The next envelope sent on the connection `name`. */
+    next: (name: string): IExpected | undefined => {
+      return queueOf(handleOf(name)).shift();
+    },
+    open: (name: string, { isTwoWay }: { isTwoWay: boolean }): void => {
+      const handle = handleOf(name);
+
+      if (isTwoWay) {
+        oneWay.delete(handle);
+      } else {
+        oneWay.add(handle);
+      }
+
+      opened.add(handle);
+      emitter.emit('connection', {}, {}, handle);
+    },
+    transport,
+    /** What was sent and not taken yet, by the name of its connection. */
+    untaken: (): Record<string, (IExpected | undefined)[]> => {
+      const untaken: Record<string, (IExpected | undefined)[]> = {};
+
+      for (const [name, handle] of handles) {
+        const queue = sent.get(handle) ?? [];
+
+        if (queue.length > 0) {
+          untaken[name] = queue;
+        }
+      }
+
+      return untaken;
+    },
+  };
 };
 
 /** Lets what the server does settle: turns of the event loop, until three in a row add nothing. */
@@ -281,53 +370,79 @@ test.describe('the conversations', () => {
 
   for (const { limits, name, pacing, steps } of CONVERSATIONS) {
     test(name, async () => {
-      const { emitter, sent, transport } = createConnection();
-      const server = createServer<IServerTransportLike, string>({ transport }, { limits, pacing });
+      const connections = createConnections();
+      const server = createServer<IServerTransportLike, string>(
+        { transport: connections.transport },
+        { limits, pacing }
+      );
       const { router } = server;
-      const reports: (number | 'exception')[] = [];
+      const reports: IReport[] = [];
       const count = (): number => {
-        return sent.length + reports.length;
+        return connections.count() + reports.length;
       };
-      let isOpen = true;
+      // what the server did that its conversation did not expect: nothing, between steps
+      const expectNothingMore = (when: string): void => {
+        expect({ reports, sent: connections.untaken() }, when).toEqual({ reports: [], sent: {} });
+      };
 
-      router.on('error', (error) => {
-        reports.push(error instanceof FailureError ? error.code : 'exception');
+      router.on('error', (error, connectionHandle) => {
+        reports.push({
+          code: error instanceof FailureError ? error.code : 'exception',
+          connectionHandle,
+        });
       });
       offerInterop(server);
-      emitter.emit('connection', {}, {}, HANDLE);
+
+      if (
+        steps.every((step) => {
+          return step.open === undefined;
+        })
+      ) {
+        connections.open(ONLY_CONNECTION, { isTwoWay: true });
+      }
 
       try {
-        for (const step of steps) {
-          if (step.send !== undefined || step.close === true) {
-            expect({ reports, sent }).toEqual({ reports: [], sent: [] });
+        for (const [index, step] of steps.entries()) {
+          const at = `step ${String(index + 1)}`;
+          const on = step.on ?? ONLY_CONNECTION;
+
+          if (step.open !== undefined || step.send !== undefined || step.close === true) {
+            expectNothingMore(`before ${at}`);
+          }
+
+          if (step.open !== undefined) {
+            connections.open(step.open, { isTwoWay: step.twoWay !== false });
+            await settle(count);
           }
 
           if (step.send !== undefined) {
-            emitter.emit('message', fromHexadecimal(step.send), HANDLE);
+            connections.message(on, fromHexadecimal(step.send));
             await settle(count);
           }
 
           if (step.close === true) {
-            isOpen = false;
-            emitter.emit('close', false, HANDLE);
+            connections.close(on);
             await settle(count);
           }
 
           if (step.expect !== undefined) {
-            expect(sent.shift()).toEqual(step.expect);
+            expect(connections.next(on), at).toEqual(step.expect);
           }
 
           if (step.report !== undefined) {
-            expect(reports.shift()).toBe(step.report);
+            const report = reports.shift();
+
+            expect(report?.code, at).toBe(step.report);
+
+            if (step.on !== undefined) {
+              expect(report?.connectionHandle, at).toBe(connections.handleOf(step.on));
+            }
           }
         }
 
-        expect({ reports, sent }).toEqual({ reports: [], sent: [] });
+        expectNothingMore('at the end');
       } finally {
-        if (isOpen) {
-          emitter.emit('close', false, HANDLE);
-        }
-
+        connections.closeAll();
         await server[Symbol.asyncDispose]();
       }
     });

@@ -179,10 +179,13 @@ public sealed class RouterClientTests
         var server = new Registrations(RouterSide.Server);
         var client = new Registrations(RouterSide.Client);
 
+        // the destinations go to a server's router, which takes none of these resolvers
+        using var link = new Link();
+
         InteropService.Offer(new ServiceManager(server), (new SessionManager<string>(), new BeforeRequest((_) =>
         {
             return true;
-        })));
+        }), link.Server));
         InteropService.OfferClient(new ServiceManager(client));
 
         Assert.Equal(

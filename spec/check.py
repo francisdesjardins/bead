@@ -146,6 +146,22 @@ for group, entries in named.items():
             problems.append(f'{group}: two entries named {entry["name"]!r}')
         seen.add(entry['name'])
 
+# a conversation that opens its connections names one, opened already, on every other step; one that
+# opens none plays the one connection opened before its first step, and names none
+for conversation in named['conversations']:
+    steps = conversation['steps']
+    opened = set()
+
+    for number, step in enumerate(steps, 1):
+        if 'open' in step:
+            opened.add(step['open'])
+        elif any('open' in other for other in steps) and step.get('on') not in opened:
+            problems.append(f'conversations: {conversation["name"]!r}, step {number}, names no connection opened '
+                            f'before it: {step.get("on")!r}')
+        elif not any('open' in other for other in steps) and 'on' in step:
+            problems.append(f'conversations: {conversation["name"]!r}, step {number}, names a connection, '
+                            'where the conversation opens none')
+
 # ── The spec's sections and the groups of vectors name each other ───────────────────────────────
 
 with open(os.path.join(SPEC, 'spec.md'), encoding='utf-8') as file:

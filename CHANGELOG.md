@@ -20,6 +20,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The units of `spec/spec.md` each vector and conversation checks, cited in its `clauses`: a clause,
   an item of its numbered list, a row of its table. `spec/uncited.txt` lists the units none cites,
   and `spec/check.py` fails when that list and the files disagree.
+- Relays in the conversations, across the connections a conversation opens, each step naming its
+  own: twelve of them, for section 14. The interop service's `register` and `unregister` register a
+  caller's connection as a destination on the wire, and `interop-service.json` states what its
+  relay admits.
 
 ### Changed
 

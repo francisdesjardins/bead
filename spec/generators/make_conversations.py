@@ -360,13 +360,105 @@ conversations = [
         cancel(1), credit_in(1, 100)]),
 ]
 
+# 14: relays, across a conversation's connections: a client, and a device the server relays to, which
+# registers its own connection as a destination on the wire
+DESTINATION_UNREACHABLE, SUBSCRIPTION_UNSUPPORTED, DESTINATION_LOST = 17, 22, 65
+DEVICE = 12
+
+
+def on(step, connection):
+    return {**step, 'on': connection}
+
+
+def opened(connection, two_way=True):
+    return {'open': connection, **({} if two_way else {'twoWay': False})}
+
+
+def closed(connection):
+    return {'close': True, 'on': connection}
+
+
+def relayed(call_id, procedure, value, destination=DEVICE, flags=0x02):
+    # a request that names a destination: its 4 bytes after the procedure
+    return json_request(call_id, procedure, value, flags=flags, words=4, tail=word(destination, 4))
+
+
+def registered(call_id=1, destination=DEVICE):
+    return [on(json_request(call_id, 'register', '{"destination":%d}' % destination), 'device'),
+            on(result(call_id, str(destination)), 'device')]
+
+
+def logged_in(call_id=1):
+    return [on(login(call_id, 'ada'), 'client'), on(result(call_id, '"ada"', 'announced'), 'client')]
+
+
+def leg_b(call_id, procedure, value):
+    return on(command(call_id, procedure, value), 'device')
+
+
+conversations += [
+    ('a destination registered on the wire takes a request relayed, and its result crosses back',
+     ['14.1', '14.2', '14.5.1'], None, [
+         opened('client'), opened('device'), *logged_in(), *registered(),
+         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+         on(answer(2, '"x"'), 'device'), on(result(3, '"x"'), 'client')]),
+    ('a failure of the destination\'s crosses one relay more', ['14.5.2', '14.6'], None, [
+        opened('client'), opened('device'), *logged_in(), *registered(),
+        on(relayed(3, 'fail', 'null'), 'client'), leg_b(2, 'fail', 'null'),
+        on(refusal(2, 7, APPLICATION), 'device'), on(failure(3, 7, APPLICATION, relays=1), 'client')]),
+    ('a failure that crossed 255 relays crosses at 255', ['7.5', '14.6'], None, [
+        opened('client'), opened('device'), *logged_in(), *registered(),
+        on(relayed(3, 'fail', 'null'), 'client'), leg_b(2, 'fail', 'null'),
+        on({'send': 'A1 12 00 02  00 00 00 02 | 00 07 FF 01'}, 'device'),
+        on(failure(3, 7, APPLICATION, relays=255), 'client')]),
+    ('a relay asks for a session by default, and its own failure crosses no relay', ['14.3.1', '14.6'], None, [
+        opened('client'), opened('device'), *registered(),
+        on(relayed(1, 'echo', '"x"'), 'client'), on(failure(1, SESSION_REQUIRED), 'client')]),
+    ('a destination not registered, to a requester admitted, is answered DESTINATION_UNKNOWN', ['14.3.2'], None, [
+        opened('client'), opened('device'), *logged_in(), *registered(),
+        on(relayed(3, 'echo', '"x"', destination=99), 'client'), on(failure(3, DESTINATION_UNKNOWN), 'client')]),
+    ('a request that opens a subscription through a relay is answered SUBSCRIPTION_UNSUPPORTED', ['14.3.3'], None, [
+        opened('client'), opened('device'), *logged_in(), *registered(),
+        on(relayed(3, 'ticks', 'null', flags=0x12), 'client'), on(failure(3, SUBSCRIPTION_UNSUPPORTED), 'client')]),
+    ('a destination whose connection carries nothing back is answered DESTINATION_UNREACHABLE', ['14.3.4'], None, [
+        opened('client'), opened('device', two_way=False), *logged_in(), *registered(),
+        on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client')]),
+    ('a destination dies with its connection, whoever opens it next, until it is registered anew',
+     ['14.3.4', '14.4'], None, [
+         opened('client'), opened('device'), *logged_in(), *registered(), closed('device'),
+         on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client'),
+         opened('device'), on(relayed(5, 'echo', '"y"'), 'client'), on(failure(5, DESTINATION_UNREACHABLE), 'client'),
+         on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device'), on(failure(1, 8, APPLICATION), 'device'),
+         on(json_request(3, 'unregister', 'null'), 'device'), on(result(3, 'true'), 'device'),
+         *registered(5), on(relayed(7, 'echo', '"z"'), 'client'), leg_b(2, 'echo', '"z"'),
+         on(answer(2, '"z"'), 'device'), on(result(7, '"z"'), 'client')]),
+    ('a destination taken out is answered DESTINATION_UNKNOWN', ['14.1'], None, [
+        opened('client'), opened('device'), *logged_in(), *registered(),
+        on(json_request(3, 'unregister', 'null'), 'device'), on(result(3, 'true'), 'device'),
+        on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNKNOWN), 'client')]),
+    ('a cancel on leg A cancels leg B, and leg A is answered nothing', ['14.4', '14.5.6'], None, [
+        opened('client'), opened('device'), *logged_in(), *registered(),
+        on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+        on(cancel(3), 'client'), on(cancelled(2), 'device'), on(answer(2, '"late"'), 'device')]),
+    ('leg A\'s connection gone cancels leg B', ['14.4'], None, [
+        opened('client'), opened('device'), *logged_in(), *registered(),
+        on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+        closed('client'), on(cancelled(2), 'device')]),
+    ('leg B\'s connection gone once it had the request is answered DESTINATION_LOST, and reported with leg A\'s connection',
+     ['14.5.5', '14.6'], None, [
+         opened('client'), opened('device'), *logged_in(), *registered(),
+         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+         closed('device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')]),
+]
+
 document = {
     '$schema': 'schemas/conversations.schema.json',
     '$comment': [
-        "Bead's conversations: what a server of the interop service (interop-service.json) does with what one client sends, played by every implementation's tests against its own server.",
+        "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
         'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. session, on an answer, says what it announced: announced for a token, which is random, ended for 16 zero bytes; none, nothing. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
+        'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',

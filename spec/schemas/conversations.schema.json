@@ -56,12 +56,27 @@
       }
     },
     "step": {
-      "description": "What the test does — send, close — or what the server under test does next — expect, report.",
+      "description": "What the test does — open, send, close — or what the server under test does next — expect, report: one of them, on the connection it names, if any.",
       "type": "object",
-      "minProperties": 1,
-      "maxProperties": 1,
       "additionalProperties": false,
+      "oneOf": [
+        { "required": ["open"] },
+        { "required": ["send"] },
+        { "required": ["close"] },
+        { "required": ["expect"] },
+        { "required": ["report"] }
+      ],
+      "dependentSchemas": {
+        "open": { "not": { "required": ["on"] } },
+        "twoWay": { "required": ["open"] }
+      },
       "properties": {
+        "open": { "$ref": "#/$defs/connection" },
+        "twoWay": {
+          "description": "false for a connection that carries nothing back, as an HTTP client that does not listen.",
+          "const": false
+        },
+        "on": { "$ref": "#/$defs/connection" },
         "send": { "$ref": "common.schema.json#/$defs/bytes" },
         "close": { "const": true },
         "expect": { "$ref": "#/$defs/expect" },
@@ -74,8 +89,13 @@
         }
       }
     },
+    "connection": {
+      "description": "A connection's name, which the conversation opens with open; the only one, opened before the first step, where it opens none.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$"
+    },
     "expect": {
-      "description": "The next envelope the server sends, each kind with its own fields.",
+      "description": "The next envelope the server sends on its connection, each kind with its own fields.",
       "type": "object",
       "required": ["kind"],
       "properties": { "kind": { "$ref": "common.schema.json#/$defs/kind" } },

@@ -499,8 +499,7 @@ session; a session opened for a connection already closed ends at once.
 
 ## 14. Relays
 
-_No conversation yet: a conversation plays one connection, and a relay needs a destination behind
-it. Each implementation's relay tests check this section._
+_Conversations: `spec/conversations.json`._
 
 14.1. A server MAY relay. It registers destinations — each from 1 to 2³² − 1, given or drawn, never
 0 — and a request whose `DESTINATION` names one goes on to what stands behind it: a router it calls
