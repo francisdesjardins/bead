@@ -37,9 +37,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message whole or in fragments, a text message reported, a message past its limit closed 1009, a
   clean close and a stop, and, on the real clock, the ping and the peer that leaves it unanswered.
 - `spec/clocks.json`, its schema and its generator: what every side's test clock does when a case
-  advances it — timers chained in one advance, a periodic timer across its periods, timers due at
-  once, the wall clock moved alone — which both sides play, so that `advance` means one thing in
-  every file (decision 0011).
+  advances it — timers chained in one advance, a periodic timer across its periods and armed again as
+  it is taken, timers due at once, the wall clock moved alone — which both sides play, so that
+  `advance` means one thing in every file (decision 0011). Both test clocks refuse a timer for less
+  than a millisecond or past the ceiling, and an advance within another.
 - The first cases that advance the clock a server is given: in the transports' file, a call id
   buried 5 seconds, then handed on; in the conversations, a command past its 10 seconds, its call id
   reserved as long, an answer within dropped and one after reported `CALL_UNKNOWN`.
@@ -53,8 +54,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side, the platform's by default. What bounds a platform's own close or stop, and a
   WebSocket's ping, stay on the real clock.
 - A timeout past 2³¹ − 1 milliseconds is refused wherever one is taken, as `LONGEST_TIMER` and
-  `Clocks.LongestTimer` state; never is `Infinity` and `Timeout.InfiniteTimeSpan`, which arm nothing.
-  The TypeScript session manager's `isArmable` goes.
+  `Clocks.LongestTimer` state; never is `Infinity` and `Timeout.InfiniteTimeSpan`, which arm
+  nothing. The TypeScript session manager's `isArmable` goes. A timeout under a millisecond is
+  refused wherever one is taken, 0 aside where it means no timer or the default, and `NaN` on the
+  TypeScript side; a server's connection inactivity timeout of 0 is refused, as a transfer's is:
+  Bead arms no timer for less than a millisecond.
 - A transport server client's last activity is `lastActivity`, milliseconds since the epoch, and
   `LastActivity`, a `DateTimeOffset`, each read from its clock; its event is `lastActivityChanged`
   and `LastActivityChanged`, and a session manager's update `updateLastActivity` and

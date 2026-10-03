@@ -66,7 +66,11 @@ reading alone, and the instants a side reports are `lastActivity`, `LastActivity
 **One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# side keeps for parity, though its
 timers reach twice as far. Every option and method that takes a timeout refuses a longer one — a
 session manager's reset and a server's connection timeout among them — and _never_ is `Infinity` and
-`Timeout.InfiniteTimeSpan`, which arm nothing. One constant a side, beside its clock.
+`Timeout.InfiniteTimeSpan`, which arm nothing. One constant a side, beside its clock. **And one
+floor: a millisecond.** Bead arms no timer for less on the clock it is given, where Node waits a
+millisecond at least and .NET fires at once: a timeout under a millisecond is refused where its
+ceiling is, 0 aside wherever 0 means no timer or the default; a server's connection inactivity
+timeout of 0 is refused, as a transfer's is; and a delay that reaches 0 acts at once, with no timer.
 
 **`advance` steps.** It settles the side; takes the earliest timer due by now plus its milliseconds;
 sets both readings to that due; fires it; settles; and so on, then sets the readings to now plus its
@@ -77,9 +81,11 @@ the fake fires a timer due within an advance with its readings at the end alread
 once in no order of its own. The TypeScript side's test clock is `@sinonjs/fake-timers`'
 `createClock()`, never installed on the globals, and its `tickAsync` steps. Both pass one shared
 table of clock cases, `spec/clocks.json`: two timers chained in one advance, a periodic timer across
-three periods, timers due at once, the wall clock moved alone. A timer armed for no time is not
-among them: `fake-timers` gives one armed by a callback a millisecond, and Bead arms none on the
-clock it is given.
+three periods, timers due at once, the wall clock moved alone. A periodic timer is armed again as it
+is taken, before its callback runs: it fires after every timer armed before it fired, and before any
+its callback arms. A due is counted in whole milliseconds, a fraction dropped, as both platforms
+count it; both test clocks refuse a timer for less than a millisecond or past the ceiling, and an
+advance within another, so what Bead never arms fails a test on either side.
 
 **An `advance` follows a timer armed.** Each side's test clock counts the timers armed and their
 dues, and `until` waits for "a timer armed, due its milliseconds from now" before an advance:
@@ -162,3 +168,14 @@ objections, each with its answer:
 | A timer-callback contract cannot be mirrored by a C side polling deadlines on a 1 kHz loop                               | Accepted: the shapes are the TypeScript and C# sides'; the contract every language plays is in readings and deadlines.                                                   |
 | Randomness is left on the platform, yet a TypeScript test swaps `Math.random`                                            | Accepted: both sides check a drawn wait by its bounds, and the swaps go.                                                                                                 |
 | The first cases close connections under exchanges cut after their head, which the clock does not order                   | Accepted in part: the clock does not order sockets, and such a case expects `orLost`, which the transports' file now has; a lingering close is the transports' to weigh. |
+
+The two test clocks, once both played the clock cases, met the Tenth Man again, on aligning the C#
+side's on `fake-timers` where the cases said nothing:
+
+| Objection                                                                                                                                                            | Answer                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bead does arm a timer for no time — a server given a connection inactivity timeout of 0 — and a millisecond counted for it describes `fake-timers`, neither platform | Accepted: one floor, a millisecond; a timeout under it is refused wherever one is taken, and a server's inactivity timeout of 0 on both sides; both test clocks refuse a timer for less, and no case pins what they would do with it. |
+| "A periodic timer is armed again last" is false of both test clocks once its own callback arms a timer due with its next firing                                      | Accepted: the rule is stated in Bead's terms — armed again as it is taken, before its callback — and a case pins the order its callback's timers take.                                                                                |
+| The ceiling is a gate on the C# test clock alone, where `fake-timers` fires a timer past it a millisecond later, as Node would                                       | Accepted: both test clocks refuse a timer past the ceiling, and an advance within another; a session that ends at an `exp` past the ceiling is decided with 0010.                                                                     |
+| Fractional dues diverge: `fake-timers` and .NET truncate to whole milliseconds, the C# test clock kept ticks                                                         | Accepted: a due is counted in whole milliseconds, a fraction dropped, on both test clocks.                                                                                                                                            |
+| The record changes without this round's objections, and the other files restate a part of `advance`                                                                  | Accepted: this table; the conversations' and the transports' files refer to `spec/clocks.json` for what `advance` means.                                                                                                              |

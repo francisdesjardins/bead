@@ -207,10 +207,9 @@ Y, or comes back to it, and Z comes to all of them at once, by a decision that m
 ## Consequences
 
 **Each behaviour is written and tested once per language.** The conformance files take most of that
-cost off the wire: 123 vectors in 9 groups, 85 conversations, 39 transports' cases and 7 clock
-cases, which both sides play, written once.
-CI's `spec` job regenerates them and fails on any byte that differs, or on any file a generator
-writes that is not committed.
+cost off the wire: 123 vectors in 9 groups, 85 conversations, 39 transports' cases and 9 clock
+cases, which both sides play, written once. CI's `spec` job regenerates them and fails on any byte
+that differs, or on any file a generator writes that is not committed.
 
 **What no entry plays stays with each side's twin tests**, and `docs/support.md` says so: a
 destination that is a router the relay calls through, with its two legs' limits and the session
