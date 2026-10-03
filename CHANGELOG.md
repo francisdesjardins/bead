@@ -86,6 +86,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The HTTP transport, on both sides, answers 200, then cuts, the exchange of a request it handed on
   when handing it on closes the connection, where it answered 404 `connection-unknown`, a refusal
   that says nothing was tried.
+- The C# side's trace counts a call's duration on its clock's monotonic reading, as the TypeScript
+  side's does, where it read the wall clock, which a clock set by hand moves; the twin test plays on
+  both sides.
 
 ## [0.1.0] - 2026-10-02
 

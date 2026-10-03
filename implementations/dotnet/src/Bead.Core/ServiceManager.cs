@@ -550,6 +550,13 @@ public sealed class ServiceManager
         return reason is FailureException failure ? failure.Failure : null;
     }
 
+    // now, for a call starting: the instant it is told at, on the wall clock, and the reading its
+    // duration counts from, on the monotonic one
+    private Started StartedNow()
+    {
+        return new Started(_clock.GetUtcNow(), _clock.GetTimestamp());
+    }
+
     // tells Debug of one step of a call; nothing is built when nobody hears it
     private void Trace(Procedure procedure, DebugStep step)
     {
@@ -558,8 +565,7 @@ public sealed class ServiceManager
             return;
         }
 
-        var now = _clock.GetUtcNow();
-        var started = step.Started ?? now;
+        var started = step.Started ?? StartedNow();
 
         debug(step.Error, new DebugEvent
         {
@@ -570,7 +576,7 @@ public sealed class ServiceManager
             Rx = step.Rx,
             ServiceId = procedure.ServiceId,
             ServiceRevision = procedure.ServiceRevision,
-            Timestamp = new DebugTimestamp(step.IsAnswered ? (long)(now - started).TotalMilliseconds : null, started.ToUnixTimeMilliseconds()),
+            Timestamp = new DebugTimestamp(step.IsAnswered ? (long)_clock.GetElapsedTime(started.Timestamp).TotalMilliseconds : null, started.Event.ToUnixTimeMilliseconds()),
             Tx = step.Tx,
             Type = step.Type,
         });
@@ -671,7 +677,7 @@ public sealed class ServiceManager
     {
         var (procedure, serializer, given, (type, subscribes)) = call;
         var options = OptionsOf(given);
-        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = _clock.GetUtcNow(), Tx = payload };
+        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = StartedNow(), Tx = payload };
 
         // what the call fails with once it went out is told as its answer
         void Failed(Exception reason)
@@ -735,10 +741,13 @@ public sealed class ServiceManager
 
         public object? Rx { get; init; }
 
-        public DateTimeOffset? Started { get; init; }
+        public Started? Started { get; init; }
 
         public object? Tx { get; init; }
     }
+
+    // when a call started: its instant on the wall clock, and the monotonic reading its duration counts from
+    private readonly record struct Started(DateTimeOffset Event, long Timestamp);
 
     // what a resolver is made of: its procedure, its serializer, its admission, its callback, and
     // what its calls are
@@ -885,7 +894,7 @@ public sealed class ServiceManager
                 return;
             }
 
-            var started = manager._clock.GetUtcNow();
+            var started = manager.StartedNow();
 
             manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { Rx = payload, Started = started });
 
@@ -965,7 +974,7 @@ public sealed class ServiceManager
                 nameof(failure));
         }
 
-        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, DateTimeOffset Started) answering) : INotificationResponse<TResponse>
+        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started Started) answering) : INotificationResponse<TResponse>
         {
             public bool IsAnswered { get; set; }
 

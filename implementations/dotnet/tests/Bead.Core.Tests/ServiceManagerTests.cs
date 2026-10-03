@@ -408,6 +408,32 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Reads_its_router_s_clock_a_step_s_instant_on_the_wall_clock_its_duration_on_the_monotonic_reading()
+    {
+        var clock = new SteppingClock(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+
+        router.Answer = async (payload) =>
+        {
+            // a wall clock set back by hand moves no duration
+            clock.Wall(TimeSpan.FromDays(-1));
+            await clock.Advance(TimeSpan.FromMilliseconds(250));
+
+            return await EchoOf(payload);
+        };
+        await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(
+            [new DebugTimestamp(null, 1_000), new DebugTimestamp(250, 1_000)],
+            seen.Select((told) =>
+            {
+                return told.Event.Timestamp;
+            }));
+    }
+
+    [Fact]
     public async Task A_debug_listener_that_throws_on_the_answer_fails_the_call_once_with_no_second_trace()
     {
         var manager = new ServiceManager(new RecordingRouter());
