@@ -458,14 +458,14 @@ test.describe('an HTTP server and client', () => {
 
     await expect(refused).rejects.toMatchObject({
       code: ProtocolCode.DESTINATION_UNREACHABLE,
-      hops: 0,
+      relays: 0,
     });
 
     const lost = echoing('hi')({ destinationId: 7 });
 
     (await nextCall(3))?.fail();
 
-    await expect(lost).rejects.toMatchObject({ code: ProtocolCode.DESTINATION_LOST, hops: 0 });
+    await expect(lost).rejects.toMatchObject({ code: ProtocolCode.DESTINATION_LOST, relays: 0 });
     legB.transport.removeAllListeners();
   });
 

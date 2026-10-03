@@ -17,11 +17,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no key twice, one version across the spec and its files, one name to a vector or a conversation
   in its group, every group of vectors named by a section of the spec, which names no other, and a
   report of the groups each side's tests read, which fails on one a side does not.
+- The units of `spec/spec.md` each vector and conversation checks, cited in its `clauses`: a clause,
+  an item of its numbered list, a row of its table. `spec/uncited.txt` lists the units none cites,
+  and `spec/check.py` fails when that list and the files disagree.
+- Relays in the conversations, across the connections a conversation opens, each step naming its
+  own: twelve of them, for section 14. The interop service's `register` and `unregister` register a
+  caller's connection as a destination on the wire, and `interop-service.json` states what its
+  relay admits.
+- `spec/transports.json`, its schema and its generator: what a server of the interop service does at
+  its HTTP transport's edge, which each side's tests play against their own server with a peer that
+  writes HTTP/1.1 in exact octets, the bounds' defaults each side checks, and responses cut across
+  reads that each side's reader reads alike.
+- The WebSocket's cases in `spec/transports.json`, played with frames the peer writes itself: a
+  message whole or in fragments, a text message reported, a message past its limit closed 1009, a
+  clean close and a stop, and, on the real clock, the ping and the peer that leaves it unanswered.
 
 ### Changed
 
 - The Tenth Man meets every change to what every language's tests answer to: the spec, its
   conformance files, their shape and their tooling, and the gates the implementations share.
+- The conversations' steps are named by who acts, `send` and `expect` where they said `in` and
+  `out`; an expected failure gives the relays it crossed, and an expected command its flags, which
+  both sides now compare.
+- A failure's `hops` is `relays` on both sides, the spec's word, and its message says "through N
+  relays".
+- Both sides play the conformance files without retry.
+- Section 15.12 names the HTTP transport's bounds in a table, and states the address a server takes
+  from a proxy on its machine it trusts; section 15.3 names `maximumMessageBytes` and `heartbeat`.
+- Section 15.4 says that a connect is of Bead's type, as both servers take it.
+
+### Fixed
+
+- The HTTP transport, on both sides, answers 200, then cuts, the exchange of a request it handed on
+  when handing it on closes the connection, where it answered 404 `connection-unknown`, a refusal
+  that says nothing was tried.
 
 ## [0.1.0] - 2026-10-02
 

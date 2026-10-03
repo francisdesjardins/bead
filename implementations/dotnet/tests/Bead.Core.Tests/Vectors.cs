@@ -177,7 +177,7 @@ internal static class Vectors
         {
             Code = json.GetProperty("code").GetUInt16(),
             Detail = json.GetProperty("detail").GetString()!,
-            Hops = json.GetProperty("hops").GetByte(),
+            Relays = json.GetProperty("relays").GetByte(),
             Scope = (FailureScope)json.GetProperty("scope").GetByte(),
         };
     }

@@ -39,9 +39,9 @@ test.describe('FailureError', () => {
       code: 19,
       destinationId: 5,
       detail: 'no procedure 1 in service 2',
-      hops: 0,
       origin: 'peer',
       procedureAddress: { procedureId: 1, serviceId: 2 },
+      relays: 0,
       scope: FailureScope.PROTOCOL,
       side: 'server',
     });
@@ -51,7 +51,7 @@ test.describe('FailureError', () => {
     expect(error.cause).toBe(cause);
   });
 
-  test('is local, with no hop, no detail and nothing it belongs to, when not told', () => {
+  test('is local, through no relay, with no detail and nothing it belongs to, when not told', () => {
     const error = new FailureError(CLIENT_FAILURES.payloadTooLarge);
 
     expect(error).toMatchObject({
@@ -59,9 +59,9 @@ test.describe('FailureError', () => {
       destinationId: undefined,
       detail: '',
       header: undefined,
-      hops: 0,
       origin: 'local',
       procedureAddress: undefined,
+      relays: 0,
       side: 'client',
     });
     expect(error.message).toBe('local client protocol failure 34 PAYLOAD_TOO_LARGE');
@@ -96,18 +96,18 @@ test.describe('FailureError', () => {
       }).message
     ).toBe('client application failure 21');
     expect(
-      new FailureError({ code: 18, hops: 1, origin: 'relayed', scope: FailureScope.PROTOCOL })
+      new FailureError({ code: 18, origin: 'relayed', relays: 1, scope: FailureScope.PROTOCOL })
         .message
-    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, relayed 1 hop');
+    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, through 1 relay');
     expect(
       new FailureError({
         code: 18,
         detail: 'gone',
-        hops: 2,
         origin: 'relayed',
+        relays: 2,
         scope: FailureScope.PROTOCOL,
       }).message
-    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, relayed 2 hops: gone');
+    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, through 2 relays: gone');
     // a code no name is known for stays a number
     expect(
       new FailureError({ code: 23, origin: 'peer', scope: FailureScope.PROTOCOL, side: 'server' })
@@ -133,8 +133,8 @@ test.describe('FailureError', () => {
 
     const relayed = new FailureError({
       code: 18,
-      hops: 1,
       origin: 'relayed',
+      relays: 1,
       scope: FailureScope.PROTOCOL,
     });
 
@@ -164,9 +164,9 @@ test.describe('FailureError', () => {
 test.describe('failureErrorOf', () => {
   const header: IFailureHeader = { callId: 3, kind: 0x12 };
 
-  test('is the peer’s, of the other side, with no hop', () => {
+  test('is the peer’s, of the other side, through no relay', () => {
     const fromServer = failureErrorOf(
-      { code: 19, detail: '', hops: 0, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: '', relays: 0, scope: FailureScope.PROTOCOL },
       {
         destinationId: 4,
         failures: CLIENT_FAILURES,
@@ -184,7 +184,7 @@ test.describe('failureErrorOf', () => {
     expect(fromServer.header).toEqual({ callId: 3, hasSessionToken: false, kind: 0x12 });
     expect(
       failureErrorOf(
-        { code: 19, detail: '', hops: 0, scope: FailureScope.PROTOCOL },
+        { code: 19, detail: '', relays: 0, scope: FailureScope.PROTOCOL },
         { failures: SERVER_FAILURES, header }
       ).side
     ).toBe('client');
@@ -192,14 +192,14 @@ test.describe('failureErrorOf', () => {
 
   test('is of no known side through a relay, and names where its call went', () => {
     const relayed = failureErrorOf(
-      { code: 18, detail: '', hops: 1, scope: FailureScope.PROTOCOL },
+      { code: 18, detail: '', relays: 1, scope: FailureScope.PROTOCOL },
       { destinationId: 4, failures: CLIENT_FAILURES, header }
     );
 
     expect(relayed).toMatchObject({
       destinationId: 4,
-      hops: 1,
       origin: 'relayed',
+      relays: 1,
       side: undefined,
     });
   });

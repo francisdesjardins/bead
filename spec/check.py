@@ -7,8 +7,15 @@ Every spec/*.json has its schema in spec/schemas/, and every schema its file; ea
 schema, which follows JSON Schema 2020-12, and holds no key twice (RFC 7493); each repeats the
 version spec/spec.md states as its specVersion; no group holds two vectors or conversations of one
 name, which a reader looking one up by name would never reach; each group of vectors.json is named
-by a section of the spec, which names no other; and each implementation's tests read every group,
-and the conversations. Exit 1 on any of them.
+by a section of the spec, which names no other; every unit an entry cites is one of spec.md's — a
+clause, an item of its numbered list, a row of its table — and spec/uncited.txt lists exactly the
+units no entry cites; and each implementation's tests read every group, the conversations and the
+transports' cases, any of which may name the row of docs/support.md it crosses. Exit 1 on any of
+them.
+
+  python spec/check.py --write-uncited
+
+writes spec/uncited.txt from the files as they stand, for a change that cites or leaves a unit.
 
 It needs jsonschema, locked in spec/requirements.txt.
 """
@@ -32,14 +39,23 @@ COMMON = 'common'
 # what vectors.json holds beside its groups
 META = {'$schema', '$comment', 'specVersion'}
 
-# where each implementation's tests are, the files among them, and how they name a group of vectors
-# and the conversations: a language that joins adds its row
+# the units of spec.md no entry cites, which only a change to the files or the spec moves
+UNCITED = os.path.join(SPEC, 'uncited.txt')
+UNCITED_HEADER = ('# The units of spec/spec.md that no vector, conversation or case cites, in their order.\n'
+                  '# spec/check.py fails when this list and the files disagree; --write-uncited writes it.\n')
+WRITE_UNCITED = '--write-uncited' in sys.argv[1:]
+
+# where each implementation's tests are, the files among them, and how they name a group of vectors,
+# the conversations and the transports' cases: a language that joins adds its row
 SIDES = {
     'TypeScript': ('implementations/typescript/src', '.test.ts',
-                   r'\bVECTORS\.(\w+)', r"'[^']*\bconversations\.json'"),
+                   r'\bVECTORS\.(\w+)', r"'[^']*\bconversations\.json'", r"'[^']*\btransports\.json'"),
     'C#': ('implementations/dotnet/tests', '.cs',
-           r'\bVectors\.(?:NamesOf|Of)\("(\w+)"', r'"conversations\.json"'),
+           r'\bVectors\.(?:NamesOf|Of)\("(\w+)"', r'"conversations\.json"', r'"transports\.json"'),
 }
+
+# the matrix whose rows a case that crosses a platform's difference names
+SUPPORT = os.path.join(ROOT, 'docs', 'support.md')
 
 problems = []
 
@@ -125,6 +141,7 @@ vectors = documents['vectors']
 groups = [group for group in vectors if group not in META]
 named = {group: vectors[group] for group in groups}
 named['conversations'] = documents['conversations']['conversations']
+named['transports'] = documents['transports']['cases']
 
 for group, entries in named.items():
     seen = set()
@@ -133,6 +150,43 @@ for group, entries in named.items():
         if entry['name'] in seen:
             problems.append(f'{group}: two entries named {entry["name"]!r}')
         seen.add(entry['name'])
+
+responses = set()
+
+for response in documents['transports']['responses']:
+    if response['name'] in responses:
+        problems.append(f'transports: two responses named {response["name"]!r}')
+    responses.add(response['name'])
+
+# a case that crosses a row of the matrix is named by that row
+with open(SUPPORT, encoding='utf-8') as file:
+    rows = [line for line in file.read().splitlines() if line.startswith('| ')]
+
+for case in named['transports']:
+    for crossed in case.get('differs', []):
+        row = next((line for line in rows if line.split('|')[1].strip() == crossed['row']), None)
+
+        if row is None:
+            problems.append(f'transports: {case["name"]!r} crosses the row {crossed["row"]!r}, which docs/support.md '
+                            'does not have')
+        elif case['name'] not in row:
+            problems.append(f'transports: {case["name"]!r} crosses the row {crossed["row"]!r}, which does not name it')
+
+# a conversation that opens its connections names one, opened already, on every other step; one that
+# opens none plays the one connection opened before its first step, and names none
+for conversation in named['conversations']:
+    steps = conversation['steps']
+    opened = set()
+
+    for number, step in enumerate(steps, 1):
+        if 'open' in step:
+            opened.add(step['open'])
+        elif any('open' in other for other in steps) and step.get('on') not in opened:
+            problems.append(f'conversations: {conversation["name"]!r}, step {number}, names no connection opened '
+                            f'before it: {step.get("on")!r}')
+        elif not any('open' in other for other in steps) and 'on' in step:
+            problems.append(f'conversations: {conversation["name"]!r}, step {number}, names a connection, '
+                            'where the conversation opens none')
 
 # ── The spec's sections and the groups of vectors name each other ───────────────────────────────
 
@@ -157,11 +211,11 @@ for line in re.findall(r'^_Vectors:.*$', text, re.MULTILINE):
         elif part != 'every refusal':
             problems.append(f'spec.md: "{line}" names {part!r}, no group')
 
-for line in re.findall(r'^_Conversations:.*$', text, re.MULTILINE):
-    found = re.fullmatch(r'_Conversations: `spec/(\S+)\.json`\._', line)
+for line in re.findall(r'^_(?:Conversations|Transports):.*$', text, re.MULTILINE):
+    found = re.fullmatch(r'_(?:Conversations|Transports): `spec/(\S+)\.json`\._', line)
 
     if found is None or found.group(1) not in documents:
-        problems.append(f'spec.md: {line!r} names no conversation file of spec/')
+        problems.append(f'spec.md: {line!r} names no file of spec/')
 
 for group in sorted(cited - set(groups)):
     problems.append(f'spec.md names the group {group}, which vectors.json does not hold')
@@ -169,11 +223,79 @@ for group in sorted(cited - set(groups)):
 for group in sorted(set(groups) - cited):
     problems.append(f'vectors.json holds the group {group}, which no section of spec.md names')
 
+# ── The units each entry cites, and those none cites ────────────────────────────────────────────
+
+
+def units_of(spec):
+    """The units of spec.md in their order: each clause, each item of its numbered list, and each row
+    of its table, counted from 1; a heading ends a clause, and a block of code holds none."""
+    units = []
+    clause = None
+    items = rows = 0
+    under_header = False
+    in_code = False
+
+    for line in spec.splitlines():
+        if line.startswith('```'):
+            in_code = not in_code
+        elif in_code:
+            continue
+        elif line.startswith('#'):
+            clause = None
+        elif found := re.match(r'(\d+)\.(\d+)\. ', line):
+            clause = f'{found.group(1)}.{found.group(2)}'
+            units.append(clause)
+            items = rows = 0
+            under_header = False
+        elif clause is None:
+            continue
+        elif re.match(r'\d+\. ', line):
+            items += 1
+            units.append(f'{clause}.{items}')
+        elif re.match(r'\|[\s|:-]+\|\s*$', line):
+            under_header = True
+        elif line.startswith('|') and under_header:
+            rows += 1
+            units.append(f'{clause}.{rows}')
+
+    return units
+
+
+units = units_of(text)
+known = set(units)
+citing = set()
+
+for group, entries in named.items():
+    for entry in entries:
+        for unit in entry['clauses']:
+            if unit not in known:
+                problems.append(f'{group}: {entry["name"]!r} cites {unit}, which spec.md does not have')
+
+            citing.add(unit)
+
+uncited = [unit for unit in units if unit not in citing]
+
+if WRITE_UNCITED:
+    with open(UNCITED, 'w', encoding='utf-8', newline='\n') as file:
+        file.write(UNCITED_HEADER + ''.join(f'{unit}\n' for unit in uncited))
+elif not os.path.exists(UNCITED):
+    problems.append('uncited.txt is missing: python spec/check.py --write-uncited writes it')
+else:
+    with open(UNCITED, encoding='utf-8') as file:
+        listed = [line.strip() for line in file if line.strip() and not line.startswith('#')]
+
+    for unit in sorted(set(uncited) - set(listed), key=units.index):
+        problems.append(f'{unit}: no entry cites it, and uncited.txt does not list it')
+
+    for unit in sorted(set(listed) - set(uncited)):
+        problems.append(f'uncited.txt lists {unit}, which ' +
+                        ('an entry cites' if unit in known else 'spec.md does not have'))
+
 # ── What each implementation's tests read ───────────────────────────────────────────────────────
 
 read = {}
 
-for side, (folder, suffix, group_pattern, conversations_pattern) in SIDES.items():
+for side, (folder, suffix, group_pattern, conversations_pattern, transports_pattern) in SIDES.items():
     sources = ''
 
     for directory, children, names in os.walk(os.path.join(ROOT, folder)):
@@ -192,6 +314,9 @@ for side, (folder, suffix, group_pattern, conversations_pattern) in SIDES.items(
     if re.search(conversations_pattern, sources):
         read[side].add('conversations')
 
+    if re.search(transports_pattern, sources):
+        read[side].add('transports')
+
     for group in sorted(read[side] - set(named)):
         problems.append(f'{side}: its tests read a group, {group}, which vectors.json does not hold')
 
@@ -203,7 +328,9 @@ if problems:
 
 print(f'spec: {version}; {len(documents)} files, each under its schema; '
       f'{sum(len(vectors[group]) for group in groups)} vectors in {len(groups)} groups, each named by '
-      f'the spec; {len(named["conversations"])} conversations.')
+      f'the spec; {len(named["conversations"])} conversations; {len(named["transports"])} transports\' '
+      f'cases; {len(units) - len(uncited)} of the '
+      f'spec\'s {len(units)} units cited, the others listed in uncited.txt.')
 
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())
 

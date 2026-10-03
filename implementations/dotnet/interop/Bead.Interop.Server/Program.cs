@@ -21,8 +21,8 @@ void Report(Exception reason, string connectionHandle)
 
 server.Router.Error += Report;
 httpServer.Router.Error += Report;
-InteropService.Offer(server.Services, (server.Sessions, server.RequireSession));
-InteropService.Offer(httpServer.Services, (httpServer.Sessions, httpServer.RequireSession));
+InteropService.Offer(server.Services, (server.Sessions, server.RequireSession, server.Router));
+InteropService.Offer(httpServer.Services, (httpServer.Sessions, httpServer.RequireSession, httpServer.Router));
 
 var address = await server.Transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });
 var httpAddress = await httpServer.Transport.Start(new HttpTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true });

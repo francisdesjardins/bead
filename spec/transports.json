@@ -1,0 +1,2098 @@
+{
+  "$schema": "schemas/transports.schema.json",
+  "$comment": [
+    "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
+    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port and {token} the token captured; body, its octets in hexadecimal. close drops that socket.",
+    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader.",
+    "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
+    "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
+    "Before each send and close, and at the end, the server reported nothing a case does not expect.",
+    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. limits, where given, are its router's, as in conversations.json.",
+    "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits.",
+    "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
+  ],
+  "specVersion": "0.1.0",
+  "defaults": {
+    "maximumConnections": 10000,
+    "maximumConnectionsPerAddress": 64,
+    "maximumWaitingExchanges": 64,
+    "bodyBytesBudget": 268435456,
+    "maximumBodyBytes": 16778240,
+    "maximumOutboxBytes": 33556480,
+    "maximumWait": 30000,
+    "exchangeTimeout": 300000,
+    "inactivityTimeout": 300000,
+    "maximumMessageBytes": 16778240,
+    "heartbeat": 30000
+  },
+  "responses": [
+    {
+      "name": "a body by its length",
+      "pieces": [
+        "48 54 54 50 2F 31 2E 31 20 32 30 30 20 4F 4B 0D 0A",
+        "43 6F 6E 74 65 6E 74 2D 54 79 70 65 3A 20 61 70 70 6C 69 63 61 74 69 6F 6E 2F 70 72 73 2E 62 65 61 64 0D 0A 43 6F 6E 74 65 6E 74 2D 4C 65 6E 67 74 68 3A 20 33 0D 0A 0D 0A 01 02 03"
+      ],
+      "status": 200,
+      "fields": {
+        "content-type": "application/prs.bead",
+        "content-length": "3"
+      },
+      "body": "01 02 03"
+    },
+    {
+      "name": "a body in chunks, cut across reads",
+      "pieces": [
+        "48 54 54 50 2F 31 2E 31 20 32 30 30 20 4F 4B 0D 0A 54 72 61 6E 73 66 65 72 2D 45 6E 63 6F 64 69 6E 67 3A 20 63 68 75 6E 6B 65 64 0D 0A 0D 0A 33 0D 0A 61 62",
+        "63 0D 0A 32 0D 0A 64 65 0D 0A 30 0D 0A 0D 0A"
+      ],
+      "status": 200,
+      "fields": {
+        "transfer-encoding": "chunked"
+      },
+      "body": "61 62 63 64 65"
+    },
+    {
+      "name": "a field cut across reads, its name in any case",
+      "pieces": [
+        "48 54 54 50 2F 31 2E 31 20 32 30 34 20 4E 6F 20 43 6F 6E 74 65 6E 74 0D 0A 42 45 41 44 2D 52 65 66 75 73 61 6C 3A 20 62 75",
+        "73 79 0D 0A 0D 0A"
+      ],
+      "status": 204,
+      "fields": {
+        "bead-refusal": "busy"
+      },
+      "body": ""
+    }
+  ],
+  "cases": [
+    {
+      "name": "a connect is answered 201, its token drawn, the response neither stored nor sniffed",
+      "clauses": [
+        "15.4",
+        "15.6",
+        "15.6.2"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "shape": "token"
+              },
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "bead-listen": null
+            },
+            "body": ""
+          },
+          "on": "connect"
+        }
+      ]
+    },
+    {
+      "name": "a connect that says it listens is told back that it does",
+      "clauses": [
+        "15.8",
+        "15.6.2"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        }
+      ]
+    },
+    {
+      "name": "a request is answered in the body of a 200",
+      "clauses": [
+        "15.5.1",
+        "15.6.1"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "echo"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "echo"
+        }
+      ]
+    },
+    {
+      "name": "an envelope other than a request ends 204 at once, handed on",
+      "clauses": [
+        "15.5.2",
+        "15.6.3"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 8\r\nconnection: close\r\n\r\n",
+            "body": "A1 16 00 02  00 00 00 05"
+          },
+          "on": "cancel"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "cancel"
+        }
+      ]
+    },
+    {
+      "name": "a request on the server's own parity is refused 400, marked",
+      "clauses": [
+        "15.5.3",
+        "15.6.4"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 02  00 01 00 01 | 22 78 22"
+          },
+          "on": "even"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "even"
+        }
+      ]
+    },
+    {
+      "name": "a request on a call id already waiting is refused 409, marked",
+      "clauses": [
+        "15.5.3",
+        "15.6.8"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 36\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+          },
+          "on": "slow"
+        },
+        {
+          "expect": {
+            "status": 200
+          },
+          "on": "slow"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "again"
+        },
+        {
+          "expect": {
+            "status": 409,
+            "fields": {
+              "bead-refusal": "call-waiting"
+            },
+            "body": ""
+          },
+          "on": "again"
+        }
+      ]
+    },
+    {
+      "name": "a cancel that comes before its request buries its call id, and the request ends 204, never handed on",
+      "clauses": [
+        "15.5"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 8\r\nconnection: close\r\n\r\n",
+            "body": "A1 16 00 02  00 00 00 01"
+          },
+          "on": "cancel"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "cancel"
+        },
+        {
+          "until": {
+            "gauge": "buriedCallIds",
+            "is": 1
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "buried"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "buried"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+          },
+          "on": "echo"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 79 22"
+            }
+          },
+          "on": "echo"
+        }
+      ]
+    },
+    {
+      "name": "HTTP carries no transfer: a request that opens one is answered PAYLOAD_TOO_LARGE",
+      "clauses": [
+        "15.11"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 21\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 00 | 22"
+          },
+          "on": "opening"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 34,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "opening"
+        }
+      ]
+    },
+    {
+      "name": "a connect with a body is refused 400, marked",
+      "clauses": [
+        "15.6.4"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 1\r\nconnection: close\r\n\r\n",
+            "body": "A1"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "connect"
+        }
+      ]
+    },
+    {
+      "name": "an exchange with no token, or one that is none, is refused 400, marked",
+      "clauses": [
+        "15.6.4"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "none"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: x\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "bad"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "bad"
+        }
+      ]
+    },
+    {
+      "name": "an exchange of a connection the server does not hold is refused 404, connection-unknown",
+      "clauses": [
+        "15.6.6"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: AAAAAAAAAAAAAAAAAAAAAA\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "gone"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "gone"
+        }
+      ]
+    },
+    {
+      "name": "a path the server does not serve is refused 404, path-unknown",
+      "clauses": [
+        "15.6.6"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "elsewhere"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": ""
+          },
+          "on": "elsewhere"
+        }
+      ]
+    },
+    {
+      "name": "a method the server does not take is refused 405, its Allow naming those it does",
+      "clauses": [
+        "15.6.7"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "PUT /bead HTTP/1.1\r\nhost: {host}\r\ncontent-length: 1\r\nconnection: close\r\n\r\n",
+            "body": "A1"
+          },
+          "on": "put"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "allow": "GET, POST, DELETE"
+            },
+            "body": ""
+          },
+          "on": "put"
+        }
+      ]
+    },
+    {
+      "name": "a body of another type, or encoded, is refused 415, marked",
+      "clauses": [
+        "15.6.10"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: text/plain\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "bead-refusal": "type-refused"
+            },
+            "body": ""
+          },
+          "on": "plain"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-encoding: gzip\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "encoded"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "bead-refusal": "type-refused"
+            },
+            "body": ""
+          },
+          "on": "encoded"
+        }
+      ]
+    },
+    {
+      "name": "a body past its bound is refused 413, marked",
+      "clauses": [
+        "15.6.9",
+        "15.12.5"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumBodyBytes": 64
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 74\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 22"
+          },
+          "on": "large"
+        },
+        {
+          "expect": {
+            "status": 413,
+            "fields": {
+              "bead-refusal": "too-large"
+            },
+            "body": ""
+          },
+          "on": "large"
+        }
+      ]
+    },
+    {
+      "name": "a host the server does not take is refused 403, marked",
+      "clauses": [
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: bead.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "taken"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "taken"
+        }
+      ]
+    },
+    {
+      "name": "an exchange from an origin the server does not take is refused 403, marked",
+      "clauses": [
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: https://elsewhere.test\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": ""
+          },
+          "on": "connect"
+        }
+      ]
+    },
+    {
+      "name": "an exchange from an origin the server takes is served",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "origins": [
+          "https://bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: https://bead.test\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "connect"
+        }
+      ]
+    },
+    {
+      "name": "past the connections a server holds, a connect is refused 503, with Retry-After",
+      "clauses": [
+        "15.6.12",
+        "15.12.1"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnections": 1
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": ""
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "past the connections one address holds, behind a proxy trusted, a connect is refused 503",
+      "clauses": [
+        "15.6.12",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "isProxyTrusted": true
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.7, 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": ""
+          },
+          "on": "second"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "past the requests waiting on one connection, a request is refused 429, marked",
+      "clauses": [
+        "15.6.11",
+        "15.12.3"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumWaitingExchanges": 1
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 36\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+          },
+          "on": "slow"
+        },
+        {
+          "expect": {
+            "status": 200
+          },
+          "on": "slow"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 36\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+          },
+          "on": "more"
+        },
+        {
+          "expect": {
+            "status": 429,
+            "fields": {
+              "bead-refusal": "busy"
+            },
+            "body": ""
+          },
+          "on": "more"
+        }
+      ]
+    },
+    {
+      "name": "a DELETE ends its connection, and an exchange after it is refused 404",
+      "clauses": [
+        "15.4",
+        "15.6.3",
+        "15.6.6"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "DELETE /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "delete"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "what the server sends of its own waits, numbered, for a listen, which brings it back in a batch",
+      "clauses": [
+        "15.8",
+        "15.9",
+        "15.6.1"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+          },
+          "on": "subscribe"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "subscribe"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 23\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+          },
+          "on": "tick"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "tick"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead-batch",
+              "bead-sequence": "1"
+            },
+            "batch": [
+              {
+                "kind": 19,
+                "callId": 1,
+                "payload": "31"
+              }
+            ]
+          },
+          "on": "listen"
+        }
+      ]
+    },
+    {
+      "name": "a listen holds until something comes, and a second listen takes the first one's place",
+      "clauses": [
+        "15.9",
+        "15.6.3"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+          },
+          "on": "subscribe"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "subscribe"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "until": {
+            "gauge": "listens",
+            "is": 1
+          }
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 23\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+          },
+          "on": "tick"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "tick"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "bead-sequence": "1"
+            },
+            "batch": [
+              {
+                "kind": 19,
+                "callId": 1,
+                "payload": "31"
+              }
+            ]
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "a listen acknowledges what came up to after, and brings back what is left",
+      "clauses": [
+        "15.9"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+          },
+          "on": "subscribe"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "subscribe"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 23\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+          },
+          "on": "one"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "one"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 23\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+          },
+          "on": "two"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 5,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "two"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "all"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "bead-sequence": "1"
+            },
+            "batch": [
+              {
+                "kind": 19,
+                "callId": 1,
+                "payload": "31"
+              },
+              {
+                "kind": 19,
+                "callId": 1,
+                "payload": "32"
+              }
+            ]
+          },
+          "on": "all"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=1&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "left"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "bead-sequence": "2"
+            },
+            "batch": [
+              {
+                "kind": 19,
+                "callId": 1,
+                "payload": "32"
+              }
+            ]
+          },
+          "on": "left"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=2&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "none"
+        }
+      ]
+    },
+    {
+      "name": "a listen of a client that did not say it listens is refused 409, marked",
+      "clauses": [
+        "15.6.8",
+        "15.8"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 409,
+            "fields": {
+              "bead-refusal": "listen-undeclared"
+            },
+            "body": ""
+          },
+          "on": "listen"
+        }
+      ]
+    },
+    {
+      "name": "a listen whose count is none, or past what was sent, is refused 400, marked",
+      "clauses": [
+        "15.6.4",
+        "15.9"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=x&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "none"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=5&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "past"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "past"
+        }
+      ]
+    },
+    {
+      "name": "an outbox past its bound closes its connection, and cuts the exchange whose request it was handed",
+      "clauses": [
+        "15.7",
+        "15.9",
+        "15.12.6"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumOutboxBytes": 16
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+          },
+          "on": "subscribe"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "subscribe"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 23\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+          },
+          "on": "one"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "one"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 23\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+          },
+          "on": "two"
+        },
+        {
+          "expect": {
+            "status": 200
+          },
+          "on": "two"
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 07  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "to a client that does not listen, a request that opens a subscription is answered SUBSCRIPTION_UNSUPPORTED",
+      "clauses": [
+        "15.8",
+        "9.2.6"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+          },
+          "on": "subscribe"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 22,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "subscribe"
+        }
+      ]
+    },
+    {
+      "name": "to a client that does not listen, a request of the server's own fails before it goes",
+      "clauses": [
+        "15.8"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+          },
+          "on": "ask"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 64,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "ask"
+        },
+        {
+          "report": "exception"
+        }
+      ]
+    },
+    {
+      "name": "a binary message is one envelope, and its answer one binary message",
+      "clauses": [
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a message in fragments is one envelope",
+      "clauses": [
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 2,
+                "fin": false,
+                "payload": "A1 10 00 03  00 00 00 01  00 01 00 01"
+              },
+              {
+                "opcode": 0,
+                "fin": true,
+                "payload": "22 78 22"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a text message is no envelope: it is reported ENVELOPE_MALFORMED, and answered nothing",
+      "clauses": [
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "text": "x"
+          },
+          "on": "socket"
+        },
+        {
+          "report": 1,
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 79 22"
+            }
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a message past the side's own limit closes its connection with 1009",
+      "clauses": [
+        "15.3",
+        "12.2.1"
+      ],
+      "transport": "websocket",
+      "limits": {
+        "maximumEnvelopeBytes": 64,
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 22"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1009
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a peer that closes with 1000 is answered 1000, the clean close",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "close": 1000
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a server that stops closes its connections with 1001",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "second"
+        },
+        {
+          "stop": true
+        },
+        {
+          "expect": {
+            "close": 1001
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "close": 1001
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "a side pings its peer every heartbeat",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 200
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "ping": true
+          },
+          "on": "socket",
+          "within": 1000
+        },
+        {
+          "expect": {
+            "ping": true
+          },
+          "on": "socket",
+          "within": 1000
+        }
+      ]
+    },
+    {
+      "name": "a peer that leaves a ping unanswered is dropped",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "options": {
+        "heartbeat": 200
+      },
+      "realTime": true,
+      "answersPings": false,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "ping": true
+          },
+          "on": "socket",
+          "within": 1000
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "socket",
+          "within": 2000
+        }
+      ]
+    }
+  ]
+}

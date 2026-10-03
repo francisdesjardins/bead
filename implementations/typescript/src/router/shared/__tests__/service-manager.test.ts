@@ -1497,7 +1497,7 @@ test.describe('createServiceManager', () => {
       expect(calls.request.length).toBe(2);
 
       // ended by the server: "dropped" says with what
-      const failure = { ...SERVER_FAILURES.capacityExceeded, detail: 'queued', hops: 0 };
+      const failure = { ...SERVER_FAILURES.capacityExceeded, detail: 'queued', relays: 0 };
 
       drop(failure);
 

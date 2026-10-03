@@ -137,8 +137,8 @@ public sealed partial class RouterServerTests
             [
                 // an answer names its call alone
                 new ResultHeader { CallId = 1 },
-                Failure.OfApplication(21, "nothing to echo") with { Hops = 1 },
-                Failure.OfProtocol(ProtocolCode.ProcedureUnknown, "no procedure 9 in service 2") with { Hops = 1 },
+                Failure.OfApplication(21, "nothing to echo") with { Relays = 1 },
+                Failure.OfProtocol(ProtocolCode.ProcedureUnknown, "no procedure 9 in service 2") with { Relays = 1 },
             ],
             answers);
         Assert.Equal(3, admissions);
@@ -311,7 +311,7 @@ public sealed partial class RouterServerTests
         // its call id on leg B stays reserved as long as its timeout, against a late answer
         Assert.Equal([TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(250)], time.Armed);
         Assert.Equal(1, device.Aborted);
-        Assert.Equal(0, _transport.Sent[0].Envelope.Failure!.Hops);
+        Assert.Equal(0, _transport.Sent[0].Envelope.Failure!.Relays);
         Assert.Equal(["first failure 1 DestinationLost"], SentSince());
 
         var (reason, connectionHandle) = Assert.Single(_errors);
@@ -402,7 +402,7 @@ public sealed partial class RouterServerTests
         });
 
         Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refused.Code);
-        Assert.Equal(0, refused.Hops);
+        Assert.Equal(0, refused.Relays);
         Assert.Empty(credits);
         Assert.Empty(behind.Pipe.ClientSent);
 

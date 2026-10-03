@@ -438,7 +438,7 @@ public sealed class HttpServerTests
             return refused.WaitAsync(Patience, Cancelled);
         });
 
-        Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, (byte)0), (unreachable.Code, unreachable.Hops));
+        Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, (byte)0), (unreachable.Code, unreachable.Relays));
 
         var lost = echoing("hi")(new RequestOptions { DestinationId = 7 });
 
@@ -449,7 +449,7 @@ public sealed class HttpServerTests
             return lost.WaitAsync(Patience, Cancelled);
         });
 
-        Assert.Equal(((ushort)ProtocolCode.DestinationLost, (byte)0), (gone.Code, gone.Hops));
+        Assert.Equal(((ushort)ProtocolCode.DestinationLost, (byte)0), (gone.Code, gone.Relays));
     }
 
     [Fact]

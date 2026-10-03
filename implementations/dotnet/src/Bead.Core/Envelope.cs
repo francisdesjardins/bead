@@ -46,7 +46,7 @@ public sealed record Failure
     /// The relays it crossed, 0 when not given: a relay that passes on a failure its target sent
     /// writes one more than it received.
     /// </summary>
-    public byte Hops { get; init; }
+    public byte Relays { get; init; }
 
     /// <summary>Whose code it is.</summary>
     public required FailureScope Scope { get; init; }

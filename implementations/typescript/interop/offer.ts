@@ -6,6 +6,7 @@
 // dependencies
 
 import { existsSync, readFileSync } from 'node:fs';
+import type { IDestinationRegistration } from '../src/router/server/types';
 import type {
   IBeforeRequest,
   IProcedure,
@@ -104,12 +105,15 @@ export type InteropServer = Pick<
 /**
  * Registers the interop service's resolvers on `server`. The calls to `slow` each connection
  * cancelled are counted per connection, for `cancellations` to answer; a session holds the name its
- * `login` gave.
+ * `login` gave; the destination each connection registered last is kept past its close, for
+ * `unregister` to take out from whichever connection takes its handle next.
  */
 export const offerInterop = (server: InteropServer): void => {
-  const { requireSession, services, sessions } = server;
-  const { failures } = server.router;
+  const { requireSession, router, services, sessions } = server;
+  const { failures } = router;
   const cancellations = new Map<TransportServerConnectionHandle, number>();
+  // by connection, the destination it registered last
+  const destinations = new Map<TransportServerConnectionHandle, IDestinationRegistration>();
   // by connection, the ticks answers held, in the order they came
   const holds = new Map<TransportServerConnectionHandle, IHold[]>();
   const clock = services.getCommand(procedureOf('clock'), { serializer: JSON_SERIALIZER });
@@ -288,6 +292,39 @@ export const offerInterop = (server: InteropServer): void => {
       });
 
       return response(time);
+    }
+  );
+
+  // its caller's connection, as the destination it names: one registered already, closed or not,
+  // is the caller's to hear about, not a mistake of the server's
+  services.getRequestResolver(procedureOf('register'), { serializer: JSON_SERIALIZER })(
+    (request, response) => {
+      const { destination, timeout } = request.payload as { destination: number; timeout?: number };
+      const { connectionHandle } = request;
+      const isRegistered = router.destinations().some(({ destinationId }) => {
+        return destinationId === destination;
+      });
+
+      if (isRegistered) {
+        return response(null, { code: 8, detail: 'that destination is registered already' });
+      }
+
+      destinations.set(
+        connectionHandle,
+        router.registerDestination({ connectionHandle }, { destinationId: destination, timeout })
+      );
+
+      return response(destination);
+    }
+  );
+
+  services.getRequestResolver(procedureOf('unregister'), { serializer: JSON_SERIALIZER })(
+    (request, response) => {
+      const registration = destinations.get(request.connectionHandle);
+
+      destinations.delete(request.connectionHandle);
+
+      return response(registration?.unregister() ?? false);
     }
   );
 };

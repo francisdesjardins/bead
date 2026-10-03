@@ -1154,7 +1154,18 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             }
         }
 
-        if (isWaiting && !context.Response.HasStarted)
+        if (isWaiting)
+        {
+            await SendHead(context);
+        }
+
+        return await Reply(context, waiting);
+    }
+
+    // a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
+    private static async Task SendHead(HttpContext context)
+    {
+        if (!context.Response.HasStarted)
         {
             context.Response.StatusCode = StatusCodes.Status200OK;
             StampOf(context.Response);
@@ -1162,17 +1173,22 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             await context.Response.StartAsync(context.RequestAborted);
             await context.Response.Body.FlushAsync(context.RequestAborted);
         }
-
-        return await Reply(context, waiting);
     }
 
-    // a request's answer, once it comes: written, or how its exchange ends instead
+    // a request's answer, once it comes: written, or how its exchange ends instead — its connection
+    // gone once its request was handed on, its head goes before its exchange is cut: a request
+    // handed on ran, which no refusal may deny
     private static async Task<End?> Reply(HttpContext context, Waiting waiting)
     {
         var ending = await waiting.Ended.Task.WaitAsync(context.RequestAborted);
 
         if (ending.IsGone)
         {
+            if (ending.IsDelivered)
+            {
+                await SendHead(context);
+            }
+
             if (context.Response.HasStarted)
             {
                 context.Abort();
@@ -1515,7 +1531,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     // out of the registry before its close is told; each exchange still waiting learns its connection
-    // is gone — by the marked 404, or, its head out already, by its exchange cut, as a lost one is
+    // is gone — by the marked 404 until its request is handed on, then by its exchange cut after its
+    // head, as a lost one is: a request handed on ran, which no refusal may deny
     private void CloseDrawn(Drawn connection, bool isClean)
     {
         // the bodies still coming of the requests waiting, whose reads are ended, so each is answered
@@ -1556,7 +1573,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             {
                 waiting.IsEnded = true;
                 waiting.Timer?.Dispose();
-                waiting.Ended.TrySetResult(new Ending { IsGone = true });
+                waiting.Ended.TrySetResult(new Ending { IsDelivered = waiting.IsDelivered, IsGone = true });
 
                 if (waiting.Reading is { } reading)
                 {
@@ -1589,7 +1606,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private sealed record End(int Status, string? Reason = null, IReadOnlyDictionary<string, string>? Headers = null);
 
     // what an exchange waiting on the transport ends with: an answer's envelope or a listen's batch,
-    // the number of a batch's first, an end of the transport's own, or its connection gone
+    // the number of a batch's first, an end of the transport's own, or its connection gone — after
+    // its request was handed on, or before
     private sealed record Ending
     {
         public ReadOnlyMemory<byte> Bytes { get; init; }
@@ -1599,6 +1617,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         public End? End { get; init; }
 
         public bool IsGone { get; init; }
+
+        // its request went on to the router before its connection went: its head goes, then its
+        // exchange is cut
+        public bool IsDelivered { get; init; }
     }
 
     // an exchange of an envelope, from its first 8 bytes to its end; touched under the lock

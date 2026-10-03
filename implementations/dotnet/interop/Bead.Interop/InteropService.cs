@@ -96,24 +96,37 @@ public static class InteropService
     /// <summary>
     /// Registers the interop service's resolvers on <paramref name="server"/>. The calls to
     /// <c>slow</c> each connection cancelled are counted per connection, for
-    /// <c>cancellations</c> to answer; a session holds the name its <c>login</c> gave.
+    /// <c>cancellations</c> to answer; a session holds the name its <c>login</c> gave. A connection
+    /// registers itself as a destination of the server's relay by <c>register</c>; the destination
+    /// it registered last is kept by its handle, once it closed too, for <c>unregister</c> to take
+    /// out.
     /// </summary>
     public static void Offer(Server<string> server)
     {
         ArgumentNullException.ThrowIfNull(server);
 
-        Offer(server.Services, (server.Sessions, server.RequireSession));
+        Offer(server.Services, (server.Sessions, server.RequireSession, server.Router));
     }
 
-    /// <summary>As <see cref="Offer(Server{string})"/>, on services and sessions given apart.</summary>
-    public static void Offer(ServiceManager services, (SessionManager<string> Sessions, BeforeRequest RequireSession) sessions)
+    /// <summary>
+    /// As <see cref="Offer(Server{string})"/>, on services, and sessions and the router whose relay
+    /// takes the destinations, given apart.
+    /// </summary>
+    public static void Offer(ServiceManager services, (SessionManager<string> Sessions, BeforeRequest RequireSession, RouterServer Router) server)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var (sessionManager, requireSession) = sessions;
+        var (sessionManager, requireSession, router) = server;
+
+        ArgumentNullException.ThrowIfNull(router);
 
         var cancellations = new ConcurrentDictionary<string, int>();
         var holds = new Dictionary<string, List<Hold>>();
+
+        // by connection, the destination it registered last: kept once it closed, so whoever
+        // connects under its handle next takes it out
+        var registered = new Dictionary<string, DestinationRegistration>();
+
         var dependencies = new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = Json };
         var clock = services.GetCommand(ProcedureOf("clock"), new RequestDependencies<JsonElement, JsonElement> { Serializer = JsonAsked });
 
@@ -309,6 +322,52 @@ public static class InteropService
             var length = request.Payload.GetProperty("length").GetInt32();
 
             return response.Answer(JsonSerializer.SerializeToElement(new string('x', length)));
+        });
+
+        // its caller's connection, as the destination it names; looked up and registered under one
+        // lock, so two registers of one destination cannot both pass
+        services.GetRequestResolver(ProcedureOf("register"), dependencies)((request, response) =>
+        {
+            var destinationId = request.Payload.GetProperty("destination").GetUInt32();
+            var timeout = request.Payload.TryGetProperty("timeout", out var given)
+                ? TimeSpan.FromMilliseconds(given.GetInt64())
+                : (TimeSpan?)null;
+            bool isTaken;
+
+            lock (registered)
+            {
+                isTaken = router.Destinations().Any((destination) =>
+                {
+                    return destination.DestinationId == destinationId;
+                });
+
+                if (!isTaken)
+                {
+                    registered[request.ConnectionHandle] = router.RegisterDestination(
+                        new ConnectionTarget(request.ConnectionHandle),
+                        new DestinationOptions { DestinationId = destinationId, Timeout = timeout });
+                }
+            }
+
+            if (isTaken)
+            {
+                return response.Fail(Failure.OfApplication(8, "that destination is registered already"));
+            }
+
+            return response.Answer(JsonSerializer.SerializeToElement(destinationId));
+        });
+
+        // the destination its caller's handle registered last, taken out and forgotten
+        services.GetRequestResolver(ProcedureOf("unregister"), dependencies)((request, response) =>
+        {
+            bool isTakenOut;
+
+            lock (registered)
+            {
+                isTakenOut = registered.Remove(request.ConnectionHandle, out var registration) && registration.Unregister();
+            }
+
+            return response.Answer(JsonSerializer.SerializeToElement(isTakenOut));
         });
     }
 

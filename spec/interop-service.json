@@ -5,11 +5,15 @@
     "Payloads are JSON, in UTF-8, written without a space. A payload that is not JSON is answered with PAYLOAD_UNDECODABLE.",
     "answers says what a procedure answers; admits, what its admission lets through, when it has one.",
     "offeredBy client: a command, which a client offers and its server calls; any other procedure, the server offers.",
-    "notifies: what a notification procedure notifies its subscribers."
+    "notifies: what a notification procedure notifies its subscribers.",
+    "relay: what the interop server's relay admits. Its destinations are its clients' connections, each registered by register and taken out by unregister."
   ],
   "specVersion": "0.1.0",
   "serviceId": 1,
   "serviceRevision": 1,
+  "relay": {
+    "admits": "a connection with a session, as section 14.3 has a server's relay ask by default; any other is refused with SESSION_REQUIRED"
+  },
   "procedures": [
     {
       "procedureId": 1,
@@ -99,6 +103,18 @@
       "request": "any JSON value",
       "admits": "a connection with a session; any other is refused with SESSION_REQUIRED",
       "answers": "the name its connection's session holds"
+    },
+    {
+      "procedureId": 15,
+      "procedureName": "register",
+      "request": "{\"destination\":n} or {\"destination\":n,\"timeout\":t}",
+      "answers": "n, once it registered its caller's connection as the destination n, leg B waiting t milliseconds at most for its answer when given; a destination registered already fails it, an application failure: code 8, detail \"that destination is registered already\""
+    },
+    {
+      "procedureId": 16,
+      "procedureName": "unregister",
+      "request": "any JSON value",
+      "answers": "true, once it took out the destination its caller's connection registered last; false when there is none, or another took its id since"
     }
   ]
 }

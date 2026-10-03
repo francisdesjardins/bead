@@ -330,14 +330,14 @@ internal sealed class Relay
     {
         if (reason is FailureException { Origin: not FailureOrigin.Local } received)
         {
-            return received.Failure with { Hops = (byte)Math.Min(received.Hops + 1, byte.MaxValue) };
+            return received.Failure with { Relays = (byte)Math.Min(received.Relays + 1, byte.MaxValue) };
         }
 
         if (!leg.IsSent && reason is FailureException { Scope: FailureScope.Protocol } refused)
         {
             if (refused.Code == (ushort)ProtocolCode.PayloadTooLarge)
             {
-                return refused.Failure with { Hops = 0 };
+                return refused.Failure with { Relays = 0 };
             }
 
             if (refused.Code == (ushort)ProtocolCode.CapacityExceeded)
@@ -433,7 +433,7 @@ internal sealed class Relay
             // once; one that could not go out goes nowhere again, and what failed is reported either
             // way
             var failure = reason is FailureException refused
-                ? refused.Failure with { Hops = 0 }
+                ? refused.Failure with { Relays = 0 }
                 : Failure.OfProtocol(ProtocolCode.ProcedureFailed, reason.Message);
 
             try

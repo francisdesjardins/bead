@@ -84,7 +84,7 @@ export interface IFailure {
    * The relays it crossed, 0 when not given: a relay that passes on a failure its target sent
    * writes one more than it received.
    */
-  hops?: number | undefined;
+  relays?: number | undefined;
   scope: FailureScope;
 }
 
@@ -115,7 +115,7 @@ export interface IProtocolFailure<Code extends ProtocolCode = ProtocolCode> {
 /** A failure as it came in: its detail read, '' when it had none, and the relays it crossed. */
 export interface IReceivedFailure extends IFailure {
   detail: string;
-  hops: number;
+  relays: number;
 }
 
 /**

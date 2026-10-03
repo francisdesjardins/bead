@@ -1,8 +1,8 @@
 // ── Conversations ─────────────────────────────────────────────────────────────
 
 // Bead's conversations, `spec/conversations.json`, played against Bead's TypeScript server of the interop
-// service: what one client sends, what the server sends back and reports. The C# server plays the
-// same file.
+// service: what its clients send, on one connection or on each a conversation opens, what the server
+// sends back on each and reports. The C# server plays the same file.
 
 // dependencies
 
@@ -19,46 +19,34 @@ import type { IServerTransportLike } from '../../../server/types';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
 import type { Data } from '../../../transport/shared/types';
-import { bytesOf, readEnvelope } from '../../shared/envelope';
+import { bytesOf } from '../../shared/envelope';
 import type {
-  Envelope,
   IProcedure,
   IServiceManager,
   RouterLimitsOptions,
   ServerConnectionHandle,
 } from '../../shared/types';
 import { fromHexadecimal } from '../../shared/__tests__/vectors';
-import {
-  CLIENT_FAILURES,
-  EnvelopeKind,
-  FailureError,
-  SERVER_FAILURES,
-  type PacingLimitsOptions,
-} from '../router-server';
+import { FailureError, SERVER_FAILURES, type PacingLimitsOptions } from '../router-server';
+import { expectedOf, type IExpected } from './expected-envelope';
 
 // interfaces
 
-/** The next envelope a conversation expects the server to send. */
-interface IExpectedOut {
-  callId: number;
-  creditEnd?: number;
-  isLast?: boolean;
-  offset?: number;
-  total?: number;
-  session?: 'announced' | 'ended';
-  failure?: { code: number; scope: number };
-  kind: number;
-  payload?: string;
-  procedureId?: number;
-  serviceId?: number;
-}
-
-/** One step of a conversation. */
+/** One step of a conversation: what the test does, or what the server does next, on its connection. */
 interface IStep {
   close?: true;
-  in?: string;
-  out?: IExpectedOut;
+  expect?: IExpected;
+  on?: string;
+  open?: string;
   report?: number | 'exception';
+  send?: string;
+  twoWay?: false;
+}
+
+/** What the server reported to its application, and the connection it came with. */
+interface IReport {
+  code: number | 'exception';
+  connectionHandle: TransportServerConnectionHandle;
 }
 
 interface IConversation {
@@ -76,12 +64,17 @@ const CONVERSATIONS = (
   ) as { conversations: IConversation[] }
 ).conversations;
 
-const HANDLE: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
+// the connection a conversation that opens none plays, opened before its first step
+const ONLY_CONNECTION = 'client';
 
 // helpers
 
-/** A transport server of one connection, which records what it sends and delivers what it is given. */
-const createConnection = () => {
+/**
+ * A transport server of the connections a conversation names, each under a handle of its own that a
+ * connection opened again under the same name takes: it records what it sends on each, and delivers
+ * what it is given.
+ */
+const createConnections = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
     connection: [
@@ -91,107 +84,99 @@ const createConnection = () => {
     ];
     message: [data: Data, connectionHandle: TransportServerConnectionHandle];
   }>();
-  const sent: (Envelope | undefined)[] = [];
+  const handles = new Map<string, TransportServerConnectionHandle>();
+  const opened = new Set<TransportServerConnectionHandle>();
+  const oneWay = new Set<TransportServerConnectionHandle>();
+  const sent = new Map<TransportServerConnectionHandle, (IExpected | undefined)[]>();
+  const handleOf = (name: string): TransportServerConnectionHandle => {
+    const port = 50_001 + handles.size;
+    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port}` as const);
+
+    handles.set(name, handle);
+
+    return handle;
+  };
+  const queueOf = (connectionHandle: TransportServerConnectionHandle) => {
+    const queue = sent.get(connectionHandle) ?? [];
+
+    sent.set(connectionHandle, queue);
+
+    return queue;
+  };
   const transport: IServerTransportLike = {
     close: () => {
       return Promise.resolve(false);
+    },
+    isTwoWay: (connectionHandle) => {
+      return !oneWay.has(connectionHandle);
     },
     off: emitter.off,
     on: emitter.on,
     stop: () => {
       return Promise.resolve();
     },
-    send: (data) => {
-      sent.push(
-        readEnvelope(bytesOf(data), {
-          failures: CLIENT_FAILURES,
-          maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
-        })
-      );
+    send: (data, connectionHandle) => {
+      queueOf(connectionHandle).push(expectedOf(bytesOf(data)));
 
       return Promise.resolve();
     },
   };
 
-  return { emitter, sent, transport };
-};
+  return {
+    close: (name: string): void => {
+      opened.delete(handleOf(name));
+      emitter.emit('close', false, handleOf(name));
+    },
+    /** Closes every connection still open. */
+    closeAll: (): void => {
+      for (const handle of opened) {
+        emitter.emit('close', false, handle);
+      }
 
-/** Bytes as the conversations write them: hexadecimal, a space between bytes. */
-const hexadecimalOf = (bytes: Uint8Array): string => {
-  return [...bytes]
-    .map((byte) => {
-      return byte.toString(16).toUpperCase().padStart(2, '0');
-    })
-    .join(' ');
-};
+      opened.clear();
+    },
+    /** How many envelopes were sent and are not taken yet, on every connection. */
+    count: (): number => {
+      return [...sent.values()].reduce((total, queue) => {
+        return total + queue.length;
+      }, 0);
+    },
+    handleOf,
+    message: (name: string, data: Data): void => {
+      emitter.emit('message', data, handleOf(name));
+    },
+    /** The next envelope sent on the connection `name`. */
+    next: (name: string): IExpected | undefined => {
+      return queueOf(handleOf(name)).shift();
+    },
+    open: (name: string, { isTwoWay }: { isTwoWay: boolean }): void => {
+      const handle = handleOf(name);
 
-/** What an answer announced of its connection's session: a token, its end, or nothing. */
-const sessionOf = (envelope: Envelope): Pick<IExpectedOut, 'session'> => {
-  const { sessionToken } = envelope.header as { sessionToken?: string | null };
+      if (isTwoWay) {
+        oneWay.delete(handle);
+      } else {
+        oneWay.add(handle);
+      }
 
-  if (sessionToken === undefined) {
-    return {};
-  }
+      opened.add(handle);
+      emitter.emit('connection', {}, {}, handle);
+    },
+    transport,
+    /** What was sent and not taken yet, by the name of its connection. */
+    untaken: (): Record<string, (IExpected | undefined)[]> => {
+      const untaken: Record<string, (IExpected | undefined)[]> = {};
 
-  return { session: sessionToken === null ? 'ended' : 'announced' };
-};
+      for (const [name, handle] of handles) {
+        const queue = sent.get(handle) ?? [];
 
-/** An envelope sent, as a conversation writes what it expects. */
-const outOf = (envelope: Envelope | undefined): IExpectedOut | undefined => {
-  if (envelope === undefined) {
-    return undefined;
-  }
+        if (queue.length > 0) {
+          untaken[name] = queue;
+        }
+      }
 
-  const { callId } = envelope.header;
-
-  if (envelope.kind === EnvelopeKind.FAILURE) {
-    const { code, scope } = envelope.failure;
-
-    return { callId, failure: { code, scope }, kind: envelope.kind, ...sessionOf(envelope) };
-  }
-
-  if (envelope.kind === EnvelopeKind.RESULT || envelope.kind === EnvelopeKind.NOTIFICATION) {
-    const { total } = envelope.header as { total?: number };
-
-    return {
-      callId,
-      kind: envelope.kind,
-      payload: hexadecimalOf(envelope.payload),
-      ...sessionOf(envelope),
-      ...(total === undefined ? {} : { total }),
-    };
-  }
-
-  if (envelope.kind === EnvelopeKind.CHUNK) {
-    const { isLast, offset } = envelope.header;
-
-    return {
-      callId,
-      isLast,
-      kind: envelope.kind,
-      offset,
-      payload: hexadecimalOf(envelope.payload),
-    };
-  }
-
-  if (envelope.kind === EnvelopeKind.CREDIT) {
-    return { callId, creditEnd: envelope.header.creditEnd, kind: envelope.kind };
-  }
-
-  // a command the server sends its client
-  if (envelope.kind === EnvelopeKind.REQUEST) {
-    const { procedureId, serviceId } = envelope.header;
-
-    return {
-      callId,
-      kind: envelope.kind,
-      payload: hexadecimalOf(envelope.payload),
-      procedureId,
-      serviceId,
-    };
-  }
-
-  return { callId, kind: envelope.kind };
+      return untaken;
+    },
+  };
 };
 
 /** Lets what the server does settle: turns of the event loop, until three in a row add nothing. */
@@ -269,55 +254,84 @@ test('every procedure of the interop manifest is offered, on the side it names',
 });
 
 test.describe('the conversations', () => {
+  // played once, as the C# side plays them: a retry would hide what fails there
+  test.describe.configure({ retries: 0 });
+
   for (const { limits, name, pacing, steps } of CONVERSATIONS) {
     test(name, async () => {
-      const { emitter, sent, transport } = createConnection();
-      const server = createServer<IServerTransportLike, string>({ transport }, { limits, pacing });
+      const connections = createConnections();
+      const server = createServer<IServerTransportLike, string>(
+        { transport: connections.transport },
+        { limits, pacing }
+      );
       const { router } = server;
-      const reports: (number | 'exception')[] = [];
+      const reports: IReport[] = [];
       const count = (): number => {
-        return sent.length + reports.length;
+        return connections.count() + reports.length;
       };
-      let isOpen = true;
+      // what the server did that its conversation did not expect: nothing, between steps
+      const expectNothingMore = (when: string): void => {
+        expect({ reports, sent: connections.untaken() }, when).toEqual({ reports: [], sent: {} });
+      };
 
-      router.on('error', (error) => {
-        reports.push(error instanceof FailureError ? error.code : 'exception');
+      router.on('error', (error, connectionHandle) => {
+        reports.push({
+          code: error instanceof FailureError ? error.code : 'exception',
+          connectionHandle,
+        });
       });
       offerInterop(server);
-      emitter.emit('connection', {}, {}, HANDLE);
+
+      if (
+        steps.every((step) => {
+          return step.open === undefined;
+        })
+      ) {
+        connections.open(ONLY_CONNECTION, { isTwoWay: true });
+      }
 
       try {
-        for (const step of steps) {
-          if (step.in !== undefined || step.close === true) {
-            expect({ reports, sent: sent.map(outOf) }).toEqual({ reports: [], sent: [] });
+        for (const [index, step] of steps.entries()) {
+          const at = `step ${String(index + 1)}`;
+          const on = step.on ?? ONLY_CONNECTION;
+
+          if (step.open !== undefined || step.send !== undefined || step.close === true) {
+            expectNothingMore(`before ${at}`);
           }
 
-          if (step.in !== undefined) {
-            emitter.emit('message', fromHexadecimal(step.in), HANDLE);
+          if (step.open !== undefined) {
+            connections.open(step.open, { isTwoWay: step.twoWay !== false });
+            await settle(count);
+          }
+
+          if (step.send !== undefined) {
+            connections.message(on, fromHexadecimal(step.send));
             await settle(count);
           }
 
           if (step.close === true) {
-            isOpen = false;
-            emitter.emit('close', false, HANDLE);
+            connections.close(on);
             await settle(count);
           }
 
-          if (step.out !== undefined) {
-            expect(outOf(sent.shift())).toEqual(step.out);
+          if (step.expect !== undefined) {
+            expect(connections.next(on), at).toEqual(step.expect);
           }
 
           if (step.report !== undefined) {
-            expect(reports.shift()).toBe(step.report);
+            const report = reports.shift();
+
+            expect(report?.code, at).toBe(step.report);
+
+            if (step.on !== undefined) {
+              expect(report?.connectionHandle, at).toBe(connections.handleOf(step.on));
+            }
           }
         }
 
-        expect({ reports, sent: sent.map(outOf) }).toEqual({ reports: [], sent: [] });
+        expectNothingMore('at the end');
       } finally {
-        if (isOpen) {
-          emitter.emit('close', false, HANDLE);
-        }
-
+        connections.closeAll();
         await server[Symbol.asyncDispose]();
       }
     });
