@@ -69,10 +69,14 @@ start on the wall clock, a duration on the monotonic one.
 timers reach twice as far. Every option and method that takes a timeout refuses a longer one — a
 session manager's reset and a server's connection timeout among them — and _never_ is `Infinity` and
 `Timeout.InfiniteTimeSpan`, which arm nothing. One constant a side, beside its clock. **And one
-floor: a millisecond.** Bead arms no timer for less on the clock it is given, where Node waits a
-millisecond at least and .NET fires at once: a timeout under a millisecond is refused where its
-ceiling is, 0 aside wherever 0 means no timer or the default; a server's connection inactivity
-timeout of 0 is refused, as a transfer's is; and a delay that reaches 0 acts at once, with no timer.
+floor: a millisecond, counted whole** (spec 1.4). Bead arms no timer for less on the clock it is
+given, where Node waits a millisecond at least and .NET fires at once, nor for a fraction, which
+both drop: every duration an application gives a side is held as a whole number of milliseconds from
+1 to 2³¹ − 1, a fraction rounded to the nearest, a half up, so that the values users write — 0.41 s,
+which .NET holds as 409.9999 ms — are held alike; one under a millisecond or past the ceiling is
+refused, by one assertion a side, in the same words. A timeout or a bound refuses 0, and is never
+only where its place takes never; one left out is its default. A delay takes 0 as at once, and a
+delay that reaches 0 acts at once, with no timer.
 
 **`advance` steps.** It settles the side; takes the earliest timer due by now plus its milliseconds;
 sets both readings to that due; fires it; settles; and so on, then sets the readings to now plus its
@@ -194,3 +198,31 @@ The trace's renaming, from `timestamp` to a word of its own, met the Tenth Man a
 | "When the call started" is false of a notification, whose steps each took a start of their own, a failed notify two                                                 | Accepted: one meaning for every step — a notification's is when it is sent or heard — and a failed notify tells its failure at its sent step's start, with a twin test. |
 | On the C# side, 0007 decides the types: a `DateTimeOffset` and a `TimeSpan`, the statistics with them, the truncation to whole milliseconds kept                    | Accepted: `StartedAt`, `Duration` and `DurationSummary` in the platform's types, the truncation explicit, a twin test advancing 30.6 ms and telling 30.                 |
 | The renaming leaves 0011, the changelog, the demo, an internal `event` and the matrix behind                                                                        | Accepted: they change with it; the internal wall reading is `instant`, and the matrix's row names every instant a side reports.                                         |
+
+The two sides' timeouts, aligned once both refused less than a millisecond, met the Tenth Man too:
+
+| Objection                                                                                                                         | Answer                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| A transfer's inactivity was aligned onto the side that took a fraction, which no timer honours and the wire then printed two ways | Accepted: every duration is a whole number of milliseconds, on both sides, as spec 1.4 states.                                   |
+| One side's reconnection told its tap before arming its wait, the other after                                                      | Accepted: both arm the wait first, with a twin test whose tap moves the clock past it.                                           |
+| The breaking changes went untold                                                                                                  | Accepted: the changelog says each, and the TypeScript connect's doc says that a refused timeout leaves its state and its target. |
+| A reconnection's delay of never retried at once                                                                                   | Accepted: refused on both sides, before the tap hears it.                                                                        |
+| The C# side wrote milliseconds in the current culture, on the wire too                                                            | Accepted: the invariant culture everywhere, with a test under fr-CA.                                                             |
+| A limit loaded from JSON could be a string or a boolean on the TypeScript side                                                    | Accepted: the one assertion refuses a non-number.                                                                                |
+| Nothing said which durations take a fraction, nor the floor, where a third language would read it                                 | Accepted: spec 1.4, which 9.9 and 12.2 cite.                                                                                     |
+| The twin tests probed two inputs                                                                                                  | Accepted: one table of inputs at every place, on both sides; -1 ms, which .NET reads as never, is a row of the matrix.           |
+
+The rule of durations, once both sides held it, met the Tenth Man twice more:
+
+| Objection                                                                                                                | Answer                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Refusing a fraction refused the values users write — 0.41 s is 409.9999 ms in .NET — and not the same ones on both sides | Accepted: a fraction is rounded to the nearest, a half up; only one under a millisecond or past the ceiling, as given, is refused. |
+| Spec 1.4 is a MUST no tool checks, kept as two tables made by hand                                                       | Accepted: a conformance file of durations is planned; until then, the twin tables of the same inputs are its gate (0006).          |
+| "A duration a side is given" reached a peer's `wait` and a token's `exp`                                                 | Accepted: 1.4 is an application's durations; 15.9 states the `wait`; a token's expiry is 0010's, with its code.                    |
+| 1.4 allowed never where both sides refuse it                                                                             | Accepted: never may be but where its place says it may not, as 12.2 and 15.12 do.                                                  |
+| 0 meant three things, one the opposite of another, and a close timeout of 0 differed                                     | Accepted: a timeout or a bound refuses 0, a delay takes it as at once, and a default is had by giving none.                        |
+| A service manager's default timeout was checked at each call                                                             | Accepted: as the manager is built, and a call's own where the defaults are applied, so its trace shows the duration held.          |
+| The TypeScript session manager's resets have no C# twin                                                                  | Accepted: a row of the matrix, open.                                                                                               |
+| A promise's delay of never meant at once                                                                                 | Accepted: refused.                                                                                                                 |
+| A C# session left without its timeouts held never, a TypeScript one the defaults                                         | Accepted: one left out is the manager's default on both sides, and a session made by `create` holds never.                         |
+| 15.9 said a `wait` is never refused for its length                                                                       | Accepted: fifteen digits at most, one left out being 0.                                                                            |

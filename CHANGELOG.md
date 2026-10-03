@@ -53,18 +53,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   where the C# side's options said `Time`; `clock`, the part of the globals Bead calls, on the
   TypeScript side, the platform's by default. What bounds a platform's own close or stop, and a
   WebSocket's ping, stay on the real clock.
-- A timeout past 2³¹ − 1 milliseconds is refused wherever one is taken, as `LONGEST_TIMER` and
-  `Clocks.LongestTimer` state; never is `Infinity` and `Timeout.InfiniteTimeSpan`, which arm
-  nothing. The TypeScript session manager's `isArmable` goes. A timeout under a millisecond is
-  refused wherever one is taken, 0 aside where it means no timer or the default, and `NaN` on the
-  TypeScript side; a server's connection inactivity timeout of 0 is refused, as a transfer's is:
-  Bead arms no timer for less than a millisecond.
+- Every duration an application gives a side — a timeout, a delay, a limit, a bound — is held as a
+  whole number of milliseconds from 1 to 2³¹ − 1, as section 1.4 now states: a fraction is rounded
+  to the nearest, a half up, and one under a millisecond or past the ceiling is refused, and on the
+  TypeScript side `NaN` and a non-number, in the same words on both sides, by one assertion a side,
+  `assertHeld` and `Clocks.AssertHeld`, beside `LONGEST_TIMER` and `Clocks.LongestTimer`. A timeout
+  or a bound refuses 0, where a call's and a connect's waited without end, a reservation and a
+  session took their default, the HTTP client's inactivity was lost at once and a close timeout cut
+  at once: one left out is its default, and never is `Infinity` and `Timeout.InfiniteTimeSpan`
+  alone, where its place takes it. A delay takes 0 as at once, and refuses never: a reconnection's
+  delay of never retried at once. A session's timeouts may be left out, `number | undefined` and
+  `TimeSpan?`, for the manager's default, as a C# session built without them now takes too; a
+  service manager's default timeout is checked as it is built, and a call's own as the defaults are
+  applied, so a call's trace shows the duration held, and a refused one fails before the trace and
+  the deprecation event, `resolveRequestOptions` refusing it. The TypeScript session manager's
+  `isArmable` goes.
+- The TypeScript reconnection arms its wait before its tap hears it, as the C# one does, and refuses
+  a delay before its tap hears it; a connect refused for its timeout leaves the TypeScript client
+  as it was, uninitialized, its target kept for no reconnection, as the C# one does. The TypeScript
+  WebSocket server's close timeout of `Infinity` waits without end, where Node took it for a
+  millisecond. The C# side writes milliseconds in the invariant culture, in its refusals and in
+  the failure details that go on the wire.
 - A transport server client's last activity is `lastActivity`, milliseconds since the epoch, and
   `LastActivity`, a `DateTimeOffset`, each read from its clock; its event is `lastActivityChanged`
   and `LastActivityChanged`, and a session manager's update `updateLastActivity` and
   `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
 - A trace tells `startedAt` and `duration`, flat on its event, where it told `timestamp: { event,
-  duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
+duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
   whole milliseconds, its statistics' `DurationSummary` in `TimeSpan`, and `DebugTimestamp` goes. A
   notification's one step starts as it is sent or heard, and a failed notify tells its failure at
   that same start.
@@ -98,6 +113,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# side's trace counts a call's duration on its clock's monotonic reading, as the TypeScript
   side's does, where it read the wall clock, which a clock set by hand moves; the twin test plays on
   both sides.
+- The C# side's trace of a received call starts as its resolver takes it, before its admission and
+  its decoding, as the TypeScript side's does, where it started once the payload decoded; through a
+  router, which asks the admission itself, both start once it admitted the call.
 
 ## [0.1.0] - 2026-10-02
 
