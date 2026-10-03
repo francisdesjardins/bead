@@ -75,7 +75,7 @@ public sealed partial class RouterCoreTests
     {
         var time = new FakeTimeProvider();
 
-        await using var link = new Link(new RouterCoreOptions { LastCallId = 3, Time = time });
+        await using var link = new Link(new RouterCoreOptions { LastCallId = 3, Clock = time });
 
         var sent = new TaskCompletionSource();
         var slow = link.Client.Request(
@@ -281,6 +281,9 @@ public sealed partial class RouterCoreTests
         public event Action<TransportMessage, string>? Message;
 
         public event Action<bool, string>? Close;
+
+        // the server's: the client's core, built alone, runs on the clock its options give
+        public TimeProvider Clock { get; } = TimeProvider.System;
 
         public RouterCore Client { get; }
 

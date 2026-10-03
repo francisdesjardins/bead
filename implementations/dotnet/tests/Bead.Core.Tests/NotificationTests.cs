@@ -524,6 +524,8 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ClientEnd : IRouterClientTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<TransportMessage>? Message;
 
         public event Action<bool, bool>? Close;
@@ -550,6 +552,8 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ServerEnd : IServerTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;

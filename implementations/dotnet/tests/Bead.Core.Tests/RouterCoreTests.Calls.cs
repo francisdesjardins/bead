@@ -907,6 +907,27 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task Refuses_to_reserve_or_cancel_for_longer_than_a_timer_holds_at_once_sending_nothing()
+    {
+        var client = new Peer(RouterSide.Client);
+
+        // 2³¹ ms, one past what JavaScript's timers hold
+        var longer = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            client.Core.Reserve(new CallAddress(1, Handle), longer);
+        });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            client.Core.Cancel(new CallAddress(1, Handle), longer);
+        });
+        await client.Settle();
+        Assert.Empty(client.Sent);
+        Assert.Empty(client.Reports);
+    }
+
+    [Fact]
     public async Task Reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
     {
         var client = new Peer(RouterSide.Client);

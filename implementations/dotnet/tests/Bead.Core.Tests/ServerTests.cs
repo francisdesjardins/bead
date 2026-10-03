@@ -25,8 +25,14 @@ public sealed class ServerTests : IAsyncLifetime
 
     private readonly FakeTimeProvider _time = new();
     private readonly SerialScheduler _scheduler = new();
-    private readonly ScriptedTransport _transport = new();
+    private readonly ScriptedTransport _transport;
     private Server<string>? _server;
+
+    // the transport runs on the test's clock, which every layer of the server takes
+    public ServerTests()
+    {
+        _transport = new ScriptedTransport { Clock = _time };
+    }
 
     // helpers
 
@@ -51,7 +57,6 @@ public sealed class ServerTests : IAsyncLifetime
             {
                 ResolverScheduler = _scheduler,
                 Scheduler = _scheduler,
-                Time = _time,
             });
         InteropService.Offer(Server);
     }
@@ -612,7 +617,7 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Builds_its_sessions_with_their_own_options_on_its_clock_unless_they_name_one()
+    public async Task Builds_its_sessions_with_their_own_options_on_its_transport_s_clock()
     {
         Start(new ServerOptions
         {
@@ -620,7 +625,6 @@ public sealed class ServerTests : IAsyncLifetime
             ResolverScheduler = _scheduler,
             Scheduler = _scheduler,
             Sessions = new SessionManagerOptions { SessionInactivityTimeout = TimeSpan.FromSeconds(3) },
-            Time = _time,
         });
         _transport.Open(Handle);
 
@@ -630,6 +634,74 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(TimeSpan.FromSeconds(3), session.SessionInactivityTimeout);
         await Advance(TimeSpan.FromSeconds(3));
         Assert.False(Server.Sessions.Has(Handle));
+    }
+
+    [Fact]
+    public void Runs_every_layer_on_its_transport_s_clock_and_refuses_another_which_leaves_nothing_on_its_transport()
+    {
+        Start(new ServerOptions { Clock = _time });
+
+        var subscribers = _transport.Subscribers;
+
+        Assert.Same(_time, Server.Clock);
+        Assert.Same(_time, Server.Router.Clock);
+        Assert.Same(_time, Server.Sessions.Clock);
+
+        var other = new FakeTimeProvider();
+        var refusal = Assert.Throws<ArgumentException>(() =>
+        {
+            return new Server<string>(_transport, new ServerOptions { Clock = other });
+        });
+
+        Assert.Equal(
+            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, a FakeTimeProvider",
+            refusal.Message);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new Server<string>(_transport, new ServerOptions { Sessions = new SessionManagerOptions { Clock = other } });
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new Server<string>(new ScriptedTransport(), new ServerOptions { Clock = _time });
+        });
+
+        // what the server started with is all it holds
+        Assert.Equal(subscribers, _transport.Subscribers);
+    }
+
+    [Fact]
+    public void Refuses_an_inactivity_timeout_past_the_longest_timer_as_it_is_built_which_leaves_nothing_on_its_transport()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new Server<string>(_transport, new ServerOptions { ConnectionInactivityTimeout = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) });
+        });
+        Assert.Equal(0, _transport.Subscribers);
+    }
+
+    [Fact]
+    public async Task Answers_slow_once_its_server_s_clock_passed_its_wait_never_before()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+        await Deliver(RequestOf(1, ("slow", false), "{\"milliseconds\":50}"));
+        await Advance(TimeSpan.FromMilliseconds(49));
+        Assert.Empty(_transport.Sent);
+        await Advance(TimeSpan.FromMilliseconds(1));
+        await _scheduler.WhenIdle();
+        Assert.Equal(new ResultHeader { CallId = 1 }, _transport.Read(0).Header);
+    }
+
+    [Fact]
+    public async Task Closes_a_connection_silent_for_the_longest_timer_at_its_due()
+    {
+        Start(Clocks.LongestTimer);
+        _transport.Open(Handle);
+
+        await Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
+        Assert.Empty(_transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([Handle], _transport.Closed);
     }
 
     [Fact]
@@ -727,6 +799,8 @@ public sealed class ServerTests : IAsyncLifetime
     // how often it is stopped
     private sealed class ScriptedTransport : IServerTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;
@@ -843,6 +917,8 @@ public sealed class ServerTests : IAsyncLifetime
     // a transport that counts nothing: the server's own connections stand for its
     private sealed class Uncounted : IServerTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<string>? Connection
         {
             add

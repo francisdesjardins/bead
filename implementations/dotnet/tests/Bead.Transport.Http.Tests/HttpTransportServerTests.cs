@@ -317,7 +317,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     {
         return [.. _server.Clients.Select((client) =>
         {
-            return client.LastActivityTimestamp;
+            return client.LastActivity;
         })];
     }
 
@@ -332,7 +332,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     private async Task Start(HttpTransportServerOptions? options = null)
     {
         await _server.Stop().WaitAsync(Patience, Cancelled);
-        _server = new HttpTransportServer((options ?? new HttpTransportServerOptions()) with { Time = _time });
+        _server = new HttpTransportServer((options ?? new HttpTransportServerOptions()) with { Clock = _time });
         _server.Connection += (connectionHandle) =>
         {
             _connections.Enqueue(connectionHandle);

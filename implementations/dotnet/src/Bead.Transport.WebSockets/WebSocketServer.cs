@@ -6,7 +6,8 @@ public sealed record WebSocketServerOptions
     /// <summary>
     /// The transport's options. A message is an envelope at most — the server's limits' — unless
     /// they say more; less is an <see cref="ArgumentException"/>: the socket would cut off envelopes
-    /// the router takes.
+    /// the router takes. Its clock is every layer's: the server's own options give none, or the
+    /// same.
     /// </summary>
     public WebSocketTransportServerOptions? Transport { get; init; }
 

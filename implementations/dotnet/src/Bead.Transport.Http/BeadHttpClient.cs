@@ -3,7 +3,10 @@ namespace Bead.Transport.Http;
 /// <summary>An HTTP client's options: its transport's, and its router's limits.</summary>
 public sealed record BeadHttpClientOptions
 {
-    /// <summary>The transport's options; the largest answer is the limits' envelope, which they set.</summary>
+    /// <summary>
+    /// The transport's options; the largest answer is the limits' envelope, which they set. Its
+    /// clock is every layer's.
+    /// </summary>
     public HttpTransportClientOptions? Transport { get; init; }
 
     /// <summary>What its router reads, writes and holds by: whole envelopes, and no transfer (see <see cref="RouterLimits.WholeEnvelopeOf"/>).</summary>
@@ -12,7 +15,7 @@ public sealed record BeadHttpClientOptions
 
 /// <summary>
 /// A client over HTTP: its three layers, bottom up — the transport, the router built on it, the
-/// services built on the router — one envelope per exchange. It sends no transfer, and a payload is
+/// services built on the router — all on its transport's clock, one envelope per exchange. It sends no transfer, and a payload is
 /// what one envelope holds. It listens for what the server sends of its own — a subscription's
 /// notifications, a command — unless its transport is told not to. The TypeScript side's
 /// <c>createHTTPClient</c>, named apart from .NET's own <see cref="System.Net.Http.HttpClient"/>.

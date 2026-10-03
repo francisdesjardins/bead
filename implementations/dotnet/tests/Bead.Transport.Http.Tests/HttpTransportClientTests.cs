@@ -134,7 +134,7 @@ public sealed class HttpTransportClientTests
     // a client that listens, its waits on a clock of the test's own
     private static HttpTransportClientOptions ListeningOn(FakeTimeProvider time)
     {
-        return new HttpTransportClientOptions { Time = time };
+        return new HttpTransportClientOptions { Clock = time };
     }
 
     // a client on a scripted handler, connected: its first call drew the connection, the listen said
@@ -1120,20 +1120,30 @@ public sealed class HttpTransportClientTests
         await disconnecting.WaitAsync(Patience, Cancelled);
 
         Assert.Equal(ReadyState.Closed, connected.Client.ReadyState);
+    }
 
-        // a DELETE never answered: waited on 5 s at most
+    // a DELETE never answered is waited on 5 s at most, on the real clock: it bounds the platform's
+    // exchange against a server that does not answer, as AbortSignal.timeout does the TypeScript
+    // side's. Played in real time, and bounded generously
+    [Fact]
+    public async Task Bounds_the_DELETE_of_its_disconnect_on_the_real_clock_never_on_the_one_it_is_given()
+    {
         var time = new FakeTimeProvider();
-        await using var waiting = await ConnectFake(NotListening with { Time = time }, new Fetch { IsDeleteHeld = true });
+        await using var waiting = await ConnectFake(NotListening with { Clock = time }, new Fetch { IsDeleteHeld = true });
         var unanswered = waiting.Client.CloseConnection();
 
         await waiting.Fetch.CallOf(1);
-        time.Advance(TimeSpan.FromSeconds(5) - Millisecond);
+
+        var started = TimeProvider.System.GetTimestamp();
+
+        time.Advance(TimeSpan.FromDays(1));
+        await Task.Delay(100, Cancelled);
 
         Assert.False(unanswered.IsCompleted);
 
-        time.Advance(Millisecond);
         await unanswered.WaitAsync(Patience, Cancelled);
 
+        Assert.InRange(TimeProvider.System.GetElapsedTime(started), TimeSpan.FromSeconds(4.5), Patience);
         Assert.Equal(ReadyState.Closed, waiting.Client.ReadyState);
     }
 
@@ -1227,7 +1237,7 @@ public sealed class HttpTransportClientTests
         // timed out: its exchange aborted
         var time = new FakeTimeProvider();
         using var slow = new Fetch();
-        await using var late = new HttpTransportClient(NotListening with { Handler = slow, Time = time });
+        await using var late = new HttpTransportClient(NotListening with { Handler = slow, Clock = time });
         var lateConnecting = late.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = TimeSpan.FromMilliseconds(20) }, Cancelled);
         var slowly = await slow.CallOf(0);
 
@@ -1430,7 +1440,7 @@ public sealed class HttpTransportClientTests
     {
         using var fetch = LosingFetch();
         var time = new FakeTimeProvider();
-        await using var client = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.FromMilliseconds(40), Time = time });
+        await using var client = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.FromMilliseconds(40), Clock = time });
         var closes = ClosesOf(client);
 
         await client.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
@@ -1460,7 +1470,7 @@ public sealed class HttpTransportClientTests
         for (var draws = 0; draws < 20; draws += 1)
         {
             var drawing = new FakeTimeProvider();
-            await using var drawn = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.FromMilliseconds(700), Time = drawing });
+            await using var drawn = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.FromMilliseconds(700), Clock = drawing });
             var closesDrawn = ClosesOf(drawn);
 
             await drawn.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
@@ -1474,7 +1484,7 @@ public sealed class HttpTransportClientTests
         }
 
         // none at all: lost at its first loss
-        await using var at = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.Zero, Time = time });
+        await using var at = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.Zero, Clock = time });
         var closedAt = ClosesOf(at);
 
         await at.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
@@ -1492,7 +1502,7 @@ public sealed class HttpTransportClientTests
         {
             Handler = leaping,
             InactivityTimeout = TimeSpan.FromMilliseconds(40),
-            Time = new WaywardTime(time, true),
+            Clock = new WaywardTime(time, true),
         });
         var closesOnLeaps = ClosesOf(onLeaps);
 
@@ -1514,7 +1524,7 @@ public sealed class HttpTransportClientTests
         {
             Handler = standing,
             InactivityTimeout = TimeSpan.FromMilliseconds(700),
-            Time = new WaywardTime(stillTime, false),
+            Clock = new WaywardTime(stillTime, false),
         });
         var closesOnStill = ClosesOf(onStill);
 
@@ -1555,7 +1565,7 @@ public sealed class HttpTransportClientTests
         {
             Handler = fetch,
             InactivityTimeout = TimeSpan.FromMilliseconds(40),
-            Time = new HastyTime(time),
+            Clock = new HastyTime(time),
         });
         var closes = ClosesOf(client);
 
@@ -1851,6 +1861,23 @@ public sealed class HttpTransportClientTests
         await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
 
+    [Fact]
+    public async Task Refuses_a_connect_s_timeout_past_the_longest_timer_moving_nothing()
+    {
+        using var fetch = new Fetch();
+        var time = new FakeTimeProvider();
+        await using var client = new HttpTransportClient(NotListening with { Handler = fetch, Clock = time });
+        await using var none = new HttpTransportClient();
+
+        // 2³¹ ms, one past what JavaScript's timers hold
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        {
+            return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = Clocks.LongestTimer + Millisecond }, Cancelled);
+        });
+        Assert.Equal((ReadyState.Uninitialized, 0), (client.ReadyState, fetch.Count));
+        Assert.Equal((time, TimeProvider.System), (client.Clock, none.Clock));
+    }
+
     // -1 ms is the infinite TimeSpan, which an inactivity timeout takes, and a TimeSpan holds no NaN
     [Fact]
     public void Refuses_a_wait_a_pause_or_an_inactivity_timeout_no_timer_holds()
@@ -1885,7 +1912,7 @@ public sealed class HttpTransportClientTests
     public async Task Says_nothing_of_listening_and_never_listens_when_told_not_to()
     {
         using var fetch = new Fetch();
-        await using var client = new HttpTransportClient(NotListening with { Handler = fetch, Time = new FakeTimeProvider() });
+        await using var client = new HttpTransportClient(NotListening with { Handler = fetch, Clock = new FakeTimeProvider() });
         var connecting = client.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
 
         // a server that says a listen back all the same takes none from a client that asked for none
@@ -2064,7 +2091,7 @@ public sealed class HttpTransportClientTests
     public async Task Refuses_a_second_reconnection_leaving_the_first_alone()
     {
         var time = new FakeTimeProvider();
-        await using var faked = await ConnectRefused(NotListening with { Time = time });
+        await using var faked = await ConnectRefused(NotListening with { Clock = time });
         var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
         var first = faked.Client.Reconnect(new TransportReconnectOptions
         {
@@ -2097,7 +2124,7 @@ public sealed class HttpTransportClientTests
     {
         var time = new FakeTimeProvider();
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        await using var faked = await ConnectRefused(NotListening with { Time = time });
+        await using var faked = await ConnectRefused(NotListening with { Clock = time });
         var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
         var reconnecting = faked.Client.Reconnect(new TransportReconnectOptions
         {

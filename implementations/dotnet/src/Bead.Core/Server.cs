@@ -30,11 +30,12 @@ public sealed record ServerOptions
 
     /// <summary>
     /// How long a connection without a session may stay silent before it is closed; infinite when
-    /// none, unless a facade says otherwise. A negative one is an <see cref="ArgumentOutOfRangeException"/>.
+    /// none, unless a facade says otherwise. A negative one, or one longer than
+    /// <see cref="Clocks.LongestTimer"/>, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan? ConnectionInactivityTimeout { get; init; }
 
-    /// <summary>How its sessions are built.</summary>
+    /// <summary>How its sessions are built: on the server's clock, which a clock of their own must be.</summary>
     public SessionManagerOptions? Sessions { get; init; }
 
     /// <summary>
@@ -50,8 +51,11 @@ public sealed record ServerOptions
     /// </summary>
     public bool? CloseOnCommandTimeout { get; init; }
 
-    /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What its timers run on: its transport's clock when none; another is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 
     /// <summary>Where resolvers run: the thread pool when none.</summary>
     internal TaskScheduler? ResolverScheduler { get; init; }
@@ -76,7 +80,7 @@ public sealed class Server<TData> : IAsyncDisposable
 {
     private readonly Lock _gate = new();
     private readonly TimeSpan _connectionInactivityTimeout;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
 
     // the connections the transport holds: only these keep a session; this server hears of each
     // before its router does, and forgets it first
@@ -88,7 +92,11 @@ public sealed class Server<TData> : IAsyncDisposable
     // a connection with no session: how long it may stay silent, and the timer that closes it
     private readonly Dictionary<string, (TimeSpan Timeout, ITimer? Timer)> _idle = [];
 
-    /// <summary>A server over <paramref name="transport"/>, its layers built in order.</summary>
+    /// <summary>
+    /// A server over <paramref name="transport"/>, its layers built in order, all on its transport's
+    /// clock: one given that differs, to the server or to its sessions, is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
     public Server(IServerTransport transport, ServerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
@@ -104,10 +112,21 @@ public sealed class Server<TData> : IAsyncDisposable
                 $"a connection's inactivity timeout cannot be negative, got {_connectionInactivityTimeout}");
         }
 
-        _time = options?.Time ?? TimeProvider.System;
-        Sessions = new SessionManager<TData>(options?.Sessions is { } sessions
-            ? sessions with { Time = sessions.Time ?? options?.Time }
-            : new SessionManagerOptions { Time = options?.Time });
+        if (_connectionInactivityTimeout > Clocks.LongestTimer)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"a connection's inactivity timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, got {_connectionInactivityTimeout.TotalMilliseconds}");
+        }
+
+        _clock = Clocks.Of((options?.Clock, transport.Clock), ("a server", "its transport"));
+
+        var sessions = options?.Sessions ?? new SessionManagerOptions();
+
+        Sessions = new SessionManager<TData>(sessions with
+        {
+            Clock = Clocks.Of((sessions.Clock, _clock), ("a server's sessions", "their server")),
+        });
         RequireSession = new BeforeRequest(
             (request) =>
             {
@@ -134,7 +153,7 @@ public sealed class Server<TData> : IAsyncDisposable
                     ResolverScheduler = options?.ResolverScheduler,
                     Scheduler = options?.Scheduler,
                     SessionTokenOf = Sessions.SessionTokenOf,
-                    Time = options?.Time,
+                    Clock = _clock,
                 });
         }
         catch
@@ -153,7 +172,6 @@ public sealed class Server<TData> : IAsyncDisposable
             {
                 CloseConnection = Close,
                 Defaults = new RequestDefaults { CloseOnTimeout = options?.CloseOnCommandTimeout },
-                Time = options?.Time,
             });
         Sessions.Created += OnSessionCreated;
         Sessions.Deleted += OnSessionDeleted;
@@ -163,6 +181,15 @@ public sealed class Server<TData> : IAsyncDisposable
 
     /// <summary>Its transport.</summary>
     public IServerTransport Transport { get; }
+
+    /// <summary>What its timers run on, and every layer's: its transport's clock.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
+        }
+    }
 
     /// <summary>Its router.</summary>
     public RouterServer Router { get; }
@@ -308,9 +335,9 @@ public sealed class Server<TData> : IAsyncDisposable
             var (kept, timer) = _idle.GetValueOrDefault(connectionHandle, (timeout, null));
 
             timer?.Dispose();
-            _idle[connectionHandle] = (kept, kept == Timeout.InfiniteTimeSpan || kept > TimeSpan.FromMilliseconds(int.MaxValue)
+            _idle[connectionHandle] = (kept, kept == Timeout.InfiniteTimeSpan
                 ? null
-                : _time.CreateTimer(
+                : _clock.CreateTimer(
                     (_) =>
                     {
                         Close(connectionHandle);

@@ -13,16 +13,22 @@ public sealed record Session<TData>
     /// <summary>The connection the session is.</summary>
     public required string ConnectionHandle { get; init; }
 
-    /// <summary>How long without activity before its connection is closed; infinite is never.</summary>
+    /// <summary>
+    /// How long without activity before its connection is closed: <see cref="Clocks.LongestTimer"/>
+    /// at most; infinite is never.
+    /// </summary>
     public TimeSpan ConnectionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>What the server keeps about the session.</summary>
     public TData? Data { get; init; }
 
-    /// <summary>When its connection last spoke.</summary>
-    public DateTimeOffset LastActivityTimestamp { get; init; }
+    /// <summary>When its connection last spoke, on its manager's clock.</summary>
+    public DateTimeOffset LastActivity { get; init; }
 
-    /// <summary>How long without activity before the session ends; infinite is never.</summary>
+    /// <summary>
+    /// How long without activity before the session ends: <see cref="Clocks.LongestTimer"/> at most;
+    /// infinite is never.
+    /// </summary>
     public TimeSpan SessionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>What the router announces to the connection; none until <c>Set</c> draws one.</summary>
@@ -38,8 +44,11 @@ public sealed record SessionManagerOptions
     /// <summary>The session timeout a session set with zero takes: 30 s.</summary>
     public TimeSpan SessionInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What its timers run on; the system's clock when none. A server's sessions run on the server's
+    /// clock, and one given that differs is an <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 
     /// <summary>
     /// Whether a session's data and another are alike, so storing one changes nothing: the TypeScript
@@ -60,13 +69,10 @@ public sealed record SessionManagerOptions
 /// <typeparam name="TData">What the server keeps about a session.</typeparam>
 public sealed class SessionManager<TData> : IDisposable
 {
-    // the longest a timer waits, as JavaScript's timers hold: 2³¹ − 1 ms
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
-
     private readonly Lock _gate = new();
     private readonly TimeSpan _connectionTimeoutDefault;
     private readonly TimeSpan _sessionTimeoutDefault;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     private readonly Action<Span<byte>> _fill;
     private readonly System.Collections.IEqualityComparer? _dataComparer;
 
@@ -77,20 +83,31 @@ public sealed class SessionManager<TData> : IDisposable
     private bool _isDisposed;
 
     /// <summary>
-    /// A session manager; a default timeout neither positive nor infinite is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// A session manager; a default timeout neither positive and <see cref="Clocks.LongestTimer"/>
+    /// at most, nor infinite, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public SessionManager(SessionManagerOptions? options = null)
     {
         _connectionTimeoutDefault = options?.ConnectionInactivityTimeout ?? TimeSpan.FromMilliseconds(600);
         _sessionTimeoutDefault = options?.SessionInactivityTimeout ?? TimeSpan.FromSeconds(30);
-        _time = options?.Time ?? TimeProvider.System;
+        _clock = options?.Clock ?? TimeProvider.System;
         _fill = options?.Fill ?? RandomNumberGenerator.Fill;
         _dataComparer = options?.DataComparer;
 
         if (!IsDefaultTimeout(_connectionTimeoutDefault) || !IsDefaultTimeout(_sessionTimeoutDefault))
         {
-            throw new ArgumentOutOfRangeException(nameof(options), "a default inactivity timeout is positive, or infinite for never");
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"a default inactivity timeout is positive and {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, or infinite for never");
+        }
+    }
+
+    /// <summary>What its timers run on, and its sessions' activity is read from.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
         }
     }
 
@@ -109,8 +126,8 @@ public sealed class SessionManager<TData> : IDisposable
     /// <summary>A session's connection timeout changed: the session, the new timeout, and the old.</summary>
     public event Action<Session<TData>, TimeSpan, TimeSpan>? ConnectionInactivityTimeoutChanged;
 
-    /// <summary>A session's activity moved to a later millisecond: the session, the new stamp, and the old.</summary>
-    public event Action<Session<TData>, DateTimeOffset, DateTimeOffset>? LastActivityTimestampChanged;
+    /// <summary>A session's activity moved to a later millisecond: the session, the new instant, and the old.</summary>
+    public event Action<Session<TData>, DateTimeOffset, DateTimeOffset>? LastActivityChanged;
 
     /// <summary>A session's session timeout changed: the session, the new timeout, and the old.</summary>
     public event Action<Session<TData>, TimeSpan, TimeSpan>? SessionInactivityTimeoutChanged;
@@ -133,7 +150,7 @@ public sealed class SessionManager<TData> : IDisposable
     /// <summary>A new session for a connection, not stored: no timeout, and no token until <c>Set</c>.</summary>
     public Session<TData> Create(string connectionHandle)
     {
-        return new Session<TData> { ConnectionHandle = connectionHandle, LastActivityTimestamp = _time.GetUtcNow() };
+        return new Session<TData> { ConnectionHandle = connectionHandle, LastActivity = _clock.GetUtcNow() };
     }
 
     /// <summary>Forgets a session and stops its timers; false when there was none.</summary>
@@ -222,8 +239,9 @@ public sealed class SessionManager<TData> : IDisposable
     /// <summary>
     /// Stores a session, and gives it as stored. One without a token draws one — a new session, its
     /// timers started over, even over a session the connection held; one with a token keeps it,
-    /// which must be no other connection's. A timeout of zero takes the default; a negative one is
-    /// an <see cref="ArgumentOutOfRangeException"/>. Once disposed, a
+    /// which must be no other connection's. A timeout of zero takes the default; a negative one, or
+    /// one longer than <see cref="Clocks.LongestTimer"/>, is an
+    /// <see cref="ArgumentOutOfRangeException"/>. Once disposed, a
     /// <see cref="DisconnectException"/>: a resolver that finishes once its server is gone has
     /// nowhere left to store a session.
     /// </summary>
@@ -315,8 +333,8 @@ public sealed class SessionManager<TData> : IDisposable
     }
 
     /// <summary>
-    /// As <see cref="UpdateLastActivityTimestamp"/>, by connection, for every message; whether it
-    /// holds a session.
+    /// As <see cref="UpdateLastActivity"/>, by connection, for every message; whether it holds a
+    /// session.
     /// </summary>
     public bool Touch(string connectionHandle)
     {
@@ -356,7 +374,8 @@ public sealed class SessionManager<TData> : IDisposable
     /// <summary>
     /// Stores a session's connection timeout — the default for zero — restarting its timer and
     /// raising <see cref="ConnectionInactivityTimeoutChanged"/> when it changed; the same timeout
-    /// restarts nothing, since activity is what does.
+    /// restarts nothing, since activity is what does. A negative one, or one longer than
+    /// <see cref="Clocks.LongestTimer"/>, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public Session<TData>? UpdateConnectionInactivityTimeout(Session<TData> session)
     {
@@ -390,10 +409,10 @@ public sealed class SessionManager<TData> : IDisposable
     }
 
     /// <summary>
-    /// Stamps a session's activity now and starts both its timers anew; raises
-    /// <see cref="LastActivityTimestampChanged"/> when the stamp moved to a later millisecond.
+    /// Stamps a session's activity now, on its clock, and starts both its timers anew; raises
+    /// <see cref="LastActivityChanged"/> when its last activity moved to a later millisecond.
     /// </summary>
-    public Session<TData>? UpdateLastActivityTimestamp(Session<TData> session)
+    public Session<TData>? UpdateLastActivity(Session<TData> session)
     {
         ArgumentNullException.ThrowIfNull(session);
 
@@ -450,10 +469,10 @@ public sealed class SessionManager<TData> : IDisposable
         }
     }
 
-    // what a default may be: a timeout, or never
+    // what a default may be: a timeout a timer holds, or never
     private static bool IsDefaultTimeout(TimeSpan timeout)
     {
-        return timeout > TimeSpan.Zero || timeout == Timeout.InfiniteTimeSpan;
+        return (timeout > TimeSpan.Zero && timeout <= Clocks.LongestTimer) || timeout == Timeout.InfiniteTimeSpan;
     }
 
     // whether two data are alike, by the comparer given or by their own Equals
@@ -468,7 +487,8 @@ public sealed class SessionManager<TData> : IDisposable
         return session with { Data = default } == other with { Data = default } && IsAlike(session.Data, other.Data);
     }
 
-    // an inactivity timeout as stored: zero takes the default, a negative one is refused
+    // an inactivity timeout as stored: zero takes the default; a negative one, or one longer than a
+    // timer holds, is refused
     private static TimeSpan Resolve(TimeSpan timeout, TimeSpan fallback)
     {
         if (timeout < TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
@@ -476,13 +496,14 @@ public sealed class SessionManager<TData> : IDisposable
             throw new ArgumentOutOfRangeException(nameof(timeout), $"an inactivity timeout cannot be negative, got {timeout}");
         }
 
-        return timeout == TimeSpan.Zero ? fallback : timeout;
-    }
+        if (timeout > Clocks.LongestTimer)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                $"an inactivity timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, got {timeout.TotalMilliseconds}");
+        }
 
-    // whether a timeout arms a timer: finite, and no longer than a timer waits
-    private static bool IsArmable(TimeSpan timeout)
-    {
-        return timeout != Timeout.InfiniteTimeSpan && timeout <= LongestTimer;
+        return timeout == TimeSpan.Zero ? fallback : timeout;
     }
 
     // 16 bytes from its fill — a cryptographic source unless a test gives its own — drawn again when
@@ -521,19 +542,19 @@ public sealed class SessionManager<TData> : IDisposable
                 return null;
             }
 
-            old = stored.LastActivityTimestamp;
-            stamped = stored with { LastActivityTimestamp = _time.GetUtcNow() };
+            old = stored.LastActivity;
+            stamped = stored with { LastActivity = _clock.GetUtcNow() };
             _sessions[stamped.SessionToken!.Value] = stamped;
             ArmConnectionTimer(connectionHandle, stamped.ConnectionInactivityTimeout);
             ArmSessionTimer(connectionHandle, stamped.SessionInactivityTimeout);
 
-            if (stamped.LastActivityTimestamp.ToUnixTimeMilliseconds() == old.ToUnixTimeMilliseconds())
+            if (stamped.LastActivity.ToUnixTimeMilliseconds() == old.ToUnixTimeMilliseconds())
             {
                 return stamped;
             }
         }
 
-        LastActivityTimestampChanged?.Invoke(stamped, stamped.LastActivityTimestamp, old);
+        LastActivityChanged?.Invoke(stamped, stamped.LastActivity, old);
 
         return stamped;
     }
@@ -567,12 +588,12 @@ public sealed class SessionManager<TData> : IDisposable
     // a timer that fires the session as it is then, not as it was when the timer was set
     private ITimer? ArmOf(string connectionHandle, (TimeSpan Timeout, bool IsConnection) timer)
     {
-        if (!_tokens.ContainsKey(connectionHandle) || !IsArmable(timer.Timeout))
+        if (!_tokens.ContainsKey(connectionHandle) || timer.Timeout == Timeout.InfiniteTimeSpan)
         {
             return null;
         }
 
-        return _time.CreateTimer(
+        return _clock.CreateTimer(
             (_) =>
             {
                 Session<TData>? reached;

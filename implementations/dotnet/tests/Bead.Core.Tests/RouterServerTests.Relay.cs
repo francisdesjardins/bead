@@ -47,16 +47,15 @@ public sealed partial class RouterServerTests
     // cancelled
     private Device DeviceOf(Setup setup)
     {
-        var pipe = new Pipe(DeviceHandle, setup.IsDeferred ? _scheduler : null);
-        var time = setup.Time ?? _time;
+        var pipe = new Pipe(DeviceHandle, setup.IsDeferred ? _scheduler : null) { Clock = setup.Clock ?? _time };
         var device = new Device(
             pipe,
             (new RouterServer(
                 pipe.Server,
-                new RouterServerOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = time }),
+                new RouterServerOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler }),
             new RouterClient(
                 pipe.Client,
-                new RouterClientOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = time })));
+                new RouterClientOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler })));
         var services = new ServiceManager(device.Router);
         var answering = new RequestResolverDependencies<string, string> { Serializer = Text };
 
@@ -92,7 +91,7 @@ public sealed partial class RouterServerTests
         var given = setup ?? new Setup();
         var device = DeviceOf(given);
 
-        Start(new RouterServerOptions { Relay = given.Relay, Time = given.Time });
+        Start(new RouterServerOptions { Relay = given.Relay, Clock = given.Clock });
         _transport.Open(First);
         Router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7, Label = "the device" });
 
@@ -298,7 +297,7 @@ public sealed partial class RouterServerTests
     {
         var time = new RecordingTime(_time);
 
-        using var device = StartRelayed(new Setup { Relay = Admitting with { Timeout = TimeSpan.FromMilliseconds(250) }, Time = time });
+        using var device = StartRelayed(new Setup { Relay = Admitting with { Timeout = TimeSpan.FromMilliseconds(250) }, Clock = time });
 
         Deliver(First, To(7, RequestOf(1, Held)));
         await Settle();
@@ -320,12 +319,12 @@ public sealed partial class RouterServerTests
         Assert.Equal(First, connectionHandle);
 
         // a relay of no timeout, on its own leg A, arms none
-        var legA = new ScriptedTransport();
+        var legA = new ScriptedTransport { Clock = time };
 
         using var unbounded = new RouterServer(
             legA,
-            new RouterServerOptions { Relay = Admitting, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = time });
-        using var behind = DeviceOf(new Setup { Time = time });
+            new RouterServerOptions { Relay = Admitting, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+        using var behind = DeviceOf(new Setup { Clock = time });
 
         legA.Open(First);
         unbounded.RegisterDestination(behind.ToDevice, new DestinationOptions { DestinationId = 7 });
@@ -342,7 +341,7 @@ public sealed partial class RouterServerTests
     public async Task Holds_a_transfer_to_the_target_s_limit_at_its_opening_and_relays_one_to_the_destination_it_opened_on()
     {
         var limits = new RouterLimits { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_024, WindowBytes = 4_096 };
-        var legA = new Pipe(First, null);
+        var legA = new Pipe(First, null) { Clock = _time };
         var admissions = 0;
         var credits = new List<uint>();
 
@@ -362,11 +361,10 @@ public sealed partial class RouterServerTests
                 },
                 ResolverScheduler = _scheduler,
                 Scheduler = _scheduler,
-                Time = _time,
             });
         using var requester = new RouterClient(
             legA.Client,
-            new RouterClientOptions { Limits = limits, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = _time });
+            new RouterClientOptions { Limits = limits, ResolverScheduler = _scheduler, Scheduler = _scheduler });
         using var behind = DeviceOf(new Setup { DeviceLimits = limits with { MaximumPayloadBytes = 4_096 } });
 
         var registration = router.RegisterDestination(behind.ToDevice, new DestinationOptions { DestinationId = 7 });
@@ -505,7 +503,7 @@ public sealed partial class RouterServerTests
 
         public bool IsDeferred { get; init; }
 
-        public TimeProvider? Time { get; init; }
+        public TimeProvider? Clock { get; init; }
     }
 
     // a device behind the relay, its router and leg B to it; how many calls to held it saw cancelled
@@ -601,6 +599,9 @@ public sealed partial class RouterServerTests
 
         public string ConnectionHandle { get; }
 
+        // what both its ends run on
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public PipeClient Client { get; }
 
         public PipeServer Server { get; }
@@ -681,6 +682,14 @@ public sealed partial class RouterServerTests
     // a pipe's client end
     private sealed class PipeClient(Pipe pipe) : IRouterClientTransport
     {
+        public TimeProvider Clock
+        {
+            get
+            {
+                return pipe.Clock;
+            }
+        }
+
         public event Action<TransportMessage>? Message;
 
         public event Action<bool, bool>? Close;
@@ -704,6 +713,14 @@ public sealed partial class RouterServerTests
     // a pipe's server end, of its one connection
     private sealed class PipeServer(Pipe pipe) : IRouterServerTransport
     {
+        public TimeProvider Clock
+        {
+            get
+            {
+                return pipe.Clock;
+            }
+        }
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;

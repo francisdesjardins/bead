@@ -9,7 +9,10 @@ public sealed record HttpServerOptions
     /// </summary>
     public static TimeSpan ConnectionInactivityTimeoutDefault { get; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>The transport's options; the largest body is the limits' envelope, which they set.</summary>
+    /// <summary>
+    /// The transport's options; the largest body is the limits' envelope, which they set. Its clock
+    /// is every layer's: the server's own options give none, or the same.
+    /// </summary>
     public HttpTransportServerOptions? Transport { get; init; }
 
     /// <summary>

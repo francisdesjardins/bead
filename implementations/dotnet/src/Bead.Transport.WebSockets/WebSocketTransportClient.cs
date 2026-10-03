@@ -16,15 +16,23 @@ public sealed record WebSocketTransportClientOptions
     /// How often the connection is pinged, and how long its pong may take: a server gone without a
     /// word ends in a close rather than never. A whole number of milliseconds from 1 to 2³¹ − 1, or
     /// <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses any other with an
-    /// <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// <see cref="ArgumentOutOfRangeException"/> as it is built. The platform's, on the real clock.
     /// </summary>
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>How long a close handshake may take: a server that never answers is dropped after it.</summary>
+    /// <summary>
+    /// How long a close handshake may take: a server that never answers is dropped after it. From 0
+    /// to 2³¹ − 1 milliseconds, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport
+    /// refuses any other with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
+    /// the platform's close, on the real clock.
+    /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>What a connect's timeout and a reconnection's waits run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What the stack built on it runs on, a connect's timeout and a reconnection's waits among
+    /// them; the system's clock when none.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>
@@ -50,7 +58,7 @@ public sealed record WebSocketConnectOptions
 
     /// <summary>
     /// How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds
-    /// unless told; zero never times out.
+    /// unless told, <see cref="Clocks.LongestTimer"/> at most; zero never times out.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 }
@@ -67,7 +75,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // constants
 
     private readonly WebSocketTransportClientOptions _options;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     // what every move from one state to another decides by
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
@@ -82,14 +90,15 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private Action? _reconnect;
 
     /// <summary>
-    /// A transport client, not yet connected. A heartbeat no timer holds is an
+    /// A transport client, not yet connected. A heartbeat or a close timeout no timer holds is an
     /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public WebSocketTransportClient(WebSocketTransportClientOptions? options = null)
     {
         _options = options ?? new WebSocketTransportClientOptions();
-        _time = _options.Time ?? TimeProvider.System;
+        _clock = _options.Clock ?? TimeProvider.System;
         WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(options));
+        WebSocketConnection.AssertCloseTimeout(_options.CloseTimeout, nameof(options));
     }
 
     /// <inheritdoc/>
@@ -145,11 +154,21 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
     }
 
+    /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
+        }
+    }
+
     /// <summary>
     /// Connects to the server; settles once the connection is open. Refused with an
-    /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed, and with an
-    /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled
-    /// already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
+    /// <see cref="ArgumentOutOfRangeException"/> for a timeout longer than
+    /// <see cref="Clocks.LongestTimer"/>, with an <see cref="InvalidOperationException"/> unless
+    /// Uninitialized or Closed, and with an <see cref="OperationCanceledException"/>, nothing
+    /// changed, when its token is cancelled already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and the
     /// <see cref="WebSocketException"/> its socket throws, a dispose under way included, ending
     /// Closed.
@@ -311,7 +330,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 {
                     return Connecting(target, (token, true));
                 },
-                (reconnect, _time));
+                (reconnect, _clock));
 
             // the last attempt opened as the token was cancelled: what it opened goes with it
             if (token.IsCancellationRequested)
@@ -394,6 +413,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        if (options.Timeout > Clocks.LongestTimer)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                $"a connect's timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, not {options.Timeout.TotalMilliseconds}");
+        }
+
         var (token, isAttempt) = call;
         ClientWebSocket socket;
 
@@ -429,7 +455,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 socket.Options.AddSubProtocol(protocol);
             }
 
-            using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _time) : null;
+            using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _clock) : null;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout?.Token ?? CancellationToken.None);
 
             try

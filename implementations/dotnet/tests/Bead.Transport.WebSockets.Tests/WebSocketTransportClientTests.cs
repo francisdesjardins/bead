@@ -240,7 +240,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(TimeSpan.FromSeconds(30), options.Heartbeat);
         Assert.Equal(TimeSpan.FromSeconds(5), options.CloseTimeout);
         Assert.Null(options.MaximumMessageBytes);
-        Assert.Null(options.Time);
+        Assert.Null(options.Clock);
         Assert.Equal(("/", false, TimeSpan.FromSeconds(30)), (target.Pathname, target.Secured, target.Timeout));
         Assert.Null(target.Protocols);
         Assert.Equal((true, false), (disconnect.IsClean, disconnect.IsQuick));
@@ -381,7 +381,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = time });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = TimeSpan.FromMilliseconds(100) }, Cancelled);
         var (peer, _) = await listener.Next();
 
@@ -404,7 +404,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = time });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = TimeSpan.Zero }, source.Token);
         var (peer, _) = await listener.Next();
 
@@ -798,6 +798,32 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Refuses_a_connect_s_timeout_or_a_close_timeout_past_the_longest_timer_and_runs_on_the_clock_it_is_given()
+    {
+        var time = new FakeTimeProvider();
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
+
+        // 2³¹ ms, one past what JavaScript's timers hold
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        {
+            return client.Connect(new WebSocketConnectOptions { Host = Host, Port = 1, Timeout = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) }, Cancelled);
+        });
+        Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+        Assert.Same(time, client.Clock);
+        Assert.Same(TimeProvider.System, _client.Clock);
+
+        foreach (var closeTimeout in new[] { TimeSpan.FromMilliseconds(-2), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = closeTimeout });
+            });
+        }
+
+        await using var never = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
+    }
+
+    [Fact]
     public async Task Reconnects_after_a_close()
     {
         await _client.Connect(Target, Cancelled);
@@ -905,7 +931,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = time });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
 
         await ConnectRefused(client, listener);
@@ -948,7 +974,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = time });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
 
         await ConnectRefused(client, listener);
@@ -1068,7 +1094,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Makes_its_first_attempt_at_once()
     {
         // a clock that never moves: a first attempt that waited would wait for ever
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = new FakeTimeProvider() });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = new FakeTimeProvider() });
 
         await client.Connect(Target, Cancelled);
         await client.Reconnect(new TransportReconnectOptions { Delay = DelayOf(TimeSpan.FromMinutes(1)) }).WaitAsync(Patience, Cancelled);
@@ -1081,7 +1107,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = time });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
         var attempts = new List<TimeSpan>();
 
@@ -1246,7 +1272,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = time });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
 
         await ConnectRefused(client, listener);
@@ -1285,7 +1311,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Time = time });
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
 
         await ConnectRefused(client, listener);

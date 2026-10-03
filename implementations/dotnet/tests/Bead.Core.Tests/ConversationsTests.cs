@@ -314,6 +314,8 @@ public sealed class ConversationsTests
         private readonly HashSet<string> _open = [];
         private readonly HashSet<string> _oneWay = [];
 
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;

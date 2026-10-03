@@ -27,7 +27,7 @@ public sealed class ReceivingTransfersTests
             {
                 credits.Add($"{call.ConnectionHandle} {call.CallId} {creditEnd}");
             },
-            Time = time,
+            Clock = time,
         });
 
         return (credits, receiving, time);
@@ -263,7 +263,7 @@ public sealed class ReceivingTransfersTests
             SendCredit = (_, _) =>
             {
             },
-            Time = time,
+            Clock = time,
         });
         var stalled = 0;
         var opened = OpenedOf(receiving.Open(new byte[1], (CallOf(1, "a"), () =>

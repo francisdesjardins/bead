@@ -766,7 +766,7 @@ public sealed partial class RouterCoreTests
             gate.Wait(TestContext.Current.CancellationToken);
         });
         peer.Core.Receive(EnvelopeCodec.WriteEnvelope(CreditOf(1, 172)), Handle);
-        peer.Time.Advance(TimeSpan.FromSeconds(2));
+        peer.Clock.Advance(TimeSpan.FromSeconds(2));
         gate.Set();
         await peer.Settle();
         Assert.False(asked.IsCompleted);
@@ -884,7 +884,7 @@ public sealed partial class RouterCoreTests
             gate.Wait(TestContext.Current.CancellationToken);
         });
         server.Core.Receive(EnvelopeCodec.WriteEnvelope(CreditOf(1, 80)), Handle);
-        server.Time.Advance(TimeSpan.FromSeconds(2));
+        server.Clock.Advance(TimeSpan.FromSeconds(2));
         gate.Set();
         await server.Settle();
         Assert.False(answered.IsCompleted);
@@ -974,13 +974,13 @@ public sealed partial class RouterCoreTests
                     Limits = limits ?? Chunked,
                     ResolverScheduler = Loop,
                     Scheduler = Loop,
-                    Time = Time,
+                    Clock = Clock,
                 });
         }
 
         public RouterSide Side { get; }
 
-        public FakeTimeProvider Time { get; } = new();
+        public FakeTimeProvider Clock { get; } = new();
 
         public SerialScheduler Loop { get; } = new();
 
@@ -1128,7 +1128,7 @@ public sealed partial class RouterCoreTests
 
         public async Task Advance(TimeSpan by)
         {
-            Time.Advance(by);
+            Clock.Advance(by);
             await Settle();
         }
 

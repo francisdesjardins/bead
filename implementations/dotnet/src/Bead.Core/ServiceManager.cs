@@ -2,12 +2,15 @@ namespace Bead;
 
 /// <summary>
 /// The part of a router a service manager calls: it registers the resolvers, answers through the
-/// router, and names the side whose failures it raises.
+/// router, and names the side whose failures it raises and the clock the manager runs on.
 /// </summary>
 public interface IRouterLike
 {
     /// <summary>Which side the router is.</summary>
     RouterSide Side { get; }
+
+    /// <summary>What the router's timers run on: its transport's clock.</summary>
+    TimeProvider Clock { get; }
 
     /// <summary>Registers a resolver; a second one for its procedure is an <see cref="ArgumentException"/>.</summary>
     void RegisterResolver(IRequestResolver resolver);
@@ -344,8 +347,11 @@ public sealed record ServiceManagerOptions
     /// <summary>What a call's options leave out.</summary>
     public RequestDefaults? Defaults { get; init; }
 
-    /// <summary>What a trace's timestamps are read from; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What a trace's instants are read from: its router's clock when none; another is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>
@@ -360,13 +366,16 @@ public sealed class ServiceManager
     private readonly IRouterLike _router;
     private readonly Action<string>? _closeConnection;
     private readonly RequestDefaults _defaults;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
 
     // the notifications this manager made, one per procedure, kept for its life: asked for again,
     // the same one is given
     private readonly Dictionary<ProcedureAddress, (Procedure Procedure, object Notification)> _notifications = [];
 
-    /// <summary>A manager of the services on <paramref name="router"/>, with its options.</summary>
+    /// <summary>
+    /// A manager of the services on <paramref name="router"/>, with its options, on its router's
+    /// clock: one given that differs is an <see cref="ArgumentException"/>.
+    /// </summary>
     public ServiceManager(IRouterLike router, ServiceManagerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(router);
@@ -374,7 +383,7 @@ public sealed class ServiceManager
         _router = router;
         _closeConnection = options?.CloseConnection;
         _defaults = options?.Defaults ?? new RequestDefaults();
-        _time = options?.Time ?? TimeProvider.System;
+        _clock = Clocks.Of((options?.Clock, router.Clock), ("a service manager", "its router"));
     }
 
     /// <summary>A notification dropped: its procedure, and the failure the other end ended it with, if any.</summary>
@@ -549,7 +558,7 @@ public sealed class ServiceManager
             return;
         }
 
-        var now = _time.GetUtcNow();
+        var now = _clock.GetUtcNow();
         var started = step.Started ?? now;
 
         debug(step.Error, new DebugEvent
@@ -662,7 +671,7 @@ public sealed class ServiceManager
     {
         var (procedure, serializer, given, (type, subscribes)) = call;
         var options = OptionsOf(given);
-        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = _time.GetUtcNow(), Tx = payload };
+        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = _clock.GetUtcNow(), Tx = payload };
 
         // what the call fails with once it went out is told as its answer
         void Failed(Exception reason)
@@ -876,7 +885,7 @@ public sealed class ServiceManager
                 return;
             }
 
-            var started = manager._time.GetUtcNow();
+            var started = manager._clock.GetUtcNow();
 
             manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { Rx = payload, Started = started });
 

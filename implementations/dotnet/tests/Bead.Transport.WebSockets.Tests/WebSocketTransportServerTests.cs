@@ -311,13 +311,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
 
-        await Start(new WebSocketTransportServerOptions { Time = time });
+        await Start(new WebSocketTransportServerOptions { Clock = time });
 
         var (client, _) = await Connect();
 
         using (client)
         {
-            Assert.Null(Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Null(Assert.Single(_server.Clients).LastActivity);
 
             time.Advance(TimeSpan.FromSeconds(1));
             await client.SendAsync("hi"u8.ToArray(), WebSocketMessageType.Text, true, Cancelled);
@@ -325,7 +325,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             var (text, _) = await Next(_messages);
 
             Assert.True(text.IsText);
-            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivity);
 
             // each message stamps it again
             time.Advance(TimeSpan.FromSeconds(1));
@@ -335,7 +335,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.False(binary.IsText);
             Assert.Equal("bytes"u8.ToArray(), binary.Bytes.ToArray());
-            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivity);
         }
     }
 
@@ -908,6 +908,25 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Throws<ArgumentOutOfRangeException>(() =>
             {
                 return new WebSocketTransportServer(new WebSocketTransportServerOptions { Heartbeat = heartbeat });
+            });
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_close_timeout_past_the_longest_timer_and_runs_on_the_clock_it_is_given()
+    {
+        var time = new FakeTimeProvider();
+        await using var given = new WebSocketTransportServer(new WebSocketTransportServerOptions { Clock = time });
+        await using var none = new WebSocketTransportServer();
+
+        Assert.Equal((time, TimeProvider.System), (given.Clock, none.Clock));
+
+        // 2³¹ ms, one past what JavaScript's timers hold
+        foreach (var closeTimeout in new[] { TimeSpan.FromMilliseconds(-2), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = closeTimeout });
             });
         }
     }

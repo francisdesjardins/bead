@@ -16,10 +16,10 @@ public static class TransportTypes
 /// </summary>
 /// <param name="Address">The address of who is on the other end.</param>
 /// <param name="ConnectionHandle">The handle the connection is named by.</param>
-/// <param name="LastActivityTimestamp">
+/// <param name="LastActivity">
 /// When it was last heard from, on its server's clock: a message over a WebSocket; an exchange of an
 /// envelope, or a listen, begun over HTTP. None until then.
 /// </param>
 /// <param name="Port">The port of who is on the other end, as it connected; 0 when it gave none.</param>
 /// <param name="Type">Its transport's type, one of <see cref="TransportTypes"/>.</param>
-public sealed record TransportServerClient(string Address, string ConnectionHandle, DateTimeOffset? LastActivityTimestamp, int Port, string Type);
+public sealed record TransportServerClient(string Address, string ConnectionHandle, DateTimeOffset? LastActivity, int Port, string Type);

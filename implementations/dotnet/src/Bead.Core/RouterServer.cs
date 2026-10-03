@@ -7,10 +7,13 @@ public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool 
 
 /// <summary>
 /// What a server's router needs of its transport: the connections that open and close, what they
-/// deliver, and a way to send to each.
+/// deliver, a way to send to each, and the clock it runs on.
 /// </summary>
 public interface IRouterServerTransport
 {
+    /// <summary>What its timers run on: the clock of the stack built on it.</summary>
+    TimeProvider Clock { get; }
+
     /// <summary>A connection opened, named by its handle.</summary>
     event Action<string>? Connection;
 
@@ -39,8 +42,11 @@ public sealed record RouterServerOptions
     /// <summary>What it reads, writes and holds by; <see cref="RouterLimits.Default"/> when none.</summary>
     public RouterLimits? Limits { get; init; }
 
-    /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What its timers run on: its transport's clock when none; another is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 
     /// <summary>What each paced subscription queues at most; <see cref="PacingLimits.Default"/> when none.</summary>
     public PacingLimits? Pacing { get; init; }
@@ -91,10 +97,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
     // goes past its bounds before the answer is answered with that failure
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<NotificationPacing, RequestHeader> _requests = [];
 
-    /// <summary>A server's router over <paramref name="transport"/>.</summary>
+    /// <summary>
+    /// A server's router over <paramref name="transport"/>, on its transport's clock: one given that
+    /// differs is an <see cref="ArgumentException"/>.
+    /// </summary>
     public RouterServer(IRouterServerTransport transport, RouterServerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
+
+        var clock = Clocks.Of((options?.Clock, transport.Clock), ("a server's router", "its transport"));
 
         Transport = transport;
         _notifications = new NotificationManager((options?.Pacing ?? PacingLimits.Default).Validate());
@@ -112,7 +123,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 Limits = options?.Limits,
                 ResolverScheduler = options?.ResolverScheduler,
                 Scheduler = options?.Scheduler,
-                Time = options?.Time,
+                Clock = clock,
             });
         _relay = new Relay(
             new RelayRouter
@@ -153,6 +164,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
         get
         {
             return _core.Limits;
+        }
+    }
+
+    /// <inheritdoc/>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _core.Clock;
         }
     }
 

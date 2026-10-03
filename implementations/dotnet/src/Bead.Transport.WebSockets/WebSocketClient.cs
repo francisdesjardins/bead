@@ -3,7 +3,7 @@ namespace Bead.Transport.WebSockets;
 /// <summary>A WebSocket client's options: its transport's, and its router's limits.</summary>
 public sealed record WebSocketClientOptions
 {
-    /// <summary>The transport's options.</summary>
+    /// <summary>The transport's options: its clock is every layer's.</summary>
     public WebSocketTransportClientOptions? Transport { get; init; }
 
     /// <summary>What its router reads, writes and holds by.</summary>
@@ -12,7 +12,8 @@ public sealed record WebSocketClientOptions
 
 /// <summary>
 /// A client over WebSocket: its three layers, bottom up — the transport, the router built on it,
-/// the services built on the router — each one Bead's TypeScript client has. What an application
+/// the services built on the router — each one Bead's TypeScript client has, all on its
+/// transport's clock. What an application
 /// starts from.
 /// </summary>
 public sealed class WebSocketClient : IAsyncDisposable

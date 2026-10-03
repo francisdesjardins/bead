@@ -115,7 +115,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = new List<string>();
 
@@ -149,7 +149,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var changed = new List<(string Timer, Session<string> Session, TimeSpan Timeout, TimeSpan Old)>();
         var reached = new List<string>();
@@ -199,38 +199,38 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
-        var changed = new List<(Session<string> Session, DateTimeOffset Timestamp, DateTimeOffset Old)>();
+        var changed = new List<(Session<string> Session, DateTimeOffset LastActivity, DateTimeOffset Old)>();
 
-        sessions.LastActivityTimestampChanged += (session, timestamp, old) =>
+        sessions.LastActivityChanged += (session, lastActivity, old) =>
         {
-            changed.Add((session, timestamp, old));
+            changed.Add((session, lastActivity, old));
         };
 
         var session = sessions.Set(sessions.Create(Handle));
 
         time.Advance(TimeSpan.FromMilliseconds(1));
 
-        var stamped = sessions.UpdateLastActivityTimestamp(session);
+        var stamped = sessions.UpdateLastActivity(session);
 
         // half a millisecond later, stamped but not said; a millisecond later, said from that stamp
         time.Advance(TimeSpan.FromMilliseconds(0.5));
         Assert.True(sessions.Touch(Handle));
 
-        var unsaid = sessions.Get(Handle)!.LastActivityTimestamp;
+        var unsaid = sessions.Get(Handle)!.LastActivity;
 
         time.Advance(TimeSpan.FromMilliseconds(1));
         Assert.True(sessions.Touch(Handle));
 
         Assert.Equal(
             [
-                (stamped!, session.LastActivityTimestamp + TimeSpan.FromMilliseconds(1), session.LastActivityTimestamp),
+                (stamped!, session.LastActivity + TimeSpan.FromMilliseconds(1), session.LastActivity),
                 (sessions.Get(Handle)!, time.GetUtcNow(), unsaid),
             ],
             changed);
-        Assert.Equal(session.LastActivityTimestamp + TimeSpan.FromMilliseconds(1.5), unsaid);
-        Assert.Null(sessions.UpdateLastActivityTimestamp(sessions.Create(Other)));
+        Assert.Equal(session.LastActivity + TimeSpan.FromMilliseconds(1.5), unsaid);
+        Assert.Null(sessions.UpdateLastActivity(sessions.Create(Other)));
     }
 
     [Fact]
@@ -287,7 +287,7 @@ public sealed class SessionManagerTests
     public void Stops_its_timers_with_a_session_deleted_and_stores_nothing_once_disposed()
     {
         var time = new FakeTimeProvider();
-        var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
         var reached = 0;
 
         sessions.SessionInactivityTimeoutReached += (_) =>
@@ -310,7 +310,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         Assert.Equal(
             new Session<string>
@@ -318,7 +318,7 @@ public sealed class SessionManagerTests
                 ConnectionHandle = Handle,
                 ConnectionInactivityTimeout = Timeout.InfiniteTimeSpan,
                 Data = null,
-                LastActivityTimestamp = time.GetUtcNow(),
+                LastActivity = time.GetUtcNow(),
                 SessionInactivityTimeout = Timeout.InfiniteTimeSpan,
                 SessionToken = null,
             },
@@ -438,14 +438,14 @@ public sealed class SessionManagerTests
     [Fact]
     public void Keeps_each_connection_to_its_token_through_every_change_and_no_update_changes_it()
     {
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = new FakeTimeProvider() });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = new FakeTimeProvider() });
 
         var session = sessions.Set(sessions.Create(Handle) with { SessionToken = TokenOf(1) });
 
         sessions.UpdateData(session with { Data = "guest" });
         sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = TimeSpan.FromSeconds(5) });
         sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = TimeSpan.FromSeconds(5) });
-        sessions.UpdateLastActivityTimestamp(session);
+        sessions.UpdateLastActivity(session);
         sessions.Touch(Handle);
         Assert.Equal([TokenOf(1), null], SessionTokensOfBoth(sessions));
         Assert.Equal(TokenOf(1), sessions.Get(Handle)!.SessionToken);
@@ -509,7 +509,7 @@ public sealed class SessionManagerTests
 
         Assert.Null(sessions.UpdateConnectionInactivityTimeout(session));
         Assert.Null(sessions.UpdateData(session));
-        Assert.Null(sessions.UpdateLastActivityTimestamp(session));
+        Assert.Null(sessions.UpdateLastActivity(session));
         Assert.Null(sessions.UpdateSessionInactivityTimeout(session));
     }
 
@@ -538,12 +538,12 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
         using var tuned = new SessionManager<string>(new SessionManagerOptions
         {
             ConnectionInactivityTimeout = TimeSpan.FromSeconds(1),
             SessionInactivityTimeout = TimeSpan.FromSeconds(2),
-            Time = time,
+            Clock = time,
         });
 
         var session = sessions.GetOrElseSet(Handle);
@@ -568,7 +568,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = 0;
 
@@ -586,11 +586,12 @@ public sealed class SessionManagerTests
         Assert.Equal(1, reached);
     }
 
-    // not -1 ms, which is .NET's infinite timeout
+    // not -1 ms, which is .NET's infinite timeout; 2³¹ ms, one past what JavaScript's timers hold
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
-    public void A_default_that_is_not_a_timeout_is_refused(int milliseconds)
+    [InlineData(2_147_483_648)]
+    public void A_default_that_is_not_a_timeout_is_refused(long milliseconds)
     {
         var timeout = TimeSpan.FromMilliseconds(milliseconds);
 
@@ -635,7 +636,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = new List<string?>();
 
@@ -657,7 +658,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = 0;
 
@@ -675,12 +676,11 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
-    public void A_timeout_longer_than_a_timer_can_wait_never_fires_rather_than_at_once()
+    public void A_timeout_longer_than_a_timer_holds_is_refused_and_nothing_is_stored_the_longest_one_fires_at_its_due()
     {
         var time = new FakeTimeProvider();
-        var longest = TimeSpan.FromMilliseconds(int.MaxValue);
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = 0;
 
@@ -692,11 +692,41 @@ public sealed class SessionManagerTests
         var session = sessions.GetOrElseSet(Handle);
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = longest + TimeSpan.FromMilliseconds(1) });
+        var longer = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return sessions.Set(sessions.Create(Other) with { ConnectionInactivityTimeout = longer });
+        });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = longer });
+        });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = longer });
+        });
+        Assert.False(sessions.Has(Other));
+        Assert.Equal(session, sessions.Get(Handle));
+
+        sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = Clocks.LongestTimer });
+        time.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
+        Assert.Equal(0, reached);
         time.Advance(TimeSpan.FromMilliseconds(1));
-        Assert.Equal(0, reached);
-        time.Advance(longest + longest);
-        Assert.Equal(0, reached);
+        Assert.Equal(1, reached);
+    }
+
+    [Fact]
+    public void Runs_on_the_clock_its_options_give_the_system_s_when_none()
+    {
+        var time = new FakeTimeProvider();
+
+        using var given = new SessionManager<string>(new SessionManagerOptions { Clock = time });
+        using var none = new SessionManager<string>();
+
+        Assert.Same(time, given.Clock);
+        Assert.Same(TimeProvider.System, none.Clock);
+        Assert.Equal(time.GetUtcNow(), given.Create(Handle).LastActivity);
     }
 
     [Fact]
@@ -716,7 +746,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = new List<SessionToken?>();
 
@@ -737,7 +767,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = 0;
 
@@ -759,7 +789,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = new List<Session<string>>();
 
@@ -786,7 +816,7 @@ public sealed class SessionManagerTests
     {
         var time = new FakeTimeProvider();
 
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = new List<SessionToken?>();
 
@@ -813,7 +843,7 @@ public sealed class SessionManagerTests
     public void Dispose_stops_every_timer_and_forgets_every_session_without_events()
     {
         var time = new FakeTimeProvider();
-        var sessions = new SessionManager<string>(new SessionManagerOptions { Time = time });
+        var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
         var told = new List<string>();
 
         sessions.Deleted += (_) =>

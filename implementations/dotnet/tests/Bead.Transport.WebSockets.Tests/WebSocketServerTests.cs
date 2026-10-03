@@ -430,6 +430,20 @@ public sealed class WebSocketServerTests
     }
 
     [Fact]
+    public async Task WebSocketServer_runs_every_layer_on_its_transport_s_clock_and_refuses_another()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+
+        await using var server = new WebSocketServer<string>(new WebSocketServerOptions { Transport = new WebSocketTransportServerOptions { Clock = time } });
+
+        Assert.Equal((time, time, time), (server.Transport.Clock, server.Router.Clock, server.Sessions.Clock));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Clock = time } });
+        });
+    }
+
+    [Fact]
     public async Task WebSocketServer_takes_a_message_of_an_envelope_at_most_more_when_the_transport_says_so_and_never_less()
     {
         // envelopes of 256 bytes; the transport's options are its own, so a raw socket finds its limit

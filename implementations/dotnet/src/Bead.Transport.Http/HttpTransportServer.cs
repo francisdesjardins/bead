@@ -64,8 +64,11 @@ public sealed record HttpTransportServerOptions
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
 
-    /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What the stack built on it runs on, its timers among them; the system's clock when none. A
+    /// stop's grace bounds the platform's own, on the real clock.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>Where an HTTP transport server listens.</summary>
@@ -111,8 +114,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // reserves one for
     private static readonly TimeSpan Burial = TimeSpan.FromSeconds(5);
 
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
-
     // how long a stop lets the exchanges under way write their end before it cuts them, at most: an
     // end its closes wrote is a few bytes, where the TypeScript side's go out as they are written,
     // and a client that does not read holds the stop back no longer than this
@@ -127,7 +128,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy, new Dictionary<string, string> { ["retry-after"] = "1" });
 
     private readonly HttpTransportServerOptions _options;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
 
     // what the transport holds, under its lock: the connections by handle and by token, how many
     // each address holds, the exchanges under way, and the bytes of body being read
@@ -159,7 +160,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         AssertWhole((nameof(HttpTransportServerOptions.MaximumOutboxBytes), _options.MaximumOutboxBytes));
         AssertTimer((nameof(HttpTransportServerOptions.MaximumWait), _options.MaximumWait), false);
         AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), _options.MaximumWaitingExchanges));
-        _time = _options.Time ?? TimeProvider.System;
+        _clock = _options.Clock ?? TimeProvider.System;
     }
 
     /// <inheritdoc/>
@@ -183,6 +184,15 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         get
         {
             return _life.ReadyState;
+        }
+    }
+
+    /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
         }
     }
 
@@ -470,7 +480,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // a whole number of milliseconds above 0 a timer holds, or, when it may be, infinite
     private static void AssertTimer((string Name, TimeSpan Value) timer, bool mayBeInfinite)
     {
-        var isHeld = timer.Value > TimeSpan.Zero && timer.Value <= LongestTimer && timer.Value.Ticks % TimeSpan.TicksPerMillisecond == 0;
+        var isHeld = timer.Value > TimeSpan.Zero && timer.Value <= Clocks.LongestTimer && timer.Value.Ticks % TimeSpan.TicksPerMillisecond == 0;
 
         if (!isHeld && !(mayBeInfinite && timer.Value == Timeout.InfiniteTimeSpan))
         {
@@ -613,7 +623,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // one grace for the whole stop, in real time, since what it waits on is the network's: the
         // exchanges under way write their end, then Kestrel puts what they wrote on the wire before
         // it closes their connections — cut at once, a 404 just written can go as a reset instead
-        using var grace = new CancellationTokenSource(EndsGrace);
+        using var grace = new CancellationTokenSource(EndsGrace, TimeProvider.System);
 
         try
         {
@@ -866,7 +876,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             else
             {
                 connection.Open += 1;
-                connection.LastActivity = _time.GetUtcNow();
+                connection.LastActivity = _clock.GetUtcNow();
                 StopIdle(connection);
             }
         }
@@ -1143,7 +1153,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
             if (isWaiting && _options.ExchangeTimeout != Timeout.InfiniteTimeSpan)
             {
-                waiting.Timer = _time.CreateTimer(
+                waiting.Timer = _clock.CreateTimer(
                     (_) =>
                     {
                         CloseDrawn(connection, false);
@@ -1309,7 +1319,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         ITimer? burial = null;
 
-        burial = _time.CreateTimer(
+        burial = _clock.CreateTimer(
             (_) =>
             {
                 lock (_gate)
@@ -1364,7 +1374,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                     return (long)outgoing.Bytes.Length;
                 });
                 connection.Open += 1;
-                connection.LastActivity = _time.GetUtcNow();
+                connection.LastActivity = _clock.GetUtcNow();
                 StopIdle(connection);
 
                 if (connection.Listen is { } replaced)
@@ -1379,7 +1389,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 else
                 {
                     connection.Listen = listening;
-                    listening.Timer = _time.CreateTimer(
+                    listening.Timer = _clock.CreateTimer(
                         (_) =>
                         {
                             lock (_gate)
@@ -1514,7 +1524,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        connection.Idle = _time.CreateTimer(
+        connection.Idle = _clock.CreateTimer(
             (_) =>
             {
                 CloseDrawn(connection, false);

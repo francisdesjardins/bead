@@ -188,6 +188,21 @@ public sealed class ServiceManagerTests
     // definition
 
     [Fact]
+    public void Runs_on_its_router_s_clock_and_refuses_another()
+    {
+        var time = new FakeTimeProvider();
+        var router = new RecordingRouter { Clock = time };
+
+        Assert.NotNull(new ServiceManager(router, new ServiceManagerOptions { Clock = time }));
+        Assert.Equal(
+            "a service manager runs on the clock of its router, a FakeTimeProvider, and was given another, the system's",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new ServiceManager(router, new ServiceManagerOptions { Clock = TimeProvider.System });
+            }).Message);
+    }
+
+    [Fact]
     public async Task Fills_what_the_options_leave_out_and_passes_a_destination_as_it_is()
     {
         var router = new RecordingRouter();
@@ -353,8 +368,8 @@ public sealed class ServiceManagerTests
     public async Task Tells_each_step_of_a_request_and_once_answered_its_duration()
     {
         var time = new FakeTimeProvider(Started);
-        var router = new RecordingRouter();
-        var manager = new ServiceManager(router, new ServiceManagerOptions { Time = time });
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
 
         router.Answer = (payload) =>
@@ -796,7 +811,7 @@ public sealed class ServiceManagerTests
     public async Task Tells_debug_the_request_it_received_and_the_answer_it_sent()
     {
         var time = new FakeTimeProvider(Started);
-        var manager = new ServiceManager(new RecordingRouter(), new ServiceManagerOptions { Time = time });
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
         var seen = RecordDebug(manager);
         var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
         {
@@ -1870,6 +1885,8 @@ public sealed class ServiceManagerTests
     {
         private readonly Lock _gate = new();
         private readonly Dictionary<ProcedureAddress, INotificationLike> _held = [];
+
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public List<IRequestResolver> RegisteredResolvers { get; } = [];
 

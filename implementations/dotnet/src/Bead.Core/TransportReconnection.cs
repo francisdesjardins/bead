@@ -20,9 +20,9 @@ internal static class TransportReconnection
     /// <see cref="OperationCanceledException"/>; a delay that throws, an
     /// <see cref="InvalidOperationException"/>. What the tap throws passes through.
     /// </summary>
-    public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Time) reconnection)
+    public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Clock) reconnection)
     {
-        var (reconnect, time) = reconnection;
+        var (reconnect, clock) = reconnection;
         var token = reconnect.CancellationToken;
         TimeSpan? previousDelay = null;
 
@@ -61,7 +61,7 @@ internal static class TransportReconnection
             }
 
             using var pausing = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var waiting = Task.Delay(nextDelay > TimeSpan.Zero ? nextDelay : TimeSpan.Zero, time, pausing.Token);
+            var waiting = Task.Delay(nextDelay > TimeSpan.Zero ? nextDelay : TimeSpan.Zero, clock, pausing.Token);
 
             try
             {

@@ -11,4 +11,10 @@
     <InternalsVisibleTo Include="Bead.Transport.Http" />
     <InternalsVisibleTo Include="Bead.Transport.WebSockets" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- what Bead times takes the clock it is given, never the platform's own: 0011 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="../BannedSymbols.txt" />
+  </ItemGroup>
 </Project>

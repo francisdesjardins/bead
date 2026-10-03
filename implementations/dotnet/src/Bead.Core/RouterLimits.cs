@@ -9,9 +9,6 @@ public sealed record RouterLimits
 {
     // constants
 
-    // the longest a timer waits in milliseconds, as JavaScript's timers hold: 2³¹ − 1
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
-
     /// <summary>The limits a router holds by when its options say nothing.</summary>
     public static RouterLimits Default { get; } = new();
 
@@ -88,8 +85,8 @@ public sealed record RouterLimits
             ("a window holds two chunks at least, so a sender waits for no credit it is owed",
                 (long)WindowBytes >= 2L * ChunkBytes),
             ("a payload fits in the budget of the transfers received", MaximumPayloadBytes <= BufferedBytesBudget),
-            ($"a transfer's inactivity is {int.MaxValue} milliseconds at most, as a timer holds",
-                TransferInactivityTimeout <= LongestTimer),
+            ($"a transfer's inactivity is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds",
+                TransferInactivityTimeout <= Clocks.LongestTimer),
         ];
 
         foreach (var (rule, holds) in rules)

@@ -120,7 +120,6 @@ internal sealed class Relay
     // a request's header on leg B: no block, since it names no destination and presents no session
     private static readonly int RequestHeaderBytes = EnvelopeCodec.HeaderBytesOf(new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 });
 
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private readonly Lock _gate = new();
 
@@ -258,11 +257,11 @@ internal sealed class Relay
     // whether `timeout` is one a timer holds, or none at all
     private static void AssertTimeout(TimeSpan timeout)
     {
-        if (timeout != System.Threading.Timeout.InfiniteTimeSpan && (timeout <= TimeSpan.Zero || timeout > LongestTimer))
+        if (timeout != System.Threading.Timeout.InfiniteTimeSpan && (timeout <= TimeSpan.Zero || timeout > Clocks.LongestTimer))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(timeout),
-                $"a relay's timeout is above 0 and {int.MaxValue} milliseconds at most, or infinite, not {timeout.TotalMilliseconds}");
+                $"a relay's timeout is above 0 and {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, or infinite, not {timeout.TotalMilliseconds}");
         }
     }
 

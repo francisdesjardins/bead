@@ -269,14 +269,15 @@ public static class InteropService
             return response.Fail(Failure.OfApplication(7, "this procedure fails, on purpose"));
         });
 
-        // cancelled first, it answers all the same, an answer its router must not send
+        // cancelled first, it answers all the same, an answer its router must not send; it waits on
+        // its server's clock
         services.GetRequestResolver(ProcedureOf("slow"), dependencies)(async (request, response) =>
         {
             var milliseconds = request.Payload.GetProperty("milliseconds").GetInt64();
 
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(milliseconds), request.Signal);
+                await Task.Delay(TimeSpan.FromMilliseconds(milliseconds), router.Clock, request.Signal);
             }
             catch (OperationCanceledException)
             {

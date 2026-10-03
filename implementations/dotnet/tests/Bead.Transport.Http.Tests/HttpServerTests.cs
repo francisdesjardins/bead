@@ -306,7 +306,7 @@ public sealed class HttpServerTests
         // by default, 30 s: a connection with no session stays for 30 s, then goes
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
 
-        await using var server = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Time = time } });
+        await using var server = new HttpServer<string>(new HttpServerOptions { Transport = new HttpTransportServerOptions { Clock = time } });
         var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
         await using var client = new BeadHttpClient();
 
