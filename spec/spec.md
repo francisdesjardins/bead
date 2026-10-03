@@ -24,6 +24,11 @@ implementation whose numbers are IEEE 754 doubles then reads every value exactly
 1.3. An envelope carries no length of its own. Its transport delimits it, as WebSocket does a
 message.
 
+1.4. A duration a side is given — a call's timeout, a limit, a session's or a transport's bound — is
+a whole number of milliseconds from 1 to 2³¹ − 1, or without end, as every platform's timers hold
+one alike: a side MUST refuse one with a fraction, under a millisecond or past 2³¹ − 1. Where 0
+means something of its own — no timeout, or the default — the place that takes it says so.
+
 ## 2. The prefix
 
 _Vectors: `prefixes`, `prefixRefusals`._
@@ -259,9 +264,9 @@ notification reports a credit that counts notifications the same way; a side tha
 one for a subscription it does not hold in silence, since it crossed that subscription's end. A
 credit of bytes for no transfer the side sends is dropped in silence too.
 
-9.9. A requester waits for its answer as long as its call was given: 5 s by default, 2³¹ − 1 ms at
-most, or without end. While a payload or its result goes as a transfer, the transfer's inactivity
-counts instead. Past it, the call ends, and is cancelled.
+9.9. A requester waits for its answer as long as its call was given: 5 s by default, a duration
+section 1.4 allows, or without end, as a call given 0 waits too. While a payload or its result goes
+as a transfer, the transfer's inactivity counts instead. Past it, the call ends, and is cancelled.
 
 9.10. A connection that closes ends every call on it: each call waiting fails, and each call to
 answer is ended as cancelled — its resolver told — and answered by nothing.
@@ -380,8 +385,8 @@ result with `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
 | `maximumDetailBytes`        | 1,024       | a failure's detail                                                           |
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
-window of two chunks at least, so a sender never waits for a credit it is owed; a payload within
-the budget; a timeout of 2³¹ − 1 ms at most.
+window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
+budget; a timeout section 1.4 allows.
 
 12.3. The opening is the request or the result itself, with the TRANSFER block: the payload's total
 on 8 bytes, and its first bytes, as many as fill the envelope to `chunkBytes`, sent without
