@@ -36,6 +36,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   relays".
 - Both sides play the conformance files without retry.
 
+### Fixed
+
+- The HTTP transport, on both sides, answers 200, then cuts, the exchange of a request it handed on
+  when handing it on closes the connection, where it answered 404 `connection-unknown`, a refusal
+  that says nothing was tried.
+
 ## [0.1.0] - 2026-10-02
 
 ### Added

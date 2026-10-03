@@ -376,6 +376,14 @@ const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd)
   response.end();
 };
 
+// a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
+const sendHead = (response: IHTTPResponseLike): void => {
+  if (!response.headersSent) {
+    response.writeHead(200, { ...RESPONSE_HEADERS, 'content-type': BEAD_MEDIA_TYPE });
+    response.flushHeaders?.();
+  }
+};
+
 // definition
 
 /**
@@ -517,8 +525,8 @@ export const createHTTPTransportServer = (
       };
 
       // out of the registry before its close is told; each exchange still waiting learns its
-      // connection is gone — by the marked 404, or, its head out already, by its socket cut, as a
-      // lost exchange is
+      // connection is gone — by the marked 404 until its request is handed on, then by its socket cut
+      // after its head, as a lost exchange's: a request handed on ran, which no refusal may deny
       const closeDrawn = (connection: IDrawn, isClean: boolean): void => {
         const { address, connectionHandle, connectionToken } = connection;
 
@@ -547,6 +555,10 @@ export const createHTTPTransportServer = (
         for (const exchange of connection.waiting.values()) {
           exchange.isEnded = true;
           clearTimeout(exchange.timer);
+
+          if (exchange.isDelivered) {
+            sendHead(exchange.response);
+          }
 
           if (exchange.response.headersSent) {
             exchange.response.destroy();
@@ -981,10 +993,7 @@ export const createHTTPTransportServer = (
             // still waiting — not answered as it came — its head goes now, so its client knows the
             // router has it; and it waits for its answer no longer than it may
             if (connection.waiting.get(callId) === state) {
-              if (!response.headersSent) {
-                response.writeHead(200, { ...RESPONSE_HEADERS, 'content-type': BEAD_MEDIA_TYPE });
-                response.flushHeaders?.();
-              }
+              sendHead(response);
 
               if (exchangeTimeout !== Infinity) {
                 state.timer = setTimeout(() => {

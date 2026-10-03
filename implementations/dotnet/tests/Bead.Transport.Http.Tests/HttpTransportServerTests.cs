@@ -925,6 +925,30 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Closes_a_connection_the_server_closes_as_the_request_is_handed_on_cutting_its_exchange_after_its_head()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+
+        _server.Message += (_, _) =>
+        {
+            _ = _server.CloseConnection(connectionHandle);
+        };
+
+        using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        // the router had it: a 200, never a refusal that says nothing was tried
+        Assert.Equal(200, (int)waiting.StatusCode);
+        Assert.Equal(HttpTransport.MediaType, HeaderOf(waiting, "content-type"));
+        Assert.Equal("no-store", HeaderOf(waiting, "cache-control"));
+        Assert.Null(HeaderOf(waiting, HttpTransport.RefusalHeader));
+        Assert.Equal("cut", await EndOf(waiting));
+        Assert.Single(_messages);
+        Assert.Equal((true, connectionHandle), _closes.Last());
+    }
+
+    [Fact]
     public async Task Closes_a_connection_whose_exchange_was_lost_before_its_answer()
     {
         await Start();

@@ -598,6 +598,30 @@ test.describe('createHTTPTransportServer', () => {
     expect(events.at(-1)).toEqual(['close', true, connectionHandle]);
   });
 
+  test('closes a connection the server closes as the request is handed on, cutting its exchange after its head', async () => {
+    await using started = await startTransport();
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+
+    server.on('message', () => {
+      void server.close(connectionHandle);
+    });
+
+    const waiting = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+      connectionToken,
+    });
+
+    // the router had it: a 200, never a refusal that says nothing was tried
+    expect(waiting.status).toBe(200);
+    expect(waiting.headers.get('content-type')).toBe(BEAD_MEDIA_TYPE);
+    expect(waiting.headers.get('cache-control')).toBe('no-store');
+    expect(waiting.headers.get(REFUSAL_HEADER)).toBeNull();
+    await expect(waiting.arrayBuffer()).rejects.toThrow();
+    expect(namesOf(events, 'message')).toHaveLength(1);
+    expect(events.at(-1)).toEqual(['close', true, connectionHandle]);
+  });
+
   test('closes a connection whose exchange was lost before its answer', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;
