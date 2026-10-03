@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -907,7 +909,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Holds_a_reservation_and_a_cancel_s_to_a_whole_number_of_milliseconds_zero_and_infinite_taking_the_default_time_doing_nothing_for_one_refused()
+    public async Task Holds_a_reservation_and_a_cancel_s_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_taking_the_default_time_doing_nothing_for_one_refused()
     {
         // reserved while what comes on it is dropped in silence; free once it is reported unknown
         async Task<bool> IsReserved(Peer peer, uint callId)
@@ -919,7 +921,7 @@ public sealed partial class RouterCoreTests
             return peer.Reports.Count == reports;
         }
 
-        foreach (var (given, outcome, refusal) in Durations.Of("a call id's reservation", (DurationOutcome.Own, DurationOutcome.Own)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a call id's reservation", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             var client = new Peer(RouterSide.Client);
 
@@ -949,8 +951,8 @@ public sealed partial class RouterCoreTests
                 continue;
             }
 
-            // reserved for the duration held, or for the default time
-            var lasts = outcome == DurationOutcome.Taken ? given : TimeSpan.FromSeconds(5);
+            // reserved for the duration held, or for the default time for infinite
+            var lasts = outcome == DurationOutcome.Taken ? held!.Value : TimeSpan.FromSeconds(5);
 
             client.Core.Reserve(new CallAddress(1, Handle), given);
             client.Core.Cancel(new CallAddress(3, Handle), given);
@@ -1115,9 +1117,9 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Holds_a_call_s_timeout_to_a_whole_number_of_milliseconds_zero_and_infinite_waiting_on_drawing_nothing_for_one_refused()
+    public async Task Holds_a_call_s_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_waiting_on_drawing_nothing_for_one_refused()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("a call's timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a call's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             var client = new Peer(RouterSide.Client);
             var drawn = new List<uint>();
@@ -1142,16 +1144,20 @@ public sealed partial class RouterCoreTests
             await client.Settle();
             Assert.Equal([1u], drawn);
 
-            // a duration held ends the call once it passed; zero and infinite wait on past the longest
-            if (given > TimeSpan.Zero)
+            // a duration held ends the call once it passed, its TimeoutException telling it; infinite
+            // waits on past the longest
+            if (outcome == DurationOutcome.Taken)
             {
-                await client.Advance(given - TimeSpan.FromMilliseconds(1));
+                await client.Advance(held!.Value - TimeSpan.FromMilliseconds(1));
                 Assert.False(asking.IsCompleted);
                 await client.Advance(TimeSpan.FromMilliseconds(1));
-                await Assert.ThrowsAsync<TimeoutException>(() =>
+
+                var ended = await Assert.ThrowsAsync<TimeoutException>(() =>
                 {
                     return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
                 });
+
+                Assert.Equal(string.Create(CultureInfo.InvariantCulture, $"no answer came in {held.Value.TotalMilliseconds} milliseconds"), ended.Message);
             }
             else
             {

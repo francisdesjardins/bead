@@ -333,7 +333,12 @@ public sealed record DebugEvent
 /// <summary>What a call's options leave out, for a manager to fill.</summary>
 public sealed record RequestDefaults
 {
-    /// <summary>How long a call waits for its answer; 5 s when none.</summary>
+    /// <summary>
+    /// How long a call waits for its answer; 5 s when none. Held as a call's, as the manager is
+    /// built: rounded to the nearest whole millisecond, infinite to wait on, and an
+    /// <see cref="ArgumentOutOfRangeException"/> for any other not from 1 to
+    /// <see cref="Clocks.LongestTimer"/>, zero among them.
+    /// </summary>
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>Whether a command unanswered in time closes the connection it went to; none closes nothing.</summary>
@@ -380,7 +385,8 @@ public sealed class ServiceManager
 
     /// <summary>
     /// A manager of the services on <paramref name="router"/>, with its options, on its router's
-    /// clock: one given that differs is an <see cref="ArgumentException"/>.
+    /// clock: one given that differs is an <see cref="ArgumentException"/>, and a default timeout
+    /// not held an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public ServiceManager(IRouterLike router, ServiceManagerOptions? options = null)
     {
@@ -388,7 +394,12 @@ public sealed class ServiceManager
 
         _router = router;
         _closeConnection = options?.CloseConnection;
-        _defaults = options?.Defaults ?? new RequestDefaults();
+
+        // held as the manager is built, rather than refused at each call it would time
+        _defaults = (options?.Defaults ?? new RequestDefaults()) with
+        {
+            Timeout = Clocks.AssertHeld(("a call's default timeout", nameof(RequestDefaults.Timeout)), options?.Defaults?.Timeout ?? TimeoutDefault),
+        };
         _clock = Clocks.Of((options?.Clock, router.Clock), ("a service manager", "its router"));
     }
 
@@ -645,7 +656,9 @@ public sealed class ServiceManager
         };
     }
 
-    // a call's options, with the defaults applied: the call's, then the manager's, then 5 s and no close
+    // a call's options, with the defaults applied: the call's, then the manager's, which is 5 s when
+    // none, and no close; the timeout held as a call's, so the trace, the router and the error tell
+    // one number
     private ResolvedRequestOptions OptionsOf(RequestOptions? given)
     {
         return new ResolvedRequestOptions
@@ -654,7 +667,7 @@ public sealed class ServiceManager
             CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
             ConnectionHandle = given?.ConnectionHandle,
             DestinationId = given?.DestinationId,
-            Timeout = given?.Timeout ?? _defaults.Timeout ?? TimeoutDefault,
+            Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
         };
     }
 
@@ -681,7 +694,9 @@ public sealed class ServiceManager
     }
 
     // one call — a request, a command, or the request that subscribes a notification: its options
-    // with the defaults applied, its trace, the request, the close on timeout, and its result decoded
+    // with the defaults applied, its trace, the request, the close on timeout, and its result
+    // decoded; a timeout refused fails as the options are resolved, before the trace and the
+    // deprecation
     private async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
         TRequest payload,
         (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes) Made) call)

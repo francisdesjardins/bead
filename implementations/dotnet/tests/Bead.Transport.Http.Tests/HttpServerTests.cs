@@ -514,7 +514,7 @@ public sealed class HttpServerTests
     [Fact]
     public void Refuse_an_inactivity_timeout_of_0_which_its_default_does_not_stand_in_for()
     {
-        Assert.StartsWith("a connection's inactivity timeout is a whole number of milliseconds from 1 to 2147483647, or infinite for never, not 0", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        Assert.StartsWith("a connection's inactivity timeout is a number of milliseconds from 1 to 2147483647, or infinite for never, not 0", Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
             return new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { ConnectionInactivityTimeout = TimeSpan.Zero } });
         }).Message, StringComparison.Ordinal);

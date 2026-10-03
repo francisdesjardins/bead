@@ -616,15 +616,15 @@ public sealed class RelayTests
     }
 
     [Fact]
-    public async Task Holds_a_relay_s_timeout_and_a_destination_s_to_a_whole_number_of_milliseconds_refusing_zero_infinite_waiting_on()
+    public async Task Holds_a_relay_s_timeout_and_a_destination_s_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_waiting_on()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("a relay's timeout", (DurationOutcome.Refused, DurationOutcome.Taken)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a relay's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
-            var relay = new TestRelay().Relay;
-            var target = new RecordingTarget();
-
             if (outcome == DurationOutcome.Refused)
             {
+                var relay = new TestRelay().Relay;
+                var target = new RecordingTarget();
+
                 foreach (var refused in new[]
                 {
                     Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -644,15 +644,21 @@ public sealed class RelayTests
                 continue;
             }
 
-            relay.Register(target, Seven with { Timeout = given });
-            await Handled(relay.HandlerOf(7), PropsOf(HeaderOf(1)));
-            Assert.Equal(
-                [given],
-                target.Asked.Select((asked) =>
-                {
-                    return asked.Options.Timeout;
-                }));
-            _ = new TestRelay(new RelayOptions { Timeout = given });
+            // leg B waits the timeout held, a destination's as the relay's own
+            foreach (var (relayTimeout, timeout) in new (TimeSpan?, TimeSpan?)[] { (null, given), (given, null) })
+            {
+                var relay = new TestRelay(Admitting with { Timeout = relayTimeout ?? Infinite }).Relay;
+                var target = new RecordingTarget();
+
+                relay.Register(target, Seven with { Timeout = timeout });
+                await Handled(relay.HandlerOf(7), PropsOf(HeaderOf(1)));
+                Assert.Equal(
+                    [held!.Value],
+                    target.Asked.Select((asked) =>
+                    {
+                        return asked.Options.Timeout;
+                    }));
+            }
         }
     }
 

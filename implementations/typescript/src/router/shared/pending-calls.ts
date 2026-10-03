@@ -76,7 +76,7 @@ export interface IPendingCalls<Handle extends string> {
   get(call: ICallAddress<Handle>): IPendingRequest<Handle> | undefined;
   isReserved(callId: CallId, connectionHandle: Handle): boolean;
   /**
-   * Reserves a call id for `timeout`, or for the default time when it is none a timer can hold;
+   * Reserves a call id for `timeout`, held already, or for the default time for none or `Infinity`;
    * reserved twice, the later end stands. Nothing waits on a reservation: it keeps no process alive.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
@@ -92,23 +92,18 @@ export interface IPendingCalls<Handle extends string> {
 // helpers
 
 /**
- * Throws a {@link ProgrammerError} for a reservation that is not a whole number of milliseconds from
- * 1 to {@link LONGEST_TIMER}. None, 0, and `Infinity`, which reserves nothing for ever, take the
- * default.
+ * A reservation held: rounded to the nearest whole millisecond, or none, for the default. One that
+ * is neither `Infinity` — a call that waited on, which reserves for the default too, since nothing
+ * is reserved for ever — nor from 1 to {@link LONGEST_TIMER}, 0 among them, is a
+ * {@link ProgrammerError}.
  */
-export const assertReservation = (timeout: number | undefined): void => {
-  if (timeout !== undefined && timeout !== 0) {
-    assertHeld("a call id's reservation", timeout);
-  }
+export const assertReservation = (timeout: number | undefined): number | undefined => {
+  return timeout === undefined ? undefined : assertHeld("a call id's reservation", timeout);
 };
 
-/** How long a call id stays reserved: its call's timeout, or the default one for none, 0 or `Infinity`. */
+/** How long a call id stays reserved: its call's timeout, held, or the default for none or never. */
 export const reservationOf = (timeout: number | undefined): number => {
-  return Number.isInteger(timeout) &&
-    (timeout as number) >= 1 &&
-    (timeout as number) <= LONGEST_TIMER
-    ? (timeout as number)
-    : RESERVATION_MILLISECONDS;
+  return timeout !== undefined && timeout <= LONGEST_TIMER ? timeout : RESERVATION_MILLISECONDS;
 };
 
 // definition

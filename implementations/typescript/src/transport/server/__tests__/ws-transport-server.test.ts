@@ -569,12 +569,12 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
-  test('holds its close timeout to a whole number of milliseconds, 0 dropping a connection at once, Infinity waiting on its peer without end', async () => {
+  test('holds its close timeout to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on its peer without end', async () => {
     const fake = createFakeWebSocketServer();
 
     for (const { given, outcome, refusal } of durationsOf('a close timeout', {
-      never: 'taken',
-      zero: 'own',
+      never: 'never',
+      zero: 'refused',
     })) {
       const building = () => {
         return createWSTransportServer({
@@ -756,7 +756,7 @@ test.describe('WSTransportServer, heartbeat', () => {
 
     await server.stop();
 
-    for (const heartbeat of [0, 1.5, 2 ** 31]) {
+    for (const heartbeat of [0, 0.5, 2 ** 31]) {
       expect(() => {
         return createWSTransportServer({ heartbeat, WebSocketServer: fake.FakeWebSocketServer });
       }, String(heartbeat)).toThrow(ProgrammerError);

@@ -13,7 +13,7 @@ import {
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
 } from '../shared/constants';
-import { assertHeld, assertHeldFinite, type TimeoutId } from '../shared/clock';
+import { assertHeld, assertHeldDelay, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { ConnectError, GenericError, ReadyStateError, wrapReason } from '../shared/errors';
 import { noop } from '../shared/noop';
@@ -189,23 +189,6 @@ const retryDelayOf = (losses: number): number => {
   return Math.floor(delay / 2 + (Math.random() * delay) / 2);
 };
 
-// a bound of the listens, which 0 gives a meaning of its own: lost, listened again or answered at
-// once; `Infinity`, only where it may be
-const assertDelay = (
-  name: string,
-  { isUnbounded = false, value }: { isUnbounded?: boolean; value: number }
-): void => {
-  if (value === 0) {
-    return;
-  }
-
-  if (isUnbounded) {
-    assertHeld(name, value);
-  } else {
-    assertHeldFinite(name, value);
-  }
-};
-
 // definition
 
 /**
@@ -242,19 +225,19 @@ export const createHTTPTransportClient = (
   const {
     clock,
     fetch: fetchImpl = globalThis.fetch as FetchLike,
-    inactivityTimeout = INACTIVITY_TIMEOUT,
+    inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
     isListening = true,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
-    pause = 0,
-    wait = WAIT,
+    pause: givenPause = 0,
+    wait: givenWait = WAIT,
   } = {
     ...DEFAULTS(),
     ...options,
   };
-
-  assertDelay('inactivityTimeout', { isUnbounded: true, value: inactivityTimeout });
-  assertDelay('pause', { value: pause });
-  assertDelay('wait', { value: wait });
+  const inactivityTimeout = assertHeld('inactivityTimeout', givenInactivityTimeout);
+  // 0 is at once: a listen again at once, and a listen the server answers at once, which polls
+  const pause = assertHeldDelay('pause', givenPause);
+  const wait = assertHeldDelay('wait', givenWait);
 
   return createTransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>(
     (client) => {
@@ -432,12 +415,8 @@ export const createHTTPTransportClient = (
       };
 
       // the inactivity timeout of a count of losses, armed at its first, which aborts `expiry` as it
-      // ends: at once when it is 0, and never when it is Infinity, which a timer would take for 1 ms
+      // ends: never when it is Infinity, which a timer would take for 1 ms
       const expireAfter = (expiry: AbortController): TimeoutId | undefined => {
-        if (inactivityTimeout === 0) {
-          return (expiry.abort(), undefined);
-        }
-
         if (inactivityTimeout === Infinity) {
           return undefined;
         }

@@ -1483,13 +1483,6 @@ public sealed class HttpTransportClientTests
 
             Assert.Equal((false, false), await Next(closesDrawn));
         }
-
-        // none at all: lost at its first loss
-        await using var at = new HttpTransportClient(new HttpTransportClientOptions { Handler = fetch, InactivityTimeout = TimeSpan.Zero, Clock = time });
-        var closedAt = ClosesOf(at);
-
-        await at.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
-        await Next(closedAt);
     }
 
     [Fact]
@@ -1682,6 +1675,15 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
+    public async Task Asks_the_server_to_wait_its_wait_held_a_fraction_rounded_to_the_nearest_whole_millisecond()
+    {
+        await using var faked = await ConnectFake(ListeningOn(new FakeTimeProvider()) with { Wait = TimeSpan.FromMilliseconds(1.5) });
+
+        Assert.EndsWith("&wait=2", (await faked.Fetch.CallOf(1)).Uri, StringComparison.Ordinal);
+        await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
     public async Task Pauses_between_listens_that_bring_nothing_and_listens_no_more_once_its_connection_went()
     {
         var time = new FakeTimeProvider();
@@ -1863,9 +1865,9 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public async Task Holds_its_connect_s_timeout_to_a_whole_number_of_milliseconds_on_its_clock_zero_and_infinite_never_timing_out_refusing_any_other_and_moving_nothing()
+    public async Task Holds_its_connect_s_timeout_to_a_whole_number_of_milliseconds_on_its_clock_rounded_infinite_never_timing_out_refusing_zero_and_any_other_and_moving_nothing()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("a connect's timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a connect's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             using var fetch = new Fetch();
             var time = new FakeTimeProvider();
@@ -1899,16 +1901,20 @@ public sealed class HttpTransportClientTests
             // the connect reached a server that never answers it
             await fetch.CallOf(0);
 
-            // a duration held times the connect out once it passed; zero and infinite wait on past the longest
-            if (given > TimeSpan.Zero)
+            // a duration held times the connect out once it passed, its TimeoutException telling it;
+            // infinite waits on past the longest
+            if (outcome == DurationOutcome.Taken)
             {
-                time.Advance(given - TimeSpan.FromMilliseconds(1));
+                time.Advance(held!.Value - TimeSpan.FromMilliseconds(1));
                 Assert.Equal(ReadyState.Connecting, client.ReadyState);
                 time.Advance(TimeSpan.FromMilliseconds(1));
-                await Assert.ThrowsAsync<TimeoutException>(() =>
+
+                var ended = await Assert.ThrowsAsync<TimeoutException>(() =>
                 {
                     return connecting.WaitAsync(Patience, Cancelled);
                 });
+
+                Assert.Equal(string.Create(CultureInfo.InvariantCulture, $"timed out after {held.Value.TotalMilliseconds}ms"), ended.Message);
             }
             else
             {
@@ -1926,27 +1932,27 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public void Holds_a_wait_a_pause_and_an_inactivity_timeout_to_a_whole_number_of_milliseconds_zero_its_own_for_each_infinite_for_the_inactivity_timeout_alone()
+    public void Holds_a_wait_a_pause_and_an_inactivity_timeout_to_a_whole_number_of_milliseconds_rounded_zero_at_once_for_a_wait_and_a_pause_and_refused_for_the_inactivity_timeout_infinite_for_the_inactivity_timeout_alone()
     {
-        var options = new (string Option, DurationOutcome Never, Func<TimeSpan, HttpTransportClientOptions> Of)[]
+        var options = new (string Option, (DurationOutcome Zero, DurationOutcome Never) Outcomes, Func<TimeSpan, HttpTransportClientOptions> Of)[]
         {
-            (nameof(HttpTransportClientOptions.InactivityTimeout), DurationOutcome.Taken, (given) =>
+            (nameof(HttpTransportClientOptions.InactivityTimeout), (DurationOutcome.Refused, DurationOutcome.Never), (given) =>
             {
                 return new HttpTransportClientOptions { InactivityTimeout = given };
             }),
-            (nameof(HttpTransportClientOptions.Pause), DurationOutcome.Refused, (given) =>
+            (nameof(HttpTransportClientOptions.Pause), (DurationOutcome.AtOnce, DurationOutcome.Refused), (given) =>
             {
                 return new HttpTransportClientOptions { Pause = given };
             }),
-            (nameof(HttpTransportClientOptions.Wait), DurationOutcome.Refused, (given) =>
+            (nameof(HttpTransportClientOptions.Wait), (DurationOutcome.AtOnce, DurationOutcome.Refused), (given) =>
             {
                 return new HttpTransportClientOptions { Wait = given };
             }),
         };
 
-        foreach (var (option, never, of) in options)
+        foreach (var (option, outcomes, of) in options)
         {
-            foreach (var (given, outcome, refusal) in Durations.Of(option, (DurationOutcome.Own, never)))
+            foreach (var (given, outcome, _, refusal) in Durations.Of(option, outcomes))
             {
                 if (outcome == DurationOutcome.Refused)
                 {

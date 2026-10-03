@@ -73,14 +73,13 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
-    heartbeat = HEARTBEAT,
+    heartbeat: givenHeartbeat = HEARTBEAT,
     WebSocket = globalThis.WebSocket,
   } = {
     ...DEFAULTS(),
     ...options,
   };
-
-  assertHeartbeat(heartbeat);
+  const heartbeat = assertHeartbeat(givenHeartbeat);
 
   return createTransportClient<IWebSocketLike, IWSTransportClientConnectOptions>((client) => {
     // settle the connect or the disconnect in flight, so a socket dropped under either cannot leave

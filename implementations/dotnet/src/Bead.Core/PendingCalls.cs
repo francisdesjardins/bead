@@ -90,28 +90,23 @@ internal sealed class PendingCalls
     // helpers
 
     /// <summary>
-    /// How long a call id stays reserved: its call's timeout, or the default for zero or infinite. One
-    /// that is not a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// How long a call id stays reserved: its call's timeout, held, or the default for none or
+    /// infinite.
     /// </summary>
-    public static TimeSpan ReservationOf(TimeSpan timeout)
+    public static TimeSpan ReservationOf(TimeSpan? timeout)
     {
-        AssertReservation(timeout);
-
-        return timeout == TimeSpan.Zero || timeout == System.Threading.Timeout.InfiniteTimeSpan ? ReservationDefault : timeout;
+        return timeout is { } given && given != System.Threading.Timeout.InfiniteTimeSpan ? given : ReservationDefault;
     }
 
     /// <summary>
-    /// Throws an <see cref="ArgumentOutOfRangeException"/> for a reservation that is not a whole
-    /// number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/>. None, zero, and infinite,
-    /// which reserves nothing for ever, take the default.
+    /// A reservation held: rounded to the nearest whole millisecond, or none, for the default. One
+    /// that is neither infinite — a call that waited on, which reserves for the default too, since
+    /// nothing is reserved for ever — nor from 1 to <see cref="Clocks.LongestTimer"/> milliseconds,
+    /// zero among them, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
-    public static void AssertReservation(TimeSpan? timeout)
+    public static TimeSpan? AssertReservation(TimeSpan? timeout)
     {
-        if (timeout is { } given && given != TimeSpan.Zero)
-        {
-            Clocks.AssertHeld(("a call id's reservation", nameof(timeout)), given);
-        }
+        return timeout is { } given ? Clocks.AssertHeld(("a call id's reservation", nameof(timeout)), given) : null;
     }
 
     // definition
@@ -188,12 +183,13 @@ internal sealed class PendingCalls
     }
 
     /// <summary>
-    /// Reserves a call id for <paramref name="timeout"/>, or for the default time for zero or
-    /// infinite; reserved twice, the later end stands, compared on the clock's monotonic reading.
+    /// Reserves a call id for <paramref name="timeout"/>, held as <see cref="AssertReservation"/>
+    /// holds one, or for the default time for none or infinite; reserved twice, the later end stands,
+    /// compared on the clock's monotonic reading.
     /// </summary>
-    public void Reserve(CallAddress call, TimeSpan timeout)
+    public void Reserve(CallAddress call, TimeSpan? timeout)
     {
-        var lasts = ReservationOf(timeout);
+        var lasts = ReservationOf(AssertReservation(timeout));
         var reserved = EntriesOf(_reservations, call.ConnectionHandle);
 
         if (reserved.TryGetValue(call.CallId, out var previous))

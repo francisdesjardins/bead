@@ -14,9 +14,9 @@ public sealed record RelayOptions
 
     /// <summary>
     /// How long leg B waits for its answer at most, whatever a destination says; without end by
-    /// default: the requester's own timeout governs, end to end, by the cancel it sends. A whole
-    /// number of milliseconds from 1 to 2³¹ − 1, or infinite; another is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// default: the requester's own timeout governs, end to end, by the cancel it sends. From 1 to
+    /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or infinite; another, zero among them,
+    /// is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan Timeout { get; init; } = System.Threading.Timeout.InfiniteTimeSpan;
 
@@ -39,9 +39,9 @@ public sealed record DestinationOptions
     public string? Label { get; init; }
 
     /// <summary>
-    /// How long leg B waits for its answer, the relay's at most; the relay's when none. A whole number
-    /// of milliseconds from 1 to 2³¹ − 1, or infinite; another is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// How long leg B waits for its answer, the relay's at most; the relay's when none. From 1 to
+    /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or infinite; another, zero among them,
+    /// is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan? Timeout { get; init; }
 }
@@ -140,8 +140,7 @@ internal sealed class Relay
         _router = router;
         _beforeRoute = options?.BeforeRoute;
         _fill = options?.Fill ?? RandomNumberGenerator.Fill;
-        _timeout = options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan;
-        AssertTimeout(_timeout);
+        _timeout = HeldTimeoutOf(options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>
@@ -219,15 +218,14 @@ internal sealed class Relay
     }
 
     /// <summary>
-    /// Registers a target as a destination: given, or drawn. A timeout neither infinite nor a whole
-    /// number of milliseconds from 1 to 2³¹ − 1 is an <see cref="ArgumentOutOfRangeException"/>; a
-    /// destination of 0, or registered already, an <see cref="ArgumentException"/>.
+    /// Registers a target as a destination: given, or drawn. A timeout is rounded to the nearest whole
+    /// millisecond; one neither infinite nor from 1 to 2³¹ − 1, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered already, an
+    /// <see cref="ArgumentException"/>.
     /// </summary>
     public DestinationRegistration Register(object target, DestinationOptions? options)
     {
-        var timeout = options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan;
-
-        AssertTimeout(timeout);
+        var timeout = HeldTimeoutOf(options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan);
 
         if (options?.DestinationId == 0)
         {
@@ -259,10 +257,10 @@ internal sealed class Relay
         }
     }
 
-    // the relay's timeout, or a destination's: zero has no meaning of its own, and is refused
-    private static void AssertTimeout(TimeSpan timeout)
+    // the relay's timeout, or a destination's, held: never zero, and infinite without end
+    private static TimeSpan HeldTimeoutOf(TimeSpan timeout)
     {
-        Clocks.AssertHeld(("a relay's timeout", nameof(RelayOptions.Timeout)), timeout);
+        return Clocks.AssertHeld(("a relay's timeout", nameof(RelayOptions.Timeout)), timeout);
     }
 
     // the shorter of two timeouts, infinite the longest

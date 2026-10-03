@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { clockOf } from '../../transport/shared/clock';
+import { assertHeld, clockOf } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
@@ -148,8 +148,10 @@ const nameAfter = <Resolver extends (...params: never[]) => unknown>(
 };
 
 /**
- * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one;
- * `options` is left alone.
+ * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one
+ * — and the timeout held as a call's, so the trace, the router and the error tell one number:
+ * rounded to the nearest whole millisecond, `Infinity` to wait on, and a {@link ProgrammerError} for
+ * any other not from 1 to 2³¹ − 1, 0 among them. `options` is left alone.
  */
 export const resolveRequestOptions = (
   options?: IRequestOptions,
@@ -157,9 +159,10 @@ export const resolveRequestOptions = (
 ): IResolvedRequestOptions => {
   const {
     closeOnTimeout = defaults.closeOnTimeout,
-    timeout = defaults.timeout,
+    timeout: givenTimeout = defaults.timeout,
     ...rest
   } = options ?? {};
+  const timeout = assertHeld("a call's timeout", givenTimeout);
 
   return closeOnTimeout === undefined ? { ...rest, timeout } : { ...rest, closeOnTimeout, timeout };
 };
@@ -243,9 +246,13 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     { below: 'its router', layer: 'a service manager' }
   );
   const closeConnection = options?.closeConnection;
+  // held as the manager is built, rather than refused at each call it would time
   const defaults = Object.freeze({
     closeOnTimeout: options?.defaults?.closeOnTimeout,
-    timeout: options?.defaults?.timeout ?? REQUEST_DEFAULTS.timeout,
+    timeout: assertHeld(
+      "a call's default timeout",
+      options?.defaults?.timeout ?? REQUEST_DEFAULTS.timeout
+    ),
   });
   const emitter = createEmitter<ServiceManagerEventMap>();
   // the notifications this manager made, one per procedure, kept for its life: asked for again,
@@ -282,7 +289,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
   // the requester body that `getRequest`, `getCommand` and a notification's subscribing call share:
   // the options, the trace, the request, the close on timeout and the decoding; `subscribes` names
-  // the notification the call subscribes
+  // the notification the call subscribes; a timeout refused fails as the options are resolved,
+  // before the trace and the deprecation
   const callOf = <RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     {

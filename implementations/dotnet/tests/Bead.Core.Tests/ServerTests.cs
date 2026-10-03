@@ -628,7 +628,7 @@ public sealed class ServerTests : IAsyncLifetime
         });
         _transport.Open(Handle);
 
-        var session = Server.Sessions.Set(Server.Sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.Zero });
+        var session = Server.Sessions.Set(Server.Sessions.Create(Handle) with { SessionInactivityTimeout = null });
 
         // the default of its own options, timed by the server's clock
         Assert.Equal(TimeSpan.FromSeconds(3), session.SessionInactivityTimeout);
@@ -670,9 +670,9 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Holds_an_inactivity_timeout_to_a_whole_number_of_milliseconds_as_it_is_built_refusing_zero_leaving_nothing_on_its_transport_for_one_refused()
+    public async Task Holds_an_inactivity_timeout_to_a_whole_number_of_milliseconds_as_it_is_built_rounded_refusing_zero_leaving_nothing_on_its_transport_for_one_refused()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("a connection's inactivity timeout", (DurationOutcome.Refused, DurationOutcome.Taken)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a connection's inactivity timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             var time = new FakeTimeProvider();
             var transport = new ScriptedTransport { Clock = time };
@@ -697,10 +697,10 @@ public sealed class ServerTests : IAsyncLifetime
 
             transport.Open(Handle);
 
-            // a silent connection closes at its due; infinite, at none
-            if (given > TimeSpan.Zero)
+            // a silent connection closes at its due, held; infinite, at none
+            if (held is { } due && due != Timeout.InfiniteTimeSpan)
             {
-                time.Advance(given - TimeSpan.FromMilliseconds(1));
+                time.Advance(due - TimeSpan.FromMilliseconds(1));
                 await _scheduler.WhenIdle();
                 Assert.Empty(transport.Closed);
                 time.Advance(TimeSpan.FromMilliseconds(1));

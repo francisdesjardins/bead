@@ -7,7 +7,10 @@ import type { IClock } from './clock';
 export interface ICreatePromiseOptions {
   /** The clock its timers run on; the platform's when not given. */
   clock?: IClock | undefined;
-  /** Milliseconds to wait before the executor runs. */
+  /**
+   * Milliseconds to wait before the executor runs, rounded to the nearest whole one: 0, the default,
+   * runs it at once; `Infinity` is refused.
+   */
   delay?: number | undefined;
   /**
    * Aborting it rejects with a {@link CancelError} carrying the signal's reason; one already aborted
@@ -15,8 +18,9 @@ export interface ICreatePromiseOptions {
    */
   signal?: AbortSignal | undefined;
   /**
-   * Milliseconds the executor gets once the delay is over; the {@link TimeoutError} reports the
-   * delay and the timeout together. `0` or absent never times out.
+   * Milliseconds the executor gets once the delay is over, rounded to the nearest whole one; the
+   * {@link TimeoutError} reports the delay and the timeout together. `Infinity` or absent never
+   * times out; 0 is refused.
    */
   timeout?: number | undefined;
 }

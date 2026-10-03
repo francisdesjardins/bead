@@ -113,15 +113,15 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   }: IServerLayers<Transport, Data>,
   options?: IServerOptions
 ): IServer<Transport, Data> => {
-  const { connectionInactivityTimeout = Infinity } = options ?? {};
   const clock = clockOf(
     { beneath: transport.clock, given: options?.clock },
     { below: 'its transport', layer: 'a server' }
   );
-
-  // refused as it is built, as a transfer's inactivity is, rather than a timer armed for no time,
-  // which the platforms do not wait alike
-  assertHeld("a connection's inactivity timeout", connectionInactivityTimeout);
+  // held as it is built, as a transfer's inactivity is, rather than refused as a timer is armed
+  const connectionInactivityTimeout = assertHeld(
+    "a connection's inactivity timeout",
+    options?.connectionInactivityTimeout ?? Infinity
+  );
 
   const sessions = createSessions({ clock });
 
@@ -290,7 +290,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
 
   // a session that ended takes with it what its connection subscribed to, which the session let it
   // have — each subscription ends with SESSION_REQUIRED, which a client that only listens hears —
-  // and leaves the connection its connection timeout
+  // and leaves the connection its connection timeout, or the server's own when it holds none
   const onSessionDeleted = ({
     connectionHandle,
     connectionInactivityTimeout: timeout,
@@ -300,7 +300,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
         connectionHandle,
         failure: router.failures.sessionRequired,
       });
-      wait(connectionHandle, timeout);
+      wait(connectionHandle, timeout ?? connectionInactivityTimeout);
     }
   };
 

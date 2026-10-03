@@ -410,28 +410,28 @@ export const createHTTPTransportServer = (
     bodyBytesBudget = BODY_BYTES_BUDGET,
     clock = PLATFORM_CLOCK,
     createServer,
-    exchangeTimeout = EXCHANGE_TIMEOUT,
+    exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
     hosts,
-    inactivityTimeout = INACTIVITY_TIMEOUT,
+    inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
     isProxyTrusted = false,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
     maximumConnections = MAXIMUM_CONNECTIONS,
     maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
     maximumOutboxBytes = MAXIMUM_OUTBOX_BYTES,
-    maximumWait = MAXIMUM_WAIT,
+    maximumWait: givenMaximumWait = MAXIMUM_WAIT,
     maximumWaitingExchanges = MAXIMUM_WAITING_EXCHANGES,
     origins = [],
     pathname = PATHNAME,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
-  assertHeld('exchangeTimeout', exchangeTimeout);
-  assertHeld('inactivityTimeout', inactivityTimeout);
+  const exchangeTimeout = assertHeld('exchangeTimeout', givenExchangeTimeout);
+  const inactivityTimeout = assertHeld('inactivityTimeout', givenInactivityTimeout);
   assertOption('maximumBodyBytes', { value: maximumBodyBytes });
   assertOption('maximumConnections', { value: maximumConnections });
   assertOption('maximumConnectionsPerAddress', { value: maximumConnectionsPerAddress });
   assertOption('maximumOutboxBytes', { value: maximumOutboxBytes });
-  assertHeldFinite('maximumWait', maximumWait);
+  const maximumWait = assertHeldFinite('maximumWait', givenMaximumWait);
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
 
   // what the transport keeps of each connection, by handle

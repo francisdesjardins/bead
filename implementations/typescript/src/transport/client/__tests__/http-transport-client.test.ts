@@ -537,10 +537,10 @@ test.describe('createHTTPTransportClient', () => {
     expect([client.isClosed(), armed]).toEqual([true, []]);
   });
 
-  test('holds its connect’s timeout to a whole number of milliseconds on its clock, 0 and Infinity never timing out, refusing any other and moving nothing', async () => {
-    for (const { given, outcome, refusal } of durationsOf("a connect's timeout", {
-      never: 'taken',
-      zero: 'own',
+  test('holds its connect’s timeout to a whole number of milliseconds on its clock, rounded, Infinity never timing out, refusing 0 and any other and moving nothing', async () => {
+    for (const { given, held, outcome, refusal } of durationsOf("a connect's timeout", {
+      never: 'never',
+      zero: 'refused',
     })) {
       const clock = createTestClock();
       const fake = createFakeFetch();
@@ -566,15 +566,19 @@ test.describe('createHTTPTransportClient', () => {
         continue;
       }
 
-      // a duration held times the connect out once it passed; 0 and Infinity wait on past the longest
-      if (Number.isFinite(given) && given > 0) {
-        await clock.tickAsync(given - 1);
+      // a duration held times the connect out once it passed, its TimeoutError telling it; never
+      // waits on past the longest
+      if (outcome === 'taken' && held !== undefined) {
+        await clock.tickAsync(held - 1);
 
         expect(client.isConnecting(), label).toBe(true);
 
         await clock.tickAsync(1);
 
-        expect(await connecting, label).toBeInstanceOf(TimeoutError);
+        const ended = await connecting;
+
+        expect(ended, label).toBeInstanceOf(TimeoutError);
+        expect(ended, label).toHaveProperty('timeout', held);
       } else {
         await clock.tickAsync(LONGEST_TIMER);
 
@@ -992,16 +996,6 @@ test.describe('createHTTPTransportClient, listening', () => {
 
       expect(closesDrawn).toEqual([[false, false]]);
     }
-
-    // none at all: lost at its first loss
-    const at = createHTTPTransportClient({ clock, fetch: fake.fetch, inactivityTimeout: 0 });
-    const closedAt = closesOf(at);
-    const listensBefore = methodsOf(fake).listens;
-
-    await at.connect({ host, port: 80 });
-    await clock.tickAsync(0);
-
-    expect([closedAt, methodsOf(fake).listens - listensBefore]).toEqual([[[false, false]], 1]);
   });
 
   test('times its inactivity on a timer, never on a reading of the wall clock: whether that leaps or goes back, the connection is lost at its timeout', async () => {
@@ -1148,6 +1142,13 @@ test.describe('createHTTPTransportClient, listening', () => {
     expect((await atLimit.callOf(2))?.url).toContain('?after=1&');
     expect(atLimit.heard).toEqual([[...largest]]);
     await atLimit.client.disconnect({ isQuick: true });
+  });
+
+  test('asks the server to wait its wait held, a fraction rounded to the nearest whole millisecond', async () => {
+    const { callOf, client } = await connectListening({ wait: 1.5 });
+
+    expect((await callOf(1))?.url).toMatch(/&wait=2$/u);
+    await client.disconnect({ isQuick: true });
   });
 
   test('pauses between listens that bring nothing, and listens no more once its connection went', async () => {
@@ -1313,13 +1314,13 @@ test.describe('createHTTPTransportClient, listening', () => {
     await client.disconnect({ isQuick: true });
   });
 
-  test('holds a wait, a pause and an inactivity timeout to a whole number of milliseconds, 0 its own for each, Infinity for the inactivity timeout alone', () => {
-    for (const [option, never] of [
-      ['inactivityTimeout', 'taken'],
-      ['pause', 'refused'],
-      ['wait', 'refused'],
+  test('holds a wait, a pause and an inactivity timeout to a whole number of milliseconds, rounded, 0 at once for a wait and a pause and refused for the inactivity timeout, Infinity for the inactivity timeout alone', () => {
+    for (const [option, outcomes] of [
+      ['inactivityTimeout', { never: 'never', zero: 'refused' }],
+      ['pause', { never: 'refused', zero: 'at once' }],
+      ['wait', { never: 'refused', zero: 'at once' }],
     ] as const) {
-      for (const { given, outcome, refusal } of durationsOf(option, { never, zero: 'own' })) {
+      for (const { given, outcome, refusal } of durationsOf(option, outcomes)) {
         const building = () => {
           return createHTTPTransportClient({ [option]: given });
         };

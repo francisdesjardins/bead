@@ -30,9 +30,9 @@ public sealed record ServerOptions
 
     /// <summary>
     /// How long a connection without a session may stay silent before it is closed; infinite when
-    /// none, unless a facade says otherwise. One neither infinite nor a whole number of milliseconds
-    /// from 1 to <see cref="Clocks.LongestTimer"/>, zero among them, is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// none, unless a facade says otherwise. From 1 to <see cref="Clocks.LongestTimer"/>
+    /// milliseconds, rounded to the nearest whole one; one neither infinite nor in that range, zero
+    /// among them, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan? ConnectionInactivityTimeout { get; init; }
 
@@ -103,11 +103,11 @@ public sealed class Server<TData> : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(transport);
 
         Transport = transport;
-        _connectionInactivityTimeout = options?.ConnectionInactivityTimeout ?? Timeout.InfiniteTimeSpan;
 
-        // refused here rather than as the first connection opens, where its timer would throw, or
-        // close it at once
-        Clocks.AssertHeld(("a connection's inactivity timeout", nameof(ServerOptions.ConnectionInactivityTimeout)), _connectionInactivityTimeout);
+        // held here rather than refused as the first connection opens, where its timer would throw
+        _connectionInactivityTimeout = Clocks.AssertHeld(
+            ("a connection's inactivity timeout", nameof(ServerOptions.ConnectionInactivityTimeout)),
+            options?.ConnectionInactivityTimeout ?? Timeout.InfiniteTimeSpan);
 
         _clock = Clocks.Of((options?.Clock, transport.Clock), ("a server", "its transport"));
 
@@ -389,8 +389,9 @@ public sealed class Server<TData> : IAsyncDisposable
     }
 
     // a session that ended takes with it what its connection subscribed to — each subscription with
-    // SESSION_REQUIRED — and leaves the connection its connection timeout; the drop goes to the
-    // router at once, ahead of the answer of the procedure that ended the session
+    // SESSION_REQUIRED — and leaves the connection its connection timeout, or the server's own when
+    // it holds none; the drop goes to the router at once, ahead of the answer of the procedure that
+    // ended the session
     private void OnSessionDeleted(Session<TData> session)
     {
         bool isConnected;
@@ -406,7 +407,7 @@ public sealed class Server<TData> : IAsyncDisposable
         }
 
         _ = Router.DropSubscriptions(session.ConnectionHandle, Failure.OfProtocol(ProtocolCode.SessionRequired));
-        Wait(session.ConnectionHandle, session.ConnectionInactivityTimeout);
+        Wait(session.ConnectionHandle, session.ConnectionInactivityTimeout ?? _connectionInactivityTimeout);
     }
 
     // a connection silent too long is gone: closing it ends its session too

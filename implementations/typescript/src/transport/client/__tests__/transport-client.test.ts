@@ -207,10 +207,10 @@ test.describe('createTransportClient', () => {
   });
 
   // the worker's transport, which no test of its own times a connect for: a worker that never answers
-  test('holds a connect’s timeout to a whole number of milliseconds, 0 and Infinity never timing out, refusing any other before anything moves, the worker’s transport as every one', async () => {
-    for (const { given, outcome, refusal } of durationsOf("a connect's timeout", {
-      never: 'taken',
-      zero: 'own',
+  test('holds a connect’s timeout to a whole number of milliseconds, rounded, Infinity never timing out, refusing 0 and any other before anything moves, the worker’s transport as every one', async () => {
+    for (const { given, held: due, outcome, refusal } of durationsOf("a connect's timeout", {
+      never: 'never',
+      zero: 'refused',
     })) {
       const clock = createTestClock();
       const held: MessagePort[] = [];
@@ -243,15 +243,19 @@ test.describe('createTransportClient', () => {
         continue;
       }
 
-      // a duration held times the connect out once it passed; 0 and Infinity wait on past the longest
-      if (Number.isFinite(given) && given > 0) {
-        await clock.tickAsync(given - 1);
+      // a duration held times the connect out once it passed, its TimeoutError telling it; never
+      // waits on past the longest
+      if (outcome === 'taken' && due !== undefined) {
+        await clock.tickAsync(due - 1);
 
         expect(isSettled, label).toBe(false);
 
         await clock.tickAsync(1);
 
-        expect(await connecting, label).toBeInstanceOf(TimeoutError);
+        const ended = await connecting;
+
+        expect(ended, label).toBeInstanceOf(TimeoutError);
+        expect(ended, label).toHaveProperty('timeout', due);
       } else {
         await clock.tickAsync(clocks.LONGEST_TIMER);
 
@@ -275,7 +279,7 @@ test.describe('createTransportClient', () => {
     await client.disconnect();
     await expect(client.connect({ host: 'h', port: 8, timeout: 0.5 })).rejects.toThrow(
       new ProgrammerError(
-        "a connect's timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 0.5"
+        "a connect's timeout is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 0.5"
       )
     );
 
@@ -470,10 +474,10 @@ test.describe('createTransportClient #reconnect', () => {
     expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
   });
 
-  test('holds a delay to a whole number of milliseconds, 0 waiting none, refusing Infinity and any other before "tap" hears it, ending CLOSED without another attempt', async () => {
-    for (const { given, outcome, refusal } of durationsOf('a delay', {
+  test('holds a delay to a whole number of milliseconds, rounded, which "tap" hears, 0 waiting none, refusing Infinity and any other before "tap" hears it, ending CLOSED without another attempt', async () => {
+    for (const { given, held, outcome, refusal } of durationsOf('a delay', {
       never: 'refused',
-      zero: 'own',
+      zero: 'at once',
     })) {
       const clock = createTestClock();
       const { calls, client } = createStubClient({ clock, failures: 2 });
@@ -502,13 +506,13 @@ test.describe('createTransportClient #reconnect', () => {
       }
 
       // a duration held is waited on the clock; 0, none
-      if (outcome === 'taken') {
+      if (outcome === 'taken' && held !== undefined) {
         await expect
           .poll(() => {
             return delaysOn(clock);
           }, label)
-          .toEqual([given]);
-        await clock.tickAsync(given - 1);
+          .toEqual([held]);
+        await clock.tickAsync(held - 1);
 
         expect(calls, label).toEqual(['connect:1', 'connect:1']);
 
@@ -517,7 +521,7 @@ test.describe('createTransportClient #reconnect', () => {
 
       await reconnecting;
 
-      expect([calls, taps], label).toEqual([['connect:1', 'connect:1', 'connect:1'], [given]]);
+      expect([calls, taps], label).toEqual([['connect:1', 'connect:1', 'connect:1'], [held]]);
     }
   });
 

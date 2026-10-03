@@ -91,9 +91,9 @@ const isConnectionTarget = (target: RelayTarget): target is IConnectionTarget =>
   return 'connectionHandle' in target;
 };
 
-// the relay's timeout, or a destination's: 0 has no meaning of its own, and is refused
-const assertTimeout = (timeout: number): void => {
-  assertHeld("a relay's timeout", timeout);
+// the relay's timeout, or a destination's, held: never 0, and `Infinity` without end
+const heldTimeoutOf = (timeout: number): number => {
+  return assertHeld("a relay's timeout", timeout);
 };
 
 // definition
@@ -139,7 +139,7 @@ export const createRelay = ({
     target: { connectionHandle: Handle; header: IRequestHeader }
   ) => Promise<void>;
 }): IRelay => {
-  const { beforeRoute, timeout: relayTimeout = Infinity } = options ?? {};
+  const { beforeRoute, timeout: givenTimeout = Infinity } = options ?? {};
   const registrations = new Map<DestinationId, IRegistration>();
 
   if (beforeRoute?.refusal !== undefined && !isAdmissionFailure(beforeRoute.refusal, failures)) {
@@ -148,7 +148,7 @@ export const createRelay = ({
     );
   }
 
-  assertTimeout(relayTimeout);
+  const relayTimeout = heldTimeoutOf(givenTimeout);
 
   // without a `beforeRoute`, the relay admits nobody: it is a door to what is behind it
   const admission =
@@ -299,9 +299,8 @@ export const createRelay = ({
   };
 
   const register = (target: RelayTarget, options?: IDestinationOptions) => {
-    const { destinationId: given, label, timeout = Infinity } = options ?? {};
-
-    assertTimeout(timeout);
+    const { destinationId: given, label } = options ?? {};
+    const timeout = heldTimeoutOf(options?.timeout ?? Infinity);
 
     if (given !== undefined && (!Number.isInteger(given) || given < 1 || given > 0xffffffff)) {
       throw new ProgrammerError(

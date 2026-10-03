@@ -23,9 +23,10 @@ public sealed record TransportReconnectOptions
 {
     /// <summary>
     /// The wait after a failed attempt, before the next: a second each unless told. The first
-    /// attempt goes at once; a wait of zero is none, and one that is not a whole number of
-    /// milliseconds from 1 to 2³¹ − 1 — <see cref="Timeout.InfiniteTimeSpan"/> among them — ends the
-    /// reconnection with an <see cref="ArgumentOutOfRangeException"/>, before its tap hears it.
+    /// attempt goes at once; a wait of zero is none, one from 1 to 2³¹ − 1 milliseconds is rounded
+    /// to the nearest whole one, which its tap hears, and any other —
+    /// <see cref="Timeout.InfiniteTimeSpan"/> among them — ends the reconnection with an
+    /// <see cref="ArgumentOutOfRangeException"/>, before its tap hears it.
     /// </summary>
     public TransportReconnectDelay? Delay { get; init; }
 

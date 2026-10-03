@@ -416,9 +416,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_zero_dropping_a_connection_at_once_infinite_waiting_on_its_peer_without_end()
+    public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_waiting_on_its_peer_without_end()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("a close timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        foreach (var (given, outcome, _, refusal) in Durations.Of("a close timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             if (outcome == DurationOutcome.Refused)
             {
@@ -941,7 +941,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             }
         }
 
-        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
+        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>
             {

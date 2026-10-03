@@ -148,25 +148,29 @@ public sealed class ClocksTests
 
     // -1 ms is .NET's infinite, so -2 ms stands for a negative; a TimeSpan holds no NaN
     [Fact]
-    public void Holds_a_duration_to_a_whole_number_of_milliseconds_from_1_to_2_31_minus_1_or_never_where_never_has_a_meaning_refusing_any_other_in_one_message()
+    public void Holds_a_duration_as_a_whole_number_of_milliseconds_from_1_to_2_31_minus_1_a_fraction_rounded_to_the_nearest_a_half_up_0_at_once_for_a_delay_and_never_where_never_has_a_meaning_refusing_any_other_in_one_message()
     {
         Assert.Equal(TimeSpan.FromMilliseconds(2_147_483_647), Clocks.LongestTimer);
 
-        var holds = new (Action<TimeSpan> Hold, DurationOutcome Never)[]
+        var holds = new (Func<TimeSpan, TimeSpan> Hold, (DurationOutcome Zero, DurationOutcome Never) Outcomes)[]
         {
             ((duration) =>
             {
-                Clocks.AssertHeld(("a timeout", "Timeout"), duration);
-            }, DurationOutcome.Taken),
+                return Clocks.AssertHeld(("a duration", "Duration"), duration);
+            }, (DurationOutcome.Refused, DurationOutcome.Never)),
             ((duration) =>
             {
-                Clocks.AssertHeldFinite(("a timeout", "Timeout"), duration);
-            }, DurationOutcome.Refused),
+                return Clocks.AssertHeldFinite(("a duration", "Duration"), duration);
+            }, (DurationOutcome.Refused, DurationOutcome.Refused)),
+            ((duration) =>
+            {
+                return Clocks.AssertHeldDelay(("a duration", "Duration"), duration);
+            }, (DurationOutcome.AtOnce, DurationOutcome.Refused)),
         };
 
-        foreach (var (hold, never) in holds)
+        foreach (var (hold, outcomes) in holds)
         {
-            foreach (var (given, outcome, refusal) in Durations.Of("a timeout", (DurationOutcome.Refused, never)))
+            foreach (var (given, outcome, held, refusal) in Durations.Of("a duration", outcomes))
             {
                 if (outcome == DurationOutcome.Refused)
                 {
@@ -176,14 +180,25 @@ public sealed class ClocksTests
                     });
 
                     Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                    Assert.Equal("Timeout", refused.ParamName);
+                    Assert.Equal("Duration", refused.ParamName);
                 }
                 else
                 {
-                    hold(given);
+                    Assert.Equal(held, hold(given));
                 }
             }
         }
+    }
+
+    [Fact]
+    public void Rounds_a_half_up_never_to_the_even()
+    {
+        var twoAndAHalf = TimeSpan.FromMilliseconds(2.5);
+        var three = TimeSpan.FromMilliseconds(3);
+
+        Assert.Equal(three, Clocks.AssertHeld(("a duration", "Duration"), twoAndAHalf));
+        Assert.Equal(three, Clocks.AssertHeldFinite(("a duration", "Duration"), twoAndAHalf));
+        Assert.Equal(three, Clocks.AssertHeldDelay(("a duration", "Duration"), twoAndAHalf));
     }
 
     // a platform's difference: -1 ms is .NET's infinite, Timeout.InfiniteTimeSpan, where the
@@ -192,10 +207,10 @@ public sealed class ClocksTests
     public void A_duration_of_minus_1_ms_is_refused_on_the_TypeScript_side_and_never_on_the_CSharp_side()
     {
         Assert.Equal(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(-1));
-        Clocks.AssertHeld(("a timeout", "Timeout"), TimeSpan.FromMilliseconds(-1));
-        Assert.StartsWith("a timeout is a whole number of milliseconds from 1 to 2147483647, not infinite", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        Assert.Equal(Timeout.InfiniteTimeSpan, Clocks.AssertHeld(("a duration", "Duration"), TimeSpan.FromMilliseconds(-1)));
+        Assert.StartsWith("a duration is a number of milliseconds from 1 to 2147483647, not infinite", Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
-            Clocks.AssertHeldFinite(("a timeout", "Timeout"), TimeSpan.FromMilliseconds(-1));
+            Clocks.AssertHeldFinite(("a duration", "Duration"), TimeSpan.FromMilliseconds(-1));
         }).Message, StringComparison.Ordinal);
     }
 

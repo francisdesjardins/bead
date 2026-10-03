@@ -65,11 +65,11 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
-    public void Gives_a_timeout_of_zero_the_default()
+    public void Gives_a_timeout_left_out_the_default()
     {
         using var sessions = new SessionManager<string>(new SessionManagerOptions { SessionInactivityTimeout = TimeSpan.FromSeconds(7) });
 
-        var session = sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.Zero });
+        var session = sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = null });
 
         Assert.Equal(TimeSpan.FromSeconds(7), session.SessionInactivityTimeout);
         Assert.Equal(Timeout.InfiniteTimeSpan, session.ConnectionInactivityTimeout);
@@ -253,7 +253,7 @@ public sealed class SessionManagerTests
             told.Add("data");
         };
 
-        var session = sessions.Set(sessions.Create(Handle) with { Data = ["ada"], SessionInactivityTimeout = TimeSpan.Zero });
+        var session = sessions.Set(sessions.Create(Handle) with { Data = ["ada"], SessionInactivityTimeout = null });
 
         Assert.Equal(Timeout.InfiniteTimeSpan, session.SessionInactivityTimeout);
 
@@ -534,7 +534,7 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
-    public void A_timeout_of_zero_takes_the_default_the_manager_s_own_or_its_options()
+    public void A_timeout_left_out_takes_the_default_the_manager_s_own_or_its_options()
     {
         var time = new FakeTimeProvider();
 
@@ -551,20 +551,20 @@ public sealed class SessionManagerTests
 
         Assert.Equal(
             TimeSpan.FromMilliseconds(600),
-            sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = TimeSpan.Zero })!.ConnectionInactivityTimeout);
+            sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = null })!.ConnectionInactivityTimeout);
         Assert.Equal(
             TimeSpan.FromSeconds(30),
-            sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = TimeSpan.Zero })!.SessionInactivityTimeout);
+            sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = null })!.SessionInactivityTimeout);
         Assert.Equal(
             TimeSpan.FromSeconds(1),
-            tuned.UpdateConnectionInactivityTimeout(tunedSession with { ConnectionInactivityTimeout = TimeSpan.Zero })!.ConnectionInactivityTimeout);
+            tuned.UpdateConnectionInactivityTimeout(tunedSession with { ConnectionInactivityTimeout = null })!.ConnectionInactivityTimeout);
         Assert.Equal(
             TimeSpan.FromSeconds(2),
-            tuned.UpdateSessionInactivityTimeout(tunedSession with { SessionInactivityTimeout = TimeSpan.Zero })!.SessionInactivityTimeout);
+            tuned.UpdateSessionInactivityTimeout(tunedSession with { SessionInactivityTimeout = null })!.SessionInactivityTimeout);
     }
 
     [Fact]
-    public void Set_takes_the_default_for_a_timeout_of_zero_rather_than_firing_at_once()
+    public void Set_takes_the_default_for_a_timeout_left_out()
     {
         var time = new FakeTimeProvider();
 
@@ -577,13 +577,29 @@ public sealed class SessionManagerTests
             reached += 1;
         };
 
-        var stored = sessions.Set(sessions.Create(Handle) with { ConnectionInactivityTimeout = TimeSpan.Zero });
+        var stored = sessions.Set(sessions.Create(Handle) with { ConnectionInactivityTimeout = null });
 
         time.Advance(TimeSpan.FromMilliseconds(599));
         Assert.Equal(TimeSpan.FromMilliseconds(600), stored.ConnectionInactivityTimeout);
         Assert.Equal(0, reached);
         time.Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal(1, reached);
+    }
+
+    [Fact]
+    public void A_session_built_without_naming_its_timeouts_is_stored_with_the_manager_s_defaults_one_made_by_create_with_never()
+    {
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = new FakeTimeProvider() });
+
+        var built = sessions.Set(new Session<string> { ConnectionHandle = Handle });
+        var created = sessions.Set(sessions.Create(Other));
+
+        Assert.Equal<(TimeSpan?, TimeSpan?)>(
+            (TimeSpan.FromMilliseconds(600), TimeSpan.FromSeconds(30)),
+            (built.ConnectionInactivityTimeout, built.SessionInactivityTimeout));
+        Assert.Equal<(TimeSpan?, TimeSpan?)>(
+            (Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan),
+            (created.ConnectionInactivityTimeout, created.SessionInactivityTimeout));
     }
 
     // not -1 ms, which is .NET's infinite timeout; 2³¹ ms, one past what JavaScript's timers hold
@@ -719,9 +735,9 @@ public sealed class SessionManagerTests
 
     // a session manager has no reset of its own on this side: a store, an update and a default
     [Fact]
-    public void Holds_a_timeout_stored_updated_or_defaulted_to_a_whole_number_of_milliseconds_zero_the_default_where_one_is_stored_and_refused_as_a_default_nothing_changing_for_one_refused()
+    public void Holds_a_timeout_stored_updated_or_defaulted_to_a_whole_number_of_milliseconds_rounded_refusing_zero_one_left_out_taking_the_default_nothing_changing_for_one_refused()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("an inactivity timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("an inactivity timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = new FakeTimeProvider() });
 
@@ -751,29 +767,35 @@ public sealed class SessionManagerTests
                 continue;
             }
 
-            // stored as given, or as the manager's default for zero
+            // stored held
             Assert.Equal(
-                outcome == DurationOutcome.Own ? (TimeSpan.FromMilliseconds(600), TimeSpan.FromSeconds(30)) : (given, given),
+                (held, held),
                 (sessions.Set(sessions.Create(Other) with { ConnectionInactivityTimeout = given }).ConnectionInactivityTimeout,
                     sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = given })!.SessionInactivityTimeout));
         }
 
-        // a default is what zero stands for, so zero is no default
-        var defaults = new (string Option, Func<TimeSpan, SessionManagerOptions> Of)[]
+        // a default is had by leaving a timeout out, so zero is no default
+        var defaults = new (string Option, Func<TimeSpan, SessionManagerOptions> Of, Func<Session<string>, TimeSpan?> Stored)[]
         {
             (nameof(SessionManagerOptions.ConnectionInactivityTimeout), (timeout) =>
             {
                 return new SessionManagerOptions { ConnectionInactivityTimeout = timeout };
+            }, (session) =>
+            {
+                return session.ConnectionInactivityTimeout;
             }),
             (nameof(SessionManagerOptions.SessionInactivityTimeout), (timeout) =>
             {
                 return new SessionManagerOptions { SessionInactivityTimeout = timeout };
+            }, (session) =>
+            {
+                return session.SessionInactivityTimeout;
             }),
         };
 
-        foreach (var (option, of) in defaults)
+        foreach (var (option, of, stored) in defaults)
         {
-            foreach (var (given, outcome, refusal) in Durations.Of(option, (DurationOutcome.Refused, DurationOutcome.Taken)))
+            foreach (var (given, outcome, held, refusal) in Durations.Of(option, (DurationOutcome.Refused, DurationOutcome.Never)))
             {
                 if (outcome == DurationOutcome.Refused)
                 {
@@ -788,6 +810,8 @@ public sealed class SessionManagerTests
                 else
                 {
                     using var taken = new SessionManager<string>(of(given));
+
+                    Assert.Equal(held, stored(taken.Set(taken.Create(Handle) with { ConnectionInactivityTimeout = null, SessionInactivityTimeout = null })));
                 }
             }
         }

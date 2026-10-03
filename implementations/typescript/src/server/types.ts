@@ -114,8 +114,8 @@ export interface IServerOptions {
   limits?: RouterLimitsOptions | undefined;
   /**
    * Milliseconds a connection with no session may stay silent before it is closed — one that never
-   * opened a session. One whose session ended keeps that session's connection timeout. A whole
-   * number of milliseconds from 1 to {@link LONGEST_TIMER}, or `Infinity` for never, the default;
+   * opened a session. One whose session ended keeps that session's connection timeout. From 1 to
+   * {@link LONGEST_TIMER}, rounded to the nearest whole one, or `Infinity` for never, the default;
    * anything else, 0 among them, is a {@link ProgrammerError}.
    */
   connectionInactivityTimeout?: number | undefined;

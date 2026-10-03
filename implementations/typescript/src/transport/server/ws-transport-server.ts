@@ -70,18 +70,13 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
-    closeTimeout = CLOSE_TIMEOUT,
-    heartbeat = HEARTBEAT,
+    closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
+    heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload,
     WebSocketServer,
   } = options;
-
-  assertHeartbeat(heartbeat);
-
-  // 0 drops a connection once its close went, without waiting on the peer's
-  if (closeTimeout !== 0) {
-    assertHeld('a close timeout', closeTimeout);
-  }
+  const heartbeat = assertHeartbeat(givenHeartbeat);
+  const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
 
   const decoder = new TextDecoder();
 

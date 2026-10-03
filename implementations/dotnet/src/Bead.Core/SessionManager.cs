@@ -14,11 +14,12 @@ public sealed record Session<TData>
     public required string ConnectionHandle { get; init; }
 
     /// <summary>
-    /// How long without activity before its connection is closed: a whole number of milliseconds
-    /// from 1 to <see cref="Clocks.LongestTimer"/>; infinite is never, and zero, as it is stored, the
-    /// manager's default.
+    /// How long without activity before its connection is closed: from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, stored rounded to the nearest whole one, or
+    /// infinite for never; zero is refused. Left out, or none, it is stored as the manager's default; a
+    /// session handed out always holds one.
     /// </summary>
-    public TimeSpan ConnectionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
+    public TimeSpan? ConnectionInactivityTimeout { get; init; }
 
     /// <summary>What the server keeps about the session.</summary>
     public TData? Data { get; init; }
@@ -26,12 +27,8 @@ public sealed record Session<TData>
     /// <summary>When its connection last spoke, on its manager's clock.</summary>
     public DateTimeOffset LastActivity { get; init; }
 
-    /// <summary>
-    /// How long without activity before the session ends: a whole number of milliseconds from 1 to
-    /// <see cref="Clocks.LongestTimer"/>; infinite is never, and zero, as it is stored, the manager's
-    /// default.
-    /// </summary>
-    public TimeSpan SessionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
+    /// <summary>As <see cref="ConnectionInactivityTimeout"/>, before the session ends.</summary>
+    public TimeSpan? SessionInactivityTimeout { get; init; }
 
     /// <summary>What the router announces to the connection; none until <c>Set</c> draws one.</summary>
     public SessionToken? SessionToken { get; init; }
@@ -40,10 +37,15 @@ public sealed record Session<TData>
 /// <summary>How a session manager is built.</summary>
 public sealed record SessionManagerOptions
 {
-    /// <summary>The connection timeout a session set with zero takes: 600 ms, as the TypeScript side's.</summary>
+    /// <summary>
+    /// The connection timeout a session set with none takes: 600 ms, as the TypeScript side's. From
+    /// 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one, or
+    /// infinite for never; any other, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the manager is built.
+    /// </summary>
     public TimeSpan ConnectionInactivityTimeout { get; init; } = TimeSpan.FromMilliseconds(600);
 
-    /// <summary>The session timeout a session set with zero takes: 30 s.</summary>
+    /// <summary>As <see cref="ConnectionInactivityTimeout"/>, for the session timeout: 30 s.</summary>
     public TimeSpan SessionInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
@@ -85,21 +87,21 @@ public sealed class SessionManager<TData> : IDisposable
     private bool _isDisposed;
 
     /// <summary>
-    /// A session manager; a default timeout neither infinite nor a whole number of milliseconds from
-    /// 1 to <see cref="Clocks.LongestTimer"/>, zero among them, is an
+    /// A session manager, its default timeouts held: one neither infinite nor from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, zero among them, is an
     /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public SessionManager(SessionManagerOptions? options = null)
     {
-        _connectionTimeoutDefault = options?.ConnectionInactivityTimeout ?? TimeSpan.FromMilliseconds(600);
-        _sessionTimeoutDefault = options?.SessionInactivityTimeout ?? TimeSpan.FromSeconds(30);
+        _connectionTimeoutDefault = Clocks.AssertHeld(
+            (nameof(SessionManagerOptions.ConnectionInactivityTimeout), nameof(SessionManagerOptions.ConnectionInactivityTimeout)),
+            options?.ConnectionInactivityTimeout ?? TimeSpan.FromMilliseconds(600));
+        _sessionTimeoutDefault = Clocks.AssertHeld(
+            (nameof(SessionManagerOptions.SessionInactivityTimeout), nameof(SessionManagerOptions.SessionInactivityTimeout)),
+            options?.SessionInactivityTimeout ?? TimeSpan.FromSeconds(30));
         _clock = options?.Clock ?? TimeProvider.System;
         _fill = options?.Fill ?? RandomNumberGenerator.Fill;
         _dataComparer = options?.DataComparer;
-
-        // a default is what zero stands for, so zero is no default
-        Clocks.AssertHeld((nameof(SessionManagerOptions.ConnectionInactivityTimeout), nameof(SessionManagerOptions.ConnectionInactivityTimeout)), _connectionTimeoutDefault);
-        Clocks.AssertHeld((nameof(SessionManagerOptions.SessionInactivityTimeout), nameof(SessionManagerOptions.SessionInactivityTimeout)), _sessionTimeoutDefault);
     }
 
     /// <summary>What its timers run on, and its sessions' activity is read from.</summary>
@@ -147,10 +149,19 @@ public sealed class SessionManager<TData> : IDisposable
         }
     }
 
-    /// <summary>A new session for a connection, not stored: no timeout, and no token until <c>Set</c>.</summary>
+    /// <summary>
+    /// A new session for a connection, not stored: its timeouts infinite, no data, and no token
+    /// until <c>Set</c>.
+    /// </summary>
     public Session<TData> Create(string connectionHandle)
     {
-        return new Session<TData> { ConnectionHandle = connectionHandle, LastActivity = _clock.GetUtcNow() };
+        return new Session<TData>
+        {
+            ConnectionHandle = connectionHandle,
+            ConnectionInactivityTimeout = Timeout.InfiniteTimeSpan,
+            LastActivity = _clock.GetUtcNow(),
+            SessionInactivityTimeout = Timeout.InfiniteTimeSpan,
+        };
     }
 
     /// <summary>Forgets a session and stops its timers; false when there was none.</summary>
@@ -239,8 +250,9 @@ public sealed class SessionManager<TData> : IDisposable
     /// <summary>
     /// Stores a session, and gives it as stored. One without a token draws one — a new session, its
     /// timers started over, even over a session the connection held; one with a token keeps it,
-    /// which must be no other connection's. A timeout of zero takes the default; one neither infinite
-    /// nor a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> is an
+    /// which must be no other connection's. A timeout is stored rounded to the nearest whole
+    /// millisecond, and none takes the default; one neither infinite nor from 1 to
+    /// <see cref="Clocks.LongestTimer"/>, zero among them, is an
     /// <see cref="ArgumentOutOfRangeException"/>. Once disposed, a
     /// <see cref="DisconnectException"/>: a resolver that finishes once its server is gone has
     /// nowhere left to store a session.
@@ -277,10 +289,13 @@ public sealed class SessionManager<TData> : IDisposable
                 }
             }
 
+            var connectionTimeout = Resolve((session.ConnectionInactivityTimeout, _connectionTimeoutDefault), nameof(Session<TData>.ConnectionInactivityTimeout));
+            var sessionTimeout = Resolve((session.SessionInactivityTimeout, _sessionTimeoutDefault), nameof(Session<TData>.SessionInactivityTimeout));
+
             next = session with
             {
-                ConnectionInactivityTimeout = Resolve((session.ConnectionInactivityTimeout, _connectionTimeoutDefault), nameof(Session<TData>.ConnectionInactivityTimeout)),
-                SessionInactivityTimeout = Resolve((session.SessionInactivityTimeout, _sessionTimeoutDefault), nameof(Session<TData>.SessionInactivityTimeout)),
+                ConnectionInactivityTimeout = connectionTimeout,
+                SessionInactivityTimeout = sessionTimeout,
                 SessionToken = session.SessionToken ?? Draw(),
             };
 
@@ -299,14 +314,14 @@ public sealed class SessionManager<TData> : IDisposable
                 StopTimers(connectionHandle);
             }
 
-            if (isNew || stored?.ConnectionInactivityTimeout != next.ConnectionInactivityTimeout)
+            if (isNew || stored?.ConnectionInactivityTimeout != connectionTimeout)
             {
-                ArmConnectionTimer(connectionHandle, next.ConnectionInactivityTimeout);
+                ArmConnectionTimer(connectionHandle, connectionTimeout);
             }
 
-            if (isNew || stored?.SessionInactivityTimeout != next.SessionInactivityTimeout)
+            if (isNew || stored?.SessionInactivityTimeout != sessionTimeout)
             {
-                ArmSessionTimer(connectionHandle, next.SessionInactivityTimeout);
+                ArmSessionTimer(connectionHandle, sessionTimeout);
             }
 
             var created = next;
@@ -372,10 +387,10 @@ public sealed class SessionManager<TData> : IDisposable
     }
 
     /// <summary>
-    /// Stores a session's connection timeout — the default for zero — restarting its timer and
-    /// raising <see cref="ConnectionInactivityTimeoutChanged"/> when it changed; the same timeout
-    /// restarts nothing, since activity is what does. One neither infinite nor a whole number of
-    /// milliseconds from 1 to <see cref="Clocks.LongestTimer"/> is an
+    /// Stores a session's connection timeout, rounded to the nearest whole millisecond — the default
+    /// for none — restarting its timer and raising <see cref="ConnectionInactivityTimeoutChanged"/>
+    /// when it changed; the same timeout restarts nothing, since activity is what does. One neither
+    /// infinite nor from 1 to <see cref="Clocks.LongestTimer"/>, zero among them, is an
     /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public Session<TData>? UpdateConnectionInactivityTimeout(Session<TData> session)
@@ -383,6 +398,7 @@ public sealed class SessionManager<TData> : IDisposable
         ArgumentNullException.ThrowIfNull(session);
 
         Session<TData> updated;
+        TimeSpan held;
         TimeSpan old;
 
         lock (_gate)
@@ -392,19 +408,20 @@ public sealed class SessionManager<TData> : IDisposable
                 return null;
             }
 
-            old = stored.ConnectionInactivityTimeout;
-            updated = stored with { ConnectionInactivityTimeout = Resolve((session.ConnectionInactivityTimeout, _connectionTimeoutDefault), nameof(Session<TData>.ConnectionInactivityTimeout)) };
+            held = Resolve((session.ConnectionInactivityTimeout, _connectionTimeoutDefault), nameof(Session<TData>.ConnectionInactivityTimeout));
+            old = stored.ConnectionInactivityTimeout!.Value;
+            updated = stored with { ConnectionInactivityTimeout = held };
             _sessions[updated.SessionToken!.Value] = updated;
 
-            if (updated.ConnectionInactivityTimeout == old)
+            if (held == old)
             {
                 return updated;
             }
 
-            ArmConnectionTimer(session.ConnectionHandle, updated.ConnectionInactivityTimeout);
+            ArmConnectionTimer(session.ConnectionHandle, held);
         }
 
-        ConnectionInactivityTimeoutChanged?.Invoke(updated, updated.ConnectionInactivityTimeout, old);
+        ConnectionInactivityTimeoutChanged?.Invoke(updated, held, old);
 
         return updated;
     }
@@ -426,6 +443,7 @@ public sealed class SessionManager<TData> : IDisposable
         ArgumentNullException.ThrowIfNull(session);
 
         Session<TData> updated;
+        TimeSpan held;
         TimeSpan old;
 
         lock (_gate)
@@ -435,19 +453,20 @@ public sealed class SessionManager<TData> : IDisposable
                 return null;
             }
 
-            old = stored.SessionInactivityTimeout;
-            updated = stored with { SessionInactivityTimeout = Resolve((session.SessionInactivityTimeout, _sessionTimeoutDefault), nameof(Session<TData>.SessionInactivityTimeout)) };
+            held = Resolve((session.SessionInactivityTimeout, _sessionTimeoutDefault), nameof(Session<TData>.SessionInactivityTimeout));
+            old = stored.SessionInactivityTimeout!.Value;
+            updated = stored with { SessionInactivityTimeout = held };
             _sessions[updated.SessionToken!.Value] = updated;
 
-            if (updated.SessionInactivityTimeout == old)
+            if (held == old)
             {
                 return updated;
             }
 
-            ArmSessionTimer(session.ConnectionHandle, updated.SessionInactivityTimeout);
+            ArmSessionTimer(session.ConnectionHandle, held);
         }
 
-        SessionInactivityTimeoutChanged?.Invoke(updated, updated.SessionInactivityTimeout, old);
+        SessionInactivityTimeoutChanged?.Invoke(updated, held, old);
 
         return updated;
     }
@@ -482,17 +501,11 @@ public sealed class SessionManager<TData> : IDisposable
         return session with { Data = default } == other with { Data = default } && IsAlike(session.Data, other.Data);
     }
 
-    // an inactivity timeout as stored, under the session's option it names: zero takes the default
-    private static TimeSpan Resolve((TimeSpan Given, TimeSpan Fallback) timeout, string option)
+    // an inactivity timeout as stored, under the session's option it names: held, or the default for
+    // none
+    private static TimeSpan Resolve((TimeSpan? Given, TimeSpan Fallback) timeout, string option)
     {
-        if (timeout.Given == TimeSpan.Zero)
-        {
-            return timeout.Fallback;
-        }
-
-        Clocks.AssertHeld(("an inactivity timeout", option), timeout.Given);
-
-        return timeout.Given;
+        return timeout.Given is { } given ? Clocks.AssertHeld(("an inactivity timeout", option), given) : timeout.Fallback;
     }
 
     // 16 bytes from its fill — a cryptographic source unless a test gives its own — drawn again when
@@ -534,8 +547,8 @@ public sealed class SessionManager<TData> : IDisposable
             old = stored.LastActivity;
             stamped = stored with { LastActivity = _clock.GetUtcNow() };
             _sessions[stamped.SessionToken!.Value] = stamped;
-            ArmConnectionTimer(connectionHandle, stamped.ConnectionInactivityTimeout);
-            ArmSessionTimer(connectionHandle, stamped.SessionInactivityTimeout);
+            ArmConnectionTimer(connectionHandle, stamped.ConnectionInactivityTimeout!.Value);
+            ArmSessionTimer(connectionHandle, stamped.SessionInactivityTimeout!.Value);
 
             if (stamped.LastActivity.ToUnixTimeMilliseconds() == old.ToUnixTimeMilliseconds())
             {

@@ -16,9 +16,9 @@ public sealed record HttpTransportClientOptions
 
     /// <summary>
     /// How long it goes on listening again, its listens lost, before it counts its connection lost: 5
-    /// minutes by default, a server's own inactivity timeout; infinite for ever, and zero not at all,
-    /// its first listen lost losing it. A whole number of milliseconds from 1 to
-    /// <see cref="Clocks.LongestTimer"/> otherwise.
+    /// minutes by default, a server's own inactivity timeout; infinite for ever. From 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds otherwise, rounded to the nearest whole one;
+    /// zero is refused.
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
@@ -30,14 +30,16 @@ public sealed record HttpTransportClientOptions
 
     /// <summary>
     /// How long it waits before it listens again after a listen that brought nothing: none, zero, by
-    /// default; a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> otherwise.
+    /// default, which listens again at once; from 1 to <see cref="Clocks.LongestTimer"/> milliseconds
+    /// otherwise, rounded to the nearest whole one. Infinite is refused.
     /// </summary>
     public TimeSpan Pause { get; init; } = TimeSpan.Zero;
 
     /// <summary>
     /// How long each listen asks the server to wait: 25 seconds by default, under a server's 30 and
-    /// an intermediary's 60; zero asks it to answer at once, which polls. A whole number of
-    /// milliseconds from 1 to <see cref="Clocks.LongestTimer"/> otherwise.
+    /// an intermediary's 60; zero asks it to answer at once, which polls. From 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds otherwise, rounded to the nearest whole one;
+    /// infinite is refused.
     /// </summary>
     public TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(25);
 
@@ -65,8 +67,9 @@ public sealed record HttpConnectOptions
 
     /// <summary>
     /// How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds
-    /// unless told, a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/>; zero
-    /// never times out, as <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> does.
+    /// unless told, from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest
+    /// whole one, or <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which never times out;
+    /// zero is refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 }
@@ -124,16 +127,22 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private Action? _reconnect;
 
     /// <summary>
-    /// A transport client, not yet connected. A wait, a pause or an inactivity timeout neither zero nor
-    /// a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> — infinite aside, for
-    /// the inactivity timeout alone — is an <see cref="ArgumentOutOfRangeException"/>.
+    /// A transport client, not yet connected, its durations held. An inactivity timeout neither
+    /// infinite nor from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, or a wait or a pause
+    /// neither zero nor in that range, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public HttpTransportClient(HttpTransportClientOptions? options = null)
     {
-        _options = options ?? new HttpTransportClientOptions();
-        AssertDelay((nameof(HttpTransportClientOptions.InactivityTimeout), _options.InactivityTimeout), true);
-        AssertDelay((nameof(HttpTransportClientOptions.Pause), _options.Pause), false);
-        AssertDelay((nameof(HttpTransportClientOptions.Wait), _options.Wait), false);
+        var given = options ?? new HttpTransportClientOptions();
+
+        // zero is at once for a delay: a listen again at once, and a listen the server answers at
+        // once, which polls
+        _options = given with
+        {
+            InactivityTimeout = Clocks.AssertHeld((nameof(HttpTransportClientOptions.InactivityTimeout), nameof(HttpTransportClientOptions.InactivityTimeout)), given.InactivityTimeout),
+            Pause = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Pause), nameof(HttpTransportClientOptions.Pause)), given.Pause),
+            Wait = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Wait), nameof(HttpTransportClientOptions.Wait)), given.Wait),
+        };
         _clock = _options.Clock ?? TimeProvider.System;
         _maximumBodyBytes = _options.MaximumBodyBytes ?? LimitDefaults.MaximumEnvelopeBytes;
     }
@@ -200,8 +209,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
-    /// an <see cref="ArgumentOutOfRangeException"/> for a timeout neither zero nor a duration
-    /// <see cref="HttpConnectOptions.Timeout"/> takes, which leaves the state, and the target a
+    /// an <see cref="ArgumentOutOfRangeException"/> for a timeout
+    /// <see cref="HttpConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
     /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already.
@@ -433,25 +442,6 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         http?.Dispose();
     }
 
-    // a bound of the listens, which zero gives a meaning of its own: lost, listened again or answered
-    // at once; infinite, only where it may be
-    private static void AssertDelay((string Name, TimeSpan Value) delay, bool mayBeInfinite)
-    {
-        if (delay.Value == TimeSpan.Zero)
-        {
-            return;
-        }
-
-        if (mayBeInfinite)
-        {
-            Clocks.AssertHeld((delay.Name, delay.Name), delay.Value);
-        }
-        else
-        {
-            Clocks.AssertHeldFinite((delay.Name, delay.Name), delay.Value);
-        }
-    }
-
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -596,16 +586,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(HttpConnectOptions options, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(HttpConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(given);
 
-        // zero never times out, as infinite does
-        if (options.Timeout != TimeSpan.Zero)
+        // held before anything moves or is kept, so a reconnection connects again with it held
+        var options = given with
         {
-            Clocks.AssertHeld(("a connect's timeout", nameof(HttpConnectOptions.Timeout)), options.Timeout);
-        }
-
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(HttpConnectOptions.Timeout)), given.Timeout),
+        };
         var (token, isAttempt) = call;
         var uri = UriOf(options);
         CancellationTokenSource connecting;

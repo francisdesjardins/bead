@@ -24,11 +24,11 @@ export const HEARTBEAT = 30_000;
 // helpers
 
 /**
- * Throws a {@link ProgrammerError} unless `heartbeat` is a whole number of milliseconds from 1 to
- * 2³¹ − 1, or `Infinity` for none.
+ * `heartbeat` held: a number of milliseconds from 1 to 2³¹ − 1, rounded to the nearest whole one,
+ * or `Infinity` for none; any other, 0 among them, is a {@link ProgrammerError}.
  */
-export const assertHeartbeat = (heartbeat: number): void => {
-  assertHeld('a heartbeat', heartbeat);
+export const assertHeartbeat = (heartbeat: number): number => {
+  return assertHeld('a heartbeat', heartbeat);
 };
 
 // definition

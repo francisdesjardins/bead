@@ -731,7 +731,7 @@ test.describe('createHTTPTransportServer', () => {
       ['exchangeTimeout', 2 ** 31],
       ['exchangeTimeout', 0.5],
       ['inactivityTimeout', 0],
-      ['inactivityTimeout', 1.5],
+      ['inactivityTimeout', -2],
       ['maximumWait', 0.5],
       ['maximumBodyBytes', 1.5],
       ['maximumConnections', -1],
@@ -768,10 +768,10 @@ test.describe('createHTTPTransportServer', () => {
     expect(EXCHANGE_TIMEOUT).toBe(300_000);
   });
 
-  test('holds its timeouts and its longest wait to a whole number of milliseconds, refusing 0, Infinity for the timeouts alone', () => {
+  test('holds its timeouts and its longest wait to a whole number of milliseconds, rounded, refusing 0, Infinity for the timeouts alone', () => {
     for (const [option, never] of [
-      ['exchangeTimeout', 'taken'],
-      ['inactivityTimeout', 'taken'],
+      ['exchangeTimeout', 'never'],
+      ['inactivityTimeout', 'never'],
       ['maximumWait', 'refused'],
     ] as const) {
       for (const { given, outcome, refusal } of durationsOf(option, { never, zero: 'refused' })) {

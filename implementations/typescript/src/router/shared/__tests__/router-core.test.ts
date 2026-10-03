@@ -2165,13 +2165,13 @@ test.describe('createRouterCore', () => {
       expect(core.isReserved(2, 'b')).toBe(false);
     });
 
-    test('reserve a call id as long as its call was given, or 5 s when it was given no time, on its clock', () => {
+    test('reserve a call id as long as its call was given, or 5 s when it was given no time or waited without end, on its clock', () => {
       const { port } = createPort();
       const clock = createTestClock();
       using core = createRouterCore(port, { clock });
 
       for (const [callId, timeout] of [
-        [2, 0],
+        [2, undefined],
         [4, 250],
         [6, Number.POSITIVE_INFINITY],
         [8, undefined],
@@ -2190,10 +2190,10 @@ test.describe('createRouterCore', () => {
       expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([true, false]);
     });
 
-    test('hold a reservation, and a cancel’s, to a whole number of milliseconds, 0 and Infinity taking the default time, doing nothing for one refused', async () => {
-      for (const { given, outcome, refusal } of durationsOf("a call id's reservation", {
-        never: 'own',
-        zero: 'own',
+    test('hold a reservation, and a cancel’s, to a whole number of milliseconds, rounded, refusing 0, Infinity taking the default time, doing nothing for one refused', async () => {
+      for (const { given, held, outcome, refusal } of durationsOf("a call id's reservation", {
+        never: 'never',
+        zero: 'refused',
       })) {
         const { port, sent } = createPort();
         const clock = createTestClock();
@@ -2218,8 +2218,8 @@ test.describe('createRouterCore', () => {
           continue;
         }
 
-        // reserved for the duration held, or for the default time
-        const lasts = outcome === 'taken' ? given : RESERVATION_MILLISECONDS;
+        // reserved for the duration held, or for the default time for never
+        const lasts = outcome === 'taken' && held !== undefined ? held : RESERVATION_MILLISECONDS;
 
         core.reserve({ callId: 1, connectionHandle: 'a', timeout: given });
         core.cancel({ callId: 3, connectionHandle: 'a', timeout: given });
@@ -2613,10 +2613,10 @@ test.describe('createRouterCore', () => {
       expect(drawn).toEqual([2]);
     });
 
-    test("hold a call's timeout to a whole number of milliseconds, 0 and Infinity waiting on, drawing nothing for one refused", async () => {
-      for (const { given, outcome, refusal } of durationsOf("a call's timeout", {
-        never: 'taken',
-        zero: 'own',
+    test("hold a call's timeout to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on, drawing nothing for one refused", async () => {
+      for (const { given, held, outcome, refusal } of durationsOf("a call's timeout", {
+        never: 'never',
+        zero: 'refused',
       })) {
         const { port, sent } = createPort();
         const clock = createTestClock();
@@ -2651,15 +2651,19 @@ test.describe('createRouterCore', () => {
 
         expect(drawn, label).toEqual([2]);
 
-        // a duration held ends the call once it passed; 0 and Infinity wait on past the longest
-        if (Number.isFinite(given) && given > 0) {
-          await clock.tickAsync(given - 1);
+        // a duration held ends the call once it passed, its TimeoutError telling it; never waits on
+        // past the longest
+        if (outcome === 'taken' && held !== undefined) {
+          await clock.tickAsync(held - 1);
 
           expect(isSettled, label).toBe(false);
 
           await clock.tickAsync(1);
 
-          expect(await asking, label).toBeInstanceOf(TimeoutError);
+          const ended = await asking;
+
+          expect(ended, label).toBeInstanceOf(TimeoutError);
+          expect(ended, label).toHaveProperty('timeout', held);
         } else {
           await clock.tickAsync(LONGEST_TIMER);
 
@@ -2724,21 +2728,23 @@ test.describe('createRouterCore', () => {
       }).not.toThrow();
     });
 
-    test("hold a transfer's inactivity to a whole number of milliseconds, refusing 0 and Infinity", () => {
+    test("hold a transfer's inactivity to a whole number of milliseconds, rounded, refusing 0 and Infinity", () => {
       const { port } = createPort();
 
-      for (const { given, outcome, refusal } of durationsOf("a transfer's inactivity", {
+      for (const { given, held, outcome, refusal } of durationsOf("a transfer's inactivity", {
         never: 'refused',
         zero: 'refused',
       })) {
-        const building = (): void => {
-          using _core = createRouterCore(port, { limits: { transferInactivityTimeout: given } });
+        const building = (): number => {
+          using core = createRouterCore(port, { limits: { transferInactivityTimeout: given } });
+
+          return core.limits.transferInactivityTimeout;
         };
 
         if (outcome === 'refused') {
           expect(building, String(given)).toThrow(new ProgrammerError(refusal));
         } else {
-          expect(building, String(given)).not.toThrow();
+          expect(building(), String(given)).toBe(held);
         }
       }
 
@@ -2749,7 +2755,7 @@ test.describe('createRouterCore', () => {
         });
       }).toThrow(
         new ProgrammerError(
-          'a transfer\'s inactivity is a whole number of milliseconds from 1 to 2147483647, not "1000"'
+          'a transfer\'s inactivity is a number of milliseconds from 1 to 2147483647, not "1000"'
         )
       );
     });

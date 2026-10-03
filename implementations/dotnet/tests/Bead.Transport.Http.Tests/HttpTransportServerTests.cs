@@ -1084,7 +1084,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             ("ExchangeTimeout", new() { ExchangeTimeout = TimeSpan.FromMilliseconds(2L << 30) }),
             ("ExchangeTimeout", new() { ExchangeTimeout = TimeSpan.FromMilliseconds(0.5) }),
             ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.Zero }),
-            ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.FromMilliseconds(1.5) }),
+            ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.FromMilliseconds(-2) }),
             ("MaximumBodyBytes", new() { MaximumBodyBytes = 0 }),
             ("MaximumConnections", new() { MaximumConnections = -1 }),
             ("MaximumConnectionsPerAddress", new() { MaximumConnectionsPerAddress = 0 }),
@@ -1111,15 +1111,15 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Holds_its_timeouts_and_its_longest_wait_to_a_whole_number_of_milliseconds_refusing_zero_infinite_for_the_timeouts_alone()
+    public void Holds_its_timeouts_and_its_longest_wait_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_for_the_timeouts_alone()
     {
         var options = new (string Option, DurationOutcome Never, Func<TimeSpan, HttpTransportServerOptions> Of)[]
         {
-            (nameof(HttpTransportServerOptions.ExchangeTimeout), DurationOutcome.Taken, (given) =>
+            (nameof(HttpTransportServerOptions.ExchangeTimeout), DurationOutcome.Never, (given) =>
             {
                 return new HttpTransportServerOptions { ExchangeTimeout = given };
             }),
-            (nameof(HttpTransportServerOptions.InactivityTimeout), DurationOutcome.Taken, (given) =>
+            (nameof(HttpTransportServerOptions.InactivityTimeout), DurationOutcome.Never, (given) =>
             {
                 return new HttpTransportServerOptions { InactivityTimeout = given };
             }),
@@ -1131,7 +1131,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         foreach (var (option, never, of) in options)
         {
-            foreach (var (given, outcome, refusal) in Durations.Of(option, (DurationOutcome.Refused, never)))
+            foreach (var (given, outcome, _, refusal) in Durations.Of(option, (DurationOutcome.Refused, never)))
             {
                 if (outcome == DurationOutcome.Refused)
                 {

@@ -344,7 +344,7 @@ public sealed partial class RouterCoreTests
         Assert.Empty(peer.Reports);
     }
 
-    // fr-CA writes 1.5 as "1,5": a refusal, and a detail that goes on the wire, read alike on every
+    // fr-CA writes 0.5 as "0,5": a refusal, and a detail that goes on the wire, read alike on every
     // machine, whatever its culture
     [Fact]
     public async Task Writes_its_milliseconds_with_a_dot_under_a_culture_that_writes_a_comma_a_refusal_and_a_failure_s_detail_alike()
@@ -355,10 +355,10 @@ public sealed partial class RouterCoreTests
 
         try
         {
-            Assert.Equal("1,5", 1.5.ToString(CultureInfo.CurrentCulture));
-            Assert.StartsWith("a transfer's inactivity is a whole number of milliseconds from 1 to 2147483647, not 1.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Assert.Equal("0,5", 0.5.ToString(CultureInfo.CurrentCulture));
+            Assert.StartsWith("a transfer's inactivity is a number of milliseconds from 1 to 2147483647, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
             {
-                return (RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(1.5) }).Validate();
+                return (RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(0.5) }).Validate();
             }).Message, StringComparison.Ordinal);
 
             var server = new Peer(RouterSide.Server);

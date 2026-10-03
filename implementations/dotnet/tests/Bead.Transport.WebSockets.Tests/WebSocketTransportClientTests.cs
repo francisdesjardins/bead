@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -400,13 +401,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Waits_on_its_handshake_without_end_with_a_timeout_of_zero_until_its_token_is_cancelled()
+    public async Task Waits_on_its_handshake_without_end_with_an_infinite_timeout_until_its_token_is_cancelled()
     {
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
-        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = TimeSpan.Zero }, source.Token);
+        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = Timeout.InfiniteTimeSpan }, source.Token);
         var (peer, _) = await listener.Next();
 
         using (peer)
@@ -789,7 +790,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             }
         }
 
-        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
+        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>
             {
@@ -799,9 +800,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Holds_its_connect_s_timeout_to_a_whole_number_of_milliseconds_on_its_clock_zero_and_infinite_never_timing_out_refusing_any_other_and_opening_nothing()
+    public async Task Holds_its_connect_s_timeout_to_a_whole_number_of_milliseconds_on_its_clock_rounded_infinite_never_timing_out_refusing_zero_and_any_other_and_opening_nothing()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("a connect's timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a connect's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             var time = new FakeTimeProvider();
             using var listener = new Listener(IPAddress.Loopback);
@@ -835,16 +836,20 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             // the handshake reached a peer that never answers it
             using var peer = (await listener.Next()).Peer;
 
-            // a duration held times the connect out once it passed; zero and infinite wait on past the longest
-            if (given > TimeSpan.Zero)
+            // a duration held times the connect out once it passed, its TimeoutException telling it;
+            // infinite waits on past the longest
+            if (outcome == DurationOutcome.Taken)
             {
-                time.Advance(given - TimeSpan.FromMilliseconds(1));
+                time.Advance(held!.Value - TimeSpan.FromMilliseconds(1));
                 Assert.Equal(ReadyState.Connecting, client.ReadyState);
                 time.Advance(TimeSpan.FromMilliseconds(1));
-                await Assert.ThrowsAsync<TimeoutException>(() =>
+
+                var ended = await Assert.ThrowsAsync<TimeoutException>(() =>
                 {
                     return connecting.WaitAsync(Patience, Cancelled);
                 });
+
+                Assert.Equal(string.Create(CultureInfo.InvariantCulture, $"timed out after {held.Value.TotalMilliseconds}ms"), ended.Message);
             }
             else
             {
@@ -864,7 +869,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     // the TypeScript side's client has no close timeout of its own: its platform's bounds its close
     // (docs/support.md)
     [Fact]
-    public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_zero_dropping_its_connection_at_once_and_runs_on_the_clock_it_is_given()
+    public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_and_runs_on_the_clock_it_is_given()
     {
         var time = new FakeTimeProvider();
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
@@ -872,7 +877,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Same(time, client.Clock);
         Assert.Same(TimeProvider.System, _client.Clock);
 
-        foreach (var (given, outcome, refusal) in Durations.Of("a close timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        foreach (var (given, outcome, _, refusal) in Durations.Of("a close timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
         {
             if (outcome == DurationOutcome.Refused)
             {
@@ -948,7 +953,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             return _client.Connect(Target with { Port = ClosedPort(), Timeout = TimeSpan.FromMilliseconds(0.5) }, Cancelled);
         });
 
-        Assert.StartsWith("a connect's timeout is a whole number of milliseconds from 1 to 2147483647, or infinite for never, not 0.5", refused.Message, StringComparison.Ordinal);
+        Assert.StartsWith("a connect's timeout is a number of milliseconds from 1 to 2147483647, or infinite for never, not 0.5", refused.Message, StringComparison.Ordinal);
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
         await _client.Reconnect(new TransportReconnectOptions { Delay = DelayOf(TimeSpan.Zero) }).WaitAsync(Patience, Cancelled);
         await Next(_connections);
@@ -1246,9 +1251,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Holds_a_delay_to_a_whole_number_of_milliseconds_zero_waiting_none_refusing_infinite_and_any_other_before_its_tap_hears_it_ending_closed_without_another_attempt()
+    public async Task Holds_a_delay_to_a_whole_number_of_milliseconds_rounded_which_its_tap_hears_zero_waiting_none_refusing_infinite_and_any_other_before_its_tap_hears_it_ending_closed_without_another_attempt()
     {
-        foreach (var (given, outcome, refusal) in Durations.Of("a delay", (DurationOutcome.Own, DurationOutcome.Refused)))
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a delay", (DurationOutcome.AtOnce, DurationOutcome.Refused)))
         {
             var time = new FakeTimeProvider();
             using var listener = new Listener(IPAddress.Loopback);
@@ -1287,12 +1292,12 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 continue;
             }
 
-            Assert.Equal(given, await Next(taps));
+            Assert.Equal(held, await Next(taps));
 
             // a duration held is waited on the clock; zero, none
             if (outcome == DurationOutcome.Taken)
             {
-                time.Advance(given - TimeSpan.FromMilliseconds(1));
+                time.Advance(held!.Value - TimeSpan.FromMilliseconds(1));
                 Assert.False(listener.IsPending);
                 time.Advance(TimeSpan.FromMilliseconds(1));
             }

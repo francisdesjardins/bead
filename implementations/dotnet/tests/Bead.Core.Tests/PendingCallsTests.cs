@@ -143,15 +143,16 @@ public sealed class PendingCallsTests
         Assert.False(calls.IsReserved(1, "a"));
     }
 
+    // -1 ms is .NET's infinite: a call that waited without end
     [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void Reserves_a_call_id_5_s_when_its_call_gave_no_time(long milliseconds)
+    [InlineData(null)]
+    [InlineData(-1L)]
+    public void Reserves_a_call_id_5_s_when_its_call_gave_no_time_or_waited_without_end(long? milliseconds)
     {
         var time = new FakeTimeProvider();
         var calls = CallsOf(RouterSide.Client, OptionsOf(time));
 
-        calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(milliseconds));
+        calls.Reserve(new CallAddress(1, "a"), milliseconds is { } given ? TimeSpan.FromMilliseconds(given) : null);
         time.Advance(TimeSpan.FromSeconds(4.9));
         Assert.True(calls.IsReserved(1, "a"));
         time.Advance(TimeSpan.FromSeconds(0.1));

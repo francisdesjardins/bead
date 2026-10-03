@@ -732,7 +732,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
-    test('a subscription given no time, let go of, is cancelled and its call id reserved 5 s, or until the connection closes', async () => {
+    test('a subscription that waits without end, let go of, is cancelled and its call id reserved 5 s, or until the connection closes', async () => {
       const { close, deliver, sent, transport } = createScriptedTransport();
       const clock = createTestClock();
       using router = createRouterClient(transport, { clock });
@@ -742,7 +742,7 @@ test.describe('createRouterClient', () => {
       await router.registerNotification(notification);
 
       const subscribing = router.request(new Uint8Array(0), {
-        options: { timeout: 0 },
+        options: { timeout: Infinity },
         procedure: service,
         subscribes: notification,
       });

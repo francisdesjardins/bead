@@ -11,8 +11,9 @@ public static class Clocks
 {
     /// <summary>
     /// The longest a timer of Bead's waits: 2³¹ − 1 ms, as JavaScript's timers hold, kept on this
-    /// side for parity. Every duration Bead is given is a whole number of milliseconds from 1 to it;
-    /// never is <see cref="Timeout.InfiniteTimeSpan"/>, which arms nothing.
+    /// side for parity. Every duration Bead is given is held as a whole number of milliseconds from 1
+    /// to it, a fraction rounded to the nearest; never is <see cref="Timeout.InfiniteTimeSpan"/>,
+    /// which arms nothing.
     /// </summary>
     public static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
 
@@ -20,49 +21,90 @@ public static class Clocks
     private static readonly TimeSpan ShortestTimer = TimeSpan.FromMilliseconds(1);
 
     /// <summary>
-    /// Throws an <see cref="ArgumentOutOfRangeException"/>, naming the duration <c>What</c>, its
-    /// parameter the option <c>Option</c>, unless every platform's timers hold it alike: a whole
-    /// number of milliseconds from 1 to <see cref="LongestTimer"/> — past it, JavaScript's timer
-    /// fires at once; under a millisecond, Node waits one and .NET none — or
-    /// <see cref="Timeout.InfiniteTimeSpan"/>, never, which arms nothing. A place where zero has a
-    /// meaning of its own takes it before; one where never has none holds to
-    /// <see cref="AssertHeldFinite"/>.
+    /// <paramref name="duration"/> held as every platform's timers hold it alike: a number of
+    /// milliseconds from 1 to <see cref="LongestTimer"/>, rounded to the nearest whole one, a half
+    /// away from zero — under a millisecond, Node waits one and .NET none; past the ceiling,
+    /// JavaScript's timer fires at once — or <see cref="Timeout.InfiniteTimeSpan"/>, never, which
+    /// arms nothing. Any other, zero among them, is an <see cref="ArgumentOutOfRangeException"/>
+    /// naming the duration <c>What</c>, its parameter the option <c>Option</c>. A timeout or a bound
+    /// where never has no meaning holds to <see cref="AssertHeldFinite"/>; a delay, which takes
+    /// zero, to <see cref="AssertHeldDelay"/>.
     /// </summary>
-    internal static void AssertHeld((string What, string Option) names, TimeSpan duration)
+    internal static TimeSpan AssertHeld((string What, string Option) names, TimeSpan duration)
     {
-        if (duration != Timeout.InfiniteTimeSpan && !IsHeld(duration))
+        if (duration == Timeout.InfiniteTimeSpan)
         {
-            throw new ArgumentOutOfRangeException(names.Option, RefusalOf(names.What, (duration, ", or infinite for never")));
+            return duration;
         }
+
+        if (!IsHeld(duration))
+        {
+            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (false, true)));
+        }
+
+        return Rounded(duration);
     }
 
     /// <summary>
     /// As <see cref="AssertHeld"/>, where never has no meaning: <see cref="Timeout.InfiniteTimeSpan"/>
     /// is refused too.
     /// </summary>
-    internal static void AssertHeldFinite((string What, string Option) names, TimeSpan duration)
+    internal static TimeSpan AssertHeldFinite((string What, string Option) names, TimeSpan duration)
     {
         if (!IsHeld(duration))
         {
-            throw new ArgumentOutOfRangeException(names.Option, RefusalOf(names.What, (duration, "")));
+            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (false, false)));
         }
+
+        return Rounded(duration);
     }
 
-    // whether every platform's timers hold `duration` alike: whole milliseconds, from 1 to the ceiling
+    /// <summary>
+    /// As <see cref="AssertHeldFinite"/>, for a delay: zero is at once, held as zero, for which no
+    /// timer is armed; <see cref="Timeout.InfiniteTimeSpan"/> is refused, since a delay of never
+    /// would never end.
+    /// </summary>
+    internal static TimeSpan AssertHeldDelay((string What, string Option) names, TimeSpan duration)
+    {
+        if (duration == TimeSpan.Zero)
+        {
+            return duration;
+        }
+
+        if (!IsHeld(duration))
+        {
+            throw new ArgumentOutOfRangeException(names.Option, RefusalOf((names.What, duration), (true, false)));
+        }
+
+        return Rounded(duration);
+    }
+
+    // whether every platform's timers hold `duration` alike once rounded: from 1 to the ceiling,
+    // read before rounding, so that neither 0.5 nor the ceiling and a half rounds into it
     private static bool IsHeld(TimeSpan duration)
     {
-        return duration >= ShortestTimer && duration <= LongestTimer && duration.Ticks % TimeSpan.TicksPerMillisecond == 0;
+        return duration >= ShortestTimer && duration <= LongestTimer;
     }
 
-    // a refusal, in the same words on every machine: a fraction written with a dot whatever the
-    // culture, and never written "infinite" rather than -1
-    private static string RefusalOf(string what, (TimeSpan Duration, string Never) refused)
+    // a duration held in whole milliseconds, a half away from zero, as JavaScript's Math.round holds
+    // a positive one, where .NET's own rounding takes a half to the even
+    private static TimeSpan Rounded(TimeSpan duration)
+    {
+        return TimeSpan.FromMilliseconds((long)Math.Round(duration.TotalMilliseconds, MidpointRounding.AwayFromZero));
+    }
+
+    // a refusal, in the same words on every machine and on every side: a fraction written with a dot
+    // whatever the culture, never written "infinite" rather than -1, and what the place takes besides
+    // offered: zero, a delay's, and never where it is taken
+    private static string RefusalOf((string What, TimeSpan Duration) refused, (bool Zero, bool Never) offered)
     {
         var written = refused.Duration == Timeout.InfiniteTimeSpan
             ? "infinite"
             : refused.Duration.TotalMilliseconds.ToString(CultureInfo.InvariantCulture);
+        var zero = offered.Zero ? "0 for at once, or " : "";
+        var never = offered.Never ? ", or infinite for never" : "";
 
-        return string.Create(CultureInfo.InvariantCulture, $"{what} is a whole number of milliseconds from 1 to {int.MaxValue}{refused.Never}, not {written}");
+        return string.Create(CultureInfo.InvariantCulture, $"{refused.What} is {zero}a number of milliseconds from 1 to {int.MaxValue}{never}, not {written}");
     }
 
     /// <summary>

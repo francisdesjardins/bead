@@ -497,7 +497,7 @@ test.describe('createSessionManager', () => {
       expect(reached?.[0].sessionToken).toBe(session.sessionToken);
     });
 
-    test('a timeout of 0 takes the default, the manager’s own or its options’', () => {
+    test('a timeout left out takes the default, the manager’s own or its options’', () => {
       using sessions = createSessionManager<IUser>();
       using tuned = createSessionManager<IUser>({
         connectionInactivityTimeout: 1_000,
@@ -507,33 +507,63 @@ test.describe('createSessionManager', () => {
       const tunedSession = tuned.getOrElseSet(first);
 
       expect(
-        sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 0 })
-          ?.connectionInactivityTimeout
+        sessions.updateConnectionInactivityTimeout({
+          ...session,
+          connectionInactivityTimeout: undefined,
+        })?.connectionInactivityTimeout
       ).toBe(DEFAULTS.connectionInactivityTimeout);
       expect(
-        sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: 0 })
+        sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: undefined })
           ?.sessionInactivityTimeout
       ).toBe(DEFAULTS.sessionInactivityTimeout);
       expect(
-        tuned.updateConnectionInactivityTimeout({ ...tunedSession, connectionInactivityTimeout: 0 })
-          ?.connectionInactivityTimeout
+        tuned.updateConnectionInactivityTimeout({
+          ...tunedSession,
+          connectionInactivityTimeout: undefined,
+        })?.connectionInactivityTimeout
       ).toBe(1_000);
       expect(
-        tuned.updateSessionInactivityTimeout({ ...tunedSession, sessionInactivityTimeout: 0 })
-          ?.sessionInactivityTimeout
+        tuned.updateSessionInactivityTimeout({
+          ...tunedSession,
+          sessionInactivityTimeout: undefined,
+        })?.sessionInactivityTimeout
       ).toBe(2_000);
     });
 
-    test('set takes the default for a timeout of 0, rather than firing at once', async () => {
+    test('set takes the default for a timeout left out', async () => {
       using sessions = createSessionManager<IUser>();
       const reached = record(sessions, 'connectionInactivityTimeoutReached');
 
-      const stored = sessions.set({ ...sessions.create(first), connectionInactivityTimeout: 0 });
+      const stored = sessions.set({
+        ...sessions.create(first),
+        connectionInactivityTimeout: undefined,
+      });
 
       await sleep(40);
 
       expect(stored.connectionInactivityTimeout).toBe(DEFAULTS.connectionInactivityTimeout);
       expect(reached).toEqual([]);
+    });
+
+    test('a session built without naming its timeouts is stored with the manager’s defaults; one made by create, with never', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
+
+      const built = sessions.set({
+        connectionHandle: first,
+        data: undefined,
+        lastActivity: clock.Date.now(),
+        sessionToken: undefined,
+      });
+      const created = sessions.set(sessions.create(second));
+
+      expect([built.connectionInactivityTimeout, built.sessionInactivityTimeout]).toEqual([
+        600, 30_000,
+      ]);
+      expect([created.connectionInactivityTimeout, created.sessionInactivityTimeout]).toEqual([
+        Infinity,
+        Infinity,
+      ]);
     });
 
     test('a default that is not a timeout is a programmer error', () => {
@@ -550,8 +580,10 @@ test.describe('createSessionManager', () => {
       const session = never.getOrElseSet(first);
 
       expect(
-        never.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 0 })
-          ?.connectionInactivityTimeout
+        never.updateConnectionInactivityTimeout({
+          ...session,
+          connectionInactivityTimeout: undefined,
+        })?.connectionInactivityTimeout
       ).toBe(Infinity);
     });
 
@@ -650,7 +682,7 @@ test.describe('createSessionManager', () => {
       expect(() => {
         sessions.resetSessionInactivityTimeout(session, past);
       }).toThrow(
-        'a session inactivity timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648'
+        'a session inactivity timeout is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648'
       );
       // the timer running is left as it was, and nothing was stored
       expect(delaysOn(clock)).toEqual([1_000]);
@@ -667,10 +699,10 @@ test.describe('createSessionManager', () => {
       expect(delaysOn(clock)).toEqual([2 ** 31 - 1]);
     });
 
-    test('holds a timeout stored, updated or defaulted to a whole number of milliseconds, 0 the default where one is stored and refused as a default, nothing changing for one refused', () => {
-      for (const { given, outcome, refusal } of durationsOf('an inactivity timeout', {
-        never: 'taken',
-        zero: 'own',
+    test('holds a timeout stored, updated or defaulted to a whole number of milliseconds, rounded, refusing 0, one left out taking the default, nothing changing for one refused', () => {
+      for (const { given, held, outcome, refusal } of durationsOf('an inactivity timeout', {
+        never: 'never',
+        zero: 'refused',
       })) {
         const clock = createTestClock();
         using sessions = createSessionManager<IUser>({ clock });
@@ -699,38 +731,40 @@ test.describe('createSessionManager', () => {
           continue;
         }
 
-        // stored as given, or as the manager's default for 0
+        // stored held
         expect(
           [storing().connectionInactivityTimeout, updating()?.sessionInactivityTimeout],
           label
-        ).toEqual(outcome === 'own' ? [600, 30_000] : [given, given]);
+        ).toEqual([held, held]);
       }
 
-      // a default is what 0 stands for, so 0 is no default
+      // a default is had by leaving a timeout out, so 0 is no default
       for (const name of ['connectionInactivityTimeout', 'sessionInactivityTimeout'] as const) {
-        for (const { given, outcome, refusal } of durationsOf(name, {
-          never: 'taken',
+        for (const { given, held, outcome, refusal } of durationsOf(name, {
+          never: 'never',
           zero: 'refused',
         })) {
-          const building = (): void => {
-            using _sessions = createSessionManager({ [name]: given });
+          const defaulting = (): number | undefined => {
+            using built = createSessionManager<IUser>({ [name]: given });
+
+            return built.set({ ...built.create(first), [name]: undefined })[name];
           };
 
           if (outcome === 'refused') {
-            expect(building, `${name} ${String(given)}`).toThrow(new ProgrammerError(refusal));
+            expect(defaulting, `${name} ${String(given)}`).toThrow(new ProgrammerError(refusal));
           } else {
-            expect(building, `${name} ${String(given)}`).not.toThrow();
+            expect(defaulting(), `${name} ${String(given)}`).toBe(held);
           }
         }
       }
     });
 
-    // a reset, which the C# side has none of: 0 has no meaning of its own there
-    test('holds a reset to a whole number of milliseconds, leaving the timer as it was for one refused', () => {
-      for (const { given, outcome, refusal } of durationsOf('a connection inactivity timeout', {
-        never: 'taken',
-        zero: 'refused',
-      })) {
+    // a reset, which the C# side has none of
+    test('holds a reset to a whole number of milliseconds, rounded, refusing 0, leaving the timer as it was for one refused', () => {
+      for (const { given, held, outcome, refusal } of durationsOf(
+        'a connection inactivity timeout',
+        { never: 'never', zero: 'refused' }
+      )) {
         const clock = createTestClock();
         using sessions = createSessionManager<IUser>({ clock });
         const session = sessions.set({
@@ -748,8 +782,8 @@ test.describe('createSessionManager', () => {
           resetting();
 
           expect(delaysOn(clock), String(given)).toEqual(
-            Number.isFinite(given)
-              ? [given, 1_000].toSorted((a, b) => {
+            held !== undefined && Number.isFinite(held)
+              ? [held, 1_000].toSorted((a, b) => {
                   return a - b;
                 })
               : [1_000]

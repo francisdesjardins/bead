@@ -795,11 +795,14 @@ test.describe('createServer', () => {
     ).toEqual([0, 0, 0]);
   });
 
-  test('holds an inactivity timeout to a whole number of milliseconds as it is built, refusing 0, leaving nothing on its transport for one refused', async () => {
-    for (const { given, outcome, refusal } of durationsOf("a connection's inactivity timeout", {
-      never: 'taken',
-      zero: 'refused',
-    })) {
+  test('holds an inactivity timeout to a whole number of milliseconds as it is built, rounded, refusing 0, leaving nothing on its transport for one refused', async () => {
+    for (const { given, held, outcome, refusal } of durationsOf(
+      "a connection's inactivity timeout",
+      {
+        never: 'never',
+        zero: 'refused',
+      }
+    )) {
       const clock = createTestClock();
       const { emitter, transport, ...silent } = createScriptedTransport();
       const label = String(given);
@@ -825,9 +828,9 @@ test.describe('createServer', () => {
 
       silent.open(first);
 
-      // a silent connection closes at its due; never, at none
-      if (Number.isFinite(given)) {
-        clock.tick(given - 1);
+      // a silent connection closes at its due, held; never, at none
+      if (held !== undefined && Number.isFinite(held)) {
+        clock.tick(held - 1);
 
         expect(silent.closed, label).toEqual([]);
 

@@ -24,18 +24,19 @@ public sealed record WebSocketTransportServerOptions
 
     /// <summary>
     /// How often each connection is pinged, and how long its pong may take: a peer gone without a
-    /// word ends in a close rather than never. A whole number of milliseconds from 1 to 2³¹ − 1, or
-    /// <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses any other with an
-    /// <see cref="ArgumentOutOfRangeException"/> as it is built. The platform's, on the real clock.
+    /// word ends in a close rather than never. From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses
+    /// any other, zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// The platform's, on the real clock.
     /// </summary>
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// How long a close handshake may take: a peer that never answers is dropped after it. A whole
-    /// number of milliseconds from 1 to 2³¹ − 1, zero to drop it without waiting, or
-    /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other
-    /// with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds the platform's
-    /// close, on the real clock.
+    /// How long a close handshake may take: a peer that never answers is dropped after it. From 1 to
+    /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or
+    /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other,
+    /// zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
+    /// the platform's close, on the real clock.
     /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -80,14 +81,18 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     private long _arrivals;
 
     /// <summary>
-    /// A transport server, not yet listening. A heartbeat or a close timeout no timer holds is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
-        _options = options ?? new WebSocketTransportServerOptions();
-        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat));
-        WebSocketConnection.AssertCloseTimeout(_options.CloseTimeout, nameof(WebSocketTransportServerOptions.CloseTimeout));
+        var given = options ?? new WebSocketTransportServerOptions();
+
+        _options = given with
+        {
+            Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
+            CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportServerOptions.CloseTimeout)),
+        };
         _clock = _options.Clock ?? TimeProvider.System;
     }
 

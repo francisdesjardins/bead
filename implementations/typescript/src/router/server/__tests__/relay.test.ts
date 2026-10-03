@@ -624,16 +624,21 @@ test.describe('createRelay', () => {
     ).toEqual([5_000, 250, Infinity, 250, 5_000]);
   });
 
-  test('holds a relay’s timeout, and a destination’s, to a whole number of milliseconds, refusing 0, Infinity waiting on', async () => {
-    for (const { given, outcome, refusal } of durationsOf("a relay's timeout", {
-      never: 'taken',
+  test('holds a relay’s timeout, and a destination’s, to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on', async () => {
+    const admitting = (): boolean => {
+      return true;
+    };
+
+    for (const { given, held, outcome, refusal } of durationsOf("a relay's timeout", {
+      never: 'never',
       zero: 'refused',
     })) {
-      const { relay } = createTestRelay();
-      const { asked, target } = createTarget();
       const label = String(given);
 
       if (outcome === 'refused') {
+        const { relay } = createTestRelay();
+        const { target } = createTarget();
+
         expect(() => {
           return relay.register(target, { timeout: given });
         }, label).toThrow(new ProgrammerError(refusal));
@@ -644,18 +649,24 @@ test.describe('createRelay', () => {
         continue;
       }
 
-      relay.register(target, { destinationId: 7, timeout: given });
-      await relay.handlerOf(7)?.(propsOf(headerOf(1)));
+      // leg B waits the timeout held, a destination's as the relay's own
+      for (const [relayTimeout, timeout] of [
+        [undefined, given],
+        [given, undefined],
+      ] as const) {
+        const { relay } = createTestRelay({ beforeRoute: admitting, timeout: relayTimeout });
+        const { asked, target } = createTarget();
 
-      expect(
-        asked.map(({ options }) => {
-          return options.timeout;
-        }),
-        label
-      ).toEqual([given]);
-      expect(() => {
-        return createTestRelay({ timeout: given });
-      }, label).not.toThrow();
+        relay.register(target, { destinationId: 7, timeout });
+        await relay.handlerOf(7)?.(propsOf(headerOf(1)));
+
+        expect(
+          asked.map(({ options }) => {
+            return options.timeout;
+          }),
+          label
+        ).toEqual([held]);
+      }
     }
   });
 

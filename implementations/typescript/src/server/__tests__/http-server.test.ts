@@ -545,7 +545,7 @@ test.describe('an HTTP server and client', () => {
         },
       });
     }).toThrow(
-      "a connection's inactivity timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 0"
+      "a connection's inactivity timeout is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 0"
     );
   });
 });

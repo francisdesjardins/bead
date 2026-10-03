@@ -22,13 +22,21 @@ public sealed record HttpTransportServerOptions
     /// <summary>The bytes of body the exchanges under way may hold together: 256 MiB by default; past it, 503.</summary>
     public long BodyBytesBudget { get; init; } = 268_435_456;
 
-    /// <summary>How long a request handed on waits for its answer: 5 minutes by default; infinite for none.</summary>
+    /// <summary>
+    /// How long a request handed on waits for its answer: 5 minutes by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one, or infinite
+    /// for none; zero is refused.
+    /// </summary>
     public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>The hosts a request may name; any when none — against a page that rebinds its name to the server's address.</summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
-    /// <summary>How long a connection may go with no exchange under way: 5 minutes by default; infinite for none.</summary>
+    /// <summary>
+    /// How long a connection may go with no exchange under way: 5 minutes by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one, or infinite
+    /// for none; zero is refused.
+    /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
@@ -49,7 +57,11 @@ public sealed record HttpTransportServerOptions
     /// <summary>The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the connection closes.</summary>
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
 
-    /// <summary>The longest a listen waits for something to bring back: 30 seconds by default, under an intermediary's 60.</summary>
+    /// <summary>
+    /// The longest a listen waits for something to bring back: 30 seconds by default, under an
+    /// intermediary's 60; from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the
+    /// nearest whole one; zero and infinite are refused.
+    /// </summary>
     public TimeSpan MaximumWait { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>The requests one connection has waiting at once: 64 by default; the exchanges under way on it, twice that.</summary>
@@ -145,22 +157,28 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private WebApplication? _application;
 
     /// <summary>
-    /// A transport server, not yet listening. A bound not above 0, or a timeout that is not a whole
-    /// number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> — infinite aside, but for
+    /// A transport server, not yet listening, its durations held. A bound not above 0, or a timeout
+    /// that is not from 1 to <see cref="Clocks.LongestTimer"/> milliseconds — infinite aside, but for
     /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
-        _options = options ?? new HttpTransportServerOptions();
-        AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), _options.BodyBytesBudget));
-        Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), _options.ExchangeTimeout);
-        Clocks.AssertHeld((nameof(HttpTransportServerOptions.InactivityTimeout), nameof(HttpTransportServerOptions.InactivityTimeout)), _options.InactivityTimeout);
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumBodyBytes), _options.MaximumBodyBytes));
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnections), _options.MaximumConnections));
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnectionsPerAddress), _options.MaximumConnectionsPerAddress));
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumOutboxBytes), _options.MaximumOutboxBytes));
-        Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.MaximumWait), nameof(HttpTransportServerOptions.MaximumWait)), _options.MaximumWait);
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), _options.MaximumWaitingExchanges));
+        var given = options ?? new HttpTransportServerOptions();
+
+        AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), given.BodyBytesBudget));
+
+        var exchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), given.ExchangeTimeout);
+        var inactivityTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.InactivityTimeout), nameof(HttpTransportServerOptions.InactivityTimeout)), given.InactivityTimeout);
+
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumBodyBytes), given.MaximumBodyBytes));
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnections), given.MaximumConnections));
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnectionsPerAddress), given.MaximumConnectionsPerAddress));
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumOutboxBytes), given.MaximumOutboxBytes));
+
+        var maximumWait = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.MaximumWait), nameof(HttpTransportServerOptions.MaximumWait)), given.MaximumWait);
+
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), given.MaximumWaitingExchanges));
+        _options = given with { ExchangeTimeout = exchangeTimeout, InactivityTimeout = inactivityTimeout, MaximumWait = maximumWait };
         _clock = _options.Clock ?? TimeProvider.System;
     }
 

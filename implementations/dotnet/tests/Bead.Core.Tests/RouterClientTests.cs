@@ -600,7 +600,7 @@ public sealed class RouterClientTests
     }
 
     [Fact]
-    public async Task A_subscription_given_no_time_let_go_of_is_cancelled_and_its_call_id_reserved_5_s_or_until_the_connection_closes()
+    public async Task A_subscription_that_waits_without_end_let_go_of_is_cancelled_and_its_call_id_reserved_5_s_or_until_the_connection_closes()
     {
         var time = new RecordingTime();
 
@@ -608,7 +608,7 @@ public sealed class RouterClientTests
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
 
-        var subscribing = await scripted.Subscribe(notification, Options with { Timeout = TimeSpan.Zero });
+        var subscribing = await scripted.Subscribe(notification, Options with { Timeout = Timeout.InfiniteTimeSpan });
 
         transport.Deliver(ResultOf(1));
         await subscribing.WaitAsync(Patience, Cancelled);

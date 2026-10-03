@@ -67,6 +67,12 @@ export type {
 
 export type DEFAULTS = typeof DEFAULTS;
 
+// a session as the manager stores it: both its timeouts held
+type StoredSession<Data> = ISession<Data> & {
+  connectionInactivityTimeout: number;
+  sessionInactivityTimeout: number;
+};
+
 // constants
 
 export const DEFAULTS = Object.freeze({
@@ -77,17 +83,11 @@ export const DEFAULTS = Object.freeze({
 // helpers
 
 /**
- * An inactivity timeout as the manager stores it: `0` takes `fallback`. One neither `Infinity` nor a
- * whole number of milliseconds from 1 to the longest a timer waits is a {@link ProgrammerError}.
+ * An inactivity timeout as the manager stores it: held, or `fallback` when left out. One neither
+ * `Infinity` nor from 1 to the longest a timer waits, 0 among them, is a {@link ProgrammerError}.
  */
-const resolveTimeout = (timeout: number, fallback: number): number => {
-  if (timeout === 0) {
-    return fallback;
-  }
-
-  assertHeld('an inactivity timeout', timeout);
-
-  return timeout;
+const resolveTimeout = (timeout: number | undefined, fallback: number): number => {
+  return timeout === undefined ? fallback : assertHeld('an inactivity timeout', timeout);
 };
 
 /** Each connection's two timers, on `clock`, in a record made on the first one set. */
@@ -177,9 +177,9 @@ export const createTimers = (clock: IClock): ISessionManagerTimers => {
  * to drop it.
  *
  * Nothing handed in or out is shared with what is stored: `data` must be structured-cloneable. Its
- * timers run on its `clock`, which reads its activity too: a timeout that is not a whole number of
- * milliseconds from 1 to the longest a timer waits is a {@link ProgrammerError}, and never is
- * `Infinity`.
+ * timers run on its `clock`, which reads its activity too: a timeout is held rounded to the nearest
+ * whole millisecond, one that is not from 1 to the longest a timer waits, 0 among them, is a
+ * {@link ProgrammerError}, and never is `Infinity`.
  *
  * @example
  * import { createSessionManager } from '@francisdesjardins/bead/session-manager';
@@ -201,21 +201,20 @@ export const createTimers = (clock: IClock): ISessionManagerTimers => {
 export const createSessionManager = <Data>(
   options?: ISessionManagerOptions
 ): ISessionManager<Data> => {
-  const {
-    clock = PLATFORM_CLOCK,
-    connectionInactivityTimeout:
-      defaultConnectionInactivityTimeout = DEFAULTS.connectionInactivityTimeout,
-    sessionInactivityTimeout: defaultSessionInactivityTimeout = DEFAULTS.sessionInactivityTimeout,
-  } = options ?? {};
-
-  // a default is what 0 stands for, so 0 is no default
-  assertHeld('connectionInactivityTimeout', defaultConnectionInactivityTimeout);
-  assertHeld('sessionInactivityTimeout', defaultSessionInactivityTimeout);
+  const clock = options?.clock ?? PLATFORM_CLOCK;
+  const defaultConnectionInactivityTimeout = assertHeld(
+    'connectionInactivityTimeout',
+    options?.connectionInactivityTimeout ?? DEFAULTS.connectionInactivityTimeout
+  );
+  const defaultSessionInactivityTimeout = assertHeld(
+    'sessionInactivityTimeout',
+    options?.sessionInactivityTimeout ?? DEFAULTS.sessionInactivityTimeout
+  );
 
   const emitter = createEmitter<SessionManagerEventMap<Data>>();
   // by token, so a draw or a check costs nothing however many sessions there are, and by
   // connection through the token each one holds
-  const sessions = new Map<SessionToken, ISession<Data>>();
+  const sessions = new Map<SessionToken, StoredSession<Data>>();
   const tokens = new Map<TransportServerConnectionHandle, SessionToken>();
   const timers = createTimers(clock);
 
@@ -225,7 +224,7 @@ export const createSessionManager = <Data>(
     return manager;
   });
 
-  const copyOf = (session: ISession<Data>): ISession<Data> => {
+  const copyOf = <Session extends ISession<Data>>(session: Session): Session => {
     return structuredClone(session);
   };
 
@@ -241,7 +240,7 @@ export const createSessionManager = <Data>(
 
   const storedOf = (
     connectionHandle: TransportServerConnectionHandle
-  ): ISession<Data> | undefined => {
+  ): StoredSession<Data> | undefined => {
     const token = tokens.get(connectionHandle);
 
     return token === undefined ? undefined : sessions.get(token);
@@ -282,7 +281,9 @@ export const createSessionManager = <Data>(
   let isDisposed = false;
 
   // stamps a session's activity now and restarts both its timers; the stored session, not a copy
-  const stamp = (connectionHandle: TransportServerConnectionHandle): ISession<Data> | undefined => {
+  const stamp = (
+    connectionHandle: TransportServerConnectionHandle
+  ): StoredSession<Data> | undefined => {
     const storedSession = storedOf(connectionHandle);
 
     if (storedSession === undefined) {
@@ -391,8 +392,9 @@ export const createSessionManager = <Data>(
     has: (connectionHandle) => {
       return tokens.has(connectionHandle);
     },
-    resetConnectionInactivityTimeout: ({ connectionHandle }, timeout) => {
-      assertHeld('a connection inactivity timeout', timeout);
+    resetConnectionInactivityTimeout: ({ connectionHandle }, given) => {
+      const timeout = assertHeld('a connection inactivity timeout', given);
+
       timers.clearConnectionInactivityTimeout(connectionHandle);
 
       if (tokens.has(connectionHandle) && Number.isFinite(timeout)) {
@@ -404,8 +406,9 @@ export const createSessionManager = <Data>(
         );
       }
     },
-    resetSessionInactivityTimeout: ({ connectionHandle }, timeout) => {
-      assertHeld('a session inactivity timeout', timeout);
+    resetSessionInactivityTimeout: ({ connectionHandle }, given) => {
+      const timeout = assertHeld('a session inactivity timeout', given);
+
       timers.clearSessionInactivityTimeout(connectionHandle);
 
       if (tokens.has(connectionHandle) && Number.isFinite(timeout)) {

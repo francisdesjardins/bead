@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
 import {
   assertHeld,
+  assertHeldDelay,
   assertHeldFinite,
   clockOf,
   type IClock,
@@ -39,28 +40,32 @@ test.describe('the clock', () => {
     expect(Date.now).toBe(now);
   });
 
-  test('holds a duration to a whole number of milliseconds from 1 to 2³¹ − 1, or never where never has a meaning, refusing any other in one message', () => {
+  test('holds a duration as a whole number of milliseconds from 1 to 2³¹ − 1, a fraction rounded to the nearest, a half up, 0 at once for a delay, and never where never has a meaning, refusing any other in one message', () => {
     expect(LONGEST_TIMER).toBe(2_147_483_647);
 
-    for (const [hold, never] of [
-      [assertHeld, 'taken'],
-      [assertHeldFinite, 'refused'],
+    for (const [hold, outcomes] of [
+      [assertHeld, { never: 'never', zero: 'refused' }],
+      [assertHeldFinite, { never: 'refused', zero: 'refused' }],
+      [assertHeldDelay, { never: 'refused', zero: 'at once' }],
     ] as const) {
-      for (const { given, outcome, refusal } of durationsOf('a timeout', {
-        never,
-        zero: 'refused',
-      })) {
-        const holding = (): void => {
-          hold('a timeout', given);
+      for (const { given, held, outcome, refusal } of durationsOf('a duration', outcomes)) {
+        const holding = (): number => {
+          return hold('a duration', given);
         };
 
         if (outcome === 'refused') {
           expect(holding, `${hold.name} ${String(given)}`).toThrow(new ProgrammerError(refusal));
         } else {
-          expect(holding, `${hold.name} ${String(given)}`).not.toThrow();
+          expect(holding(), `${hold.name} ${String(given)}`).toBe(held);
         }
       }
     }
+  });
+
+  test('rounds a half up, never to the even', () => {
+    expect(assertHeld('a duration', 2.5)).toBe(3);
+    expect(assertHeldFinite('a duration', 2.5)).toBe(3);
+    expect(assertHeldDelay('a duration', 2.5)).toBe(3);
   });
 
   test('refuses what is not a number at all, as a limit read from JSON may be, a string written in its quotes', () => {
@@ -71,10 +76,10 @@ test.describe('the clock', () => {
       [{}, '[object Object]'],
     ] as const) {
       expect(() => {
-        assertHeld('a timeout', given);
+        assertHeld('a duration', given);
       }, written).toThrow(
         new ProgrammerError(
-          `a timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not ${written}`
+          `a duration is a number of milliseconds from 1 to 2147483647, or Infinity for never, not ${written}`
         )
       );
     }
@@ -84,18 +89,16 @@ test.describe('the clock', () => {
   // infinite, `Timeout.InfiniteTimeSpan`, which the C# side's twin takes as never
   test('a duration of -1 ms is refused on the TypeScript side, and never on the C# side', () => {
     expect(() => {
-      assertHeld('a timeout', -1);
+      assertHeld('a duration', -1);
     }).toThrow(
       new ProgrammerError(
-        'a timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not -1'
+        'a duration is a number of milliseconds from 1 to 2147483647, or Infinity for never, not -1'
       )
     );
     expect(() => {
-      assertHeldFinite('a timeout', -1);
+      assertHeldFinite('a duration', -1);
     }).toThrow(
-      new ProgrammerError(
-        'a timeout is a whole number of milliseconds from 1 to 2147483647, not -1'
-      )
+      new ProgrammerError('a duration is a number of milliseconds from 1 to 2147483647, not -1')
     );
   });
 

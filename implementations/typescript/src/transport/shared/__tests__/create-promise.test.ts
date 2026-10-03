@@ -88,11 +88,11 @@ test.describe('createPromise', () => {
     for (const [options, refusal] of [
       [
         { delay: 2 ** 31 },
-        'a delay is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648',
+        'a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not 2147483648',
       ],
       [
         { timeout: 2 ** 31 },
-        'a timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648',
+        'a timeout is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648',
       ],
       [
         { delay: 2 ** 30, timeout: 2 ** 30 },
@@ -113,12 +113,12 @@ test.describe('createPromise', () => {
     expect(ran).toBe(true);
   });
 
-  test('holds a delay and a timeout to a whole number of milliseconds, 0 and Infinity none, never running the executor for one refused', async () => {
-    for (const name of ['delay', 'timeout'] as const) {
-      for (const { given, outcome, refusal } of durationsOf(`a ${name}`, {
-        never: 'own',
-        zero: 'own',
-      })) {
+  test('holds a delay as 0 at once or a duration, and a timeout as a duration or never, rounded, never running the executor for one refused', async () => {
+    for (const [name, outcomes] of [
+      ['delay', { never: 'refused', zero: 'at once' }],
+      ['timeout', { never: 'never', zero: 'refused' }],
+    ] as const) {
+      for (const { given, held, outcome, refusal } of durationsOf(`a ${name}`, outcomes)) {
         const clock = createTestClock();
         let ran = false;
         const pending = createPromise(
@@ -133,9 +133,10 @@ test.describe('createPromise', () => {
           await expect(pending, label).rejects.toThrow(new ProgrammerError(refusal));
           expect([ran, clock.armed], label).toEqual([false, []]);
         } else {
-          // a delay held waits before it runs the executor; a timeout held, and none, run it at once
+          // a delay held waits before it runs the executor; a timeout held, at once and never run
+          // it at once
           expect([ran, delaysOn(clock)], label).toEqual(
-            outcome === 'taken' ? [name === 'timeout', [given]] : [true, []]
+            outcome === 'taken' ? [name === 'timeout', [held]] : [true, []]
           );
         }
       }
@@ -156,12 +157,9 @@ test.describe('createPromise', () => {
 
   test('never times out without a timeout', async () => {
     await expect(
-      createPromise(
-        (resolve) => {
-          setTimeout(resolve, 20);
-        },
-        { timeout: 0 }
-      )
+      createPromise((resolve) => {
+        setTimeout(resolve, 20);
+      })
     ).resolves.toBeUndefined();
   });
 

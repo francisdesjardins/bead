@@ -121,9 +121,9 @@ unreadable, a transfer refused, a subscription unregistered — sends a cancel: 
 that call id, never answered. The other end forgets the call, takes away what it subscribed, then
 aborts the signal its resolver holds, so nothing more goes out on that call id; a cancel for no call
 has crossed its answer, and is dropped in silence. The requester reserves the call id as long as the
-call was given, 5 s when it was given no time — and, once a result came to it as a transfer, as long
-as the other end keeps the call abandoned, should that be longer: its draws skip it, and what comes
-late on it is dropped in silence.
+call was given, 5 s when it was given no time or waited without end — and, once a result came to it
+as a transfer, as long as the other end keeps the call abandoned, should that be longer: its draws
+skip it, and what comes late on it is dropped in silence.
 
 A failure travels once, in a failure's payload: its code on two bytes, the relays it crossed, whether
 the code is the procedure's own, and a readable detail — `maximumDetailBytes` at most, 1,024 by

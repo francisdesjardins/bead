@@ -204,7 +204,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
             host,
             port: portOf(gatedServer),
             signal: controller.signal,
-            timeout: 0,
+            timeout: Infinity,
           });
           controller.abort('why');
 
@@ -230,7 +230,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
 
         try {
-          const connecting = client.connect({ host, port: portOf(gatedServer), timeout: 0 });
+          const connecting = client.connect({ host, port: portOf(gatedServer), timeout: Infinity });
           drop(client);
 
           await expect(connecting).rejects.toBeInstanceOf(ConnectError);
@@ -756,10 +756,10 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     expect(closes).toEqual([[false, false]]);
   });
 
-  test('holds its connect’s timeout to a whole number of milliseconds on its clock, 0 and Infinity never timing out, refusing any other and opening nothing', async () => {
-    for (const { given, outcome, refusal } of durationsOf("a connect's timeout", {
-      never: 'taken',
-      zero: 'own',
+  test('holds its connect’s timeout to a whole number of milliseconds on its clock, rounded, Infinity never timing out, refusing 0 and any other and opening nothing', async () => {
+    for (const { given, held, outcome, refusal } of durationsOf("a connect's timeout", {
+      never: 'never',
+      zero: 'refused',
     })) {
       const clock = createTestClock();
       const { FakeWebSocket, sockets: opened } = createFakeWebSocket();
@@ -785,15 +785,19 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
         continue;
       }
 
-      // a duration held times the connect out once it passed; 0 and Infinity wait on past the longest
-      if (Number.isFinite(given) && given > 0) {
-        await clock.tickAsync(given - 1);
+      // a duration held times the connect out once it passed, its TimeoutError telling it; never
+      // waits on past the longest
+      if (outcome === 'taken' && held !== undefined) {
+        await clock.tickAsync(held - 1);
 
         expect(client.isConnecting(), label).toBe(true);
 
         await clock.tickAsync(1);
 
-        expect(await connecting, label).toBeInstanceOf(TimeoutError);
+        const ended = await connecting;
+
+        expect(ended, label).toBeInstanceOf(TimeoutError);
+        expect(ended, label).toHaveProperty('timeout', held);
       } else {
         await clock.tickAsync(LONGEST_TIMER);
 
@@ -923,7 +927,7 @@ test.describe('WSTransportClient, heartbeat', () => {
     ).toEqual([true, true]);
     expect(pinging.sockets[0]?.pings).toBe(0);
 
-    for (const heartbeat of [0, 1.5, 2 ** 31]) {
+    for (const heartbeat of [0, 0.5, 2 ** 31]) {
       expect(() => {
         return createWSTransportClient({ heartbeat, WebSocket: pinging.FakeWebSocket });
       }, String(heartbeat)).toThrow(ProgrammerError);

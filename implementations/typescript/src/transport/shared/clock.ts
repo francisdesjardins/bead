@@ -38,8 +38,8 @@ export type TimeoutId = number | object;
 
 /**
  * The longest a timer waits, in milliseconds: 2³¹ − 1, JavaScript's, past which `setTimeout` fires
- * at once. Every duration Bead is given is a whole number of milliseconds from 1 to it; never is
- * `Infinity`, which arms nothing.
+ * at once. Every duration Bead is given is held as a whole number of milliseconds from 1 to it, a
+ * fraction rounded to the nearest; never is `Infinity`, which arms nothing.
  */
 export const LONGEST_TIMER = 2 ** 31 - 1;
 
@@ -48,11 +48,10 @@ export const PLATFORM_CLOCK: IClock = globalThis;
 
 // helpers
 
-// whether every platform's timers hold `duration` alike: whole milliseconds, from 1 to the ceiling
-const isHeld = (duration: unknown): boolean => {
-  return (
-    Number.isInteger(duration) && (duration as number) >= 1 && (duration as number) <= LONGEST_TIMER
-  );
+// whether every platform's timers hold `duration` alike once rounded: from 1 to the ceiling, read
+// before rounding, so that neither 0.5 nor the ceiling and a half rounds into it
+const isHeld = (duration: unknown): duration is number => {
+  return typeof duration === 'number' && duration >= 1 && duration <= LONGEST_TIMER;
 };
 
 // a duration as a refusal writes it: a string quoted, so `'1000'` reads apart from 1000
@@ -85,27 +84,62 @@ export const clockOf = (
   );
 };
 
+// the one refusal of a duration, which offers what its place takes besides: 0, a delay's, and
+// `Infinity` where never is taken
+const refusalOf = (
+  name: string,
+  { duration, offered }: { duration: unknown; offered: { never: boolean; zero: boolean } }
+): ProgrammerError => {
+  const zero = offered.zero ? '0 for at once, or ' : '';
+  const never = offered.never ? ', or Infinity for never' : '';
+
+  return new ProgrammerError(
+    `${name} is ${zero}a number of milliseconds from 1 to ${String(LONGEST_TIMER)}${never}, not ${writtenOf(duration)}`
+  );
+};
+
 /**
- * Throws a {@link ProgrammerError}, naming the duration `name`, unless every platform's timers hold
- * it alike: a whole number of milliseconds from 1 to {@link LONGEST_TIMER} — past it, a timer fires
- * at once; under a millisecond, Node waits one and .NET none — or `Infinity`, never, which arms
- * nothing. A fraction, `NaN`, a negative, or what is not a number at all — a limit read from JSON
- * — is refused. A place where 0 has a meaning of its own takes it before; one where never has none
- * holds to {@link assertHeldFinite}.
+ * `duration` held as every platform's timers hold it alike: a number of milliseconds from 1 to
+ * {@link LONGEST_TIMER}, rounded to the nearest whole one, a half up — under a millisecond, Node
+ * waits one and .NET none; past the ceiling, a timer fires at once — or `Infinity`, never, which
+ * arms nothing. Any other — 0, a negative, `NaN`, or what is not a number at all, a limit read from
+ * JSON — is a {@link ProgrammerError} naming the duration `name`. A timeout or a bound where never
+ * has no meaning holds to {@link assertHeldFinite}; a delay, which takes 0, to
+ * {@link assertHeldDelay}.
  */
-export const assertHeld = (name: string, duration: unknown): void => {
-  if (duration !== Infinity && !isHeld(duration)) {
-    throw new ProgrammerError(
-      `${name} is a whole number of milliseconds from 1 to ${String(LONGEST_TIMER)}, or Infinity for never, not ${writtenOf(duration)}`
-    );
+export const assertHeld = (name: string, duration: unknown): number => {
+  if (duration === Infinity) {
+    return Infinity;
   }
+
+  if (!isHeld(duration)) {
+    throw refusalOf(name, { duration, offered: { never: true, zero: false } });
+  }
+
+  return Math.round(duration);
 };
 
 /** As {@link assertHeld}, where never has no meaning: `Infinity` is refused too. */
-export const assertHeldFinite = (name: string, duration: unknown): void => {
+export const assertHeldFinite = (name: string, duration: unknown): number => {
   if (!isHeld(duration)) {
-    throw new ProgrammerError(
-      `${name} is a whole number of milliseconds from 1 to ${String(LONGEST_TIMER)}, not ${writtenOf(duration)}`
-    );
+    throw refusalOf(name, { duration, offered: { never: false, zero: false } });
   }
+
+  return Math.round(duration);
+};
+
+/**
+ * As {@link assertHeldFinite}, for a delay: 0 is at once, held as 0, for which no timer is armed;
+ * `Infinity` is refused, since a delay of never would never end.
+ */
+export const assertHeldDelay = (name: string, duration: unknown): number => {
+  if (duration === 0) {
+    return 0;
+  }
+
+  if (!isHeld(duration)) {
+    throw refusalOf(name, { duration, offered: { never: false, zero: true } });
+  }
+
+  return Math.round(duration);
 };

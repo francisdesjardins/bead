@@ -18,9 +18,10 @@ internal static class TransportReconnection
     /// Attempts until one opens: the first at once, each next one after its delay. Attempts that run
     /// out are a <see cref="ReconnectException"/>, the last one's exception inside; a cancel is an
     /// <see cref="OperationCanceledException"/>; a delay that throws, an
-    /// <see cref="InvalidOperationException"/>; one neither zero nor a whole number of milliseconds
-    /// from 1 to <see cref="Clocks.LongestTimer"/>, infinite among them, an
-    /// <see cref="ArgumentOutOfRangeException"/> before the tap hears it, no attempt made after it.
+    /// <see cref="InvalidOperationException"/>; one neither zero nor from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, infinite among them, an
+    /// <see cref="ArgumentOutOfRangeException"/> before the tap hears it, no attempt made after it;
+    /// one held is rounded to the nearest whole millisecond, which the tap hears.
     /// What the tap throws passes through.
     /// </summary>
     public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Clock) reconnection)
@@ -63,11 +64,9 @@ internal static class TransportReconnection
                 throw new InvalidOperationException(reason.Message, reason);
             }
 
-            // zero waits none; never, refused, would wait for ever between two attempts
-            if (nextDelay != TimeSpan.Zero)
-            {
-                Clocks.AssertHeldFinite(("a delay", nameof(TransportReconnectOptions.Delay)), nextDelay);
-            }
+            // held before its tap hears it: zero waits none; never, refused, would wait for ever
+            // between two attempts
+            nextDelay = Clocks.AssertHeldDelay(("a delay", nameof(TransportReconnectOptions.Delay)), nextDelay);
 
             using var pausing = CancellationTokenSource.CreateLinkedTokenSource(token);
             var waiting = Task.Delay(nextDelay, clock, pausing.Token);

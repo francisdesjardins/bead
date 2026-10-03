@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { assertHeld, assertHeldFinite, type IClock, PLATFORM_CLOCK } from '../shared/clock';
+import { assertHeld, assertHeldDelay, type IClock, PLATFORM_CLOCK } from '../shared/clock';
 import { RECONNECT_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
@@ -183,15 +183,16 @@ export const createTransportClient = <
       return implementation.clock ?? PLATFORM_CLOCK;
     },
 
-    connect: (options) => {
-      // refused here, so by every transport, before anything moves or is kept for a reconnection;
-      // 0 never times out, as `Infinity` does
-      try {
-        const { timeout = 0 } = options;
+    connect: (given) => {
+      // held here, so by every transport, before anything moves or is kept for a reconnection, which
+      // connects again with the timeout held
+      let options: ConnectOptions;
 
-        if (timeout !== 0) {
-          assertHeld("a connect's timeout", timeout);
-        }
+      try {
+        options =
+          given.timeout === undefined
+            ? given
+            : { ...given, timeout: assertHeld("a connect's timeout", given.timeout) };
       } catch (reason) {
         return Promise.reject(toError(reason));
       }
@@ -319,10 +320,8 @@ export const createTransportClient = <
             throw wrapReason(ProgrammerError, reason);
           }
 
-          // refused before "tap" hears it: 0 waits none, and never would wait for ever
-          if (nextDelay !== 0) {
-            assertHeldFinite('a delay', nextDelay);
-          }
+          // held before "tap" hears it: 0 waits none, and never would wait for ever
+          nextDelay = assertHeldDelay('a delay', nextDelay);
 
           // armed before "tap" is told, so whoever moves the clock once told moves it past the wait
           const pausing = new AbortController();

@@ -270,14 +270,15 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
    * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close` and
-   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake. A
-   * whole number from 1 to 2³¹ − 1, `0` to drop it without waiting, or `Infinity` to wait without
-   * end; any other is a {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
+   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake.
+   * From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end; any
+   * other, 0 among them, is a {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
    */
   closeTimeout?: number | undefined;
   /**
-   * Milliseconds between two pings of each connection, and `Infinity` for none: a connection that
-   * has not answered one by the next is dropped, and its `close` says it was not clean. Defaults to
+   * Milliseconds between two pings of each connection, rounded to the nearest whole one, from 1 to
+   * 2³¹ − 1, and `Infinity` for none; 0 is refused: a connection that has not answered one by the
+   * next is dropped, and its `close` says it was not clean. Defaults to
    * {@link HEARTBEAT}. A heartbeat keeps nothing of a session alive: it tells a live connection
    * from a dead one, and the session's own timers still count what the peer sends.
    */
@@ -382,7 +383,8 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   createServer: (listener: HTTPRequestListener) => IHTTPServerLike;
   /**
    * Milliseconds a request handed on waits for its answer before its exchange counts as lost, which
-   * closes its connection; `Infinity` for ever. Defaults to {@link EXCHANGE_TIMEOUT}.
+   * closes its connection: from 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for
+   * ever; 0 is refused. Defaults to {@link EXCHANGE_TIMEOUT}.
    */
   exchangeTimeout?: number | undefined;
   /**
@@ -392,11 +394,11 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   hosts?: readonly string[] | undefined;
   /**
-   * Milliseconds a connection may go with no exchange under way before it is closed; `Infinity` for
-   * never. It tells a client alive from one gone, as a WebSocket's heartbeat does: a listen held is an
-   * exchange under way, so a client that listens again as each listen ends — or pauses less than
-   * this — stays. A session's own timers still count what the client says. Defaults to
-   * {@link INACTIVITY_TIMEOUT}.
+   * Milliseconds a connection may go with no exchange under way before it is closed: from 1 to
+   * 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for never; 0 is refused. It tells a
+   * client alive from one gone, as a WebSocket's heartbeat does: a listen held is an exchange under
+   * way, so a client that listens again as each listen ends — or pauses less than this — stays. A
+   * session's own timers still count what the client says. Defaults to {@link INACTIVITY_TIMEOUT}.
    */
   inactivityTimeout?: number | undefined;
   /**
@@ -424,8 +426,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   maximumOutboxBytes?: number | undefined;
   /**
-   * Milliseconds a listen waits at most for something to bring back, whatever `wait` it asks; an
-   * intermediary's own timeout must be longer. Defaults to {@link MAXIMUM_WAIT}.
+   * Milliseconds a listen waits at most for something to bring back, whatever `wait` it asks: from 1
+   * to 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. An intermediary's
+   * own timeout must be longer. Defaults to {@link MAXIMUM_WAIT}.
    */
   maximumWait?: number | undefined;
   /**

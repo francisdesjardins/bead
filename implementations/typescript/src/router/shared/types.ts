@@ -183,10 +183,10 @@ export interface IRouterLimits {
    */
   maximumTransfers: number;
   /**
-   * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls, a
-   * whole number from 1 to 2³¹ − 1, never `Infinity`; and how long, at least, a call that received
-   * one keeps its call id once it ends — abandoned by the side that answers, reserved by the
-   * requester.
+   * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls, from 1
+   * to 2³¹ − 1, rounded to the nearest whole one, never 0 nor `Infinity`; and how long, at least, a
+   * call that received one keeps its call id once it ends — abandoned by the side that answers,
+   * reserved by the requester.
    */
   transferInactivityTimeout: number;
   /** How far past the bytes it received, contiguous, a receiver lets its sender send. */
@@ -342,9 +342,10 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
   signal?: AbortSignal | undefined;
   /**
    * Milliseconds to wait for the answer; 5 s. While the payload, or its result, goes as a transfer,
-   * the transfer's inactivity counts instead, and the timeout counts anew once the payload went. A
-   * whole number from 1 to 2³¹ − 1; `0` waits on, as `Infinity` does. Any other rejects with a
-   * {@link ProgrammerError}, and the call draws nothing.
+   * the transfer's inactivity counts instead, and the timeout counts anew once the payload went.
+   * From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity`, which waits on. Any other,
+   * 0 among them, rejects with a {@link ProgrammerError}, and the call draws nothing: a manager's
+   * call, before it is traced or told deprecated.
    */
   timeout?: number | undefined;
 }
@@ -394,6 +395,10 @@ export interface IRequestResolverProps<Handle extends string = ConnectionHandle>
 /** The options of a request, with the manager's defaults applied. */
 export interface IResolvedRequestOptions extends IRequestOptions {
   closeOnTimeout?: boolean | undefined;
+  /**
+   * The call's timeout, or the manager's default, held as the defaults are applied: in whole
+   * milliseconds, rounded, or `Infinity`, which waits on.
+   */
   timeout: number;
 }
 
@@ -415,9 +420,9 @@ export interface IRouterCore<Handle extends string> {
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
    * waiting and none is given — or, once its result came in part, for as long as the peer keeps the
    * call abandoned, should that be longer. A call id reserved already, or a router disposed, sends
-   * nothing. `0`, or `Infinity`, reserves it for the default time; any other timeout that is not a
-   * whole number of milliseconds from 1 to {@link LONGEST_TIMER} is a {@link ProgrammerError}, and
-   * nothing is done.
+   * nothing. A timeout is rounded to the nearest whole millisecond; `Infinity`, a call that waited
+   * on, reserves it for the default time; any other that is not from 1 to {@link LONGEST_TIMER}, 0
+   * among them, is a {@link ProgrammerError}, and nothing is done.
    */
   cancel(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -485,10 +490,10 @@ export interface IRouterCore<Handle extends string> {
     }
   ): Promise<IRouterResult>;
   /**
-   * Reserves this side's `callId` on `connectionHandle` for `timeout`, or for the default time for
-   * none, `0` or `Infinity`: the sequence skips it, and what comes late on it is dropped in silence.
-   * Reserved twice, the later end stands. Any other timeout that is not a whole number of
-   * milliseconds from 1 to {@link LONGEST_TIMER} is a {@link ProgrammerError}, as for
+   * Reserves this side's `callId` on `connectionHandle` for `timeout`, rounded to the nearest whole
+   * millisecond, or for the default time for none or `Infinity`: the sequence skips it, and what
+   * comes late on it is dropped in silence. Reserved twice, the later end stands. Any other timeout
+   * that is not from 1 to {@link LONGEST_TIMER}, 0 among them, is a {@link ProgrammerError}, as for
    * {@link IRouterCore.cancel}, and nothing is reserved.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
@@ -534,7 +539,7 @@ export interface IRouterCoreOptions {
    * hold together, or the core is a {@link ProgrammerError}: whole numbers, positive but for the
    * transfers and the detail; an envelope of 64 bytes at least; a chunk from 64 bytes to an
    * envelope; a window of two chunks at least; a payload within the budget; a transfer's
-   * inactivity a whole number of milliseconds from 1 to 2³¹ − 1.
+   * inactivity from 1 to 2³¹ − 1 milliseconds, held rounded to the nearest whole one.
    */
   limits?: RouterLimitsOptions | undefined;
 }
@@ -1017,7 +1022,12 @@ export interface IServiceManagerOptions<Handle extends string = ConnectionHandle
    * connection to name.
    */
   closeConnection?: ((connectionHandle: Handle) => void) | undefined;
-  /** What a call's options leave out: {@link REQUEST_DEFAULTS}' where these do too, and no close. */
+  /**
+   * What a call's options leave out: {@link REQUEST_DEFAULTS}' where these do too, and no close. Its
+   * timeout is held as a call's, as the manager is built: rounded to the nearest whole millisecond,
+   * `Infinity` to wait on, and a {@link ProgrammerError} for any other not from 1 to 2³¹ − 1, 0
+   * among them.
+   */
   defaults?:
     | (Partial<Pick<IResolvedRequestOptions, 'timeout'>> & {
         closeOnTimeout?: boolean | undefined;

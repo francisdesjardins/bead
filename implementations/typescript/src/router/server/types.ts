@@ -169,10 +169,11 @@ export type PacingLimitsOptions = { [Key in keyof IPacingLimits]?: IPacingLimits
 export interface ISession<Data> {
   connectionHandle: TransportServerConnectionHandle;
   /**
-   * Milliseconds without activity before `connectionInactivityTimeoutReached`: a whole number from 1 to
-   * 2³¹ − 1; `Infinity` is never, and `0`, as it is stored, the manager's default.
+   * Milliseconds without activity before `connectionInactivityTimeoutReached`: from 1 to 2³¹ − 1,
+   * stored rounded to the nearest whole one, or `Infinity` for never; 0 is refused. Left out, it is
+   * stored as the manager's default; a session handed out always holds one.
    */
-  connectionInactivityTimeout: number;
+  connectionInactivityTimeout?: number | undefined;
   /** What the router keeps about the session; structured-cloneable, since it is stored as a copy. */
   data: Data | undefined;
   /**
@@ -180,11 +181,8 @@ export interface ISession<Data> {
    * the wall clock.
    */
   lastActivity: number;
-  /**
-   * Milliseconds without activity before `sessionInactivityTimeoutReached`: a whole number from 1 to
-   * 2³¹ − 1; `Infinity` is never, and `0`, as it is stored, the manager's default.
-   */
-  sessionInactivityTimeout: number;
+  /** As `connectionInactivityTimeout`, before `sessionInactivityTimeoutReached`. */
+  sessionInactivityTimeout?: number | undefined;
   /** What the router announces to the connection; `undefined` until `set` draws one. */
   sessionToken: SessionToken | undefined;
 }
@@ -205,7 +203,10 @@ export interface ISessionManager<Data> {
    * timers kept for a connection with no session — set through `timers` — are an anomaly.
    */
   gauges(): IGauges<TransportServerConnectionHandle>;
-  /** A new session for `connectionHandle`, not stored: no timeout, and no token until `set`. */
+  /**
+   * A new session for `connectionHandle`, not stored: its timeouts `Infinity`, none, and no token
+   * until `set`.
+   */
   create(connectionHandle: TransportServerConnectionHandle): ISession<Data>;
   /** Forgets a session and stops its timers, emitting `deleted`; `false` when there was none. */
   delete(connectionHandle: TransportServerConnectionHandle): boolean;
@@ -237,8 +238,9 @@ export interface ISessionManager<Data> {
   removeAllListeners(event?: SESSION_MANAGER_EVENTS): this;
   /**
    * Restarts the connection timer of a stored session: `connectionInactivityTimeoutReached` in
-   * `timeout` milliseconds. `Infinity` only stops it; one that is not a whole number from 1 to
-   * {@link LONGEST_TIMER} is a {@link ProgrammerError}, and the timer is left as it was.
+   * `timeout` milliseconds, rounded to the nearest whole one. `Infinity` only stops it; one that is
+   * not from 1 to {@link LONGEST_TIMER}, 0 among them, is a {@link ProgrammerError}, and the timer is
+   * left as it was.
    */
   resetConnectionInactivityTimeout(session: ISession<Data>, timeout: number): void;
   /** As {@link ISessionManager.resetConnectionInactivityTimeout}, for the session timer. */
@@ -246,16 +248,16 @@ export interface ISessionManager<Data> {
   /**
    * Stores a session, drawing its token when it has none; emits `created`, or `updated` when it
    * replaces a different one. A new session's timers start over, and a timeout that changed
-   * restarts its timer; a timeout of `0` is the manager's default, as for the `update*` methods.
-   * Throws a {@link ProgrammerError} for a timeout neither `0`, `Infinity` nor a whole number of
-   * milliseconds from 1 to {@link LONGEST_TIMER}, or a token that is not one or that another
+   * restarts its timer; a timeout left out is the manager's default, as for the `update*` methods.
+   * Throws a {@link ProgrammerError} for a timeout neither `Infinity` nor from 1 to
+   * {@link LONGEST_TIMER} milliseconds, 0 among them, or a token that is not one or that another
    * connection holds — before anything is stored.
    */
   set(session: ISession<Data>): ISession<Data>;
   /**
-   * Stores `session.connectionInactivityTimeout` — the manager's default when `0`, a
-   * {@link ProgrammerError} when neither `Infinity` nor a whole number of milliseconds from 1 to
-   * {@link LONGEST_TIMER}. When it changed, restarts the timer with it and emits
+   * Stores `session.connectionInactivityTimeout`, rounded to the nearest whole millisecond — the
+   * manager's default when left out, a {@link ProgrammerError} when neither `Infinity` nor from 1
+   * to {@link LONGEST_TIMER}, 0 among them. When it changed, restarts the timer with it and emits
    * `connectionInactivityTimeoutChanged`; the same timeout restarts nothing, since activity is what
    * restarts a timer. `undefined` when the connection has no session.
    */
@@ -290,9 +292,9 @@ export interface ISessionManagerOptions {
   /** The clock its timers run on, and its activity is read on; the platform's when not given. */
   clock?: IClock | undefined;
   /**
-   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. A whole number of
-   * milliseconds from 1 to {@link LONGEST_TIMER}, or `Infinity` for never: anything else, `0`
-   * among them, is a {@link ProgrammerError}.
+   * What `set` and `updateConnectionInactivityTimeout` store for a timeout left out; 600 ms. From 1
+   * to {@link LONGEST_TIMER} milliseconds, rounded to the nearest whole one, or `Infinity` for
+   * never: anything else, 0 among them, is a {@link ProgrammerError}, as the manager is built.
    */
   connectionInactivityTimeout?: number | undefined;
   /** As `connectionInactivityTimeout`, for the session timeout; 30 s. */
@@ -523,8 +525,9 @@ export interface IDestinationOptions {
   /** What the application calls it, for a list of its own. */
   label?: string | undefined;
   /**
-   * The milliseconds leg B waits for its answer, the relay's at most; the relay's if not given. A
-   * whole number from 1 to 2³¹ − 1, or `Infinity`; any other is a {@link ProgrammerError}.
+   * The milliseconds leg B waits for its answer, the relay's at most; the relay's if not given. From
+   * 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for none; any other, 0 among
+   * them, is a {@link ProgrammerError}.
    */
   timeout?: number | undefined;
 }
@@ -549,7 +552,8 @@ export interface IRelayOptions {
   /**
    * The milliseconds leg B waits for its answer at most, whatever a destination says; none,
    * `Infinity`, by default: the requester's own timeout governs, end to end, by the cancel it sends.
-   * A whole number from 1 to 2³¹ − 1 otherwise; any other is a {@link ProgrammerError}.
+   * From 1 to 2³¹ − 1 otherwise, rounded to the nearest whole one; any other, 0 among them, is a
+   * {@link ProgrammerError}.
    */
   timeout?: number | undefined;
 }

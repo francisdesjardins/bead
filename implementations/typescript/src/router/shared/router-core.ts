@@ -159,8 +159,8 @@ const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMal
 /**
  * `given` over {@link LIMIT_DEFAULTS}, where it says nothing. A {@link ProgrammerError} for a limit
  * that is not a whole number — positive, but for the transfers and the detail — for limits that do
- * not hold together, or for a transfer's inactivity that is not a whole number of milliseconds from
- * 1 to 2³¹ − 1, `Infinity` among them.
+ * not hold together, or for a transfer's inactivity that is not from 1 to 2³¹ − 1 milliseconds, 0
+ * and `Infinity` among them; the inactivity is held rounded to the nearest whole millisecond.
  */
 const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
   const keys = Object.keys(LIMIT_DEFAULTS) as (keyof IRouterLimits)[];
@@ -190,10 +190,15 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
     }
   }
 
-  // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free
-  assertHeldFinite("a transfer's inactivity", limits.transferInactivityTimeout);
-
-  return Object.freeze(limits);
+  // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free;
+  // held, as its failures' details say it on the wire
+  return Object.freeze({
+    ...limits,
+    transferInactivityTimeout: assertHeldFinite(
+      "a transfer's inactivity",
+      limits.transferInactivityTimeout
+    ),
+  });
 };
 
 /** Whether `value` limits a procedure's payloads: none, or a whole number above 0. */
@@ -201,7 +206,7 @@ const isPayloadLimit = (value: unknown): boolean => {
   return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 1);
 };
 
-/** Whether a call waits `timeout` at most: a duration held; 0 and `Infinity` wait on. */
+/** Whether a call waits `timeout` at most: a duration held; none and `Infinity` wait on. */
 const isTimeout = (timeout: number | undefined): timeout is number => {
   return timeout !== undefined && Number.isFinite(timeout) && timeout > 0;
 };
@@ -667,8 +672,8 @@ export const createRouterCore = <Handle extends string>(
     return promise;
   };
 
-  const cancel: IRouterCore<Handle>['cancel'] = ({ callId, connectionHandle, timeout }) => {
-    assertReservation(timeout);
+  const cancel: IRouterCore<Handle>['cancel'] = ({ callId, connectionHandle, timeout: given }) => {
+    const timeout = assertReservation(given);
 
     const pendingRequest = pendingCalls.get({ callId, connectionHandle });
 
@@ -1523,7 +1528,7 @@ export const createRouterCore = <Handle extends string>(
         procedure,
       }
     ) => {
-      const { destinationId, signal, timeout } = requestOptions;
+      const { destinationId, signal, timeout: givenTimeout } = requestOptions;
       const procedureAddress = {
         procedureId: procedure.procedureId,
         serviceId: procedure.serviceId,
@@ -1543,10 +1548,8 @@ export const createRouterCore = <Handle extends string>(
             return (reject(refused), undefined);
           }
 
-          // 0 waits on, as `Infinity` does
-          if (timeout !== 0) {
-            assertHeld("a call's timeout", timeout);
-          }
+          // held, which its timer, its reservation and its TimeoutError all take
+          const timeout = assertHeld("a call's timeout", givenTimeout);
 
           // drawn once the call starts: an aborted signal draws nothing
           const callId = pendingCalls.draw(connectionHandle);
@@ -1650,8 +1653,7 @@ export const createRouterCore = <Handle extends string>(
         });
     },
     reserve: (call) => {
-      assertReservation(call.timeout);
-      pendingCalls.reserve(call);
+      pendingCalls.reserve({ ...call, timeout: assertReservation(call.timeout) });
     },
     respond,
     send: (envelope, connectionHandle) => {

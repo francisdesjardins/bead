@@ -59,8 +59,8 @@ public sealed record RouterLimits
     public int MaximumTransfers { get; init; } = 4;
 
     /// <summary>
-    /// How long a transfer waits for its next chunk or credit before it stalls: a whole number of
-    /// milliseconds from 1 to 2³¹ − 1, never infinite.
+    /// How long a transfer waits for its next chunk or credit before it stalls: from 1 to 2³¹ − 1
+    /// milliseconds, rounded to the nearest whole one, never zero nor infinite.
     /// </summary>
     public TimeSpan TransferInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
@@ -68,11 +68,12 @@ public sealed record RouterLimits
     public int WindowBytes { get; init; } = 4_194_304;
 
     /// <summary>
-    /// These limits, checked: whole numbers, positive but for the transfers and the detail; an
-    /// envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a window of two chunks
-    /// at least; a payload within the budget; a transfer's inactivity a whole number of milliseconds
-    /// from 1 to 2³¹ − 1. Throws an <see cref="ArgumentException"/> for the first that does not hold,
-    /// an <see cref="ArgumentOutOfRangeException"/> for the inactivity.
+    /// These limits, checked, a transfer's inactivity held: whole numbers, positive but for the
+    /// transfers and the detail; an envelope of 64 bytes at least; a chunk from 64 bytes to an
+    /// envelope; a window of two chunks at least; a payload within the budget; a transfer's
+    /// inactivity from 1 to 2³¹ − 1 milliseconds, rounded to the nearest whole one. Throws an
+    /// <see cref="ArgumentException"/> for the first that does not hold, an
+    /// <see cref="ArgumentOutOfRangeException"/> for the inactivity.
     /// </summary>
     public RouterLimits Validate()
     {
@@ -98,9 +99,10 @@ public sealed record RouterLimits
             }
         }
 
-        // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free
-        Clocks.AssertHeldFinite(("a transfer's inactivity", nameof(TransferInactivityTimeout)), TransferInactivityTimeout);
+        // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free;
+        // held, as its failures' details say it on the wire
+        var held = Clocks.AssertHeldFinite(("a transfer's inactivity", nameof(TransferInactivityTimeout)), TransferInactivityTimeout);
 
-        return this;
+        return held == TransferInactivityTimeout ? this : this with { TransferInactivityTimeout = held };
     }
 }
