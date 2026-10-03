@@ -550,10 +550,10 @@ public sealed class SessionManagerTests
         var tunedSession = tuned.GetOrElseSet(Handle);
 
         Assert.Equal(
-            TimeSpan.FromMilliseconds(600),
+            Timeout.InfiniteTimeSpan,
             sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = null })!.ConnectionInactivityTimeout);
         Assert.Equal(
-            TimeSpan.FromSeconds(30),
+            Timeout.InfiniteTimeSpan,
             sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = null })!.SessionInactivityTimeout);
         Assert.Equal(
             TimeSpan.FromSeconds(1),
@@ -564,7 +564,7 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
-    public void Set_takes_the_default_for_a_timeout_left_out()
+    public void Set_takes_the_default_for_a_timeout_left_out_never_which_arms_no_timer()
     {
         var time = new FakeTimeProvider();
 
@@ -579,27 +579,31 @@ public sealed class SessionManagerTests
 
         var stored = sessions.Set(sessions.Create(Handle) with { ConnectionInactivityTimeout = null });
 
-        time.Advance(TimeSpan.FromMilliseconds(599));
-        Assert.Equal(TimeSpan.FromMilliseconds(600), stored.ConnectionInactivityTimeout);
+        time.Advance(Clocks.LongestTimer);
+        Assert.Equal(
+            (Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan),
+            (stored.ConnectionInactivityTimeout, new SessionManagerOptions().ConnectionInactivityTimeout));
         Assert.Equal(0, reached);
-        time.Advance(TimeSpan.FromMilliseconds(1));
-        Assert.Equal(1, reached);
     }
 
     [Fact]
-    public void A_session_built_without_naming_its_timeouts_is_stored_with_the_manager_s_defaults_one_made_by_create_with_never()
+    public void A_session_built_without_naming_its_timeouts_holds_both_without_end_as_one_made_by_create_does()
     {
         using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = new FakeTimeProvider() });
 
         var built = sessions.Set(new Session<string> { ConnectionHandle = Handle });
         var created = sessions.Set(sessions.Create(Other));
+        var defaults = new SessionManagerOptions();
 
         Assert.Equal<(TimeSpan?, TimeSpan?)>(
-            (TimeSpan.FromMilliseconds(600), TimeSpan.FromSeconds(30)),
+            (Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan),
             (built.ConnectionInactivityTimeout, built.SessionInactivityTimeout));
         Assert.Equal<(TimeSpan?, TimeSpan?)>(
             (Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan),
             (created.ConnectionInactivityTimeout, created.SessionInactivityTimeout));
+        Assert.Equal(
+            (Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan),
+            (defaults.ConnectionInactivityTimeout, defaults.SessionInactivityTimeout));
     }
 
     // not -1 ms, which is .NET's infinite timeout; 2³¹ ms, one past what JavaScript's timers hold
@@ -723,6 +727,16 @@ public sealed class SessionManagerTests
         {
             return sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = longer });
         });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            sessions.ResetConnectionInactivityTimeout(session, longer);
+        });
+        Assert.Equal(
+            "a session inactivity timeout is a number of milliseconds from 1 to 2147483647, or infinite for never, not 2147483648 (Parameter 'timeout')",
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                sessions.ResetSessionInactivityTimeout(session, longer);
+            }).Message);
         Assert.False(sessions.Has(Other));
         Assert.Equal(session, sessions.Get(Handle));
 
@@ -733,7 +747,6 @@ public sealed class SessionManagerTests
         Assert.Equal(1, reached);
     }
 
-    // a session manager has no reset of its own on this side: a store, an update and a default
     [Fact]
     public void Holds_a_timeout_stored_updated_or_defaulted_to_a_whole_number_of_milliseconds_rounded_refusing_zero_one_left_out_taking_the_default_nothing_changing_for_one_refused()
     {
@@ -815,6 +828,53 @@ public sealed class SessionManagerTests
                 }
             }
         }
+    }
+
+    [Fact]
+    public void Holds_a_reset_to_a_whole_number_of_milliseconds_rounded_refusing_zero_leaving_the_timer_as_it_was_for_one_refused()
+    {
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a connection inactivity timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
+        {
+            var time = new SteppingClock(DateTimeOffset.UnixEpoch);
+
+            using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
+
+            var session = sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromSeconds(1) });
+
+            if (outcome == DurationOutcome.Refused)
+            {
+                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                {
+                    sessions.ResetConnectionInactivityTimeout(session, given);
+                });
+
+                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.Equal("timeout", refused.ParamName);
+                Assert.Equal([TimeSpan.FromSeconds(1)], time.Dues());
+
+                continue;
+            }
+
+            sessions.ResetConnectionInactivityTimeout(session, given);
+
+            TimeSpan[] armed = held == Timeout.InfiniteTimeSpan ? [TimeSpan.FromSeconds(1)] : [TimeSpan.FromSeconds(1), held!.Value];
+
+            Assert.Equal(armed, time.Dues());
+        }
+    }
+
+    [Fact]
+    public void A_reset_for_a_connection_with_no_session_arms_nothing()
+    {
+        var time = new SteppingClock(DateTimeOffset.UnixEpoch);
+
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
+
+        sessions.ResetConnectionInactivityTimeout(sessions.Create(Handle), TimeSpan.FromMilliseconds(10));
+        sessions.ResetSessionInactivityTimeout(sessions.Create(Handle), TimeSpan.FromMilliseconds(10));
+
+        Assert.Empty(time.Dues());
+        Assert.Equal(0, sessions.Gauges().Counts["timedConnections"]);
     }
 
     [Fact]

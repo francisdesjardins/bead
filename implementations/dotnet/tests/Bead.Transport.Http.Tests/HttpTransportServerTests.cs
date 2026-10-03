@@ -2228,6 +2228,73 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal([null, _time.GetUtcNow()], StampsOf());
     }
 
+    // the TypeScript side tells the second before the first ends; here each ends on its own request's
+    // thread, so the two come in either order, which a server's count of listens takes alike
+    [Fact]
+    public async Task Tells_a_listen_held_once_past_its_refusals_and_its_end_while_its_connection_stands_one_refused_tells_nothing_and_restarts_nothing_and_a_second_and_the_first_it_replaces_each_tell_theirs()
+    {
+        await Start(new HttpTransportServerOptions { InactivityTimeout = TimeSpan.FromSeconds(2) });
+
+        var told = new ConcurrentQueue<(bool IsHeld, string ConnectionHandle)>();
+
+        _server.Listen += (isHeld, connectionHandle) =>
+        {
+            told.Enqueue((isHeld, connectionHandle));
+        };
+
+        var deaf = await Connect();
+        var (connectionToken, connectionHandle) = await Connect(true);
+        var before = _time.Armed.Count;
+
+        // undeclared, 409, and asking what it cannot, 400: no timer stopped nor armed
+        Assert.Equal(
+            [(409, HttpRefusals.ListenUndeclared), (400, HttpRefusals.Malformed), (400, HttpRefusals.Malformed)],
+            [
+                await RefusalOf(ListenOf(deaf.ConnectionToken, "")),
+                await RefusalOf(ListenOf(connectionToken, "wait=soon")),
+                await RefusalOf(ListenOf(connectionToken, "after=1")),
+            ]);
+        Assert.Empty(told);
+        Assert.Empty(DelaysSince(before));
+        Assert.All(_time.Armed, (armed) =>
+        {
+            Assert.False(armed.IsCleared);
+        });
+
+        // a second in the place of the first, which ends empty: each tells its own
+        var first = ListenOf(connectionToken, "wait=20000");
+
+        await Until(() =>
+        {
+            return !told.IsEmpty;
+        });
+
+        var second = ListenOf(connectionToken, "wait=20000");
+
+        using (var ended = await first)
+        {
+            Assert.Equal(204, (int)ended.StatusCode);
+        }
+
+        await Until(() =>
+        {
+            return told.Count == 3;
+        });
+        Assert.Equal(
+            [(false, connectionHandle), (true, connectionHandle), (true, connectionHandle)],
+            told.Order());
+
+        // its connection closed: the listen it held ends untold
+        Assert.True(await _server.CloseConnection(connectionHandle));
+
+        using (var gone = await second)
+        {
+            Assert.Equal(404, (int)gone.StatusCode);
+        }
+
+        Assert.Equal(3, told.Count);
+    }
+
     [Fact]
     public async Task Closes_a_connection_whose_outbox_holds_more_than_its_bound_and_its_listen_learns_it_is_gone()
     {

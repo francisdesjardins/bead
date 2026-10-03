@@ -188,9 +188,9 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Ends_a_session_past_its_timeout_with_its_subscriptions_and_keeps_its_connection_for_its_own_timeout()
+    public async Task Ends_a_session_past_its_timeout_with_its_subscriptions_and_keeps_its_connection_for_the_server_s_own_timeout_counted_from_its_end()
     {
-        Start(Timeout.InfiniteTimeSpan);
+        Start(TimeSpan.FromSeconds(3));
         _transport.Open(Handle);
         Server.Sessions.Set(Server.Sessions.Create(Handle) with
         {
@@ -213,8 +213,11 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal((ushort)ProtocolCode.SessionRequired, ended.Failure!.Code);
         Assert.Empty(_transport.Closed);
 
-        // the connection stays, then goes once silent past that session's connection timeout
-        await Advance(TimeSpan.FromSeconds(5));
+        // the connection stays, then goes once silent past the server's own timeout, not the
+        // session's
+        await Advance(TimeSpan.FromSeconds(3) - TimeSpan.FromMilliseconds(1));
+        Assert.Empty(_transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal([Handle], _transport.Closed);
     }
 
@@ -244,6 +247,93 @@ public sealed class ServerTests : IAsyncLifetime
         await Advance(TimeSpan.FromSeconds(2));
         Assert.Empty(_transport.Closed);
         await Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal([Handle], _transport.Closed);
+    }
+
+    [Fact]
+    public async Task A_listen_held_is_no_silence_a_connection_with_no_session_is_not_closed_while_one_is_and_is_closed_the_server_s_own_timeout_after_the_last_ends()
+    {
+        Start(TimeSpan.FromMilliseconds(60));
+        _transport.Open(Handle);
+        await Advance(TimeSpan.FromMilliseconds(40));
+        _transport.Listening(true);
+
+        // held: no timer runs, a message meanwhile arms none, and a second listen said before the
+        // first ends keeps the connection held
+        await Deliver(UnknownRequestOf(1));
+        await Advance(TimeSpan.FromSeconds(1));
+        _transport.Listening(true);
+        _transport.Listening(false);
+        await Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal((0, 1L), (_transport.Closed.Count, (await Server.Gauges()).Server.Counts["listening"]));
+
+        // the last ends: the silence counts anew from it
+        _transport.Listening(false);
+        await Advance(TimeSpan.FromMilliseconds(59));
+        Assert.Empty(_transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([Handle], _transport.Closed);
+        Assert.Equal(0, (await Server.Gauges()).Server.Counts["listening"]);
+    }
+
+    [Fact]
+    public async Task A_listen_held_is_no_silence_for_a_session_s_connection_timeout_either_a_message_meanwhile_restarts_its_session_timer_alone_and_the_listen_s_end_counts_anew()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+
+        // a session opened while a listen is held, as a client over HTTP logs in: its session timer alone
+        _transport.Listening(true);
+        await Deliver(RequestOf(1, ("login", false), "{\"name\":\"ada\",\"connectionTimeout\":100,\"sessionTimeout\":1000}"));
+
+        // a message, and a session opened anew, each restart the session timer alone
+        await Advance(TimeSpan.FromMilliseconds(200));
+        await Deliver(UnknownRequestOf(3));
+        await Deliver(RequestOf(5, ("login", false), "{\"name\":\"bob\",\"connectionTimeout\":100,\"sessionTimeout\":1000}"));
+
+        var lastActivity = Server.Sessions.Get(Handle)!.LastActivity;
+
+        await Advance(TimeSpan.FromMilliseconds(400));
+        Assert.Empty(_transport.Closed);
+
+        // the listen's end starts the connection timer from it, and leaves the session timer and the
+        // session's activity to the messages: a listen is no message
+        _transport.Listening(false);
+        Assert.Equal(lastActivity, Server.Sessions.Get(Handle)!.LastActivity);
+        await Advance(TimeSpan.FromMilliseconds(99));
+        Assert.Empty(_transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([Handle], _transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(499));
+        Assert.True(Server.Sessions.Has(Handle));
+        await Advance(TimeSpan.FromMilliseconds(1));
+        Assert.False(Server.Sessions.Has(Handle));
+    }
+
+    [Fact]
+    public async Task A_session_s_session_timeout_ends_its_session_while_a_listen_is_held_its_subscription_s_failure_goes_out_and_the_connection_stays_held()
+    {
+        Start(TimeSpan.FromMilliseconds(60));
+        _transport.Open(Handle);
+        await Deliver(RequestOf(1, ("login", false), "{\"name\":\"ada\",\"connectionTimeout\":100,\"sessionTimeout\":30}"));
+        await Deliver(RequestOf(3, ("ticks", true)));
+        _transport.Listening(true);
+        await Advance(TimeSpan.FromMilliseconds(30));
+
+        // over HTTP, the failure is what the listen held brings back
+        var ended = _transport.Read(2);
+
+        Assert.Equal(new FailureHeader { CallId = 3, Session = SessionAnnouncement.Ended }, ended.Header);
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, ended.Failure!.Code);
+        Assert.False(Server.Sessions.Has(Handle));
+        await Advance(TimeSpan.FromSeconds(1));
+        Assert.Empty(_transport.Closed);
+
+        // the listen's end: the server's own timeout, the session gone
+        _transport.Listening(false);
+        await Advance(TimeSpan.FromMilliseconds(59));
+        Assert.Empty(_transport.Closed);
+        await Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal([Handle], _transport.Closed);
     }
 
@@ -430,12 +520,12 @@ public sealed class ServerTests : IAsyncLifetime
         await _scheduler.WhenIdle();
 
         // no session yet: idle, until its timeout closes it
-        Assert.Equal(new Dictionary<string, long> { ["closing"] = 0, ["connections"] = 1, ["idle"] = 1 }, (await Server.Gauges()).Server.Counts);
+        Assert.Equal(new Dictionary<string, long> { ["closing"] = 0, ["connections"] = 1, ["idle"] = 1, ["listening"] = 0 }, (await Server.Gauges()).Server.Counts);
         Server.Sessions.Set(Server.Sessions.Create(Handle));
 
         var gauges = await Server.Gauges();
 
-        Assert.Equal(new Dictionary<string, long> { ["closing"] = 0, ["connections"] = 1, ["idle"] = 0 }, gauges.Server.Counts);
+        Assert.Equal(new Dictionary<string, long> { ["closing"] = 0, ["connections"] = 1, ["idle"] = 0, ["listening"] = 0 }, gauges.Server.Counts);
         Assert.Equal(new Dictionary<string, long> { ["sessions"] = 1, ["timedConnections"] = 1 }, gauges.Sessions.Counts);
         Assert.Empty(gauges.Transport.Counts);
         Assert.All([gauges.Router, gauges.Server, gauges.Sessions, gauges.Transport], (layer) =>
@@ -446,7 +536,7 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(HealthStatus.Pass, (await Server.Health()).Status);
         _transport.CloseFromPeer(Handle);
         await _scheduler.WhenIdle();
-        Assert.Equal(new Dictionary<string, long> { ["closing"] = 0, ["connections"] = 0, ["idle"] = 0 }, (await Server.Gauges()).Server.Counts);
+        Assert.Equal(new Dictionary<string, long> { ["closing"] = 0, ["connections"] = 0, ["idle"] = 0, ["listening"] = 0 }, (await Server.Gauges()).Server.Counts);
         Assert.Equal(new Dictionary<string, long> { ["sessions"] = 0, ["timedConnections"] = 0 }, (await Server.Gauges()).Sessions.Counts);
         Assert.Equal(HealthStatus.Pass, (await Server.Health()).Status);
     }
@@ -836,6 +926,8 @@ public sealed class ServerTests : IAsyncLifetime
 
         public event Action<bool, string>? Close;
 
+        public event Action<bool, string>? Listen;
+
         public List<ReadOnlyMemory<byte>> Sent { get; } = [];
 
         public List<string> Closed { get; } = [];
@@ -859,20 +951,27 @@ public sealed class ServerTests : IAsyncLifetime
 
         public int Shutdowns { get; private set; }
 
-        // the handlers on its three events
+        // the handlers on its four events
         public int Subscribers
         {
             get
             {
                 return (Connection?.GetInvocationList().Length ?? 0)
                     + (Message?.GetInvocationList().Length ?? 0)
-                    + (Close?.GetInvocationList().Length ?? 0);
+                    + (Close?.GetInvocationList().Length ?? 0)
+                    + (Listen?.GetInvocationList().Length ?? 0);
             }
         }
 
         public void Open(string connectionHandle)
         {
             Connection?.Invoke(connectionHandle);
+        }
+
+        // a listen held on the connection, as an HTTP transport tells it, or its end
+        public void Listening(bool isHeld)
+        {
+            Listen?.Invoke(isHeld, Handle);
         }
 
         public void Deliver(byte[] bytes)

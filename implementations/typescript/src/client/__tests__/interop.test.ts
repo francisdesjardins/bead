@@ -362,6 +362,42 @@ test.describe('the C# server of the interop service', () => {
         expect(client.router.sessionToken).toBeUndefined();
       });
 
+      test('login and register hold a duration as section 1.4 does: a fraction rounded, one under a millisecond or past 2³¹ − 1 refused with PROCEDURE_FAILED, nothing opened or registered', async () => {
+        const failed = { code: ProtocolCode.PROCEDURE_FAILED };
+
+        for (const refused of [
+          { name: 'ada', sessionTimeout: 0.4 },
+          { connectionTimeout: 2 ** 31, name: 'ada' },
+          { name: 'ada', sessionTimeout: -1 },
+        ]) {
+          await expect(requesterOf('login')(refused)()).rejects.toMatchObject(failed);
+        }
+
+        await expect(requesterOf('whoami')(null)()).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+        });
+        await expect(
+          requesterOf('register')({ destination: 41, timeout: 0 })()
+        ).rejects.toMatchObject(failed);
+        await expect(requesterOf('register')({ destination: 41, timeout: 1.5 })()).resolves.toBe(
+          41
+        );
+        await expect(requesterOf('unregister')(null)()).resolves.toBe(true);
+
+        // a session timeout given ends its session once past, rounded; silence counts it alone
+        await expect(
+          requesterOf('login')({
+            connectionTimeout: 2 ** 31 - 1,
+            name: 'ada',
+            sessionTimeout: 99.6,
+          })()
+        ).resolves.toBe('ada');
+        await sleep(400);
+        await expect(requesterOf('whoami')(null)()).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+        });
+      });
+
       // HTTP carries no transfer: a payload is what one envelope holds
       if (carriesTransfers) {
         test('a payload that goes as a transfer comes back as one, and so does a result too large for one envelope', async () => {

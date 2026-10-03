@@ -310,11 +310,15 @@ console.log(statistics.durations());
 the resolver that opens one stores it — and every message of its connection is activity for it. Its
 token is announced to the connection on the next answer after it changes, and its end the same way:
 a procedure that closes a session deletes it before it answers. Its connection timeout closes the
-connection, its session timeout ends the session — the connection keeps its connection timeout, and
-each of its subscriptions is ended with `SESSION_REQUIRED`, which its client hears as `dropped` — and
-a connection that closes takes its session; a session stored once its connection closed goes at once.
-A connection that never opens a session is closed once silent for the server's
-`connectionInactivityTimeout`, when it has one. `requireSession` is the `beforeRequest` of every other
+connection, its session timeout ends the session — the connection takes the server's own timeout,
+counted from that end, and each of its subscriptions is ended with `SESSION_REQUIRED`, which its
+client hears as `dropped` — and a connection that closes takes its session; a session stored once its
+connection closed goes at once. A session stored without its timeouts holds both without end: the
+application gives its own, OWASP ASVS 4.0.3 V3.3.2's for one that authenticates, 30 minutes of
+inactivity at level 2, 15 at level 3. A connection that never opens a session is closed once silent
+for the server's `connectionInactivityTimeout`, when it has one. Over HTTP a listen held is no
+silence: no connection timeout runs while one is, and each counts anew from its end, while a session
+timeout counts messages alone. `requireSession` is the `beforeRequest` of every other
 procedure, and refuses with `SESSION_REQUIRED`; composed with `&&`, it loses that refusal and the
 composition refuses with `ACCESS_DENIED` — a caller that wants to keep it puts `refusal` on its own
 function. The server
@@ -479,7 +483,8 @@ written, a request unanswered past `exchangeTimeout`, 5 minutes — closes the c
 ends, as a socket that drops does, and the exchanges it handed on are cut, never answered; so does
 the 404 marked `connection-unknown`, which says the connection is gone. Idleness tells a client gone
 from one alive, as a WebSocket's heartbeat does: a connection with no exchange under way for 5
-minutes closes, and, by `createHTTPServer`'s default, one without a session for 30 seconds.
+minutes closes, and, by `createHTTPServer`'s default, one without a session silent for 30 seconds,
+a listen held being no silence: the transport emits `listen` as it holds one and as it ends.
 
 | Status | `bead-refusal`                       | Says                                                                                                                                                                   |
 | ------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

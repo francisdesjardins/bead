@@ -237,14 +237,21 @@ export interface ISessionManager<Data> {
   ): this;
   removeAllListeners(event?: SESSION_MANAGER_EVENTS): this;
   /**
-   * Restarts the connection timer of a stored session: `connectionInactivityTimeoutReached` in
-   * `timeout` milliseconds, rounded to the nearest whole one. `Infinity` only stops it; one that is
-   * not from 1 to {@link LONGEST_TIMER}, 0 among them, is a {@link ProgrammerError}, and the timer is
-   * left as it was.
+   * Restarts the connection timer of a stored session, which only its `connectionHandle` names:
+   * `connectionInactivityTimeoutReached` in `timeout` milliseconds, rounded to the nearest whole
+   * one. `Infinity` only stops it; one that is not from 1 to {@link LONGEST_TIMER}, 0 among them, is
+   * a {@link ProgrammerError}, and the timer is left as it was. A connection with no session arms
+   * nothing.
    */
-  resetConnectionInactivityTimeout(session: ISession<Data>, timeout: number): void;
+  resetConnectionInactivityTimeout(
+    session: Pick<ISession<Data>, 'connectionHandle'>,
+    timeout: number
+  ): void;
   /** As {@link ISessionManager.resetConnectionInactivityTimeout}, for the session timer. */
-  resetSessionInactivityTimeout(session: ISession<Data>, timeout: number): void;
+  resetSessionInactivityTimeout(
+    session: Pick<ISession<Data>, 'connectionHandle'>,
+    timeout: number
+  ): void;
   /**
    * Stores a session, drawing its token when it has none; emits `created`, or `updated` when it
    * replaces a different one. A new session's timers start over, and a timeout that changed
@@ -292,12 +299,14 @@ export interface ISessionManagerOptions {
   /** The clock its timers run on, and its activity is read on; the platform's when not given. */
   clock?: IClock | undefined;
   /**
-   * What `set` and `updateConnectionInactivityTimeout` store for a timeout left out; 600 ms. From 1
-   * to {@link LONGEST_TIMER} milliseconds, rounded to the nearest whole one, or `Infinity` for
-   * never: anything else, 0 among them, is a {@link ProgrammerError}, as the manager is built.
+   * What `set` and `updateConnectionInactivityTimeout` store for a timeout left out; `Infinity`,
+   * never, when not given: the application gives its own. One that authenticates takes OWASP ASVS
+   * 4.0.3 V3.3.2's: 30 minutes of inactivity at level 2, 15 at level 3. From 1 to
+   * {@link LONGEST_TIMER} milliseconds, rounded to the nearest whole one, or `Infinity` for never:
+   * anything else, 0 among them, is a {@link ProgrammerError}, as the manager is built.
    */
   connectionInactivityTimeout?: number | undefined;
-  /** As `connectionInactivityTimeout`, for the session timeout; 30 s. */
+  /** As `connectionInactivityTimeout`, for the session timeout; `Infinity` when not given. */
   sessionInactivityTimeout?: number | undefined;
 }
 

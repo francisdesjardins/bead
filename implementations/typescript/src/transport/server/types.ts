@@ -202,6 +202,12 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
    * handle is the server's own error.
    */
   error: [error: Error, connectionHandle: TransportServerConnectionHandle | ''];
+  /**
+   * A listen held on the connection, `isHeld`, once its refusals passed, and its end, while the
+   * connection stands: over HTTP alone, whose listen is no silence (spec 13.7). A transport that has
+   * no listen never emits it.
+   */
+  listen: [isHeld: boolean, connectionHandle: TransportServerConnectionHandle];
   message: [data: Data, connectionHandle: TransportServerConnectionHandle];
 };
 

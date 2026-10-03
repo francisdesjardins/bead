@@ -11,6 +11,7 @@ import {
   CONNECTION_TOKEN_HEADER,
   CONNECTION_UNKNOWN,
   ERROR_EVENT,
+  LISTEN_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
@@ -394,7 +395,9 @@ const sendHead = (response: IHTTPResponseLike): void => {
  * listen — a `GET` with `after` and `wait` — brings back all that waits, in a batch of
  * `application/prs.bead-batch`, the number of its first in `bead-sequence`; the next listen
  * acknowledges by `after` what its client heard whole, and what it did not comes again. A listen waits up to `wait`, no longer than `maximumWait`, for something
- * to bring back; a second takes the first's place. An outbox past `maximumOutboxBytes` closes its
+ * to bring back; a second takes the first's place. Each listen held, once past its refusals, emits
+ * `listen` with `true`, and its end, while its connection stands, `listen` with `false`: the layers
+ * above count no silence meanwhile (spec 13.7). An outbox past `maximumOutboxBytes` closes its
  * connection. A connection whose client does not listen carries answers alone: anything else
  * rejects its `send`.
  *
@@ -666,8 +669,11 @@ export const createHTTPTransportServer = (
 
           if (drawn.get(connection.connectionHandle) === connection) {
             rest(connection);
+            server.emit(LISTEN_EVENT, false, connection.connectionHandle);
           }
         });
+        // said before the listen it replaces ends, so a second keeps its connection held throughout
+        server.emit(LISTEN_EVENT, true, connection.connectionHandle);
 
         if (connection.listen !== undefined) {
           answer(connection.listen, NOTHING);

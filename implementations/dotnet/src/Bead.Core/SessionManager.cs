@@ -38,15 +38,16 @@ public sealed record Session<TData>
 public sealed record SessionManagerOptions
 {
     /// <summary>
-    /// The connection timeout a session set with none takes: 600 ms, as the TypeScript side's. From
-    /// 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one, or
-    /// infinite for never; any other, zero among them, is an
-    /// <see cref="ArgumentOutOfRangeException"/> as the manager is built.
+    /// The connection timeout a session set with none takes: infinite, never, when none is given —
+    /// the application gives its own. One that authenticates takes OWASP ASVS 4.0.3 V3.3.2's: 30
+    /// minutes of inactivity at level 2, 15 at level 3. From 1 to <see cref="Clocks.LongestTimer"/>
+    /// milliseconds, rounded to the nearest whole one, or infinite for never; any other, zero among
+    /// them, is an <see cref="ArgumentOutOfRangeException"/> as the manager is built.
     /// </summary>
-    public TimeSpan ConnectionInactivityTimeout { get; init; } = TimeSpan.FromMilliseconds(600);
+    public TimeSpan ConnectionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
 
-    /// <summary>As <see cref="ConnectionInactivityTimeout"/>, for the session timeout: 30 s.</summary>
-    public TimeSpan SessionInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    /// <summary>As <see cref="ConnectionInactivityTimeout"/>, for the session timeout: infinite when none is given.</summary>
+    public TimeSpan SessionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>
     /// What its timers run on; the system's clock when none. A server's sessions run on the server's
@@ -95,10 +96,10 @@ public sealed class SessionManager<TData> : IDisposable
     {
         _connectionTimeoutDefault = Clocks.AssertHeld(
             (nameof(SessionManagerOptions.ConnectionInactivityTimeout), nameof(SessionManagerOptions.ConnectionInactivityTimeout)),
-            options?.ConnectionInactivityTimeout ?? TimeSpan.FromMilliseconds(600));
+            options?.ConnectionInactivityTimeout ?? Timeout.InfiniteTimeSpan);
         _sessionTimeoutDefault = Clocks.AssertHeld(
             (nameof(SessionManagerOptions.SessionInactivityTimeout), nameof(SessionManagerOptions.SessionInactivityTimeout)),
-            options?.SessionInactivityTimeout ?? TimeSpan.FromSeconds(30));
+            options?.SessionInactivityTimeout ?? Timeout.InfiniteTimeSpan);
         _clock = options?.Clock ?? TimeProvider.System;
         _fill = options?.Fill ?? RandomNumberGenerator.Fill;
         _dataComparer = options?.DataComparer;
@@ -244,6 +245,44 @@ public sealed class SessionManager<TData> : IDisposable
         lock (_gate)
         {
             return _tokens.TryGetValue(connectionHandle, out var token) ? token : null;
+        }
+    }
+
+    /// <summary>
+    /// Restarts the connection timer of a stored session: <see cref="ConnectionInactivityTimeoutReached"/>
+    /// in <paramref name="timeout"/>, rounded to the nearest whole millisecond. Infinite only stops it;
+    /// one neither infinite nor from 1 to <see cref="Clocks.LongestTimer"/>, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/>, and the timer is left as it was. A connection with no
+    /// session arms nothing.
+    /// </summary>
+    public void ResetConnectionInactivityTimeout(Session<TData> session, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var held = Clocks.AssertHeld(("a connection inactivity timeout", nameof(timeout)), timeout);
+
+        lock (_gate)
+        {
+            if (_tokens.ContainsKey(session.ConnectionHandle))
+            {
+                ArmConnectionTimer(session.ConnectionHandle, held);
+            }
+        }
+    }
+
+    /// <summary>As <see cref="ResetConnectionInactivityTimeout"/>, for the session timer.</summary>
+    public void ResetSessionInactivityTimeout(Session<TData> session, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var held = Clocks.AssertHeld(("a session inactivity timeout", nameof(timeout)), timeout);
+
+        lock (_gate)
+        {
+            if (_tokens.ContainsKey(session.ConnectionHandle))
+            {
+                ArmSessionTimer(session.ConnectionHandle, held);
+            }
         }
     }
 

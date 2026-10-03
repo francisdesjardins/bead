@@ -72,13 +72,16 @@ const digestOf = (payload: Uint8Array) => {
 };
 
 /**
- * An HTTP server on a free port — a session opened by `openSession`, `read` behind it, `upload`
- * answering its payload's digest, `slow` waiting on its signal, `news` a subscription — and an HTTP
- * client connected to it. `await using` takes them apart.
+ * An HTTP server on a free port — a session opened by `openSession`, of `sessionInactivityTimeout`,
+ * `read` behind it, `upload` answering its payload's digest, `slow` waiting on its signal, `news` a
+ * subscription — and an HTTP client connected to it. `await using` takes them apart.
  */
 const connectHTTP = async (
   options?: Partial<Parameters<typeof createHTTPServer>[0]>,
-  { isListening = true }: { isListening?: boolean } = {}
+  {
+    isListening = true,
+    sessionInactivityTimeout = Infinity,
+  }: { isListening?: boolean; sessionInactivityTimeout?: number } = {}
 ) => {
   const server: HTTPServer = createHTTPServer({
     transport: {
@@ -92,10 +95,7 @@ const connectHTTP = async (
   const aborted: unknown[] = [];
 
   services.getRequestResolver(openSession, { serializer: text })((request, response) => {
-    sessions.set({
-      ...sessions.create(request.connectionHandle),
-      sessionInactivityTimeout: Infinity,
-    });
+    sessions.set({ ...sessions.create(request.connectionHandle), sessionInactivityTimeout });
 
     return response('opened');
   });
@@ -279,7 +279,11 @@ test.describe('an HTTP server and client', () => {
   });
 
   test('close a connection that opened no session within its timeout, 30 s by default', async () => {
-    await using connected = await connectHTTP({ connectionInactivityTimeout: 50 });
+    // a client that does not listen: one that does holds a listen, which is no silence
+    await using connected = await connectHTTP(
+      { connectionInactivityTimeout: 50 },
+      { isListening: false }
+    );
     const { client } = connected;
     const closed = new Promise((resolve) => {
       client.transport.once('close', (...params) => {
@@ -325,6 +329,43 @@ test.describe('an HTTP server and client', () => {
       })
     ).toEqual([CONNECTION_INACTIVITY_TIMEOUT]);
     expect(CONNECTION_INACTIVITY_TIMEOUT).toBe(30_000);
+  });
+
+  test('end a session past its session timeout while its client holds a listen, which brings back the failure of its subscription, the connection staying', async () => {
+    const clock = createTestClock();
+
+    await using connected = await connectHTTP(
+      {
+        transport: {
+          clock,
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+        },
+      },
+      { sessionInactivityTimeout: 1_000 }
+    );
+    const { client, server } = connected;
+    const dropped = Promise.withResolvers<unknown>();
+
+    client.services.on('dropped', (procedure, failure) => {
+      dropped.resolve([procedure.procedureName, failure?.code]);
+    });
+    await client.services.getRequest(openSession, { serializer: text })('me')();
+    await client.services.getNotification(news, {
+      serializer: { ...text, decodeNotification: text.decode },
+    })('subscribe', () => {})();
+
+    // the client holds a listen, which the server's clock, the test's, never ends by itself
+    await expect
+      .poll(() => {
+        return server.transport.gauges().counts['listens'];
+      })
+      .toBe(1);
+    clock.tick(1_000);
+
+    await expect(dropped.promise).resolves.toEqual(['news', ProtocolCode.SESSION_REQUIRED]);
+    expect([server.sessions.getAll(), server.transport.clients]).toEqual([[], [expect.anything()]]);
   });
 
   test('bring a client that listens what the server sends of its own: a subscription’s notifications, a command, a call relayed to it', async () => {

@@ -7,6 +7,7 @@ import {
   CREATED_EVENT,
   DELETED_EVENT,
   SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
+  UPDATED_EVENT,
 } from '../router/server/constants';
 import { createRouterServer, SERVER_FAILURES } from '../router/server/router-server';
 import { createSessionManager } from '../router/server/session-manager';
@@ -14,7 +15,12 @@ import type { ISession } from '../router/server/types';
 import { createServiceManager } from '../router/shared/service-manager';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import { assertHeld, clockOf, type TimeoutId } from '../transport/shared/clock';
-import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT } from '../transport/shared/constants';
+import {
+  CLOSE_EVENT,
+  CONNECTION_EVENT,
+  LISTEN_EVENT,
+  MESSAGE_EVENT,
+} from '../transport/shared/constants';
 import { toError } from '../transport/shared/errors';
 import { gaugesOf } from '../transport/shared/gauges';
 import type { Data as TransportData } from '../transport/shared/types';
@@ -62,14 +68,6 @@ export type { IServer, IServerLayers, IServerOptions, IServerTransportLike } fro
 export { WARNING_RATIO } from './health';
 export type { HealthStatus, IHealth, IHealthCheck, ILayerGauges, ServerGauges } from './health';
 
-// interfaces
-
-/** A connection with no session: how long it may stay silent, and the timer that closes it. */
-interface IIdleConnection {
-  timeout: number;
-  timeoutId: TimeoutId | undefined;
-}
-
 // definition
 
 /**
@@ -85,9 +83,11 @@ interface IIdleConnection {
  * the failure that ends one of the connection's subscriptions. Each message from a connection is
  * activity for it. When the connection timeout of a session passes, its connection is closed; when
  * its session timeout passes, the session ends and the connection stays, its idleness counted
- * afresh against that session's connection timeout, and none of the notifications it subscribed to
- * stay: each subscription is ended with SESSION_REQUIRED. A connection that closes takes its
- * session with it, and a session stored for a connection already closed goes at once.
+ * afresh against the server's own connection timeout, and none of the notifications it subscribed
+ * to stay: each subscription is ended with SESSION_REQUIRED. A listen held over HTTP is no
+ * silence: no connection timeout runs while one is, and each counts anew from its end; a session
+ * timeout counts messages alone (spec 13.7). A connection that closes takes its session with it,
+ * and a session stored for a connection already closed goes at once.
  *
  * Every layer runs on the transport's clock: the router is built with it, and the builder of the
  * sessions is given it. A clock its options give that differs from the transport's, or a layer
@@ -143,16 +143,20 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   const connections = new Set<TransportServerConnectionHandle>();
   // the connections being closed, so each is asked to close once
   const closing = new Set<TransportServerConnectionHandle>();
-  const idle = new Map<TransportServerConnectionHandle, IIdleConnection>();
+  // the connections with no session, each with the timer that closes it once silent, when one runs
+  const idle = new Map<TransportServerConnectionHandle, TimeoutId | undefined>();
+  // the listens each connection holds: a second comes before the first it replaces ends
+  const listens = new Map<TransportServerConnectionHandle, number>();
 
   const stopWaiting = (connectionHandle: TransportServerConnectionHandle): void => {
-    clock.clearTimeout(idle.get(connectionHandle)?.timeoutId);
+    clock.clearTimeout(idle.get(connectionHandle));
     idle.delete(connectionHandle);
   };
 
   // a connection that was never opened or is gone keeps nothing
   const forgetConnection = (connectionHandle: TransportServerConnectionHandle): void => {
     connections.delete(connectionHandle);
+    listens.delete(connectionHandle);
     stopWaiting(connectionHandle);
     sessions.delete(connectionHandle);
   };
@@ -182,17 +186,23 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       });
   };
 
-  // a connection without a session is closed once silent for its own timeout
-  const wait = (connectionHandle: TransportServerConnectionHandle, timeout: number): void => {
-    const connection = idle.get(connectionHandle) ?? { timeout, timeoutId: undefined };
+  // a connection without a session is closed once silent for the server's own timeout, counted
+  // afresh; ! none runs while a listen is held, whose end arms it
+  const wait = (connectionHandle: TransportServerConnectionHandle): void => {
+    clock.clearTimeout(idle.get(connectionHandle));
+    idle.set(
+      connectionHandle,
+      Number.isFinite(connectionInactivityTimeout) && !listens.has(connectionHandle)
+        ? clock.setTimeout(() => {
+            close(connectionHandle);
+          }, connectionInactivityTimeout)
+        : undefined
+    );
+  };
 
-    clock.clearTimeout(connection.timeoutId);
-    connection.timeoutId = Number.isFinite(connection.timeout)
-      ? clock.setTimeout(() => {
-          close(connectionHandle);
-        }, connection.timeout)
-      : undefined;
-    idle.set(connectionHandle, connection);
+  // a session's connection timer, stopped while a listen is held; its session timer runs on
+  const holdSession = (connectionHandle: TransportServerConnectionHandle): void => {
+    sessions.resetConnectionInactivityTimeout({ connectionHandle }, Infinity);
   };
 
   // before the router's own: a resolver that stores a session as the router reads the envelope finds
@@ -205,7 +215,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     ]
   ): void => {
     connections.add(connectionHandle);
-    wait(connectionHandle, connectionInactivityTimeout);
+    wait(connectionHandle);
   };
 
   // each message is activity, whatever it is and whatever the router makes of it; a connection that
@@ -214,7 +224,48 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     connections.add(connectionHandle);
 
     if (!sessions.touch(connectionHandle)) {
-      wait(connectionHandle, connectionInactivityTimeout);
+      wait(connectionHandle);
+    } else if (listens.has(connectionHandle)) {
+      holdSession(connectionHandle);
+    }
+  };
+
+  // the end of the last listen held: the connection's silence counts anew from it
+  const resume = (connectionHandle: TransportServerConnectionHandle): void => {
+    const session = sessions.get(connectionHandle);
+
+    if (session === undefined) {
+      return (wait(connectionHandle), undefined);
+    }
+
+    sessions.resetConnectionInactivityTimeout(
+      session,
+      session.connectionInactivityTimeout ?? Infinity
+    );
+  };
+
+  // the first listen held stops the connection's timers, and the end of the last arms them afresh;
+  // a listen of a connection the server does not hold counts nothing
+  const onListen = (isHeld: boolean, connectionHandle: TransportServerConnectionHandle): void => {
+    const before = listens.get(connectionHandle) ?? 0;
+    const after = before + (isHeld ? 1 : -1);
+
+    if (!connections.has(connectionHandle) || after < 0) {
+      return;
+    }
+
+    if (after === 0) {
+      listens.delete(connectionHandle);
+
+      return (resume(connectionHandle), undefined);
+    }
+
+    listens.set(connectionHandle, after);
+
+    if (before === 0 && idle.has(connectionHandle)) {
+      wait(connectionHandle);
+    } else if (before === 0) {
+      holdSession(connectionHandle);
     }
   };
 
@@ -226,11 +277,13 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   const release = (): void => {
     transport.off(CONNECTION_EVENT, onConnection);
     transport.off(MESSAGE_EVENT, onMessage);
+    transport.off(LISTEN_EVENT, onListen);
     transport.off(CLOSE_EVENT, onClose);
   };
 
   transport.on(CONNECTION_EVENT, onConnection);
   transport.on(MESSAGE_EVENT, onMessage);
+  transport.on(LISTEN_EVENT, onListen);
   transport.on(CLOSE_EVENT, onClose);
 
   // a refusal of its own, which a composition by `&&` loses to ACCESS_DENIED; the relay's by default
@@ -278,35 +331,45 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     defaults: { closeOnTimeout: options?.closeOnCommandTimeout },
   });
 
+  // a session stored anew restarts its connection timer, which a listen held keeps stopped
+  const onSessionStored = ({ connectionHandle }: ISession<Data>): void => {
+    if (listens.has(connectionHandle)) {
+      holdSession(connectionHandle);
+    }
+  };
+
   // a session stored once its connection was gone would outlive it, for a later connection of the
   // same handle to take over; the session's own timers take over from the idle one
-  const onSessionCreated = ({ connectionHandle }: ISession<Data>): void => {
+  const onSessionCreated = (session: ISession<Data>): void => {
+    const { connectionHandle } = session;
+
     if (!connections.has(connectionHandle)) {
       return (sessions.delete(connectionHandle), undefined);
     }
 
     stopWaiting(connectionHandle);
+    onSessionStored(session);
   };
 
   // a session that ended takes with it what its connection subscribed to, which the session let it
   // have — each subscription ends with SESSION_REQUIRED, which a client that only listens hears —
-  // and leaves the connection its connection timeout, or the server's own when it holds none
-  const onSessionDeleted = ({
-    connectionHandle,
-    connectionInactivityTimeout: timeout,
-  }: ISession<Data>): void => {
+  // and leaves the connection the server's own timeout, counted from the end
+  const onSessionDeleted = ({ connectionHandle }: ISession<Data>): void => {
     if (connections.has(connectionHandle)) {
       void router.dropSubscriptions({
         connectionHandle,
         failure: router.failures.sessionRequired,
       });
-      wait(connectionHandle, timeout ?? connectionInactivityTimeout);
+      wait(connectionHandle);
     }
   };
 
-  // a connection silent for too long is gone: closing it ends its session too
+  // a connection silent for too long is gone: closing it ends its session too. ! One whose listen
+  // is held is not silent, whatever armed its timer meanwhile — the listen's end arms it afresh
   const onConnectionInactive = ({ connectionHandle }: ISession<Data>): void => {
-    close(connectionHandle);
+    if (!listens.has(connectionHandle)) {
+      close(connectionHandle);
+    }
   };
 
   // a session unused for too long ends; its connection stays, to open another
@@ -323,8 +386,13 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       router: layerGaugesOf(router.gauges(), held.connectionHandles),
       server: layerGaugesOf(
         gaugesOf({
-          connectionHandles: [...connections, ...idle.keys()],
-          counts: { closing: closing.size, connections: connections.size, idle: idle.size },
+          connectionHandles: [...connections, ...idle.keys(), ...listens.keys()],
+          counts: {
+            closing: closing.size,
+            connections: connections.size,
+            idle: idle.size,
+            listening: listens.size,
+          },
         }),
         held.connectionHandles
       ),
@@ -334,6 +402,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   };
 
   sessions.on(CREATED_EVENT, onSessionCreated);
+  sessions.on(UPDATED_EVENT, onSessionStored);
   sessions.on(DELETED_EVENT, onSessionDeleted);
   sessions.on(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, onConnectionInactive);
   sessions.on(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, onSessionInactive);
@@ -352,15 +421,17 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     [Symbol.asyncDispose]: async () => {
       release();
       sessions.off(CREATED_EVENT, onSessionCreated);
+      sessions.off(UPDATED_EVENT, onSessionStored);
       sessions.off(DELETED_EVENT, onSessionDeleted);
       sessions.off(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, onConnectionInactive);
       sessions.off(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, onSessionInactive);
 
-      for (const { timeoutId } of idle.values()) {
+      for (const timeoutId of idle.values()) {
         clock.clearTimeout(timeoutId);
       }
 
       idle.clear();
+      listens.clear();
       connections.clear();
 
       // the reverse of the order they were built in; the services hold nothing of their own

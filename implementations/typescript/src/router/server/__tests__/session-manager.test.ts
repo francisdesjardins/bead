@@ -530,22 +530,23 @@ test.describe('createSessionManager', () => {
       ).toBe(2_000);
     });
 
-    test('set takes the default for a timeout left out', async () => {
-      using sessions = createSessionManager<IUser>();
-      const reached = record(sessions, 'connectionInactivityTimeoutReached');
+    test('set takes the default for a timeout left out: never, which arms no timer', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
 
       const stored = sessions.set({
         ...sessions.create(first),
         connectionInactivityTimeout: undefined,
       });
 
-      await sleep(40);
-
-      expect(stored.connectionInactivityTimeout).toBe(DEFAULTS.connectionInactivityTimeout);
-      expect(reached).toEqual([]);
+      expect([stored.connectionInactivityTimeout, DEFAULTS.connectionInactivityTimeout]).toEqual([
+        Infinity,
+        Infinity,
+      ]);
+      expect(delaysOn(clock)).toEqual([]);
     });
 
-    test('a session built without naming its timeouts is stored with the manager’s defaults; one made by create, with never', () => {
+    test('a session built without naming its timeouts holds both without end, as one made by create does', () => {
       const clock = createTestClock();
       using sessions = createSessionManager<IUser>({ clock });
 
@@ -558,12 +559,17 @@ test.describe('createSessionManager', () => {
       const created = sessions.set(sessions.create(second));
 
       expect([built.connectionInactivityTimeout, built.sessionInactivityTimeout]).toEqual([
-        600, 30_000,
+        Infinity,
+        Infinity,
       ]);
       expect([created.connectionInactivityTimeout, created.sessionInactivityTimeout]).toEqual([
         Infinity,
         Infinity,
       ]);
+      expect(DEFAULTS).toEqual({
+        connectionInactivityTimeout: Infinity,
+        sessionInactivityTimeout: Infinity,
+      });
     });
 
     test('a default that is not a timeout is a programmer error', () => {
@@ -759,7 +765,6 @@ test.describe('createSessionManager', () => {
       }
     });
 
-    // a reset, which the C# side has none of
     test('holds a reset to a whole number of milliseconds, rounded, refusing 0, leaving the timer as it was for one refused', () => {
       for (const { given, held, outcome, refusal } of durationsOf(
         'a connection inactivity timeout',

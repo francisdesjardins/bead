@@ -75,9 +75,10 @@ type StoredSession<Data> = ISession<Data> & {
 
 // constants
 
+/** A session stored without its timeouts holds both without end: the application gives its own. */
 export const DEFAULTS = Object.freeze({
-  connectionInactivityTimeout: 600,
-  sessionInactivityTimeout: 30_000,
+  connectionInactivityTimeout: Infinity,
+  sessionInactivityTimeout: Infinity,
 });
 
 // helpers

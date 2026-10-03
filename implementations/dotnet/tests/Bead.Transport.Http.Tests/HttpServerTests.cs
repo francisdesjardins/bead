@@ -285,7 +285,8 @@ public sealed class HttpServerTests
     [Fact]
     public async Task Close_a_connection_that_opened_no_session_within_its_timeout_30_s_by_default()
     {
-        await using (var connected = await ConnectHttp(new ServerOptions { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(50) }))
+        // a client that does not listen: one that does holds a listen, which is no silence
+        await using (var connected = await ConnectHttp(new ServerOptions { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(50) }, isListening: false))
         {
             var closed = new TaskCompletionSource<(bool WasClean, bool WasQuick)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -308,7 +309,7 @@ public sealed class HttpServerTests
 
         await using var server = new HttpServer<string>(new HttpServerOptions { Transport = new HttpTransportServerOptions { Clock = time } });
         var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
-        await using var client = new BeadHttpClient();
+        await using var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = false } });
 
         await client.Connect(new HttpConnectOptions { Host = Host, Port = address.Port }, Cancelled);
         Assert.Equal(TimeSpan.FromSeconds(30), HttpServerOptions.ConnectionInactivityTimeoutDefault);
@@ -319,6 +320,54 @@ public sealed class HttpServerTests
         {
             return server.Transport.ConnectionHandles.Count == 0;
         });
+    }
+
+    // ConnectHttp builds its server on the system's clock: this one runs on the test's
+    [Fact]
+    public async Task End_a_session_past_its_session_timeout_while_its_client_holds_a_listen_which_brings_back_the_failure_of_its_subscription_the_connection_staying()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+
+        await using var server = new HttpServer<string>(new HttpServerOptions { Transport = new HttpTransportServerOptions { Clock = time } });
+
+        server.Services.GetRequestResolver(OpenSession, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        {
+            server.Sessions.Set(server.Sessions.Create(request.ConnectionHandle) with { SessionInactivityTimeout = TimeSpan.FromSeconds(1) });
+
+            return response.Answer("opened");
+        });
+        server.Services.GetNotificationResolver(News, new NotificationResolverDependencies<string, string, string> { Serializer = Text })(async (_, response) =>
+        {
+            await response.RegisterNotification();
+            await response.Answer("subscribed");
+        });
+
+        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+        await using var client = new BeadHttpClient();
+        var dropped = new TaskCompletionSource<(string ProcedureName, ushort? Code)>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        client.Services.Dropped += (procedure, failure) =>
+        {
+            dropped.TrySetResult((procedure.ProcedureName, failure?.Code));
+        };
+        await client.Connect(new HttpConnectOptions { Host = Host, Port = address.Port }, Cancelled);
+        await TextRequester(client.Services, OpenSession)("me")().WaitAsync(Patience, Cancelled);
+
+        await using var subscribed = await client.Services.GetNotification(News, new NotificationDependencies<string, string, string> { Serializer = Text }).Register("subscribe", (_) =>
+        {
+            return Task.CompletedTask;
+        })().WaitAsync(Patience, Cancelled);
+
+        // the client holds a listen, which the server's clock, the test's, never ends by itself
+        await Eventually(() =>
+        {
+            return server.Transport.Gauges().Counts["listens"] == 1;
+        });
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(("news", (ushort?)ProtocolCode.SessionRequired), await dropped.Task.WaitAsync(Patience, Cancelled));
+        Assert.Empty(server.Sessions.GetAll());
+        Assert.Single(server.Transport.ConnectionHandles);
     }
 
     [Fact]
