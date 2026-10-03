@@ -1862,7 +1862,7 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public async Task Refuses_a_connect_s_timeout_past_the_longest_timer_moving_nothing()
+    public async Task Refuses_a_connect_s_timeout_under_a_millisecond_or_past_the_longest_timer_moving_nothing_and_times_one_of_a_millisecond()
     {
         using var fetch = new Fetch();
         var time = new FakeTimeProvider();
@@ -1870,19 +1870,34 @@ public sealed class HttpTransportClientTests
         await using var none = new HttpTransportClient();
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        foreach (var timeout in new[] { TimeSpan.FromMilliseconds(0.5), Clocks.LongestTimer + Millisecond })
         {
-            return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = Clocks.LongestTimer + Millisecond }, Cancelled);
-        });
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = timeout }, Cancelled);
+            });
+        }
+
         Assert.Equal((ReadyState.Uninitialized, 0), (client.ReadyState, fetch.Count));
         Assert.Equal((time, TimeProvider.System), (client.Clock, none.Clock));
+
+        var connecting = client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = Millisecond }, Cancelled);
+
+        await fetch.CallOf(0);
+        time.Advance(Millisecond);
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
     }
 
     // -1 ms is the infinite TimeSpan, which an inactivity timeout takes, and a TimeSpan holds no NaN
     [Fact]
     public void Refuses_a_wait_a_pause_or_an_inactivity_timeout_no_timer_holds()
     {
-        foreach (var value in new[] { TimeSpan.FromMilliseconds(-2), TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L) })
+        foreach (var value in new[] { TimeSpan.FromMilliseconds(-2), TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L) })
         {
             foreach (var options in new[]
             {
@@ -1902,9 +1917,17 @@ public sealed class HttpTransportClientTests
         {
             return new HttpTransportClient(new HttpTransportClientOptions { InactivityTimeout = Timeout.InfiniteTimeSpan, Pause = TimeSpan.Zero, Wait = TimeSpan.Zero });
         }));
+        Assert.Null(Record.Exception(() =>
+        {
+            return new HttpTransportClient(new HttpTransportClientOptions { InactivityTimeout = Millisecond, Pause = Millisecond, Wait = Millisecond });
+        }));
         Assert.StartsWith("Wait is a whole number of milliseconds from 0 a timer holds, not -1", Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
             return new HttpTransportClient(new HttpTransportClientOptions { Wait = Timeout.InfiniteTimeSpan });
+        }).Message, StringComparison.Ordinal);
+        Assert.StartsWith("Pause is a whole number of milliseconds from 0 a timer holds, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new HttpTransportClient(new HttpTransportClientOptions { Pause = TimeSpan.FromMilliseconds(0.5) });
         }).Message, StringComparison.Ordinal);
     }
 

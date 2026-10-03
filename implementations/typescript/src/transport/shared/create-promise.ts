@@ -1,8 +1,17 @@
 // dependencies
 
-import { LONGEST_TIMER, PLATFORM_CLOCK, type TimeoutId } from './clock';
+import { assertHeld, LONGEST_TIMER, PLATFORM_CLOCK, type TimeoutId } from './clock';
 import { ProgrammerError, TimeoutError, toCancelError, toError } from './errors';
 import type { ICreatePromiseOptions, PromiseExecutor } from './types';
+
+// helpers
+
+// a delay or a timeout that waits at all — above 0, or not a number — is one a timer holds
+const assertWaited = (name: string, given: number): void => {
+  if (Number.isNaN(given) || given > 0) {
+    assertHeld(name, given);
+  }
+};
 
 // definition
 
@@ -12,7 +21,8 @@ import type { ICreatePromiseOptions, PromiseExecutor } from './types';
  * Its timers, on its `clock`, and its abort listener are released however the promise settles, so a
  * connect that fails fast does not keep the process alive for the rest of its timeout. A delay, or a
  * timeout and its delay together, past {@link LONGEST_TIMER} rejects with a {@link ProgrammerError},
- * the executor never run.
+ * the executor never run; so does a delay or a timeout under a millisecond but above 0, or `NaN`.
+ * One of 0 or less, or `Infinity`, is none.
  */
 export const createPromise = <T = void>(
   executor: PromiseExecutor<T>,
@@ -25,7 +35,7 @@ export const createPromise = <T = void>(
     timeout: requestedTimeout = 0,
   } = options ?? {};
 
-  // anything but a positive finite number means none, NaN included
+  // anything but a positive finite number means none; NaN is refused below
   const delay = Number.isFinite(requestedDelay) && requestedDelay > 0 ? requestedDelay : 0;
   const timeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0 ? requestedTimeout : 0;
   const total = timeout + delay;
@@ -37,6 +47,15 @@ export const createPromise = <T = void>(
         `a timer waits ${String(LONGEST_TIMER)} milliseconds at most, a timeout and its delay together, not ${String(timeout > 0 ? total : delay)}`
       )
     );
+
+    return promise;
+  }
+
+  try {
+    assertWaited('a delay', requestedDelay);
+    assertWaited('a timeout', requestedTimeout);
+  } catch (reason) {
+    reject(toError(reason));
 
     return promise;
   }

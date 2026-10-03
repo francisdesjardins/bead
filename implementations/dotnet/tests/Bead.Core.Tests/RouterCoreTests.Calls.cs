@@ -907,24 +907,39 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_to_reserve_or_cancel_for_longer_than_a_timer_holds_at_once_sending_nothing()
+    public async Task Refuses_to_reserve_or_cancel_for_longer_than_a_timer_holds_or_under_a_millisecond_at_once_sending_nothing()
     {
         var client = new Peer(RouterSide.Client);
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        var longer = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1);
+        foreach (var (timeout, refusal) in new[]
+        {
+            (Clocks.LongestTimer + TimeSpan.FromMilliseconds(1), "a call id is reserved 2147483647 milliseconds at most, as a timer holds, not 2147483648"),
+            (TimeSpan.FromMilliseconds(0.5), "a call id's reservation is a millisecond at least, not 0.5"),
+        })
+        {
+            Assert.StartsWith(refusal, Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                client.Core.Reserve(new CallAddress(1, Handle), timeout);
+            }).Message, StringComparison.Ordinal);
+            Assert.StartsWith(refusal, Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                client.Core.Cancel(new CallAddress(1, Handle), timeout);
+            }).Message, StringComparison.Ordinal);
+        }
 
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            client.Core.Reserve(new CallAddress(1, Handle), longer);
-        });
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            client.Core.Cancel(new CallAddress(1, Handle), longer);
-        });
         await client.Settle();
         Assert.Empty(client.Sent);
         Assert.Empty(client.Reports);
+
+        // a millisecond is taken: what comes on its call id is dropped until it ends
+        client.Core.Reserve(new CallAddress(1, Handle), TimeSpan.FromMilliseconds(1));
+        await client.Settle();
+        await client.Deliver(ResultOf(1));
+        Assert.Empty(client.Reports);
+        await client.Advance(TimeSpan.FromMilliseconds(1));
+        await client.Deliver(ResultOf(1));
+        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
     }
 
     [Fact]
@@ -1075,11 +1090,16 @@ public sealed partial class RouterCoreTests
         {
             return client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo, TimeSpan.FromMilliseconds(int.MaxValue + 1L)))));
         });
+        Assert.StartsWith("a call's timeout is a millisecond at least, not 0.5", (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        {
+            return client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo, TimeSpan.FromMilliseconds(0.5)))));
+        })).Message, StringComparison.Ordinal);
         Assert.Empty(drawn);
-        _ = client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo with { MaximumPayloadBytes = 1 }, TimeSpan.FromMilliseconds(int.MaxValue)))));
+        _ = client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo with { MaximumPayloadBytes = 1 }, TimeSpan.FromMilliseconds(1)))));
+        _ = client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo, TimeSpan.FromMilliseconds(int.MaxValue)))));
         _ = client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo, Timeout.InfiniteTimeSpan))));
         await client.Settle();
-        Assert.Equal([1u, 3u], drawn);
+        Assert.Equal([1u, 3u, 5u], drawn);
     }
 
     [Fact]

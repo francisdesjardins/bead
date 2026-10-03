@@ -798,16 +798,20 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Refuses_a_connect_s_timeout_or_a_close_timeout_past_the_longest_timer_and_runs_on_the_clock_it_is_given()
+    public async Task Refuses_a_connect_s_timeout_under_a_millisecond_or_past_the_longest_timer_or_a_close_timeout_past_it_and_runs_on_the_clock_it_is_given()
     {
         var time = new FakeTimeProvider();
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        foreach (var timeout in new[] { TimeSpan.FromMilliseconds(0.5), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
         {
-            return client.Connect(new WebSocketConnectOptions { Host = Host, Port = 1, Timeout = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) }, Cancelled);
-        });
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return client.Connect(new WebSocketConnectOptions { Host = Host, Port = 1, Timeout = timeout }, Cancelled);
+            });
+        }
+
         Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
         Assert.Same(time, client.Clock);
         Assert.Same(TimeProvider.System, _client.Clock);
@@ -821,6 +825,22 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         await using var never = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
+
+        // a millisecond is timed
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = TimeSpan.FromMilliseconds(1) }, Cancelled);
+        var (peer, _) = await listener.Next();
+
+        using (peer)
+        {
+            time.Advance(TimeSpan.FromMilliseconds(1));
+
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
     }
 
     [Fact]
@@ -1145,6 +1165,60 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         Assert.Equal([TimeSpan.Zero, TimeSpan.FromMilliseconds(60), TimeSpan.FromMilliseconds(120)], attempts);
         Assert.False(listener.IsPending);
+    }
+
+    [Fact]
+    public async Task Refuses_a_delay_under_a_millisecond_or_past_the_longest_timer_ending_closed_without_another_attempt_and_waits_one_of_a_millisecond()
+    {
+        var time = new FakeTimeProvider();
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
+
+        // 2³¹ ms, one past what JavaScript's timers hold
+        foreach (var delay in new[] { TimeSpan.FromMilliseconds(0.5), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
+        {
+            await ConnectRefused(client, listener);
+
+            var refusing = client.Reconnect(new TransportReconnectOptions { Delay = DelayOf(delay) });
+            var (refused, _) = await listener.Next();
+
+            await Listener.Refuse(refused, 503);
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return refusing.WaitAsync(Patience, Cancelled);
+            });
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            Assert.False(listener.IsPending);
+        }
+
+        var taps = Channel.CreateUnbounded<(TimeSpan Delay, int Attempt)>();
+
+        await ConnectRefused(client, listener);
+
+        var reconnecting = client.Reconnect(new TransportReconnectOptions
+        {
+            Delay = DelayOf(TimeSpan.FromMilliseconds(1)),
+            Tap = (delay, attempt) =>
+            {
+                taps.Writer.TryWrite((delay, attempt));
+            },
+        });
+        var (first, _) = await listener.Next();
+
+        await Listener.Refuse(first, 503);
+        await Next(taps);
+        time.Advance(TimeSpan.FromMilliseconds(1));
+
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        // open while the server's end holds it, before it lets it go
+        using (await Listener.Answer(peer, head))
+        {
+            await reconnecting.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(ReadyState.Open, client.ReadyState);
+        }
     }
 
     [Fact]

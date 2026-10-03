@@ -102,20 +102,27 @@ public sealed class PendingCallsTests
     }
 
     [Fact]
-    public void Refuses_a_reservation_longer_than_a_timer_holds_and_reserves_nothing()
+    public void Refuses_a_reservation_longer_than_a_timer_holds_or_under_a_millisecond_and_reserves_nothing()
     {
         var time = new FakeTimeProvider();
         var calls = CallsOf(RouterSide.Client, OptionsOf(time));
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        foreach (var timeout in new[] { Clocks.LongestTimer + TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(0.5) })
         {
-            calls.Reserve(new CallAddress(1, "a"), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1));
-        });
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                calls.Reserve(new CallAddress(1, "a"), timeout);
+            });
+        }
+
         Assert.False(calls.IsReserved(1, "a"));
 
         calls.Reserve(new CallAddress(1, "a"), Clocks.LongestTimer);
-        time.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
+        calls.Reserve(new CallAddress(3, "a"), TimeSpan.FromMilliseconds(1));
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal((true, false), (calls.IsReserved(1, "a"), calls.IsReserved(3, "a")));
+        time.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(2));
         Assert.True(calls.IsReserved(1, "a"));
         time.Advance(TimeSpan.FromMilliseconds(1));
         Assert.False(calls.IsReserved(1, "a"));

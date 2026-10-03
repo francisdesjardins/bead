@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
@@ -8,11 +10,15 @@ namespace Bead.Tests;
 /// <see cref="FakeTimeProvider"/> whose readings it steps from due to due, and the timers armed on
 /// it, which it keeps itself — the fake fires each timer due within an advance with its readings at
 /// the advance's end already, and those due at once in no order of its own. An advance settles the
-/// side; takes the earliest timer live due by its end, the first armed among those due at once;
-/// moves both readings to its due; fires it; settles; and so on; then moves the readings to its
-/// end. A callback reads its own due, a periodic timer fires once for each period crossed, and a
-/// timer due now fires at the next advance. The wall reading is the fake's, moved by a step of its
-/// own, which moves it alone, forward or back.
+/// side; takes the earliest timer live due by its end; moves both readings to its due; fires it;
+/// settles; and so on; then moves the readings to its end. Timers due at once fire in the order they
+/// were armed. A callback reads its own due, and a timer it arms counts from there. A periodic timer
+/// fires once for each period crossed, armed again as it is taken, before its callback runs, last
+/// among those armed. A due is in whole milliseconds, a fraction dropped, from 1 to
+/// <see cref="Clocks.LongestTimer"/>, so an advance always ends; a period is as many, or none for a
+/// timer that fires once. It refuses a timer for less or for more, and an advance within another,
+/// as Bead arms none. The wall reading is the fake's, moved by a step of its own, which moves it
+/// alone, forward or back.
 /// </summary>
 internal sealed class SteppingClock : TimeProvider
 {
@@ -20,6 +26,9 @@ internal sealed class SteppingClock : TimeProvider
 
     // how often a wait for a timer armed looks again, on the real clock
     private static readonly TimeSpan Polling = TimeSpan.FromMilliseconds(5);
+
+    // the shortest a timer waits, and the shortest period it repeats by
+    private static readonly TimeSpan Millisecond = TimeSpan.FromMilliseconds(1);
 
     // its readings, which an advance alone moves
     private readonly FakeTimeProvider _readings;
@@ -33,6 +42,9 @@ internal sealed class SteppingClock : TimeProvider
 
     // how far the wall reading stands from the fake's
     private TimeSpan _wall;
+
+    // an advance under way, which a second one would move back
+    private bool _isAdvancing;
 
     /// <summary>A clock whose wall reading starts at <paramref name="wallClock"/>.</summary>
     public SteppingClock(DateTimeOffset wallClock)
@@ -76,7 +88,10 @@ internal sealed class SteppingClock : TimeProvider
     /// <inheritdoc/>
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
-        var timer = new SteppedTimer(this, (callback, state));
+        ArgumentNullException.ThrowIfNull(callback);
+
+        // its callback runs in the context it was armed in, as the system's timers run theirs
+        var timer = new SteppedTimer(this, (callback, state, ExecutionContext.Capture()));
 
         timer.Change(dueTime, period);
 
@@ -117,24 +132,55 @@ internal sealed class SteppingClock : TimeProvider
 
     /// <summary>
     /// Steps both readings <paramref name="by"/>, from due to due: each timer due within fires at
-    /// its own, the side settled before it and after it.
+    /// its own, the side settled before it and after it. A callback that throws stops none of the
+    /// others; the first thrown is thrown again once the advance is done. One advance at a time.
     /// </summary>
     public async Task Advance(TimeSpan by)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(by, TimeSpan.Zero);
+
         DateTimeOffset end;
 
         lock (_gate)
         {
+            if (_isAdvancing)
+            {
+                throw new InvalidOperationException("a test clock advances once at a time: an advance within another would move it back");
+            }
+
+            _isAdvancing = true;
             end = _readings.GetUtcNow() + by;
         }
 
-        await Settle();
+        ExceptionDispatchInfo? thrown = null;
 
-        while (Next(end) is { } timer)
+        try
         {
-            timer.Fire();
             await Settle();
+
+            while (Next(end) is { } timer)
+            {
+                try
+                {
+                    timer.Fire();
+                }
+                catch (Exception reason)
+                {
+                    thrown ??= ExceptionDispatchInfo.Capture(reason);
+                }
+
+                await Settle();
+            }
         }
+        finally
+        {
+            lock (_gate)
+            {
+                _isAdvancing = false;
+            }
+        }
+
+        thrown?.Throw();
     }
 
     /// <summary>Moves the wall reading alone <paramref name="by"/>, forward or back: the monotonic one and the timers stay.</summary>
@@ -147,8 +193,8 @@ internal sealed class SteppingClock : TimeProvider
     }
 
     // the earliest timer live due by the end, the first armed among those due at once, its readings
-    // moved to its due, and taken off, or due a period later; none once none is, the readings moved
-    // to the end
+    // moved to its due, and taken off, or due a period later and last among those armed; none once
+    // none is, the readings moved to the end
     private SteppedTimer? Next(DateTimeOffset end)
     {
         lock (_gate)
@@ -170,13 +216,12 @@ internal sealed class SteppingClock : TimeProvider
                 return null;
             }
 
+            _live.Remove(next);
+
             if (next.Period > TimeSpan.Zero)
             {
                 next.Due += next.Period;
-            }
-            else
-            {
-                _live.Remove(next);
+                _live.Add(next);
             }
 
             return next;
@@ -184,14 +229,22 @@ internal sealed class SteppingClock : TimeProvider
     }
 
     // arms a timer anew, last among those armed, or disarms it for a due that is never; false once
-    // it was disposed
+    // it was disposed. Its arguments are checked before it is touched, as given, against what Bead
+    // arms on every side (0011): a due from a millisecond to the longest timer, and a period as
+    // long, or none; then each is held in whole milliseconds, a fraction dropped
     private bool Arm(SteppedTimer timer, (TimeSpan Due, TimeSpan Period) arming)
     {
         var (due, period) = arming;
+        var isOnce = period == TimeSpan.Zero || period == Timeout.InfiniteTimeSpan;
 
-        if ((due < TimeSpan.Zero && due != Timeout.InfiniteTimeSpan) || (period < TimeSpan.Zero && period != Timeout.InfiniteTimeSpan))
+        foreach (var (time, isArmed) in new[] { (due, due != Timeout.InfiniteTimeSpan), (period, !isOnce) })
         {
-            throw new ArgumentOutOfRangeException(nameof(arming), $"a timer is due in no negative time, nor repeats every one: {due}, {period}");
+            if (isArmed && !IsHeld(time))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(arming),
+                    string.Create(CultureInfo.InvariantCulture, $"a test clock arms a timer for 1 to {Clocks.LongestTimer.TotalMilliseconds} milliseconds, as Bead does, not {time.TotalMilliseconds}"));
+            }
         }
 
         lock (_gate)
@@ -208,14 +261,27 @@ internal sealed class SteppingClock : TimeProvider
                 return true;
             }
 
-            timer.Due = _readings.GetUtcNow() + due;
-            timer.Period = period == Timeout.InfiniteTimeSpan ? TimeSpan.Zero : period;
+            timer.Due = _readings.GetUtcNow() + WholeOf(due);
+            timer.Period = isOnce ? TimeSpan.Zero : WholeOf(period);
             _live.Add(timer);
 
             return true;
         }
     }
 
+    // a due or a period a timer takes: from a millisecond to the longest timer
+    private static bool IsHeld(TimeSpan time)
+    {
+        return time >= Millisecond && time <= Clocks.LongestTimer;
+    }
+
+    // a time in whole milliseconds, a fraction dropped, as the system's timers read it
+    private static TimeSpan WholeOf(TimeSpan time)
+    {
+        return TimeSpan.FromTicks(time.Ticks - (time.Ticks % TimeSpan.TicksPerMillisecond));
+    }
+
+    // takes a timer off for good: a change after it arms nothing
     private void Drop(SteppedTimer timer)
     {
         lock (_gate)
@@ -227,7 +293,7 @@ internal sealed class SteppingClock : TimeProvider
 
     // a timer armed on it: its due, on the fake's reading, and its period, none for a timer that
     // fires once; touched under its clock's gate
-    private sealed class SteppedTimer(SteppingClock clock, (TimerCallback Callback, object? State) fired) : ITimer
+    private sealed class SteppedTimer(SteppingClock clock, (TimerCallback Callback, object? State, ExecutionContext? Context) fired) : ITimer
     {
         public DateTimeOffset Due { get; set; }
 
@@ -237,7 +303,20 @@ internal sealed class SteppingClock : TimeProvider
 
         public void Fire()
         {
-            fired.Callback(fired.State);
+            if (fired.Context is not { } context)
+            {
+                fired.Callback(fired.State);
+
+                return;
+            }
+
+            ExecutionContext.Run(
+                context,
+                (_) =>
+                {
+                    fired.Callback(fired.State);
+                },
+                null);
         }
 
         public bool Change(TimeSpan dueTime, TimeSpan period)

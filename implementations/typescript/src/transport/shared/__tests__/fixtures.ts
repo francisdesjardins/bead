@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
 import type { AddressInfo } from 'node:net';
 import { WebSocket as WsWebSocket, WebSocketServer, type ServerOptions } from 'ws';
-import type { TimeoutId } from '../clock';
+import { LONGEST_TIMER, type TimeoutId } from '../clock';
 
 /**
  * What the client and server suites share: a loopback host, raw `ws` servers with a clean stop, and
@@ -91,9 +91,25 @@ export interface IArmedTimer {
   handle: TimeoutId;
 }
 
+// a timer's delay or period as Bead arms one: from a millisecond to the longest a timer waits
+const armedDelayOf = (delay: number | undefined): number => {
+  if (delay === undefined || !Number.isFinite(delay) || delay < 1 || delay > LONGEST_TIMER) {
+    throw new Error(
+      `a test clock arms a timer for 1 to ${String(LONGEST_TIMER)} milliseconds, as Bead does, not ${String(delay)}`
+    );
+  }
+
+  return delay;
+};
+
 /**
  * A test's clock: `@sinonjs/fake-timers`' `createClock()`, never installed on the globals, which Bead
- * runs on once given it as `clock`, and which the test advances. Each timer armed on it is kept in
+ * runs on once given it as `clock`, and which the test advances with `tickAsync`, from due to due.
+ * A timer is due in whole milliseconds, a fraction dropped, as `fake-timers` counts it.
+ *
+ * It refuses what Bead never arms, with an `Error` that names it: a timer or a period that is not a
+ * finite number of milliseconds from 1 to {@link LONGEST_TIMER}, and a `tickAsync` while another is
+ * under way, which would move the clock back as the first ends. Each timer armed on it is kept in
  * `armed`, and each handle cleared in `cleared`, for the test to read what Bead means to fire.
  */
 export const createTestClock = (now?: number) => {
@@ -105,21 +121,40 @@ export const createTestClock = (now?: number) => {
     clearTimeout: clear,
     setInterval: every,
     setTimeout: set,
+    tickAsync: tick,
   } = clock;
+  let isAdvancing = false;
 
-  clock.setTimeout = (callback, delay = 0) => {
+  clock.setTimeout = (callback, given) => {
+    const delay = armedDelayOf(given);
     const handle = set(callback, delay);
 
     armed.push({ delay, handle });
 
     return handle;
   };
-  clock.setInterval = (callback, delay = 0) => {
+  clock.setInterval = (callback, given) => {
+    const delay = armedDelayOf(given);
     const handle = every(callback, delay);
 
     armed.push({ delay, handle });
 
     return handle;
+  };
+  clock.tickAsync = async (time) => {
+    if (isAdvancing) {
+      throw new Error(
+        'a test clock advances once at a time: an advance within another would move it back'
+      );
+    }
+
+    isAdvancing = true;
+
+    try {
+      return await tick(time);
+    } finally {
+      isAdvancing = false;
+    }
   };
   // a clear of none, which Bead makes of a timer it never armed, clears nothing to read
   clock.clearTimeout = (handle) => {

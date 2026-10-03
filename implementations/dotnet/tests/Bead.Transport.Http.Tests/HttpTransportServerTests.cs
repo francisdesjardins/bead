@@ -1081,6 +1081,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         {
             ("BodyBytesBudget", new() { BodyBytesBudget = 0 }),
             ("ExchangeTimeout", new() { ExchangeTimeout = TimeSpan.FromMilliseconds(2L << 30) }),
+            ("ExchangeTimeout", new() { ExchangeTimeout = TimeSpan.FromMilliseconds(0.5) }),
             ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.Zero }),
             ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.FromMilliseconds(1.5) }),
             ("MaximumBodyBytes", new() { MaximumBodyBytes = 0 }),
@@ -1088,6 +1089,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             ("MaximumConnectionsPerAddress", new() { MaximumConnectionsPerAddress = 0 }),
             ("MaximumOutboxBytes", new() { MaximumOutboxBytes = 0 }),
             ("MaximumWait", new() { MaximumWait = Timeout.InfiniteTimeSpan }),
+            ("MaximumWait", new() { MaximumWait = TimeSpan.FromMilliseconds(0.5) }),
             ("MaximumWaitingExchanges", new() { MaximumWaitingExchanges = int.MinValue }),
         })
         {
@@ -1098,6 +1100,12 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         }
 
         _ = new HttpTransportServer(new HttpTransportServerOptions { ExchangeTimeout = Timeout.InfiniteTimeSpan, InactivityTimeout = Timeout.InfiniteTimeSpan });
+        _ = new HttpTransportServer(new HttpTransportServerOptions
+        {
+            ExchangeTimeout = TimeSpan.FromMilliseconds(1),
+            InactivityTimeout = TimeSpan.FromMilliseconds(1),
+            MaximumWait = TimeSpan.FromMilliseconds(1),
+        });
         Assert.Equal(TimeSpan.FromMinutes(5), new HttpTransportServerOptions().ExchangeTimeout);
     }
 

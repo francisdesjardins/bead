@@ -56,7 +56,7 @@ public sealed record HttpConnectOptions
 
     /// <summary>
     /// How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds
-    /// unless told, <see cref="Clocks.LongestTimer"/> at most; zero never times out.
+    /// unless told, a millisecond to <see cref="Clocks.LongestTimer"/>; zero never times out.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 }
@@ -189,7 +189,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
-    /// an <see cref="ArgumentOutOfRangeException"/> for a timeout longer than
+    /// an <see cref="ArgumentOutOfRangeException"/> for a timeout under a millisecond or longer than
     /// <see cref="Clocks.LongestTimer"/>, with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed, and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already.
@@ -585,6 +585,12 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 $"a connect's timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, not {options.Timeout.TotalMilliseconds}");
+        }
+
+        // one not above zero never times out; any other is one a timer holds, a millisecond at least
+        if (options.Timeout > TimeSpan.Zero)
+        {
+            Clocks.AssertHeld("a connect's timeout", options.Timeout);
         }
 
         var (token, isAttempt) = call;

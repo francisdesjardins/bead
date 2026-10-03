@@ -2,7 +2,12 @@
 
 // dependencies
 
-import { LONGEST_TIMER, PLATFORM_CLOCK, type TimeoutId } from '../../transport/shared/clock';
+import {
+  assertHeld,
+  LONGEST_TIMER,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from '../../transport/shared/clock';
 import { createPromise } from '../../transport/shared/create-promise';
 import { CancelError, ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import { mergeGauges } from '../../transport/shared/gauges';
@@ -1542,6 +1547,11 @@ export const createRouterCore = <Handle extends string>(
             );
 
             return (reject(refused), undefined);
+          }
+
+          // one not above 0 waits on; any other is one a timer holds, a millisecond at least
+          if (Number.isNaN(timeout) || timeout > 0) {
+            assertHeld("a call's timeout", timeout);
           }
 
           // drawn once the call starts: an aborted signal draws nothing

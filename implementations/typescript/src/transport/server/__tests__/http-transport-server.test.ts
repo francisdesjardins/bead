@@ -724,7 +724,10 @@ test.describe('createHTTPTransportServer', () => {
     for (const [name, value] of [
       ['bodyBytesBudget', 0],
       ['exchangeTimeout', 2 ** 31],
+      ['exchangeTimeout', 0.5],
       ['inactivityTimeout', 0],
+      ['inactivityTimeout', 1.5],
+      ['maximumWait', 0.5],
       ['maximumBodyBytes', 1.5],
       ['maximumConnections', -1],
       ['maximumConnectionsPerAddress', 0],
@@ -743,15 +746,20 @@ test.describe('createHTTPTransportServer', () => {
       ).toThrow(ProgrammerError);
     }
 
-    expect(() => {
-      return createHTTPTransportServer({
-        createServer: (listener) => {
-          return createServer(listener);
-        },
-        exchangeTimeout: Infinity,
-        inactivityTimeout: Infinity,
-      });
-    }).not.toThrow();
+    for (const timers of [
+      { exchangeTimeout: Infinity, inactivityTimeout: Infinity },
+      { exchangeTimeout: 1, inactivityTimeout: 1, maximumWait: 1 },
+    ]) {
+      expect(() => {
+        return createHTTPTransportServer({
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+          ...timers,
+        });
+      }).not.toThrow();
+    }
+
     expect(EXCHANGE_TIMEOUT).toBe(300_000);
   });
 });

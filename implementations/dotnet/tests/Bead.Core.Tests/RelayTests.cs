@@ -614,7 +614,7 @@ public sealed class RelayTests
                 return asked.Options.Timeout;
             }));
 
-        foreach (var timeout in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(-2), TimeSpan.FromMilliseconds(2_147_483_648) })
+        foreach (var timeout in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(-2), TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(2_147_483_648) })
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>
             {
@@ -625,6 +625,17 @@ public sealed class RelayTests
                 return new TestRelay(new RelayOptions { Timeout = timeout });
             });
         }
+
+        Assert.StartsWith("a relay's timeout is a millisecond at least, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return relay.Register(target, new DestinationOptions { Timeout = TimeSpan.FromMilliseconds(0.5) });
+        }).Message, StringComparison.Ordinal);
+
+        // a millisecond is taken
+        relay.Register(target, new DestinationOptions { DestinationId = 10, Timeout = TimeSpan.FromMilliseconds(1) });
+        await Handled(relay.HandlerOf(10), PropsOf(HeaderOf(7, 10)));
+        Assert.Equal(TimeSpan.FromMilliseconds(1), target.Asked[^1].Options.Timeout);
+        _ = new TestRelay(new RelayOptions { Timeout = TimeSpan.FromMilliseconds(1) });
     }
 
     [Fact]

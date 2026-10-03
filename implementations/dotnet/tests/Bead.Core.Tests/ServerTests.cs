@@ -669,13 +669,16 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(subscribers, _transport.Subscribers);
     }
 
-    [Fact]
-    public void Refuses_an_inactivity_timeout_past_the_longest_timer_as_it_is_built_which_leaves_nothing_on_its_transport()
+    // 2³¹ ms, one past what JavaScript's timers hold
+    [Theory]
+    [InlineData(0.5, "a connection's inactivity timeout is a millisecond at least, not 0.5")]
+    [InlineData(2_147_483_648, "a connection's inactivity timeout is 2147483647 milliseconds at most, or infinite for never, not 2147483648")]
+    public void Refuses_an_inactivity_timeout_under_a_millisecond_or_past_the_longest_timer_as_it_is_built_which_leaves_nothing_on_its_transport(double milliseconds, string refusal)
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        Assert.StartsWith(refusal, Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
-            return new Server<string>(_transport, new ServerOptions { ConnectionInactivityTimeout = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) });
-        });
+            return new Server<string>(_transport, new ServerOptions { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(milliseconds) });
+        }).Message, StringComparison.Ordinal);
         Assert.Equal(0, _transport.Subscribers);
     }
 
@@ -692,27 +695,32 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(new ResultHeader { CallId = 1 }, _transport.Read(0).Header);
     }
 
-    [Fact]
-    public async Task Closes_a_connection_silent_for_the_longest_timer_at_its_due()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(int.MaxValue)]
+    public async Task Closes_a_connection_silent_for_a_millisecond_or_the_longest_timer_at_its_due(int milliseconds)
     {
-        Start(Clocks.LongestTimer);
+        var timeout = TimeSpan.FromMilliseconds(milliseconds);
+
+        Start(timeout);
         _transport.Open(Handle);
 
-        await Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
+        await Advance(timeout - TimeSpan.FromMilliseconds(1));
         Assert.Empty(_transport.Closed);
         await Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal([Handle], _transport.Closed);
     }
 
-    [Fact]
-    public void Refuses_a_negative_inactivity_timeout_as_it_is_built_which_leaves_nothing_on_its_transport()
+    // a timeout is above zero, or infinite for never; not -1 ms, which is .NET's infinite timeout
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-2_000)]
+    public void Refuses_an_inactivity_timeout_not_above_zero_as_it_is_built_which_leaves_nothing_on_its_transport(long milliseconds)
     {
-        // C# only: the TypeScript side's timer fires at once for a negative delay, where a .NET timer
-        // throws, which would stop the transport's handlers for the first connection
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        Assert.StartsWith($"a connection's inactivity timeout is above 0, or infinite for never, not {milliseconds}", Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
-            return new Server<string>(_transport, new ServerOptions { ConnectionInactivityTimeout = TimeSpan.FromSeconds(-2) });
-        });
+            return new Server<string>(_transport, new ServerOptions { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(milliseconds) });
+        }).Message, StringComparison.Ordinal);
         Assert.Equal(0, _transport.Subscribers);
     }
 

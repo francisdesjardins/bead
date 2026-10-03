@@ -530,14 +530,26 @@ test.describe('createHTTPTransportClient', () => {
     expect([client.isClosed(), armed]).toEqual([true, []]);
   });
 
-  test('refuses a connect timeout past the longest a timer waits, fetching nothing', async () => {
+  test('refuses a connect timeout under a millisecond or past the longest a timer waits, fetching nothing, and times one of a millisecond', async () => {
+    const clock = createTestClock();
     const fake = createFakeFetch();
-    const client = createHTTPTransportClient({ fetch: fake.fetch, isListening: false });
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
 
-    await expect(client.connect({ host, port: 8_080, timeout: 2 ** 31 })).rejects.toBeInstanceOf(
-      ProgrammerError
-    );
+    for (const timeout of [0.5, 2 ** 31]) {
+      await expect(
+        client.connect({ host, port: 8_080, timeout }),
+        String(timeout)
+      ).rejects.toBeInstanceOf(ProgrammerError);
+    }
+
     expect([fake.calls, client.isClosed()]).toEqual([[], true]);
+
+    const connecting = client.connect({ host, port: 8_080, timeout: 1 });
+
+    clock.tick(1);
+
+    await expect(connecting).rejects.toBeInstanceOf(TimeoutError);
+    expect(client.isClosed()).toBe(true);
   });
 
   test('settles its send on the head of the answer, before its body is in, and hears the answer once it is', async () => {
@@ -1266,7 +1278,7 @@ test.describe('createHTTPTransportClient, listening', () => {
 
   test('refuses a wait, a pause or an inactivity timeout no timer holds', () => {
     for (const option of ['inactivityTimeout', 'pause', 'wait'] as const) {
-      for (const value of [-1, 1.5, 2 ** 31, Number.NaN]) {
+      for (const value of [-1, 0.5, 1.5, 2 ** 31, Number.NaN]) {
         expect(
           () => {
             return createHTTPTransportClient({ [option]: value });
@@ -1277,11 +1289,15 @@ test.describe('createHTTPTransportClient, listening', () => {
     }
 
     expect(() => {
-      return createHTTPTransportClient({ inactivityTimeout: Infinity, pause: 0, wait: 0 });
+      createHTTPTransportClient({ inactivityTimeout: Infinity, pause: 0, wait: 0 });
+      createHTTPTransportClient({ inactivityTimeout: 1, pause: 1, wait: 1 });
     }).not.toThrow();
     expect(() => {
       return createHTTPTransportClient({ wait: Infinity });
     }).toThrow('wait is a whole number from 0 a timer holds, not Infinity');
+    expect(() => {
+      return createHTTPTransportClient({ pause: 0.5 });
+    }).toThrow('pause is a whole number from 0 a timer holds, not 0.5');
   });
 
   test('says nothing of listening, and never listens, when told not to', async () => {

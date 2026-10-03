@@ -3,7 +3,7 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
-import { LONGEST_TIMER } from '../../transport/shared/clock';
+import { assertHeld, LONGEST_TIMER } from '../../transport/shared/clock';
 import { ProgrammerError, reasonMessage, toError } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
@@ -91,7 +91,7 @@ const isConnectionTarget = (target: RelayTarget): target is IConnectionTarget =>
   return 'connectionHandle' in target;
 };
 
-/** Whether `timeout` is one a timer holds, or none at all. */
+/** Whether `timeout` is above 0 and the longest a timer waits at most, or none at all. */
 const isTimeout = (timeout: number): boolean => {
   return (
     timeout === Infinity || (Number.isFinite(timeout) && timeout > 0 && timeout <= LONGEST_TIMER)
@@ -104,6 +104,8 @@ const assertTimeout = (timeout: number): void => {
       `a relay's timeout is above 0 and ${String(LONGEST_TIMER)} milliseconds at most, or none, not ${String(timeout)}`
     );
   }
+
+  assertHeld("a relay's timeout", timeout);
 };
 
 // definition

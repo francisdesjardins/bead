@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Bead;
 
 /// <summary>What a server needs of its transport, beyond its router's needs: closing a connection, and stopping.</summary>
@@ -30,7 +32,7 @@ public sealed record ServerOptions
 
     /// <summary>
     /// How long a connection without a session may stay silent before it is closed; infinite when
-    /// none, unless a facade says otherwise. A negative one, or one longer than
+    /// none, unless a facade says otherwise. One under a millisecond, or one longer than
     /// <see cref="Clocks.LongestTimer"/>, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan? ConnectionInactivityTimeout { get; init; }
@@ -104,20 +106,16 @@ public sealed class Server<TData> : IAsyncDisposable
         Transport = transport;
         _connectionInactivityTimeout = options?.ConnectionInactivityTimeout ?? Timeout.InfiniteTimeSpan;
 
-        // refused here rather than as the first connection opens, where its timer would throw
-        if (_connectionInactivityTimeout < TimeSpan.Zero && _connectionInactivityTimeout != Timeout.InfiniteTimeSpan)
+        // refused here rather than as the first connection opens, where its timer would throw, or
+        // close it at once
+        if (_connectionInactivityTimeout <= TimeSpan.Zero && _connectionInactivityTimeout != Timeout.InfiniteTimeSpan)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
-                $"a connection's inactivity timeout cannot be negative, got {_connectionInactivityTimeout}");
+                string.Create(CultureInfo.InvariantCulture, $"a connection's inactivity timeout is above 0, or infinite for never, not {_connectionInactivityTimeout.TotalMilliseconds}"));
         }
 
-        if (_connectionInactivityTimeout > Clocks.LongestTimer)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(options),
-                $"a connection's inactivity timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, got {_connectionInactivityTimeout.TotalMilliseconds}");
-        }
+        Clocks.AssertHeld("a connection's inactivity timeout", _connectionInactivityTimeout);
 
         _clock = Clocks.Of((options?.Clock, transport.Clock), ("a server", "its transport"));
 

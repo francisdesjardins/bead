@@ -2,7 +2,12 @@
 
 // dependencies
 
-import { type IClock, LONGEST_TIMER, type TimeoutId } from '../../transport/shared/clock';
+import {
+  assertHeld,
+  type IClock,
+  LONGEST_TIMER,
+  type TimeoutId,
+} from '../../transport/shared/clock';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
@@ -88,15 +93,22 @@ export interface IPendingCalls<Handle extends string> {
 // helpers
 
 /**
- * Throws a {@link ProgrammerError} for a reservation past {@link LONGEST_TIMER}, which a timer would
- * end at once; none, or `Infinity`, takes the default.
+ * Throws a {@link ProgrammerError} for a reservation no timer holds: past {@link LONGEST_TIMER},
+ * which a timer would end at once, or under a millisecond, `NaN` among them. None, one not above 0,
+ * or `Infinity`, takes the default.
  */
 export const assertReservation = (timeout: number | undefined): void => {
-  if (timeout !== undefined && Number.isFinite(timeout) && timeout > LONGEST_TIMER) {
+  if (timeout === undefined || timeout <= 0) {
+    return;
+  }
+
+  if (Number.isFinite(timeout) && timeout > LONGEST_TIMER) {
     throw new ProgrammerError(
       `a call id is reserved ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds, not ${String(timeout)}`
     );
   }
+
+  assertHeld("a call id's reservation", timeout);
 };
 
 /** How long a call id stays reserved: its call's timeout, or the default one when it had none. */

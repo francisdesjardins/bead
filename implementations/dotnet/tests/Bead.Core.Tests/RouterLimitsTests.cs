@@ -17,6 +17,7 @@ public sealed class RouterLimitsTests
         { "a chunk past an envelope", RouterLimits.Default with { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_023 } },
         { "a window of less than two chunks", RouterLimits.Default with { WindowBytes = (2 * LimitDefaults.ChunkBytes) - 1 } },
         { "a payload past the budget", RouterLimits.Default with { BufferedBytesBudget = LimitDefaults.MaximumPayloadBytes - 1 } },
+        { "an inactivity under a millisecond", RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(0.5) } },
         { "an inactivity no timer holds", RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(int.MaxValue + 1L) } },
     };
 
@@ -62,8 +63,10 @@ public sealed class RouterLimitsTests
             TransferInactivityTimeout = TimeSpan.FromMilliseconds(int.MaxValue),
             WindowBytes = 128,
         };
+        var shortest = RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(1) };
 
         Assert.Same(edges, edges.Validate());
+        Assert.Same(shortest, shortest.Validate());
     }
 
     [Fact]

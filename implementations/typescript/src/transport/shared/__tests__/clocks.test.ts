@@ -8,7 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import type { IClock } from '../clock';
+import { type IClock, LONGEST_TIMER } from '../clock';
 import { createTestClock } from './fixtures';
 
 // interfaces
@@ -122,4 +122,52 @@ test.describe('the clock cases', () => {
       }
     });
   }
+});
+
+// what Bead never arms fails a test, on the C# side's test clock as on this one
+test.describe('the test clock', () => {
+  test('refuses a timer or a period Bead never arms, under a millisecond or past the ceiling, naming it', () => {
+    const clock = createTestClock();
+
+    for (const delay of [0, 0.5, -1, Number.NaN, Infinity, LONGEST_TIMER + 1]) {
+      for (const arm of [clock.setTimeout, clock.setInterval]) {
+        expect(() => {
+          arm(() => {}, delay);
+        }, String(delay)).toThrow(
+          `a test clock arms a timer for 1 to 2147483647 milliseconds, as Bead does, not ${String(delay)}`
+        );
+      }
+    }
+
+    expect(clock.armed).toEqual([]);
+  });
+
+  test('counts a due in whole milliseconds, a fraction dropped, from 1 to the ceiling', async () => {
+    const clock = createTestClock();
+    const fired: number[] = [];
+
+    clock.setTimeout(() => {
+      fired.push(clock.now);
+    }, 1.9);
+    clock.setTimeout(() => {
+      fired.push(clock.now);
+    }, LONGEST_TIMER);
+    await clock.tickAsync(1);
+    await clock.tickAsync(LONGEST_TIMER - 1);
+
+    expect(fired).toEqual([1, LONGEST_TIMER]);
+  });
+
+  test('refuses an advance within another, and takes one once it ends', async () => {
+    const clock = createTestClock();
+    const advancing = clock.tickAsync(1_000);
+
+    await expect(clock.tickAsync(1)).rejects.toThrow(
+      'a test clock advances once at a time: an advance within another would move it back'
+    );
+    await advancing;
+    await clock.tickAsync(1);
+
+    expect(clock.now).toBe(1_001);
+  });
 });

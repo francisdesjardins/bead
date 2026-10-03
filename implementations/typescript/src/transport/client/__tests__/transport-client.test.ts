@@ -382,14 +382,35 @@ test.describe('createTransportClient #reconnect', () => {
     expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
   });
 
-  test('refuses a delay past the longest a timer waits, ending CLOSED without another attempt', async () => {
-    const { calls, client } = createStubClient({ failures: 2 });
+  test('refuses a delay under a millisecond or past the longest a timer waits, ending CLOSED without another attempt, and waits one of a millisecond', async () => {
+    for (const delay of [0.5, 2 ** 31]) {
+      const { calls, client } = createStubClient({ failures: 2 });
+
+      await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+      await expect(client.reconnect({ delay }), String(delay)).rejects.toBeInstanceOf(
+        ProgrammerError
+      );
+
+      expect(calls).toEqual(['connect:1', 'connect:1']);
+      expect(client.isClosed()).toBe(true);
+    }
+
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 2 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
-    await expect(client.reconnect({ delay: 2 ** 31 })).rejects.toBeInstanceOf(ProgrammerError);
 
-    expect(calls).toEqual(['connect:1', 'connect:1']);
-    expect(client.isClosed()).toBe(true);
+    const reconnecting = client.reconnect({ delay: 1 });
+
+    await expect
+      .poll(() => {
+        return delaysOn(clock);
+      })
+      .toEqual([1]);
+    await clock.tickAsync(1);
+    await reconnecting;
+
+    expect(calls).toEqual(['connect:1', 'connect:1', 'connect:1']);
   });
 
   test('tells "tap" the wait and the attempt that failed, and nothing when the first one succeeds', async () => {

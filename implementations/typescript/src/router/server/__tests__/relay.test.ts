@@ -622,7 +622,7 @@ test.describe('createRelay', () => {
       })
     ).toEqual([5_000, 250, Infinity, 250, 5_000]);
 
-    for (const timeout of [0, -1, 2 ** 31, Number.NaN]) {
+    for (const timeout of [0, -1, 0.5, 2 ** 31, Number.NaN]) {
       expect(() => {
         return relay.register(target, { timeout });
       }, String(timeout)).toThrow(ProgrammerError);
@@ -630,6 +630,19 @@ test.describe('createRelay', () => {
         return createTestRelay({ timeout });
       }, String(timeout)).toThrow(ProgrammerError);
     }
+
+    expect(() => {
+      return relay.register(target, { timeout: 0.5 });
+    }).toThrow("a relay's timeout is a millisecond at least, not 0.5");
+
+    // a millisecond is taken
+    relay.register(target, { destinationId: 10, timeout: 1 });
+    await relay.handlerOf(10)?.(propsOf(headerOf(7, { destinationId: 10 })));
+
+    expect(asked.at(-1)?.options.timeout).toBe(1);
+    expect(() => {
+      return createTestRelay({ timeout: 1 });
+    }).not.toThrow();
   });
 
   test('passes nothing on to a connection of its own that takes no request of the relay’s', async () => {

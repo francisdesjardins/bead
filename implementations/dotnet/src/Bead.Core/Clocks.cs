@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Bead;
 
 /// <summary>
@@ -9,10 +11,41 @@ public static class Clocks
 {
     /// <summary>
     /// The longest a timer of Bead's waits: 2³¹ − 1 ms, as JavaScript's timers hold, kept on this
-    /// side for parity. A timeout longer than it is refused; never is
+    /// side for parity. A timeout longer than it is refused, and one under a millisecond; never is
     /// <see cref="Timeout.InfiniteTimeSpan"/>, which arms nothing.
     /// </summary>
     public static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
+
+    // the shortest a timer of Bead's waits
+    private static readonly TimeSpan ShortestTimer = TimeSpan.FromMilliseconds(1);
+
+    /// <summary>
+    /// Throws an <see cref="ArgumentOutOfRangeException"/>, naming the timeout <paramref name="name"/>,
+    /// unless a timer holds it: past <see cref="LongestTimer"/>, or under a millisecond, which Node
+    /// waits a millisecond and .NET none. <see cref="Timeout.InfiniteTimeSpan"/>, never, arms nothing
+    /// and passes. A place where zero has a meaning of its own takes it before.
+    /// </summary>
+    internal static void AssertHeld(string name, TimeSpan timeout)
+    {
+        if (timeout == Timeout.InfiniteTimeSpan)
+        {
+            return;
+        }
+
+        if (timeout > LongestTimer)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                string.Create(CultureInfo.InvariantCulture, $"{name} is {LongestTimer.TotalMilliseconds} milliseconds at most, or infinite for never, not {timeout.TotalMilliseconds}"));
+        }
+
+        if (timeout < ShortestTimer)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                string.Create(CultureInfo.InvariantCulture, $"{name} is a millisecond at least, not {timeout.TotalMilliseconds}"));
+        }
+    }
 
     /// <summary>
     /// The clock of a layer built on another: the one beneath it, unless it was given one; one given

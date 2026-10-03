@@ -511,6 +511,15 @@ public sealed class HttpServerTests
         Assert.Equal((0, 0), (server.Router.Limits.MaximumTransfers, client.Router.Limits.MaximumTransfers));
     }
 
+    [Fact]
+    public void Refuse_an_inactivity_timeout_of_0_which_its_default_does_not_stand_in_for()
+    {
+        Assert.StartsWith("a connection's inactivity timeout is above 0, or infinite for never, not 0", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { ConnectionInactivityTimeout = TimeSpan.Zero } });
+        }).Message, StringComparison.Ordinal);
+    }
+
     // an HTTP server and its client, connected: taken apart once each layer keeps nothing of the
     // client gone
     private sealed class Connected((HttpServer<string> Server, BeadHttpClient Client) ends, (int Port, List<string> Aborted, INotificationResolver<string> News) made) : IAsyncDisposable

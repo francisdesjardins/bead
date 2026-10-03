@@ -533,7 +533,7 @@ test.describe('createSessionManager', () => {
     });
 
     test('a default that is not a timeout is a programmer error', () => {
-      for (const timeout of [0, -1, Number.NaN]) {
+      for (const timeout of [0, -1, 0.5, Number.NaN]) {
         expect(() => {
           return createSessionManager({ connectionInactivityTimeout: timeout });
         }).toThrow(ProgrammerError);
@@ -661,6 +661,61 @@ test.describe('createSessionManager', () => {
       sessions.resetSessionInactivityTimeout(session, Infinity);
 
       expect(delaysOn(clock)).toEqual([2 ** 31 - 1]);
+    });
+
+    test('a timeout under a millisecond is refused, by a reset, a store, an update and a default, and nothing changes; a millisecond is armed', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
+      const session = sessions.set({ ...sessions.create(first), sessionInactivityTimeout: 1_000 });
+      const under = 0.5;
+
+      for (const refused of [
+        () => {
+          sessions.resetConnectionInactivityTimeout(session, under);
+        },
+        () => {
+          sessions.resetSessionInactivityTimeout(session, 0);
+        },
+        () => {
+          sessions.set({ ...sessions.create(second), connectionInactivityTimeout: under });
+        },
+        () => {
+          sessions.set({ ...sessions.create(second), sessionInactivityTimeout: Number.NaN });
+        },
+        () => {
+          sessions.updateConnectionInactivityTimeout({
+            ...session,
+            connectionInactivityTimeout: under,
+          });
+        },
+        () => {
+          sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: under });
+        },
+        () => {
+          createSessionManager({ connectionInactivityTimeout: under });
+        },
+        () => {
+          createSessionManager({ sessionInactivityTimeout: under });
+        },
+      ]) {
+        expect(refused).toThrow(ProgrammerError);
+      }
+
+      expect(() => {
+        sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: under });
+      }).toThrow('an inactivity timeout is a millisecond at least, not 0.5');
+      // the timer running is left as it was, and nothing was stored
+      expect(delaysOn(clock)).toEqual([1_000]);
+      expect(sessions.has(second)).toBe(false);
+      expect(sessions.get(first)).toMatchObject({
+        connectionInactivityTimeout: Infinity,
+        sessionInactivityTimeout: 1_000,
+      });
+
+      // a millisecond is stored and armed
+      sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 1 });
+
+      expect(delaysOn(clock)).toEqual([1, 1_000]);
     });
 
     test('removing every listener does not unhook the timers', async () => {

@@ -23,7 +23,9 @@ public sealed record TransportReconnectOptions
 {
     /// <summary>
     /// The wait after a failed attempt, before the next: a second each unless told. The first
-    /// attempt goes at once; a wait of zero or less is none.
+    /// attempt goes at once; a wait of zero or less is none, and one a timer does not hold — under a
+    /// millisecond, or past 2³¹ − 1 ms — ends the reconnection with an
+    /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TransportReconnectDelay? Delay { get; init; }
 

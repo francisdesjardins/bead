@@ -38,7 +38,8 @@ export type TimeoutId = number | object;
 
 /**
  * The longest a timer waits, in milliseconds: 2³¹ − 1, JavaScript's, past which `setTimeout` fires
- * at once. Every timeout Bead takes is refused past it; never is `Infinity`, which arms nothing.
+ * at once. Every timeout Bead takes is refused past it, and under a millisecond; never is
+ * `Infinity`, which arms nothing.
  */
 export const LONGEST_TIMER = 2 ** 31 - 1;
 
@@ -73,13 +74,19 @@ export const clockOf = (
 };
 
 /**
- * Throws a {@link ProgrammerError} for a timeout past {@link LONGEST_TIMER}, which a timer would fire
- * at once, naming it `name`; `Infinity`, never, arms nothing and passes.
+ * Throws a {@link ProgrammerError}, naming the timeout `name`, unless a timer holds it: past
+ * {@link LONGEST_TIMER}, a timer would fire at once; under a millisecond, `NaN` among them, Node
+ * waits a millisecond and .NET none. `Infinity`, never, arms nothing and passes. A place where 0 has
+ * a meaning of its own takes it before.
  */
 export const assertHeld = (name: string, timeout: number): void => {
   if (Number.isFinite(timeout) && timeout > LONGEST_TIMER) {
     throw new ProgrammerError(
       `${name} is ${String(LONGEST_TIMER)} milliseconds at most, or Infinity for never, not ${String(timeout)}`
     );
+  }
+
+  if (!(timeout >= 1)) {
+    throw new ProgrammerError(`${name} is a millisecond at least, not ${String(timeout)}`);
   }
 };

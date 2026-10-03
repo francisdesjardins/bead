@@ -31,10 +31,12 @@ test.describe('the clock', () => {
     expect(Date.now).toBe(now);
   });
 
-  test('its ceiling is 2³¹ − 1 milliseconds, past which a timeout is refused, and never is Infinity', () => {
+  test('its ceiling is 2³¹ − 1 milliseconds and its floor a millisecond, beyond which a timeout is refused, and never is Infinity', () => {
     expect(LONGEST_TIMER).toBe(2_147_483_647);
 
     expect(() => {
+      assertHeld('a timeout', 1);
+      assertHeld('a timeout', 1.5);
       assertHeld('a timeout', LONGEST_TIMER);
       assertHeld('a timeout', Infinity);
     }).not.toThrow();
@@ -45,6 +47,14 @@ test.describe('the clock', () => {
         'a timeout is 2147483647 milliseconds at most, or Infinity for never, not 2147483648'
       )
     );
+
+    for (const timeout of [0.5, 0, -1, Number.NaN]) {
+      expect(() => {
+        assertHeld('a timeout', timeout);
+      }).toThrow(
+        new ProgrammerError(`a timeout is a millisecond at least, not ${String(timeout)}`)
+      );
+    }
   });
 
   test('a layer runs on the clock of the one beneath it, unless given one, and refuses one that differs, naming both', () => {

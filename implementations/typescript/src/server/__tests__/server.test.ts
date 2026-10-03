@@ -794,34 +794,61 @@ test.describe('createServer', () => {
     ).toEqual([0, 0, 0]);
   });
 
-  test('a negative inactivity timeout refuses the server, which leaves nothing on its transport', () => {
-    const { emitter, transport } = createScriptedTransport();
+  test('an inactivity timeout not above 0 refuses the server, which leaves nothing on its transport', () => {
+    for (const timeout of [-2_000, 0]) {
+      const { emitter, transport } = createScriptedTransport();
 
-    expect(() => {
-      return createServer({ transport }, { connectionInactivityTimeout: -2_000 });
-    }).toThrow(ProgrammerError);
-    expect(
-      (['close', 'connection', 'message'] as const).map((event) => {
-        return emitter.listenerCount(event);
-      })
-    ).toEqual([0, 0, 0]);
+      expect(() => {
+        return createServer({ transport }, { connectionInactivityTimeout: timeout });
+      }).toThrow(
+        new ProgrammerError(
+          `a connection's inactivity timeout is above 0, or Infinity for never, not ${String(timeout)}`
+        )
+      );
+      expect(
+        (['close', 'connection', 'message'] as const).map((event) => {
+          return emitter.listenerCount(event);
+        })
+      ).toEqual([0, 0, 0]);
+    }
   });
 
-  test('an inactivity timeout past the longest a timer waits refuses the server, which leaves nothing on its transport', () => {
+  test('an inactivity timeout under a millisecond or past the longest a timer waits refuses the server, which leaves nothing on its transport; one of a millisecond closes at its due', async () => {
     const { emitter, transport } = createScriptedTransport();
 
-    expect(() => {
-      return createServer({ transport }, { connectionInactivityTimeout: 2 ** 31 });
-    }).toThrow(
-      new ProgrammerError(
-        "a connection's inactivity timeout is 2147483647 milliseconds at most, or Infinity for never, not 2147483648"
-      )
-    );
+    for (const [timeout, refusal] of [
+      [
+        2 ** 31,
+        "a connection's inactivity timeout is 2147483647 milliseconds at most, or Infinity for never, not 2147483648",
+      ],
+      [0.5, "a connection's inactivity timeout is a millisecond at least, not 0.5"],
+    ] as const) {
+      expect(() => {
+        return createServer({ transport }, { connectionInactivityTimeout: timeout });
+      }).toThrow(new ProgrammerError(refusal));
+    }
+
     expect(
       (['close', 'connection', 'message'] as const).map((event) => {
         return emitter.listenerCount(event);
       })
     ).toEqual([0, 0, 0]);
+
+    const clock = createTestClock();
+    const silent = createScriptedTransport();
+
+    await using _server = createServer(
+      { transport: silent.transport },
+      { clock, connectionInactivityTimeout: 1 }
+    );
+
+    silent.open(first);
+
+    expect(delaysArmed(clock)).toEqual([1]);
+
+    clock.tick(1);
+
+    expect(silent.closed).toEqual([first]);
   });
 
   test("runs every layer on its transport's clock: the sessions are built with it, and a layer on another is refused, leaving nothing on its transport", async () => {

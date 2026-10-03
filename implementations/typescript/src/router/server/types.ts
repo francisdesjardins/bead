@@ -231,8 +231,8 @@ export interface ISessionManager<Data> {
   removeAllListeners(event?: SESSION_MANAGER_EVENTS): this;
   /**
    * Restarts the connection timer of a stored session: `connectionInactivityTimeoutReached` in
-   * `timeout` milliseconds. `Infinity` only stops it; past {@link LONGEST_TIMER}, it is a
-   * {@link ProgrammerError}, and the timer is left as it was.
+   * `timeout` milliseconds. `Infinity` only stops it; under a millisecond or past
+   * {@link LONGEST_TIMER}, it is a {@link ProgrammerError}, and the timer is left as it was.
    */
   resetConnectionInactivityTimeout(session: ISession<Data>, timeout: number): void;
   /** As {@link ISessionManager.resetConnectionInactivityTimeout}, for the session timer. */
@@ -241,15 +241,17 @@ export interface ISessionManager<Data> {
    * Stores a session, drawing its token when it has none; emits `created`, or `updated` when it
    * replaces a different one. A new session's timers start over, and a timeout that changed
    * restarts its timer; a timeout of `0` is the manager's default, as for the `update*` methods.
-   * Throws a {@link ProgrammerError} for a negative timeout or one past {@link LONGEST_TIMER}, or a
-   * token that is not one or that another connection holds — before anything is stored.
+   * Throws a {@link ProgrammerError} for a timeout negative, under a millisecond, past
+   * {@link LONGEST_TIMER} or not a number, or a token that is not one or that another connection
+   * holds — before anything is stored.
    */
   set(session: ISession<Data>): ISession<Data>;
   /**
    * Stores `session.connectionInactivityTimeout` — the manager's default when `0`, a
-   * {@link ProgrammerError} when negative or past {@link LONGEST_TIMER}. When it changed, restarts
-   * the timer with it and emits `connectionInactivityTimeoutChanged`; the same timeout restarts
-   * nothing, since activity is what restarts a timer. `undefined` when the connection has no session.
+   * {@link ProgrammerError} when negative, under a millisecond, past {@link LONGEST_TIMER} or not a
+   * number. When it changed, restarts the timer with it and emits
+   * `connectionInactivityTimeoutChanged`; the same timeout restarts nothing, since activity is what
+   * restarts a timer. `undefined` when the connection has no session.
    */
   updateConnectionInactivityTimeout(session: ISession<Data>): ISession<Data> | undefined;
   /** Stores a copy of `session.data`; emits `dataChanged` when it is not similar to the last. */
@@ -282,7 +284,7 @@ export interface ISessionManagerOptions {
   /** The clock its timers run on, and its activity is read on; the platform's when not given. */
   clock?: IClock | undefined;
   /**
-   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. Positive, up to
+   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. A millisecond to
    * {@link LONGEST_TIMER}, or `Infinity` for never: anything else is a {@link ProgrammerError}.
    */
   connectionInactivityTimeout?: number | undefined;
@@ -424,7 +426,7 @@ export interface IRouterServer<
    * Sends a request to the connection its options name, on an even call id, and resolves with its
    * result. Rejects with a {@link ProgrammerError} when none is named, for a notification it
    * `subscribes`, which a server never holds, for a procedure's payload limit that is not a whole
-   * number above 0, or a timeout longer than a timer holds; a {@link DisconnectError} when that
+   * number above 0, or a timeout no timer holds; a {@link DisconnectError} when that
    * connection is not open, closes first, or the router was disposed; a {@link FailureError} for a
    * failure answered, a payload too large or every call id in use; a {@link TimeoutError}, a
    * {@link CancelError}, or what the transport's `send` throws.

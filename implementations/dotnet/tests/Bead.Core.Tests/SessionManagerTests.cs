@@ -590,8 +590,9 @@ public sealed class SessionManagerTests
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
+    [InlineData(0.5)]
     [InlineData(2_147_483_648)]
-    public void A_default_that_is_not_a_timeout_is_refused(long milliseconds)
+    public void A_default_that_is_not_a_timeout_is_refused(double milliseconds)
     {
         var timeout = TimeSpan.FromMilliseconds(milliseconds);
 
@@ -712,6 +713,53 @@ public sealed class SessionManagerTests
         sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = Clocks.LongestTimer });
         time.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
         Assert.Equal(0, reached);
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal(1, reached);
+    }
+
+    // a session manager has no reset of its own on this side: a store, an update and a default
+    [Fact]
+    public void A_timeout_under_a_millisecond_is_refused_by_a_store_an_update_and_a_default_and_nothing_changes_a_millisecond_is_armed()
+    {
+        var time = new FakeTimeProvider();
+
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
+
+        var reached = 0;
+
+        sessions.ConnectionInactivityTimeoutReached += (_) =>
+        {
+            reached += 1;
+        };
+
+        var session = sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromSeconds(1) });
+        var under = TimeSpan.FromMilliseconds(0.5);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return sessions.Set(sessions.Create(Other) with { ConnectionInactivityTimeout = under });
+        });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = under });
+        });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new SessionManager<string>(new SessionManagerOptions { ConnectionInactivityTimeout = under });
+        });
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new SessionManager<string>(new SessionManagerOptions { SessionInactivityTimeout = under });
+        });
+        Assert.StartsWith("an inactivity timeout is a millisecond at least, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = under });
+        }).Message, StringComparison.Ordinal);
+        Assert.False(sessions.Has(Other));
+        Assert.Equal(session, sessions.Get(Handle));
+
+        // a millisecond is stored and armed
+        sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(1) });
         time.Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal(1, reached);
     }

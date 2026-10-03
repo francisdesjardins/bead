@@ -520,6 +520,12 @@ public sealed class RouterCore : IDisposable
                 $"a call's timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, not {options.Timeout.TotalMilliseconds}");
         }
 
+        // one not above zero waits on; any other is one a timer holds, a millisecond at least
+        if (options.Timeout > TimeSpan.Zero)
+        {
+            Clocks.AssertHeld("a call's timeout", options.Timeout);
+        }
+
         // drawn once the call starts: a cancelled token draws nothing
         token.ThrowIfCancellationRequested();
 
@@ -1696,8 +1702,9 @@ public sealed class RouterCore : IDisposable
     /// Cancels a call this side opened: one still waiting throws an
     /// <see cref="OperationCanceledException"/>, the peer is sent a cancel, and the call id is
     /// reserved for <paramref name="timeout"/> — the call's own when it is waiting and none is given.
-    /// A call id reserved already, or a router disposed, sends nothing. A timeout longer than
-    /// <see cref="Clocks.LongestTimer"/> is an <see cref="ArgumentOutOfRangeException"/>.
+    /// A call id reserved already, or a router disposed, sends nothing. A timeout above zero that no
+    /// timer holds — under a millisecond, or longer than <see cref="Clocks.LongestTimer"/> — is an
+    /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public void Cancel(CallAddress call, TimeSpan? timeout = null)
     {
@@ -1719,8 +1726,8 @@ public sealed class RouterCore : IDisposable
     /// <summary>
     /// Reserves this side's call id on a connection for <paramref name="timeout"/>, or for the
     /// default time for none, or one not above zero: draws skip it, and what comes late on it is
-    /// dropped in silence. Reserved twice, the later end stands. A timeout longer than
-    /// <see cref="Clocks.LongestTimer"/> is an <see cref="ArgumentOutOfRangeException"/>.
+    /// dropped in silence. Reserved twice, the later end stands. A timeout above zero that no timer
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>, as for <see cref="Cancel"/>.
     /// </summary>
     public void Reserve(CallAddress call, TimeSpan? timeout = null)
     {

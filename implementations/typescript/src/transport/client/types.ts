@@ -20,7 +20,11 @@ export interface ITransportClientConnectOptions {
    * before the transport is reached.
    */
   signal?: AbortSignal | undefined;
-  /** Milliseconds before `connect` rejects with a {@link TimeoutError}; `0` never times out. */
+  /**
+   * Milliseconds before `connect` rejects with a {@link TimeoutError}; `0` never times out. One a
+   * timer does not hold — under a millisecond, or past 2³¹ − 1 — rejects with a
+   * {@link ProgrammerError}.
+   */
   timeout?: number | undefined;
 }
 
@@ -51,7 +55,9 @@ export interface ITransportClientOptions {
 export interface ITransportClientReconnectOptions {
   /**
    * Milliseconds to wait after a failed attempt before the next one, or a function of the previous
-   * wait and the number of the attempt that failed. The first attempt goes at once.
+   * wait and the number of the attempt that failed. The first attempt goes at once; one of 0 or less
+   * waits none, and one a timer does not hold — under a millisecond, or past 2³¹ − 1 — rejects with
+   * a {@link ProgrammerError}.
    */
   delay?: TransportClientReconnectDelayOrDelayResolver | undefined;
   /** Attempts before giving up with a {@link ReconnectError}; there is always at least one. */

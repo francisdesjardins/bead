@@ -533,4 +533,17 @@ test.describe('an HTTP server and client', () => {
       return createHTTPClient({ limits: { maximumTransfers: 2 } });
     }).toThrow(ProgrammerError);
   });
+
+  test('refuse an inactivity timeout of 0, which its default does not stand in for', () => {
+    expect(() => {
+      return createHTTPServer({
+        connectionInactivityTimeout: 0,
+        transport: {
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+        },
+      });
+    }).toThrow("a connection's inactivity timeout is above 0, or Infinity for never, not 0");
+  });
 });

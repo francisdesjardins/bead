@@ -2187,7 +2187,7 @@ test.describe('createRouterCore', () => {
       expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([true, false]);
     });
 
-    test('refuse to reserve a call id, or to cancel a call, for longer than a timer holds, before anything is done', async () => {
+    test('refuse to reserve a call id, or to cancel a call, for longer than a timer holds or under a millisecond, before anything is done', async () => {
       const { port, sent } = createPort();
       const clock = createTestClock();
       using core = createRouterCore(port, { clock });
@@ -2196,25 +2196,39 @@ test.describe('createRouterCore', () => {
         options,
         procedure: echo,
       });
-      const refusal = new ProgrammerError(
-        'a call id is reserved 2147483647 milliseconds at most, as a timer holds, not 2147483648'
-      );
 
       await sleep(0);
 
-      expect(() => {
-        core.reserve({ callId: 4, connectionHandle: 'a', timeout: 2 ** 31 });
-      }).toThrow(refusal);
-      expect(() => {
-        core.cancel({ callId: 2, connectionHandle: 'a', timeout: 2 ** 31 });
-      }).toThrow(refusal);
+      for (const [timeout, refusal] of [
+        [
+          2 ** 31,
+          'a call id is reserved 2147483647 milliseconds at most, as a timer holds, not 2147483648',
+        ],
+        [0.5, "a call id's reservation is a millisecond at least, not 0.5"],
+        [Number.NaN, "a call id's reservation is a millisecond at least, not NaN"],
+      ] as const) {
+        expect(() => {
+          core.reserve({ callId: 4, connectionHandle: 'a', timeout });
+        }).toThrow(new ProgrammerError(refusal));
+        expect(() => {
+          core.cancel({ callId: 2, connectionHandle: 'a', timeout });
+        }).toThrow(new ProgrammerError(refusal));
+      }
+
       // the call still waits, and nothing went out but its request
       expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([false, false]);
       expect(answersOf(sent)).toEqual([['a', EnvelopeKind.REQUEST, 2]]);
 
+      // a millisecond is taken
+      core.reserve({ callId: 4, connectionHandle: 'a', timeout: 1 });
       core.cancel({ callId: 2, connectionHandle: 'a' });
 
       await expect(waiting).rejects.toBeInstanceOf(CancelError);
+      expect(core.isReserved(4, 'a')).toBe(true);
+
+      await clock.tickAsync(1);
+
+      expect(core.isReserved(4, 'a')).toBe(false);
     });
 
     test('reserve a call id with a timer that keeps no process alive: nothing waits on it', () => {
@@ -2588,17 +2602,24 @@ test.describe('createRouterCore', () => {
       }
 
       expect(await ask(echo, 2 ** 31)).toBeInstanceOf(ProgrammerError);
+
+      for (const timeout of [0.5, Number.NaN]) {
+        expect(await ask(echo, timeout), String(timeout)).toEqual(
+          new ProgrammerError(`a call's timeout is a millisecond at least, not ${String(timeout)}`)
+        );
+      }
+
       expect(drawn).toEqual([]);
       expect(sent).toEqual([]);
 
-      // at their edges, they are taken: a limit of 1, the longest timeout, and none at all
+      // at their edges, they are taken: a limit of 1, the shortest and the longest timeouts, and none
       core.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 1 }));
 
-      for (const timeout of [2 ** 31 - 1, Number.POSITIVE_INFINITY]) {
+      for (const timeout of [1, 2 ** 31 - 1, Number.POSITIVE_INFINITY]) {
         void ask(echo, timeout);
       }
 
-      expect(drawn).toEqual([2, 4]);
+      expect(drawn).toEqual([2, 4, 6]);
     });
 
     test('take the defaults where they say nothing, and let the transfers and the detail be none', () => {
@@ -2616,6 +2637,10 @@ test.describe('createRouterCore', () => {
 
       for (const [limits, named] of [
         [{ chunkBytes: 1_024.5 }, /^chunkBytes is a whole number above 0/],
+        [
+          { transferInactivityTimeout: 0.5 },
+          /^transferInactivityTimeout is a whole number above 0/,
+        ],
         [{ windowBytes: 0 }, /^windowBytes is a whole number above 0/],
         [{ maximumPayloadBytes: Number.NaN }, /^maximumPayloadBytes is a whole number above 0/],
         [{ maximumTransfers: -1 }, /^maximumTransfers is a whole number, not -1/],
@@ -2643,7 +2668,7 @@ test.describe('createRouterCore', () => {
         }, JSON.stringify(limits)).toThrow(rule);
       }
 
-      // the edges hold
+      // the edges hold, a transfer's inactivity of a millisecond among them
       expect(() => {
         using _core = createRouterCore(port, {
           limits: {
@@ -2654,6 +2679,7 @@ test.describe('createRouterCore', () => {
             windowBytes: 128,
           },
         });
+        using _shortest = createRouterCore(port, { limits: { transferInactivityTimeout: 1 } });
       }).not.toThrow();
     });
 

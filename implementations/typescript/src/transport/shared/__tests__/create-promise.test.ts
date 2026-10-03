@@ -106,15 +106,36 @@ test.describe('createPromise', () => {
     expect(ran).toBe(true);
   });
 
-  test('treats a delay that is not a number as none, in the timeout too', async () => {
-    const pending = createPromise(
-      () => {
-        /* never settles */
-      },
-      { delay: Number.NaN, timeout: 30 }
-    );
+  test('refuses a delay or a timeout under a millisecond, or not a number, never running the executor, and arms one of a millisecond', async () => {
+    const clock = createTestClock();
+    let ran = false;
+    const run = () => {
+      ran = true;
+    };
 
-    await expect(pending).rejects.toHaveProperty('timeout', 30);
+    for (const [name, value] of [
+      ['delay', 0.5],
+      ['delay', Number.NaN],
+      ['timeout', 0.5],
+      ['timeout', Number.NaN],
+    ] as const) {
+      await expect(createPromise(run, { clock, [name]: value })).rejects.toThrow(
+        new ProgrammerError(`a ${name} is a millisecond at least, not ${String(value)}`)
+      );
+    }
+
+    expect([ran, clock.armed]).toEqual([false, []]);
+
+    // a millisecond is armed, and 0 or less is none
+    void createPromise(run, { clock, delay: 1, timeout: 1 });
+    void createPromise(run, { clock, delay: -1, timeout: 0 });
+
+    expect([
+      ran,
+      clock.armed.map(({ delay }) => {
+        return delay;
+      }),
+    ]).toEqual([true, [2, 1]]);
   });
 
   test('rejects with a TimeoutError that names its timeout', async () => {

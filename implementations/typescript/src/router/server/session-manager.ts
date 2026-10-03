@@ -77,7 +77,7 @@ export const DEFAULTS = Object.freeze({
 // helpers
 
 /**
- * A default the manager falls back on is a timeout itself: positive, up to the longest a timer
+ * A default the manager falls back on is a timeout itself: a millisecond to the longest a timer
  * waits, or `Infinity` for never. Anything else would let `0` through as a timer that fires at once.
  */
 const assertDefaultTimeout = (name: string, timeout: number): void => {
@@ -91,18 +91,22 @@ const assertDefaultTimeout = (name: string, timeout: number): void => {
 };
 
 /**
- * An inactivity timeout as the manager stores it: `0` or `NaN` takes `fallback`. A negative one, or
- * one past the longest a timer waits, is a {@link ProgrammerError}, since a timer would fire it at
- * once.
+ * An inactivity timeout as the manager stores it: `0` takes `fallback`. A negative one, `NaN`, or one
+ * no timer holds — under a millisecond, or past the longest a timer waits — is a
+ * {@link ProgrammerError}.
  */
 const resolveTimeout = (timeout: number, fallback: number): number => {
   if (timeout < 0) {
     throw new ProgrammerError(`an inactivity timeout cannot be negative, got ${String(timeout)}`);
   }
 
+  if (timeout === 0) {
+    return fallback;
+  }
+
   assertHeld('an inactivity timeout', timeout);
 
-  return timeout || fallback;
+  return timeout;
 };
 
 /** Each connection's two timers, on `clock`, in a record made on the first one set. */

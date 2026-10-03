@@ -85,6 +85,7 @@ public sealed record RouterLimits
             ("a window holds two chunks at least, so a sender waits for no credit it is owed",
                 (long)WindowBytes >= 2L * ChunkBytes),
             ("a payload fits in the budget of the transfers received", MaximumPayloadBytes <= BufferedBytesBudget),
+            ("a transfer's inactivity is a millisecond at least", TransferInactivityTimeout >= TimeSpan.FromMilliseconds(1)),
             ($"a transfer's inactivity is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds",
                 TransferInactivityTimeout <= Clocks.LongestTimer),
         ];

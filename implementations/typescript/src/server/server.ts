@@ -119,10 +119,11 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     { below: 'its transport', layer: 'a server' }
   );
 
-  // refused as it is built, as the session manager refuses its own, rather than timing out at once
-  if (connectionInactivityTimeout < 0) {
+  // refused as it is built, as a transfer's inactivity is, rather than a timer armed for no time,
+  // which the platforms do not wait alike
+  if (!(connectionInactivityTimeout > 0)) {
     throw new ProgrammerError(
-      `a connection's inactivity timeout cannot be negative, got ${String(connectionInactivityTimeout)}`
+      `a connection's inactivity timeout is above 0, or Infinity for never, not ${String(connectionInactivityTimeout)}`
     );
   }
 

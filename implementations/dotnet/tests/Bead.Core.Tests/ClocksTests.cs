@@ -7,7 +7,8 @@ namespace Bead.Tests;
 /// Bead's clock cases, <c>spec/clocks.json</c>, played on the clock the conformance files'
 /// harnesses give the side under test: the timers a case arms, which fire as it advances the clock,
 /// each with the reading its callback read, and the clock's readings. The TypeScript side's test
-/// clock plays the same file.
+/// clock plays the same file. Then what a timer of Bead's holds, from a millisecond to the ceiling,
+/// and the test clock's refusals of what Bead never arms.
 /// </summary>
 public sealed class ClocksTests
 {
@@ -141,5 +142,121 @@ public sealed class ClocksTests
                 Assert.Equal(wanted, read);
             }
         }
+    }
+
+    // the clock
+
+    // -1 ms is .NET's infinite, so -2 ms stands for a negative; a TimeSpan holds no NaN
+    [Fact]
+    public void Its_ceiling_is_2_31_minus_1_milliseconds_and_its_floor_a_millisecond_beyond_which_a_timeout_is_refused_and_never_is_infinite()
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(2_147_483_647), Clocks.LongestTimer);
+
+        foreach (var timeout in new[] { TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1.5), Clocks.LongestTimer, Timeout.InfiniteTimeSpan })
+        {
+            Clocks.AssertHeld("a timeout", timeout);
+        }
+
+        Assert.StartsWith("a timeout is 2147483647 milliseconds at most, or infinite for never, not 2147483648", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            Clocks.AssertHeld("a timeout", Clocks.LongestTimer + TimeSpan.FromMilliseconds(1));
+        }).Message, StringComparison.Ordinal);
+
+        foreach (var (timeout, written) in new[] { (TimeSpan.FromMilliseconds(0.5), "0.5"), (TimeSpan.Zero, "0"), (TimeSpan.FromMilliseconds(-2), "-2") })
+        {
+            Assert.StartsWith($"a timeout is a millisecond at least, not {written}", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                Clocks.AssertHeld("a timeout", timeout);
+            }).Message, StringComparison.Ordinal);
+        }
+    }
+
+    // the test clock: what Bead never arms fails a test, on the TypeScript side's test clock as on
+    // this one
+
+    // -1 ms is a timer disarmed, and a period of 0 one that fires once, as .NET's timers read them;
+    // a TimeSpan holds no NaN
+    [Fact]
+    public void Refuses_a_timer_or_a_period_Bead_never_arms_under_a_millisecond_or_past_the_ceiling_naming_it()
+    {
+        var clock = new SteppingClock(WallClock);
+        var millisecond = TimeSpan.FromMilliseconds(1);
+
+        foreach (var time in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(-2), Clocks.LongestTimer + millisecond })
+        {
+            var arms = time == TimeSpan.Zero
+                ? new[] { (time, Timeout.InfiniteTimeSpan) }
+                : new[] { (time, Timeout.InfiniteTimeSpan), (millisecond, time) };
+
+            foreach (var (due, period) in arms)
+            {
+                Assert.StartsWith(
+                    string.Create(CultureInfo.InvariantCulture, $"a test clock arms a timer for 1 to 2147483647 milliseconds, as Bead does, not {time.TotalMilliseconds}"),
+                    Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return clock.CreateTimer(
+                            (_) =>
+                            {
+                            },
+                            null,
+                            due,
+                            period);
+                    }).Message,
+                    StringComparison.Ordinal);
+            }
+        }
+
+        Assert.Empty(clock.Dues());
+    }
+
+    [Fact]
+    public async Task Counts_a_due_in_whole_milliseconds_a_fraction_dropped_from_1_to_the_ceiling()
+    {
+        var clock = new SteppingClock(WallClock);
+        var started = clock.GetTimestamp();
+        var fired = new List<TimeSpan>();
+
+        foreach (var due in new[] { TimeSpan.FromMilliseconds(1.9), Clocks.LongestTimer })
+        {
+            clock.CreateTimer(
+                (_) =>
+                {
+                    fired.Add(clock.GetElapsedTime(started));
+                },
+                null,
+                due,
+                Timeout.InfiniteTimeSpan);
+        }
+
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+        await clock.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
+
+        Assert.Equal([TimeSpan.FromMilliseconds(1), Clocks.LongestTimer], fired);
+    }
+
+    [Fact]
+    public async Task Refuses_an_advance_within_another_and_takes_one_once_it_ends()
+    {
+        // the first advance stays under way until its side is let settle
+        var settling = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new SteppingClock(WallClock)
+        {
+            Settle = () =>
+            {
+                return settling.Task;
+            },
+        };
+        var started = clock.GetTimestamp();
+        var advancing = clock.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("a test clock advances once at a time: an advance within another would move it back", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return clock.Advance(TimeSpan.FromMilliseconds(1));
+        })).Message);
+        settling.SetResult();
+        await advancing;
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+
+        Assert.Equal(TimeSpan.FromMilliseconds(1_001), clock.GetElapsedTime(started));
     }
 }

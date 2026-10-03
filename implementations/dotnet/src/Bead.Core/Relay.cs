@@ -14,8 +14,8 @@ public sealed record RelayOptions
 
     /// <summary>
     /// How long leg B waits for its answer at most, whatever a destination says; without end by
-    /// default: the requester's own timeout governs, end to end, by the cancel it sends. Above 0, and
-    /// 2³¹ − 1 ms at most, or infinite; another is an <see cref="ArgumentOutOfRangeException"/>.
+    /// default: the requester's own timeout governs, end to end, by the cancel it sends. A
+    /// millisecond to 2³¹ − 1 ms, or infinite; another is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan Timeout { get; init; } = System.Threading.Timeout.InfiniteTimeSpan;
 
@@ -214,8 +214,8 @@ internal sealed class Relay
     }
 
     /// <summary>
-    /// Registers a target as a destination: given, or drawn. A timeout not above 0, or past 2³¹ − 1
-    /// ms, is an <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered
+    /// Registers a target as a destination: given, or drawn. A timeout under a millisecond, or past
+    /// 2³¹ − 1 ms, is an <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered
     /// already, an <see cref="ArgumentException"/>.
     /// </summary>
     public DestinationRegistration Register(object target, DestinationOptions? options)
@@ -263,6 +263,8 @@ internal sealed class Relay
                 nameof(timeout),
                 $"a relay's timeout is above 0 and {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, or infinite, not {timeout.TotalMilliseconds}");
         }
+
+        Clocks.AssertHeld("a relay's timeout", timeout);
     }
 
     // the shorter of two timeouts, infinite the longest

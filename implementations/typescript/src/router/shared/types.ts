@@ -341,8 +341,8 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
   signal?: AbortSignal | undefined;
   /**
    * Milliseconds to wait for the answer; 5 s. While the payload, or its result, goes as a transfer,
-   * the transfer's inactivity counts instead, and the timeout counts anew once the payload went. At
-   * most 2³¹ − 1, as a timer holds; `Infinity` waits on.
+   * the transfer's inactivity counts instead, and the timeout counts anew once the payload went. A
+   * millisecond at least and 2³¹ − 1 at most, as a timer holds; `Infinity` waits on.
    */
   timeout?: number | undefined;
 }
@@ -413,7 +413,8 @@ export interface IRouterCore<Handle extends string> {
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
    * waiting and none is given — or, once its result came in part, for as long as the peer keeps the
    * call abandoned, should that be longer. A call id reserved already, or a router disposed, sends
-   * nothing. A timeout past {@link LONGEST_TIMER} is a {@link ProgrammerError}, and nothing is done.
+   * nothing. A timeout above 0 that no timer holds — under a millisecond, or past
+   * {@link LONGEST_TIMER} — or `NaN`, is a {@link ProgrammerError}, and nothing is done.
    */
   cancel(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -483,8 +484,8 @@ export interface IRouterCore<Handle extends string> {
   /**
    * Reserves this side's `callId` on `connectionHandle` for `timeout`, or for the default time when
    * it gives none: the sequence skips it, and what comes late on it is dropped in silence. Reserved
-   * twice, the later end stands. A timeout past {@link LONGEST_TIMER} is a
-   * {@link ProgrammerError}, and nothing is reserved.
+   * twice, the later end stands. A timeout above 0 that no timer holds, or `NaN`, is a
+   * {@link ProgrammerError}, as for {@link IRouterCore.cancel}, and nothing is reserved.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
