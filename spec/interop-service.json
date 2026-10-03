@@ -87,8 +87,8 @@
     {
       "procedureId": 12,
       "procedureName": "login",
-      "request": "{\"name\":s}",
-      "answers": "s, once it opened a new session for its connection, s its data, with no timeout"
+      "request": "{\"name\":s}, with \"sessionTimeout\":t, \"connectionTimeout\":c, or both, in milliseconds",
+      "answers": "s, once it opened a new session for its connection, s its data, its session timeout t and its connection timeout c, each held as section 1.4 holds a duration and without end when not given (section 13.7); a t or c under a millisecond or past 2³¹ − 1, as given, opens no session and fails it, which its server answers with PROCEDURE_FAILED and reports"
     },
     {
       "procedureId": 13,
@@ -108,7 +108,7 @@
       "procedureId": 15,
       "procedureName": "register",
       "request": "{\"destination\":n} or {\"destination\":n,\"timeout\":t}",
-      "answers": "n, once it registered its caller's connection as the destination n, leg B waiting t milliseconds at most for its answer when given; a destination registered already fails it, an application failure: code 8, detail \"that destination is registered already\""
+      "answers": "n, once it registered its caller's connection as the destination n, leg B waiting t milliseconds at most for its answer when given, t held as section 1.4 holds a duration; a t under a millisecond or past 2³¹ − 1, as given, registers nothing and fails it, which its server answers with PROCEDURE_FAILED and reports; a destination registered already fails it, an application failure: code 8, detail \"that destination is registered already\""
     },
     {
       "procedureId": 16,
