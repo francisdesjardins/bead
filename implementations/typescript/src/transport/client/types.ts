@@ -1,5 +1,6 @@
 // dependencies
 
+import type { IClock } from '../shared/clock';
 import type { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constants';
 import type {
   Data,
@@ -38,9 +39,13 @@ export interface ITransportClientDisconnectOptions {
   isQuick?: boolean | undefined;
 }
 
-/** Reserved: the shared half takes no option yet, and each transport extends this with its own. */
+/** What every transport client takes, and each transport extends with its own. */
 export interface ITransportClientOptions {
-  TBD?: undefined;
+  /**
+   * The clock its connects, its waits and its reconnection run on, and the layers built on it with
+   * it; the platform's when not given.
+   */
+  clock?: IClock | undefined;
 }
 
 export interface ITransportClientReconnectOptions {
@@ -65,6 +70,8 @@ export interface ITransportClient<
   Socket extends object = object,
   ConnectOptions extends ITransportClientConnectOptions = ITransportClientAddressOptions,
 > extends IReadyStateMethods {
+  /** The clock it runs on, which a layer built on it runs on too. */
+  readonly clock: IClock;
   /** The current or last connection, possibly closed; `null` before the first and once dropped. */
   socket: Socket | null;
 
@@ -149,6 +156,8 @@ export interface ITransportClientInternal<
 export interface ITransportClientImplementation<
   ConnectOptions extends ITransportClientConnectOptions,
 > {
+  /** The clock it runs on, which the shared half waits on too; the platform's when none. */
+  readonly clock?: IClock | undefined;
   connect(options: ConnectOptions): Promise<void>;
   disconnect(options?: ITransportClientDisconnectOptions): Promise<void>;
   send(data: Data): Promise<void>;

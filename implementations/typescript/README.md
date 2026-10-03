@@ -62,6 +62,17 @@ await client.connect({ host: 'localhost', port });
 await client.send('hello');
 ```
 
+Each end takes its time from a `clock`: the part of the globals Bead calls — `setTimeout`,
+`clearTimeout`, `setInterval`, `clearInterval`, `Date.now` and `performance.now` — in their own
+shape, so the platform's, `globalThis`, is the default, and `@sinonjs/fake-timers`' `createClock()`,
+never installed on the globals, is a test's. A stack has one clock, set where it starts and read
+upward: a router or a server built on a transport runs on the transport's, a server's sessions on
+the server's, a service manager on its router's, and one given that differs is a `ProgrammerError`.
+Each transport, router and session manager exposes the one it runs on as `clock`. What bounds a
+platform's own close stays on the real clock — a ping, the WebSocket server's close handshake, the
+HTTP client's disconnect. A timeout past `LONGEST_TIMER`, 2³¹ − 1 milliseconds, is refused wherever
+one is taken; never is `Infinity`, which arms nothing.
+
 The router's layer sits under `src/router/`. Both sides build on one core, under `shared/`: it
 writes the envelopes that go out and reads those that come in, pairs each result and failure with
 its request by call id, sends a payload too large for one envelope as a transfer and puts one that

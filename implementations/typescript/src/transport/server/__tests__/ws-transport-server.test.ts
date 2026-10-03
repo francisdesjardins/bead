@@ -11,7 +11,13 @@ import type {
 import { createWSTransportClient, type WSTransportClient } from '../../client/ws-transport-client';
 import * as constants from '../../shared/constants';
 import { CancelError, ConnectError } from '../../shared/errors';
-import { allClosed, host, IMPLEMENTATIONS, spyIntervals } from '../../shared/__tests__/fixtures';
+import {
+  allClosed,
+  createTestClock,
+  host,
+  IMPLEMENTATIONS,
+  spyIntervals,
+} from '../../shared/__tests__/fixtures';
 import {
   ProgrammerError,
   type TRANSPORT_SERVER_EVENTS,
@@ -159,7 +165,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       test('delivers text as a string and binary as an ArrayBuffer, stamping the activity', async () => {
         await connectClient(client);
         const [before] = server.clients;
-        expect(before?.lastActivityTimestamp).toBeUndefined();
+        expect(before?.lastActivity).toBeUndefined();
 
         const text = nextServerEvent(server, 'message');
         await client.send('hello');
@@ -171,7 +177,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(data).toBeInstanceOf(ArrayBuffer);
         expect(new TextDecoder().decode(data as ArrayBuffer)).toBe('bytes');
 
-        expect(server.clients[0]?.lastActivityTimestamp).toBeDefined();
+        expect(server.clients[0]?.lastActivity).toBeGreaterThan(0);
       });
     });
 
@@ -560,6 +566,34 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     expect(silent.closeCodes).toEqual([1001]);
     expect(silent.wasTerminated).toBe(true);
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  test('stamps the activity on its clock, and bounds a close on the real one, which the clock given never times', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({
+      clock,
+      closeTimeout: 20,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start();
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const silent = createFakeSocket({ onClose: 'ignore' });
+
+    fake.connect(silent);
+    clock.tick(5);
+    silent.hear('message', Buffer.from('bytes'), true);
+
+    expect(server.clock).toBe(clock);
+    expect(server.clients[0]?.lastActivity).toBe(Date.UTC(2026, 0, 1) + 5);
+
+    // its 20 ms pass on the real clock, the clock given never advanced
+    await server.stop();
+
+    expect(silent.wasTerminated).toBe(true);
+    expect(clock.armed).toEqual([]);
   });
 
   test('drops a connection whose close throws, and still resolves "close" to true', async () => {

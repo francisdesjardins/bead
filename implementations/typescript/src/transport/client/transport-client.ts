@@ -2,6 +2,7 @@
 
 // dependencies
 
+import { type IClock, PLATFORM_CLOCK } from '../shared/clock';
 import { RECONNECT_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
@@ -25,6 +26,8 @@ import type {
   TransportClientEventMap,
 } from './types';
 
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
+export type { IClock, TimeoutId } from '../shared/clock';
 export { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constants';
 export {
   CancelError,
@@ -84,7 +87,7 @@ export type RECONNECT_DEFAULTS = typeof RECONNECT_DEFAULTS;
 
 /** What an omitted transport option resolves to. */
 export const DEFAULTS = (): ITransportClientOptions => {
-  return { TBD: undefined };
+  return { clock: PLATFORM_CLOCK };
 };
 
 /** What an omitted disconnect option resolves to. */
@@ -101,12 +104,15 @@ export const RECONNECT_DEFAULTS = Object.freeze({
 
 // helpers
 
-const sleep = (delay: number, signal?: AbortSignal): Promise<void> => {
+const sleep = (
+  delay: number,
+  { clock, signal }: { clock: IClock; signal: AbortSignal | undefined }
+) => {
   return createPromise(
     (resolve) => {
       resolve();
     },
-    { delay, signal }
+    { clock, delay, signal }
   );
 };
 
@@ -114,13 +120,14 @@ const sleep = (delay: number, signal?: AbortSignal): Promise<void> => {
 
 /**
  * The shared half of every transport client: the events, the ready state around `reconnect` and
- * `[dispose]`, and `reconnect` itself.
+ * `[dispose]`, and `reconnect` itself, which waits between its attempts on the clock its transport
+ * runs on.
  *
- * `define` receives the client being built and returns what only its transport knows — `connect`,
- * `disconnect`, `send` and `[dispose]`. Those are reached through the client, never captured, so
- * `reconnect` calls whatever `client.connect` is at the time, as a subclass override would; a
- * replacement must call the original before its first `await`, which is when `reconnect` lets it
- * past the state guard.
+ * `define` receives the client being built and returns what only its transport knows — its clock,
+ * `connect`, `disconnect`, `send` and `[dispose]`. Those are reached through the client, never
+ * captured, so `reconnect` calls whatever `client.connect` is at the time, as a subclass override
+ * would; a replacement must call the original before its first `await`, which is when `reconnect`
+ * lets it past the state guard.
  *
  * @example
  * const client = createTransportClient((client) => {
@@ -165,6 +172,10 @@ export const createTransportClient = <
     ...createReadyStateMethods(() => {
       return client;
     }),
+
+    get clock() {
+      return implementation.clock ?? PLATFORM_CLOCK;
+    },
 
     connect: (options) => {
       if (!isAttempting && !client.isUninitialized() && !client.isClosed()) {
@@ -294,7 +305,7 @@ export const createTransportClient = <
 
           previousDelay = nextDelay;
 
-          await sleep(nextDelay, signal);
+          await sleep(nextDelay, { clock: client.clock, signal });
         }
 
         if (signal?.aborted) {

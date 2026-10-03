@@ -19,6 +19,7 @@ import * as constants from '../../shared/constants';
 import {
   allClosed,
   closedPort,
+  createTestClock,
   host,
   IMPLEMENTATIONS,
   portOf,
@@ -751,6 +752,28 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     expect(client.isClosed()).toBe(true);
     // the close of a connection that did open, once
     expect(closes).toEqual([[false, false]]);
+  });
+
+  test('times its connect on its clock, and refuses a timeout past the longest a timer waits, opening nothing', async () => {
+    const clock = createTestClock();
+    const { FakeWebSocket, sockets: opened } = createFakeWebSocket();
+    const client = createWSTransportClient({ clock, WebSocket: FakeWebSocket });
+
+    await expect(client.connect({ host: 'h', port: 1, timeout: 2 ** 31 })).rejects.toBeInstanceOf(
+      ProgrammerError
+    );
+    expect([opened, client.isClosed(), client.clock]).toEqual([[], true, clock]);
+
+    const connecting = client.connect({ host: 'h', port: 1, timeout: 250 });
+
+    clock.tick(249);
+
+    expect(client.isConnecting()).toBe(true);
+
+    clock.tick(1);
+
+    await expect(connecting).rejects.toBeInstanceOf(TimeoutError);
+    expect(client.isClosed()).toBe(true);
   });
 
   test('brackets an IPv6 literal host', async () => {

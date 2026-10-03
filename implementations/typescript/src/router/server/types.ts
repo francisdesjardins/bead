@@ -1,12 +1,12 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import type {
   Data,
   EmitterListener,
   IEventIteratorOptions,
   IGauges,
-  ITimestamp,
 } from '../../transport/shared/types';
 import type { IRouterClient } from '../client/types';
 import type {
@@ -172,7 +172,11 @@ export interface ISession<Data> {
   connectionInactivityTimeout: number;
   /** What the router keeps about the session; structured-cloneable, since it is stored as a copy. */
   data: Data | undefined;
-  lastActivityTimestamp: ITimestamp;
+  /**
+   * When the session was last active, in milliseconds since the epoch, as its manager's clock reads
+   * the wall clock.
+   */
+  lastActivity: number;
   /** Milliseconds without activity before `sessionInactivityTimeoutReached`; `Infinity` is never. */
   sessionInactivityTimeout: number;
   /** What the router announces to the connection; `undefined` until `set` draws one. */
@@ -184,6 +188,8 @@ export interface ISession<Data> {
  * timer.
  */
 export interface ISessionManager<Data> {
+  /** The clock its timers run on, and its activity is read on. */
+  readonly clock: IClock;
   /** Each connection's timers. */
   readonly timers: ISessionManagerTimers;
 
@@ -225,7 +231,8 @@ export interface ISessionManager<Data> {
   removeAllListeners(event?: SESSION_MANAGER_EVENTS): this;
   /**
    * Restarts the connection timer of a stored session: `connectionInactivityTimeoutReached` in
-   * `timeout` milliseconds. `Infinity`, or more than `setTimeout` can wait, only stops it.
+   * `timeout` milliseconds. `Infinity` only stops it; past {@link LONGEST_TIMER}, it is a
+   * {@link ProgrammerError}, and the timer is left as it was.
    */
   resetConnectionInactivityTimeout(session: ISession<Data>, timeout: number): void;
   /** As {@link ISessionManager.resetConnectionInactivityTimeout}, for the session timer. */
@@ -234,15 +241,15 @@ export interface ISessionManager<Data> {
    * Stores a session, drawing its token when it has none; emits `created`, or `updated` when it
    * replaces a different one. A new session's timers start over, and a timeout that changed
    * restarts its timer; a timeout of `0` is the manager's default, as for the `update*` methods.
-   * Throws a {@link ProgrammerError} for a negative timeout, or a token that is not one or that
-   * another connection holds — before anything is stored.
+   * Throws a {@link ProgrammerError} for a negative timeout or one past {@link LONGEST_TIMER}, or a
+   * token that is not one or that another connection holds — before anything is stored.
    */
   set(session: ISession<Data>): ISession<Data>;
   /**
    * Stores `session.connectionInactivityTimeout` — the manager's default when `0`, a
-   * {@link ProgrammerError} when negative. When it changed, restarts the timer with it and emits
-   * `connectionInactivityTimeoutChanged`; the same timeout restarts nothing, since activity is what
-   * restarts a timer. `undefined` when the connection has no session.
+   * {@link ProgrammerError} when negative or past {@link LONGEST_TIMER}. When it changed, restarts
+   * the timer with it and emits `connectionInactivityTimeoutChanged`; the same timeout restarts
+   * nothing, since activity is what restarts a timer. `undefined` when the connection has no session.
    */
   updateConnectionInactivityTimeout(session: ISession<Data>): ISession<Data> | undefined;
   /** Stores a copy of `session.data`; emits `dataChanged` when it is not similar to the last. */
@@ -253,15 +260,15 @@ export interface ISessionManager<Data> {
    */
   sessionTokenOf(connectionHandle: TransportServerConnectionHandle): SessionToken | undefined;
   /**
-   * As {@link ISessionManager.updateLastActivityTimestamp}, by connection and without a copy, for
+   * As {@link ISessionManager.updateLastActivity}, by connection and without a copy, for
    * every message; whether the connection has a session.
    */
   touch(connectionHandle: TransportServerConnectionHandle): boolean;
   /**
-   * Stamps activity now and restarts both timers; emits `lastActivityTimestampChanged` when the
-   * stamp moved to a later millisecond.
+   * Stamps activity now and restarts both timers; emits `lastActivityChanged` when the stamp moved
+   * to another millisecond.
    */
-  updateLastActivityTimestamp(session: ISession<Data>): ISession<Data> | undefined;
+  updateLastActivity(session: ISession<Data>): ISession<Data> | undefined;
   /** As {@link ISessionManager.updateConnectionInactivityTimeout}, for the session timeout. */
   updateSessionInactivityTimeout(session: ISession<Data>): ISession<Data> | undefined;
   /**
@@ -272,9 +279,11 @@ export interface ISessionManager<Data> {
 }
 
 export interface ISessionManagerOptions {
+  /** The clock its timers run on, and its activity is read on; the platform's when not given. */
+  clock?: IClock | undefined;
   /**
-   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. Positive, or
-   * `Infinity` for never: anything else is a {@link ProgrammerError}.
+   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. Positive, up to
+   * {@link LONGEST_TIMER}, or `Infinity` for never: anything else is a {@link ProgrammerError}.
    */
   connectionInactivityTimeout?: number | undefined;
   /** As `connectionInactivityTimeout`, for the session timeout; 30 s. */
@@ -319,11 +328,7 @@ export type SessionManagerEventMap<Data = unknown> = {
   created: [session: ISession<Data>];
   dataChanged: [session: ISession<Data>, newValue: Data | undefined, oldValue: Data | undefined];
   deleted: [session: ISession<Data>];
-  lastActivityTimestampChanged: [
-    session: ISession<Data>,
-    newValue: ITimestamp,
-    oldValue: ITimestamp,
-  ];
+  lastActivityChanged: [session: ISession<Data>, newValue: number, oldValue: number];
   sessionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number];
   /** The session as it is when its timer fires. */
   sessionInactivityTimeoutReached: [session: ISession<Data>];
@@ -341,9 +346,6 @@ export type SessionManagerOnInactivityTimeoutCallback<Data = unknown> = EmitterL
 export type SessionManagerOnSessionCallback<Data = unknown> = EmitterListener<
   SessionManagerEventMap<Data>[CREATED_EVENT | DELETED_EVENT | UPDATED_EVENT]
 >;
-
-/** What `setTimeout` returns, here or in a browser. */
-export type TimeoutId = ReturnType<typeof setTimeout>;
 
 // ── Router server ─────────────────────────────────────────────────────────────
 
@@ -466,6 +468,11 @@ export interface IRouterServerDebugInfo {
 /** What a server's router is built with. */
 export interface IRouterServerOptions {
   /**
+   * The clock it runs on: its transport's, which one given must be; the platform's when neither
+   * has one.
+   */
+  clock?: IClock | undefined;
+  /**
    * How much the router reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing.
    * They must hold together, or the router is a {@link ProgrammerError}.
    */
@@ -536,6 +543,8 @@ export interface IRelayOptions {
 
 /** The part of a transport server this router uses — met by this package's. */
 export interface IRouterServerTransportLike {
+  /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
+  readonly clock?: IClock | undefined;
   off(
     event: 'close',
     listener: EmitterListener<

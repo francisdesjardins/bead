@@ -1,6 +1,12 @@
+// dependencies
+
+import type { IClock } from './clock';
+
 // interfaces
 
 export interface ICreatePromiseOptions {
+  /** The clock its timers run on; the platform's when not given. */
+  clock?: IClock | undefined;
   /** Milliseconds to wait before the executor runs. */
   delay?: number | undefined;
   /**
@@ -85,13 +91,6 @@ export interface IWorkerPortLike {
   close(): void;
   postMessage(message: unknown, transfer?: readonly unknown[]): void;
   start(): void;
-}
-
-/** A moment, or a span between two, as milliseconds and as seconds plus microseconds. */
-export interface ITimestamp {
-  ms: number;
-  sec: number;
-  usec: number;
 }
 
 // types

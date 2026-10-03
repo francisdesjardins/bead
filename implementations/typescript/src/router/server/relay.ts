@@ -3,12 +3,13 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import { LONGEST_TIMER } from '../../transport/shared/clock';
 import { ProgrammerError, reasonMessage, toError } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { IGauges } from '../../transport/shared/types';
 import { admissionOf, isAdmissionFailure } from '../shared/admission';
-import { EnvelopeKind, FailureScope, ProtocolCode, TIMEOUT_MAX } from '../shared/constants';
+import { EnvelopeKind, FailureScope, ProtocolCode } from '../shared/constants';
 import { FailureError } from '../shared/errors';
 import { headerBytesOf } from '../shared/header';
 import { drawDestinationId } from '../shared/identifiers';
@@ -93,14 +94,14 @@ const isConnectionTarget = (target: RelayTarget): target is IConnectionTarget =>
 /** Whether `timeout` is one a timer holds, or none at all. */
 const isTimeout = (timeout: number): boolean => {
   return (
-    timeout === Infinity || (Number.isFinite(timeout) && timeout > 0 && timeout <= TIMEOUT_MAX)
+    timeout === Infinity || (Number.isFinite(timeout) && timeout > 0 && timeout <= LONGEST_TIMER)
   );
 };
 
 const assertTimeout = (timeout: number): void => {
   if (!isTimeout(timeout)) {
     throw new ProgrammerError(
-      `a relay's timeout is above 0 and ${String(TIMEOUT_MAX)} milliseconds at most, or none, not ${String(timeout)}`
+      `a relay's timeout is above 0 and ${String(LONGEST_TIMER)} milliseconds at most, or none, not ${String(timeout)}`
     );
   }
 };

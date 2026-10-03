@@ -15,13 +15,12 @@ import {
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
-  TIMER_MAX,
   TRANSPORT_HTTP,
 } from '../shared/constants';
+import { LONGEST_TIMER, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
-import { timestamp } from '../shared/timestamp';
 import type { Data } from '../shared/types';
 import { createTransportServer, generateDrawnHandle } from './transport-server';
 import type {
@@ -85,7 +84,7 @@ interface IExchange {
   isEnded: boolean;
   readonly response: IHTTPResponseLike;
   /** Ends its connection, as lost, once its request waited past `exchangeTimeout` for its answer. */
-  timer: ReturnType<typeof setTimeout> | undefined;
+  timer: TimeoutId | undefined;
 }
 
 /** An envelope of the server's own, waiting in its connection's outbox until a listen acknowledges it. */
@@ -98,7 +97,7 @@ interface IOutgoing {
 interface IListen {
   readonly connection: IDrawn;
   readonly response: IHTTPResponseLike;
-  timer: ReturnType<typeof setTimeout> | undefined;
+  timer: TimeoutId | undefined;
 }
 
 /**
@@ -109,10 +108,10 @@ interface IListen {
 interface IDrawn extends IDrawnConnection {
   readonly address: string;
   /** The call ids of the client's a cancel came for before their request, each until it lapses. */
-  readonly buried: Map<number, ReturnType<typeof setTimeout>>;
+  readonly buried: Map<number, TimeoutId>;
   readonly connectionHandle: TransportServerConnectionHandle;
   readonly connectionToken: string;
-  idle: ReturnType<typeof setTimeout> | undefined;
+  idle: TimeoutId | undefined;
   /** Its client said at connect that it listens: the server may send of its own. */
   readonly isListening: boolean;
   /** The listen held, when one is. */
@@ -344,7 +343,7 @@ const assertOption = (
   { timer, value }: { timer?: 'bounded' | 'unbounded'; value: number }
 ) => {
   const isWhole = Number.isInteger(value) && value > 0;
-  const isHeld = isWhole && value <= TIMER_MAX;
+  const isHeld = isWhole && value <= LONGEST_TIMER;
   const isValid =
     timer === undefined ? isWhole : isHeld || (timer === 'unbounded' && value === Infinity);
   const holds = {
@@ -359,7 +358,7 @@ const assertOption = (
 };
 
 // a timer that keeps no process alive: a browser's has no `unref`
-const unref = (timer: ReturnType<typeof setTimeout>): void => {
+const unref = (timer: TimeoutId): void => {
   (timer as { unref?: () => unknown }).unref?.();
 };
 
@@ -422,6 +421,7 @@ export const createHTTPTransportServer = (
 ): HTTPTransportServer => {
   const {
     bodyBytesBudget = BODY_BYTES_BUDGET,
+    clock = PLATFORM_CLOCK,
     createServer,
     exchangeTimeout = EXCHANGE_TIMEOUT,
     hosts,
@@ -511,14 +511,14 @@ export const createHTTPTransportServer = (
 
       // a connection idle — no exchange under way — closes past its timeout
       const rest = (connection: IDrawn): void => {
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
         connection.idle = undefined;
 
         if (inactivityTimeout === Infinity || connection.open > 0) {
           return;
         }
 
-        connection.idle = setTimeout(() => {
+        connection.idle = clock.setTimeout(() => {
           closeDrawn(connection, false);
         }, inactivityTimeout);
         unref(connection.idle);
@@ -544,17 +544,17 @@ export const createHTTPTransportServer = (
         } else {
           perAddress.set(address, others);
         }
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
 
         for (const burial of connection.buried.values()) {
-          clearTimeout(burial);
+          clock.clearTimeout(burial);
         }
 
         connection.buried.clear();
 
         for (const exchange of connection.waiting.values()) {
           exchange.isEnded = true;
-          clearTimeout(exchange.timer);
+          clock.clearTimeout(exchange.timer);
 
           if (exchange.isDelivered) {
             sendHead(exchange.response);
@@ -587,7 +587,7 @@ export const createHTTPTransportServer = (
           connection.listen = undefined;
         }
 
-        clearTimeout(listen.timer);
+        clock.clearTimeout(listen.timer);
 
         if (outbox.length === 0) {
           return (endWith(response, end), undefined);
@@ -662,14 +662,14 @@ export const createHTTPTransportServer = (
           return total + bytes.length;
         }, 0);
         connection.open += 1;
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
 
         if (client !== undefined) {
-          client.lastActivityTimestamp = timestamp();
+          client.lastActivity = clock.Date.now();
         }
 
         response.on('close', () => {
-          clearTimeout(held.timer);
+          clock.clearTimeout(held.timer);
 
           if (connection.listen === held) {
             connection.listen = undefined;
@@ -691,7 +691,7 @@ export const createHTTPTransportServer = (
         }
 
         connection.listen = held;
-        held.timer = setTimeout(
+        held.timer = clock.setTimeout(
           () => {
             answer(held, NOTHING);
           },
@@ -707,9 +707,9 @@ export const createHTTPTransportServer = (
           return;
         }
 
-        clearTimeout(connection.buried.get(callId));
+        clock.clearTimeout(connection.buried.get(callId));
 
-        const burial = setTimeout(() => {
+        const burial = clock.setTimeout(() => {
           connection.buried.delete(callId);
         }, BURIAL_MILLISECONDS);
 
@@ -771,7 +771,7 @@ export const createHTTPTransportServer = (
         connections.set(connectionHandle, {
           address,
           connectionHandle,
-          lastActivityTimestamp: undefined,
+          lastActivity: undefined,
           port: request.socket.remotePort ?? 0,
           socket: connection,
           type: TRANSPORT_HTTP,
@@ -829,12 +829,12 @@ export const createHTTPTransportServer = (
         let sides = 2;
 
         connection.open += 1;
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
 
         const client = connections.get(connectionHandle);
 
         if (client !== undefined) {
-          client.lastActivityTimestamp = timestamp();
+          client.lastActivity = clock.Date.now();
         }
 
         const release = (): void => {
@@ -857,7 +857,7 @@ export const createHTTPTransportServer = (
         // ends it now, before its body or its answer; what still comes is counted, and dropped
         const endEarly = (end: IEnd): void => {
           state.isEnded = true;
-          clearTimeout(state.timer);
+          clock.clearTimeout(state.timer);
 
           if (prefix !== undefined && connection.waiting.get(prefix.callId) === state) {
             connection.waiting.delete(prefix.callId);
@@ -897,7 +897,7 @@ export const createHTTPTransportServer = (
           prefix = { callId, kind };
 
           if (connection.buried.has(callId)) {
-            clearTimeout(connection.buried.get(callId));
+            clock.clearTimeout(connection.buried.get(callId));
             connection.buried.delete(callId);
             state.isCancelled = true;
           }
@@ -907,7 +907,7 @@ export const createHTTPTransportServer = (
 
         response.on('close', () => {
           release();
-          clearTimeout(state.timer);
+          clock.clearTimeout(state.timer);
 
           // closed before the transport ended it: lost, as a dropped socket's frames are
           if (!state.isEnded) {
@@ -996,7 +996,7 @@ export const createHTTPTransportServer = (
               sendHead(response);
 
               if (exchangeTimeout !== Infinity) {
-                state.timer = setTimeout(() => {
+                state.timer = clock.setTimeout(() => {
                   closeDrawn(connection, false);
                 }, exchangeTimeout);
                 unref(state.timer);
@@ -1019,7 +1019,7 @@ export const createHTTPTransportServer = (
             } else if (cancelled.isDelivered) {
               connection.waiting.delete(callId);
               cancelled.isEnded = true;
-              clearTimeout(cancelled.timer);
+              clock.clearTimeout(cancelled.timer);
               endWith(cancelled.response, { status: 204 });
             } else {
               cancelled.isCancelled = true;
@@ -1094,6 +1094,7 @@ export const createHTTPTransportServer = (
       };
 
       return {
+        clock,
         defaults: START_DEFAULTS,
         type: TRANSPORT_HTTP,
 
@@ -1253,7 +1254,7 @@ export const createHTTPTransportServer = (
 
           connection.waiting.delete(callId);
           exchange.isEnded = true;
-          clearTimeout(exchange.timer);
+          clock.clearTimeout(exchange.timer);
 
           const { response } = exchange;
 

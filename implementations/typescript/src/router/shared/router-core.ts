@@ -2,24 +2,24 @@
 
 // dependencies
 
+import { LONGEST_TIMER, PLATFORM_CLOCK, type TimeoutId } from '../../transport/shared/clock';
 import { createPromise } from '../../transport/shared/create-promise';
 import { CancelError, ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import { mergeGauges } from '../../transport/shared/gauges';
 import type { Data } from '../../transport/shared/types';
 import { createAnnouncements } from './announcements';
 import { createAnsweringCalls } from './answering-calls';
-import {
-  EnvelopeKind,
-  EnvelopeLayout,
-  LIMIT_DEFAULTS,
-  SESSION_TOKEN_BYTES,
-  TIMEOUT_MAX,
-} from './constants';
+import { EnvelopeKind, EnvelopeLayout, LIMIT_DEFAULTS, SESSION_TOKEN_BYTES } from './constants';
 import { bytesOf, readEnvelope, writeEnvelope, writeFailure } from './envelope';
 import { DisconnectError, FailureError, failureErrorOf, redactHeader } from './errors';
 import { headerBytesOf, readPrefix } from './header';
 import { sideOfCallId } from './identifiers';
-import { createPendingCalls, type IPendingRequest, reservationOf } from './pending-calls';
+import {
+  assertReservation,
+  createPendingCalls,
+  type IPendingRequest,
+  reservationOf,
+} from './pending-calls';
 import { createProcedureMap } from './procedure-map';
 import { createReceivingTransfers, type IReceiving } from './receiving-transfers';
 import { createSendingTransfers } from './sending-transfers';
@@ -128,9 +128,9 @@ const LIMIT_RULES: readonly { holds: (limits: IRouterLimits) => boolean; rule: s
     },
     {
       holds: ({ transferInactivityTimeout }) => {
-        return transferInactivityTimeout <= TIMEOUT_MAX;
+        return transferInactivityTimeout <= LONGEST_TIMER;
       },
-      rule: `a transfer's inactivity is ${String(TIMEOUT_MAX)} milliseconds at most, as a timer holds`,
+      rule: `a transfer's inactivity is ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds`,
     },
   ]);
 
@@ -224,6 +224,7 @@ export const createRouterCore = <Handle extends string>(
   options?: IRouterCoreOptions
 ): IRouterCore<Handle> => {
   const { failures } = port;
+  const clock = options?.clock ?? PLATFORM_CLOCK;
   const limits = limitsOf(options?.limits);
   // a failure's detail fits in an envelope, whatever the limit of a detail says
   const detailBytes = Math.min(
@@ -234,6 +235,7 @@ export const createRouterCore = <Handle extends string>(
   const wholeBytes = Math.min(limits.chunkBytes, limits.maximumEnvelopeBytes);
   const payloadBytesPerChunk = chunkPayloadBytes(limits, CHUNK_HEADER_BYTES);
   const receivings = createReceivingTransfers<Handle>({
+    clock,
     failures,
     limits,
     payloadBytesPerChunk,
@@ -248,9 +250,10 @@ export const createRouterCore = <Handle extends string>(
   // what a call holds leaves with the call, whichever way the call leaves: its timer, and the
   // transfers it sends and receives
   const pendingCalls = createPendingCalls(port, {
+    clock,
     lastCallId: options?.lastCallId,
     onRemove: ({ receiving, sending, timer }) => {
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
 
       if (receiving !== undefined) {
         receivings.close(receiving.transfer);
@@ -262,6 +265,7 @@ export const createRouterCore = <Handle extends string>(
     },
   });
   const answeringCalls = createAnsweringCalls<Handle, IRequestReceiving<Handle>>({
+    clock,
     limits,
     onRemove: ({ transfer }) => {
       receivings.close(transfer);
@@ -444,9 +448,9 @@ export const createRouterCore = <Handle extends string>(
       return;
     }
 
-    clearTimeout(pendingRequest.timer);
+    clock.clearTimeout(pendingRequest.timer);
     pendingRequest.timer = isTimeout(delay)
-      ? setTimeout(() => {
+      ? clock.setTimeout(() => {
           endPending(new TimeoutError(delay), waiting);
         }, delay)
       : undefined;
@@ -572,13 +576,13 @@ export const createRouterCore = <Handle extends string>(
     const call = { callId, connectionHandle };
     const { promise, reject, resolve } = Promise.withResolvers<void>();
     let isOpen = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: TimeoutId | undefined;
 
     // nothing more goes, and nothing more ends it
     const stop = (): void => {
       isOpen = false;
       sendings.close(sending);
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       controller.signal.removeEventListener('abort', onAbort);
     };
     // the call goes with it: its call id is the peer's to open again
@@ -599,9 +603,9 @@ export const createRouterCore = <Handle extends string>(
         return;
       }
 
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       // silent too long, it ends, and the peer is told
-      timer = setTimeout(() => {
+      timer = clock.setTimeout(() => {
         const stalled = {
           ...failures.transferStalled,
           detail: `no credit came for ${String(limits.transferInactivityTimeout)} milliseconds`,
@@ -657,6 +661,8 @@ export const createRouterCore = <Handle extends string>(
   };
 
   const cancel: IRouterCore<Handle>['cancel'] = ({ callId, connectionHandle, timeout }) => {
+    assertReservation(timeout);
+
     const pendingRequest = pendingCalls.get({ callId, connectionHandle });
 
     pendingCalls.forget({ callId, connectionHandle });
@@ -1530,9 +1536,9 @@ export const createRouterCore = <Handle extends string>(
             return (reject(refused), undefined);
           }
 
-          if (Number.isFinite(timeout) && timeout > TIMEOUT_MAX) {
+          if (Number.isFinite(timeout) && timeout > LONGEST_TIMER) {
             const refused = new ProgrammerError(
-              `a call's timeout is ${String(TIMEOUT_MAX)} milliseconds at most, as a timer holds, not ${String(timeout)}`
+              `a call's timeout is ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds, not ${String(timeout)}`
             );
 
             return (reject(refused), undefined);
@@ -1640,6 +1646,7 @@ export const createRouterCore = <Handle extends string>(
         });
     },
     reserve: (call) => {
+      assertReservation(call.timeout);
       pendingCalls.reserve(call);
     },
     respond,

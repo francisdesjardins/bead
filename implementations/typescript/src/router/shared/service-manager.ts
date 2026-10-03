@@ -2,12 +2,11 @@
 
 // dependencies
 
+import { clockOf } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { noop } from '../../transport/shared/noop';
-import { timestamp } from '../../transport/shared/timestamp';
-import type { ITimestamp } from '../../transport/shared/types';
 import { admissionOf, isAdmissionFailure } from './admission';
 import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT, FailureScope } from './constants';
 import { FailureError } from './errors';
@@ -49,6 +48,15 @@ import type {
 
 // interfaces
 
+/**
+ * When a call started, on its router's clock: the wall clock's instant it reports, and the
+ * monotonic reading its duration counts from.
+ */
+interface IStarted {
+  event: number;
+  timestamp: number;
+}
+
 /** One step of a call, as `trace` tells it to `debug`. */
 interface ITraceStep {
   direction: DebugDirection;
@@ -57,7 +65,7 @@ interface ITraceStep {
   isAnswered?: boolean | undefined;
   options?: IResolvedRequestOptions | undefined;
   rx?: unknown;
-  started?: ITimestamp | undefined;
+  started?: IStarted | undefined;
   tx?: unknown;
   type: DebugType;
 }
@@ -206,7 +214,8 @@ const snapshot = (value: unknown): unknown => {
 
 /**
  * The requesters and resolvers of the services on one router: what a requester calls, and what
- * answers it on the other side. Both sides of a router use the same manager.
+ * answers it on the other side. Both sides of a router use the same manager, which runs on its
+ * router's clock: one its options give that differs is a {@link ProgrammerError}.
  *
  * @example
  * import { createServiceManager } from '@francisdesjardins/bead/service-manager';
@@ -228,6 +237,10 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   router: IRouterLike<Handle>,
   options?: IServiceManagerOptions<Handle>
 ): IServiceManager<Handle> => {
+  const clock = clockOf(
+    { beneath: router.clock, given: options?.clock },
+    { below: 'its router', layer: 'a service manager' }
+  );
   const closeConnection = options?.closeConnection;
   const defaults = Object.freeze({
     closeOnTimeout: options?.defaults?.closeOnTimeout,
@@ -237,6 +250,11 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   // the notifications this manager made, one per procedure, kept for its life: asked for again,
   // the same one is given
   const notifications = createProcedureMap<{ notification: unknown; procedure: IProcedure }>();
+
+  // now, for a call starting
+  const startedNow = (): IStarted => {
+    return { event: clock.Date.now(), timestamp: clock.performance.now() };
+  };
 
   // tells `debug` about one step of a call; nothing is built when nobody listens
   const trace = (procedure: IProcedure, step: ITraceStep): void => {
@@ -250,7 +268,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       isAnswered = false,
       options,
       rx,
-      started = timestamp(),
+      started = startedNow(),
       tx,
       type,
     } = step;
@@ -263,7 +281,10 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       rx: snapshot(rx),
       serviceId: procedure.serviceId,
       serviceRevision: procedure.serviceRevision,
-      timestamp: { duration: isAnswered ? timestamp(started).ms : undefined, event: started.ms },
+      timestamp: {
+        duration: isAnswered ? Math.trunc(clock.performance.now() - started.timestamp) : undefined,
+        event: started.event,
+      },
       tx: snapshot(tx),
       type,
     });
@@ -294,7 +315,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         const resolvedOptions = resolveRequestOptions(options, defaults);
         const { closeOnTimeout, destinationId } = resolvedOptions;
         const connectionHandle = options?.connectionHandle;
-        const started = timestamp();
+        const started = startedNow();
         const step = {
           options: resolvedOptions,
           started,
@@ -456,7 +477,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
     const resolver = nameAfter(async (props: IRequestResolverProps<Handle>): Promise<void> => {
       const { connectionHandle, header, signal } = props;
-      const started = timestamp();
+      const started = startedNow();
       const target = { connectionHandle, header };
       // a request is answered once: by its callback, by a refusal, or as failed; the answer sets it,
       // out of the flow a type follows here

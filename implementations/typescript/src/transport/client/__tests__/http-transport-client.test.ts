@@ -1,5 +1,4 @@
 import { createServer } from 'node:http';
-import { setImmediate as nextTurn } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import {
   createHTTPTransportServer,
@@ -14,8 +13,7 @@ import {
   ReadyStateError,
   TimeoutError,
 } from '../../shared/errors';
-import { spyTimers } from '../../../router/shared/__tests__/fixtures';
-import { tcpSocketsClosed } from '../../shared/__tests__/fixtures';
+import { createTestClock, tcpSocketsClosed, timersUntil } from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -509,6 +507,39 @@ test.describe('createHTTPTransportClient', () => {
     expect([connected.isClosed(), delays]).toEqual([true, [DISCONNECT_TIMEOUT]]);
   });
 
+  test('bounds its disconnect on the real clock, whatever its own: a server that never answers the DELETE is let go once DISCONNECT_TIMEOUT has passed', async () => {
+    // played in real time, as a platform's own bound is: no clock given moves it
+    test.setTimeout(DISCONNECT_TIMEOUT * 4);
+
+    const clock = createTestClock();
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+    const connecting = client.connect({ host, port: 8_080 });
+
+    fake.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    await connecting;
+
+    const started = performance.now();
+    const { armed } = await timersUntil(clock, () => {
+      return client.disconnect();
+    });
+
+    expect(fake.calls[1]?.init.method).toBe('DELETE');
+    expect(fake.calls[1]?.init.signal?.aborted).toBe(true);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(DISCONNECT_TIMEOUT - 50);
+    expect([client.isClosed(), armed]).toEqual([true, []]);
+  });
+
+  test('refuses a connect timeout past the longest a timer waits, fetching nothing', async () => {
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({ fetch: fake.fetch, isListening: false });
+
+    await expect(client.connect({ host, port: 8_080, timeout: 2 ** 31 })).rejects.toBeInstanceOf(
+      ProgrammerError
+    );
+    expect([fake.calls, client.isClosed()]).toEqual([[], true]);
+  });
+
   test('settles its send on the head of the answer, before its body is in, and hears the answer once it is', async () => {
     const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
     const { promise: later, resolve: bodyCame } = Promise.withResolvers<Uint8Array>();
@@ -744,68 +775,19 @@ const closesOf = (client: HTTPTransportClient) => {
   return closes;
 };
 
-interface IClockTimer {
-  readonly at: number;
-  readonly fire: () => void;
-}
-
 /**
- * The timers armed from now on, on a clock of the test's own that only `advance` moves: it fires, in
- * order, each timer due by then, a turn after each so what it set going settles. Real time fires
- * none, so a loaded machine changes nothing of what a test sees. `isHasty` ends each timer a
- * millisecond before it is due, as a timer can against a clock read on a loaded machine.
+ * A test clock whose timers end a millisecond before they are due, as a timer can against a clock
+ * read on a loaded machine.
  */
-const clockOf = ({ isHasty = false }: { isHasty?: boolean } = {}) => {
-  const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
-  const timers = new Map<number, IClockTimer>();
-  let now = 0;
-  let lastId = 0;
+const hastyClockOf = () => {
+  const clock = createTestClock();
+  const { setTimeout: onTime } = clock;
 
-  // the timer due first by `until`; of those due together, the first armed
-  const dueBy = (until: number): [number, IClockTimer] | undefined => {
-    let due: [number, IClockTimer] | undefined;
-
-    for (const entry of timers) {
-      if (entry[1].at <= until && (due === undefined || entry[1].at < due[1].at)) {
-        due = entry;
-      }
-    }
-
-    return due;
+  clock.setTimeout = (callback, delay = 0) => {
+    return onTime(callback, delay > 0 ? delay - 1 : delay);
   };
 
-  globalThis.setTimeout = ((fire: () => void, delay = 0) => {
-    lastId += 1;
-    timers.set(lastId, { at: now + (isHasty && delay > 0 ? delay - 1 : delay), fire });
-
-    return lastId;
-  }) as unknown as typeof realSet;
-  globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-    timers.delete(timeoutId as unknown as number);
-  };
-
-  return {
-    advance: async (by: number) => {
-      const until = now + by;
-
-      await nextTurn();
-
-      for (let due = dueBy(until); due !== undefined; due = dueBy(until)) {
-        const [timeoutId, { at, fire }] = due;
-
-        timers.delete(timeoutId);
-        now = at;
-        fire();
-        await nextTurn();
-      }
-
-      now = until;
-    },
-    restore: () => {
-      globalThis.setTimeout = realSet;
-      globalThis.clearTimeout = realClear;
-    },
-  };
+  return clock;
 };
 
 test.describe('createHTTPTransportClient, listening', () => {
@@ -835,78 +817,83 @@ test.describe('createHTTPTransportClient, listening', () => {
   });
 
   test('listens again from where it was when a listen is lost — at once, then later and later, drawn apart — and one that reaches the server ends the losses', async () => {
-    const { callOf, client, fake, heard } = await connectListening();
-    const tick = globalThis.setTimeout;
-    const settle = () => {
-      return new Promise((resolve) => {
-        tick(resolve, 5);
-      });
-    };
-    const { random } = Math;
-    // the first listen, before the timers are watched: `expect.poll` arms its own
+    const clock = createTestClock();
+    const { callOf, client, fake, heard } = await connectListening({ clock });
+    // what the connect armed, its timeout, stays out of what the listens arm
+    const connected = clock.armed.length;
     const first = await callOf(1);
-    const { armed, restore } = spyTimers();
     const envelope = envelopeOf(0x13, { callId: 1 });
+    // each wait drawn between half of what it may be and all of it: short of its half, no listen;
+    // at all of it, the next
+    const waitOut = async (wait: number) => {
+      const calls = fake.calls.length;
 
-    // each drawn at half of what it may be
-    Math.random = () => {
-      return 0;
+      await clock.tickAsync(wait / 2 - 1);
+
+      expect(fake.calls.length).toBe(calls);
+
+      await clock.tickAsync(wait / 2 + 1);
+      await callOf(calls);
     };
 
-    try {
-      first?.fail();
-      await settle();
+    first?.fail();
+    await callOf(2);
 
-      for (let losses = 2; losses <= 8; losses += 1) {
-        // a batch cut before anything came whole is a loss as well
-        if (losses === 3) {
-          fake.calls.at(-1)?.answer({ ...batch(1, envelope), isBodyLost: true });
-        } else {
-          fake.calls.at(-1)?.fail();
-        }
-
-        await settle();
-        armed.at(-1)?.fire();
-        await settle();
+    for (const [losses, wait] of [
+      [2, 1_000],
+      [3, 2_000],
+      [4, 4_000],
+      [5, 8_000],
+      [6, 16_000],
+      [7, 30_000],
+      [8, 30_000],
+    ] as const) {
+      // a batch cut before anything came whole is a loss as well
+      if (losses === 3) {
+        fake.calls.at(-1)?.answer({ ...batch(1, envelope), isBodyLost: true });
+      } else {
+        fake.calls.at(-1)?.fail();
       }
 
-      // a 200 of another type — a proxy's page — is lost too, its body unread
-      fake.calls.at(-1)?.answer({
-        body: new TextEncoder().encode('<html>'),
-        headers: { 'content-type': 'text/html' },
-        status: 200,
-      });
-      await settle();
-      armed.at(-1)?.fire();
-      await settle();
-
-      // it reaches the server: the losses end, and the next is listened again at once
-      fake.calls.at(-1)?.answer({ status: 204 });
-      await settle();
-      fake.calls.at(-1)?.fail();
-      await settle();
-    } finally {
-      restore();
-      Math.random = random;
+      await waitOut(wait);
     }
 
-    // the inactivity timeout armed at the first loss of each count, then the waits between
-    expect(
-      armed.map(({ delay }) => {
-        return delay;
-      })
-    ).toEqual([
+    // a 200 of another type — a proxy's page — is lost too, its body unread
+    fake.calls.at(-1)?.answer({
+      body: new TextEncoder().encode('<html>'),
+      headers: { 'content-type': 'text/html' },
+      status: 200,
+    });
+    await waitOut(30_000);
+
+    // it reaches the server: the losses end, and the next is listened again at once
+    fake.calls.at(-1)?.answer({ status: 204 });
+    await callOf(11);
+    fake.calls.at(-1)?.fail();
+    await callOf(12);
+
+    // the inactivity timeout armed at the first loss of each count, then the waits between, each
+    // within its bounds
+    const delays = clock.armed.slice(connected).map(({ delay }) => {
+      return delay;
+    });
+
+    expect([delays[0], delays.at(-1), delays.length]).toEqual([
       INACTIVITY_TIMEOUT,
-      500,
-      1_000,
-      2_000,
-      4_000,
-      8_000,
-      15_000,
-      15_000,
-      15_000,
       INACTIVITY_TIMEOUT,
+      10,
     ]);
+    expect(
+      delays.slice(1, -1).map((delay, index) => {
+        const wait = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000][index] ?? 0;
+
+        return delay >= wait / 2 && delay <= wait;
+      })
+    ).toEqual(
+      Array.from({ length: 8 }, () => {
+        return true;
+      })
+    );
     expect([client.isOpen(), fake.calls.length]).toEqual([true, 13]);
 
     // what was cut on its way comes whole at last, and is heard once
@@ -920,115 +907,83 @@ test.describe('createHTTPTransportClient, listening', () => {
 
   test('counts its connection lost once its listens were lost for its inactivity timeout, and tells the server', async () => {
     const fake = losingFetch();
-    const clock = clockOf();
+    const clock = createTestClock();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, inactivityTimeout: 40 });
+    const closes = closesOf(client);
 
-    try {
-      const client = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 40 });
+    await client.connect({ host, port: 80 });
+
+    // its last wait ends at its timeout, never after it
+    await clock.tickAsync(39);
+
+    expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
+
+    await clock.tickAsync(1);
+
+    expect(closes).toEqual([[false, false]]);
+    // at once, then no later than its timeout, then no more
+    expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
+    expect(INACTIVITY_TIMEOUT).toBe(300_000);
+
+    // a timeout within the second wait's range: whichever is drawn, it ends at its timeout
+    for (let draws = 0; draws < 20; draws += 1) {
+      const drawn = createHTTPTransportClient({
+        clock,
+        fetch: fake.fetch,
+        inactivityTimeout: 700,
+      });
+      const closesDrawn = closesOf(drawn);
+
+      await drawn.connect({ host, port: 80 });
+      await clock.tickAsync(699);
+
+      expect(drawn.isOpen()).toBe(true);
+
+      await clock.tickAsync(1);
+
+      expect(closesDrawn).toEqual([[false, false]]);
+    }
+
+    // none at all: lost at its first loss
+    const at = createHTTPTransportClient({ clock, fetch: fake.fetch, inactivityTimeout: 0 });
+    const closedAt = closesOf(at);
+    const listensBefore = methodsOf(fake).listens;
+
+    await at.connect({ host, port: 80 });
+    await clock.tickAsync(0);
+
+    expect([closedAt, methodsOf(fake).listens - listensBefore]).toEqual([[[false, false]], 1]);
+  });
+
+  test('times its inactivity on a timer, never on a reading of the wall clock: whether that leaps or goes back, the connection is lost at its timeout', async () => {
+    for (const leap of [3_600_000, -3_600_000]) {
+      // a wall clock moved an hour at each step — a machine woken from sleep, a clock set — buys
+      // nothing and costs nothing: three listens, the last at its timeout
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const leaping = losingFetch();
+      const client = createHTTPTransportClient({
+        clock,
+        fetch: leaping.fetch,
+        inactivityTimeout: 40,
+      });
       const closes = closesOf(client);
 
       await client.connect({ host, port: 80 });
 
-      // its last wait ends at its timeout, never after it
-      await clock.advance(39);
-
-      expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
-
-      await clock.advance(1);
-
-      expect(closes).toEqual([[false, false]]);
-      // at once, then no later than its timeout, then no more
-      expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
-      expect(INACTIVITY_TIMEOUT).toBe(300_000);
-
-      // a timeout within the second wait's range: whichever is drawn, it ends at its timeout
-      for (let draws = 0; draws < 20; draws += 1) {
-        const drawn = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 700 });
-        const closesDrawn = closesOf(drawn);
-
-        await drawn.connect({ host, port: 80 });
-        await clock.advance(699);
-
-        expect(drawn.isOpen()).toBe(true);
-
-        await clock.advance(1);
-
-        expect(closesDrawn).toEqual([[false, false]]);
+      for (let step = 0; step < 39; step += 1) {
+        clock.setSystemTime(clock.Date.now() + leap);
+        await clock.tickAsync(1);
       }
 
-      // none at all: lost at its first loss
-      const at = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 0 });
-      const closedAt = closesOf(at);
-      const listensBefore = methodsOf(fake).listens;
+      expect([client.isOpen(), methodsOf(leaping).listens]).toEqual([true, 2]);
 
-      await at.connect({ host, port: 80 });
-      await clock.advance(0);
+      clock.setSystemTime(clock.Date.now() + leap);
+      await clock.tickAsync(1);
 
-      expect([closedAt, methodsOf(fake).listens - listensBefore]).toEqual([[[false, false]], 1]);
-    } finally {
-      clock.restore();
-    }
-  });
-
-  test('times its inactivity on a timer, never on its clock: whether the clock leaps or stands still, the connection is lost at its timeout', async () => {
-    const clock = clockOf();
-    const { now } = Date;
-    const { random } = Math;
-
-    try {
-      // a clock that leaps an hour at each reading — a machine woken from sleep, a clock set — buys
-      // nothing and costs nothing: three listens, the last at its timeout
-      const leaping = losingFetch();
-      const onLeaps = createHTTPTransportClient({ fetch: leaping.fetch, inactivityTimeout: 40 });
-      const closesOnLeaps = closesOf(onLeaps);
-      let readings = 0;
-
-      Date.now = () => {
-        readings += 1;
-
-        return now() + readings * 3_600_000;
-      };
-
-      await onLeaps.connect({ host, port: 80 });
-      await clock.advance(39);
-
-      expect([onLeaps.isOpen(), methodsOf(leaping).listens]).toEqual([true, 2]);
-
-      await clock.advance(1);
-
-      expect([closesOnLeaps, methodsOf(leaping)]).toEqual([
+      expect([closes, methodsOf(leaping)]).toEqual([
         [[false, false]],
         { last: 'DELETE', listens: 3 },
       ]);
-
-      // one that stands still, and a second wait drawn short of the timeout: the third wait is cut
-      // at the timeout, and the listen after it is the last
-      const standing = losingFetch();
-      const onStill = createHTTPTransportClient({ fetch: standing.fetch, inactivityTimeout: 700 });
-      const closesOnStill = closesOf(onStill);
-      const stood = now();
-
-      Date.now = () => {
-        return stood;
-      };
-      Math.random = () => {
-        return 0;
-      };
-
-      await onStill.connect({ host, port: 80 });
-      await clock.advance(699);
-
-      expect([onStill.isOpen(), methodsOf(standing).listens]).toEqual([true, 3]);
-
-      await clock.advance(1);
-
-      expect([closesOnStill, methodsOf(standing)]).toEqual([
-        [[false, false]],
-        { last: 'DELETE', listens: 4 },
-      ]);
-    } finally {
-      clock.restore();
-      Date.now = now;
-      Math.random = random;
     }
   });
 
@@ -1037,64 +992,54 @@ test.describe('createHTTPTransportClient, listening', () => {
   test('listens three times within its inactivity timeout, even on timers that end early, and never a fourth', async () => {
     // a fourth is one too many: told gone, so that a burst ends there
     const fake = losingFetch(3);
-    const clock = clockOf({ isHasty: true });
+    const clock = hastyClockOf();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, inactivityTimeout: 40 });
+    const closes = closesOf(client);
 
-    try {
-      const client = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 40 });
-      const closes = closesOf(client);
+    await client.connect({ host, port: 80 });
+    await clock.tickAsync(38);
 
-      await client.connect({ host, port: 80 });
-      await clock.advance(38);
+    expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
 
-      expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
+    await clock.tickAsync(1);
 
-      await clock.advance(1);
+    expect(closes).toEqual([[false, false]]);
 
-      expect(closes).toEqual([[false, false]]);
+    // and nothing after it
+    await clock.tickAsync(60_000);
 
-      // and nothing after it
-      await clock.advance(60_000);
-
-      expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
-    } finally {
-      clock.restore();
-    }
+    expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
   });
 
   test('a listen heard ends the count, and its inactivity timeout runs again from the next first loss', async () => {
-    const { callOf, client, fake } = await connectListening({ inactivityTimeout: 40 });
-    // the first listen, before the clock is the test's: `expect.poll` arms timers of its own
+    const clock = createTestClock();
+    const { callOf, client, fake } = await connectListening({ clock, inactivityTimeout: 40 });
     const first = await callOf(1);
-    const clock = clockOf();
     const closes = closesOf(client);
 
-    try {
-      // lost, listened again at once, and heard 30 ms later
-      first?.fail();
-      await clock.advance(30);
-      fake.calls[2]?.answer(batch(1, envelopeOf(0x13, { callId: 1 })));
-      await clock.advance(0);
+    // lost, listened again at once, and heard 30 ms later
+    first?.fail();
+    await clock.tickAsync(30);
+    fake.calls[2]?.answer(batch(1, envelopeOf(0x13, { callId: 1 })));
+    await clock.tickAsync(0);
 
-      // past where the first count would have ended, lost twice again
-      await clock.advance(20);
-      fake.calls[3]?.fail();
-      await clock.advance(0);
-      fake.calls[4]?.fail();
+    // past where the first count would have ended, lost twice again
+    await clock.tickAsync(20);
+    fake.calls[3]?.fail();
+    await clock.tickAsync(0);
+    fake.calls[4]?.fail();
 
-      // 40 ms from this first loss, not from the one before
-      await clock.advance(39);
+    // 40 ms from this first loss, not from the one before
+    await clock.tickAsync(39);
 
-      expect([client.isOpen(), fake.calls.length]).toEqual([true, 5]);
+    expect([client.isOpen(), fake.calls.length]).toEqual([true, 5]);
 
-      await clock.advance(1);
-      fake.calls[5]?.fail();
-      await clock.advance(0);
+    await clock.tickAsync(1);
+    fake.calls[5]?.fail();
+    await clock.tickAsync(0);
 
-      expect(closes).toEqual([[false, false]]);
-      expect(fake.calls[6]?.init.method).toBe('DELETE');
-    } finally {
-      clock.restore();
-    }
+    expect(closes).toEqual([[false, false]]);
+    expect(fake.calls[6]?.init.method).toBe('DELETE');
   });
 
   test('loses the connection on a batch that does not read, and on a refusal of its listen; told it is gone, it tells the server nothing', async () => {

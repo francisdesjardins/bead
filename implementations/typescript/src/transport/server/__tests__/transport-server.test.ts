@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
+import * as clocks from '../../shared/clock';
 import * as constants from '../../shared/constants';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
-import * as timestamps from '../../shared/timestamp';
 import * as entry from '../transport-server';
+import { createTestClock } from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
 import {
   createTransportServer,
@@ -33,7 +34,7 @@ const createStubServer = (options?: {
       connections.set(connectionHandle, {
         address: '127.0.0.1',
         connectionHandle,
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: 1,
         socket: { id: connectionHandle },
         type: 'WS',
@@ -123,7 +124,41 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
     ] as const) {
       expect(entry[name]).toBe(readyState[name]);
     }
-    expect(entry.timestamp).toBe(timestamps.timestamp);
+    expect([entry.LONGEST_TIMER, entry.PLATFORM_CLOCK]).toEqual([
+      clocks.LONGEST_TIMER,
+      clocks.PLATFORM_CLOCK,
+    ]);
+  });
+
+  test('runs on the clock its transport supplies, the platform’s when it supplies none', () => {
+    const clock = createTestClock();
+    const implementation = {
+      defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
+      type: 'WS',
+      close: () => {
+        return Promise.resolve();
+      },
+      send: () => {
+        return Promise.resolve();
+      },
+      start: ({ address, port }: ITransportServerAddress) => {
+        return Promise.resolve({ address, port });
+      },
+      stop: () => {
+        return Promise.resolve();
+      },
+    } as const;
+
+    expect(
+      createTransportServer(() => {
+        return { ...implementation, clock };
+      }).clock
+    ).toBe(clock);
+    expect(
+      createTransportServer(() => {
+        return implementation;
+      }).clock
+    ).toBe(clocks.PLATFORM_CLOCK);
   });
 
   test('names a connection by its type, address and port', () => {
@@ -283,7 +318,7 @@ test.describe('createTransportServer', () => {
       {
         address: '127.0.0.1',
         connectionHandle: A,
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: 1,
         type: 'WS',
       },

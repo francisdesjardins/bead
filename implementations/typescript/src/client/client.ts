@@ -4,6 +4,7 @@
 
 import { createRouterClient, DisconnectError } from '../router/client/router-client';
 import { createServiceManager } from '../router/shared/service-manager';
+import { clockOf } from '../transport/shared/clock';
 import type { IClient, IClientLayers, IClientOptions, IClientTransportLike } from './types';
 
 export {
@@ -15,6 +16,8 @@ export {
   ProtocolCode,
   SERVER_FAILURES,
 } from '../router/client/router-client';
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../transport/shared/clock';
+export type { IClock, TimeoutId } from '../transport/shared/clock';
 export {
   CancelError,
   ConnectError,
@@ -37,7 +40,8 @@ export type {
  * A client from its layers, bottom up: the transport, the router built on it, the services built on
  * the router. The router and the services are this package's unless others are given, so one layer
  * can be replaced without the others. Debugging is each layer's own — `client.router.on('debug', …)`
- * for the envelopes, `client.services.on('debug', …)` for the calls.
+ * for the envelopes, `client.services.on('debug', …)` for the calls. Every layer runs on the
+ * transport's clock: a router built on another is a {@link ProgrammerError}.
  *
  * @example
  * import { createClient } from '@francisdesjardins/bead/client';
@@ -58,7 +62,21 @@ export const createClient = <Transport extends IClientTransportLike>(
   }: IClientLayers<Transport>,
   options?: IClientOptions
 ): IClient<Transport> => {
-  const router = createRouter(transport, { limits: options?.limits });
+  const { clock } = transport;
+  const router = createRouter(transport, { clock, limits: options?.limits });
+
+  // a router a builder made on another clock comes apart, refused
+  try {
+    clockOf(
+      { beneath: clock, given: router.clock },
+      { below: 'its transport', layer: "a client's router" }
+    );
+  } catch (reason) {
+    router[Symbol.dispose]();
+
+    throw reason;
+  }
+
   const services = createServices(router);
   // ends with the client: a reconnection it started must not outlive it
   const lifetime = new AbortController();

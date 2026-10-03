@@ -1,6 +1,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
+import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { CancelError, TimeoutError } from '../../../transport/shared/errors';
 import { createSessionManager } from '../../server/session-manager';
 import { failureTableOf } from '../constants';
@@ -96,10 +98,10 @@ const answerOf = (payload: Uint8Array): IRouterResult => {
 
 /**
  * A router that records every call, answers each request with `answer`, and holds notifications;
- * it raises the failures of its `side`, a server's unless given, and subscribes a request under
- * its own call id.
+ * it raises the failures of its `side`, a server's unless given, subscribes a request under its own
+ * call id, and runs on `clock`, the platform's unless given.
  */
-const createFakeRouter = (side: RouterSide = 'server') => {
+const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_CLOCK) => {
   const keyOf = ({ procedureId, serviceId }: IProcedureAddress) => {
     return `${String(serviceId)}/${String(procedureId)}`;
   };
@@ -143,6 +145,7 @@ const createFakeRouter = (side: RouterSide = 'server') => {
   };
 
   const router: IRouterLike = {
+    clock,
     failures: failureTableOf(side),
 
     hasNotification: (notification) => {
@@ -436,6 +439,50 @@ test.describe('createServiceManager', () => {
         serviceId: 2,
         serviceRevision: 3,
       });
+    });
+
+    test("reads its router's clock: a step's instant on the wall clock, its duration on the monotonic reading", async () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const { control, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+
+      control.answer = (payload) => {
+        return new Promise((resolve) => {
+          clock.setTimeout(() => {
+            resolve(answerOf(payload));
+          }, 250);
+        });
+      };
+
+      const answering = manager.getRequest(echo, { serializer })({ text: 'hello' })();
+
+      // a wall clock set back by hand moves no duration
+      clock.setSystemTime(Date.UTC(2025, 11, 31));
+      await clock.tickAsync(250);
+      await answering;
+
+      expect(
+        seen.map(({ info }) => {
+          return info.timestamp;
+        })
+      ).toEqual([
+        { duration: undefined, event: Date.UTC(2026, 0, 1) },
+        { duration: 250, event: Date.UTC(2026, 0, 1) },
+      ]);
+    });
+
+    test("refuses a clock that differs from its router's", () => {
+      const { router } = createFakeRouter('server', createTestClock());
+
+      expect(createServiceManager(router, { clock: router.clock })).toBeDefined();
+      expect(() => {
+        createServiceManager(router, { clock: PLATFORM_CLOCK });
+      }).toThrow(
+        new ProgrammerError(
+          "a service manager runs on the clock of its router, one of its own, and was given another, the platform's"
+        )
+      );
     });
 
     test('a debug listener that throws on the answer rejects the call once, with no second trace', async () => {

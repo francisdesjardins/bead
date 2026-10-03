@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createPromise } from '../create-promise';
-import { CancelError, ConnectError, GenericError, TimeoutError } from '../errors';
+import { CancelError, ConnectError, GenericError, ProgrammerError, TimeoutError } from '../errors';
+import { createTestClock } from './fixtures';
 
 const activeTimeouts = () => {
   return process.getActiveResourcesInfo().filter((resource) => {
@@ -35,31 +36,74 @@ test.describe('createPromise', () => {
     await expect(pending).rejects.toHaveProperty('cause', 'boom');
   });
 
-  test('waits for the delay before running the executor', async () => {
-    const started = Date.now();
-    let waited = 0;
-
-    await createPromise(
+  test('waits for the delay on its clock before running the executor', async () => {
+    const clock = createTestClock();
+    let ran = false;
+    const pending = createPromise(
       (resolve) => {
-        waited = Date.now() - started;
+        ran = true;
         resolve();
       },
-      { delay: 60 }
+      { clock, delay: 60 }
     );
 
-    expect(waited).toBeGreaterThanOrEqual(50);
+    clock.tick(59);
+
+    expect(ran).toBe(false);
+
+    clock.tick(1);
+    await pending;
+
+    expect(ran).toBe(true);
   });
 
   test('counts the delay in the timeout', async () => {
+    const clock = createTestClock();
     const pending = createPromise(
       () => {
         /* never settles */
       },
-      { delay: 20, timeout: 30 }
+      { clock, delay: 20, timeout: 30 }
     );
+
+    expect(
+      clock.armed.map(({ delay }) => {
+        return delay;
+      })
+    ).toEqual([50, 20]);
+
+    clock.tick(50);
 
     await expect(pending).rejects.toBeInstanceOf(TimeoutError);
     await expect(pending).rejects.toHaveProperty('timeout', 50);
+  });
+
+  test('refuses a delay, or a timeout and its delay together, past the longest a timer waits, never running the executor', async () => {
+    const clock = createTestClock();
+    let ran = false;
+    const run = () => {
+      ran = true;
+    };
+
+    for (const options of [
+      { delay: 2 ** 31 },
+      { timeout: 2 ** 31 },
+      { delay: 2 ** 30, timeout: 2 ** 30 },
+    ]) {
+      await expect(createPromise(run, { clock, ...options })).rejects.toThrow(
+        new ProgrammerError(
+          'a timer waits 2147483647 milliseconds at most, a timeout and its delay together, not 2147483648'
+        )
+      );
+    }
+
+    expect([ran, clock.armed]).toEqual([false, []]);
+
+    // the longest a timer waits, and never, are taken
+    void createPromise(run, { clock, timeout: 2 ** 31 - 1 });
+    void createPromise(run, { clock, timeout: Infinity });
+
+    expect(ran).toBe(true);
   });
 
   test('treats a delay that is not a number as none, in the timeout too', async () => {

@@ -72,6 +72,7 @@ const errorOf = (event: unknown): unknown => {
 export const createWSTransportClient = (options?: IWSTransportClientOptions): WSTransportClient => {
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
+    clock,
     heartbeat = HEARTBEAT,
     WebSocket = globalThis.WebSocket,
   } = {
@@ -120,6 +121,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
     };
 
     return {
+      clock,
+
       connect: async (connectOptions) => {
         const {
           host,
@@ -199,7 +202,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
 
               return undefined;
             },
-            { signal, timeout }
+            { clock: client.clock, signal, timeout }
           );
 
           // a close or a dispose between the open and here comes after it: what it left is kept

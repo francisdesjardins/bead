@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createTestClock, hasRef } from '../../../transport/shared/__tests__/fixtures';
 import { LIMIT_DEFAULTS, ProtocolCode, SERVER_FAILURES } from '../constants';
 import { createReceivingTransfers, type IReceiving } from '../receiving-transfers';
 import { ChunkOutcome } from '../transfer';
@@ -8,10 +9,15 @@ import type { IProtocolFailure, IRouterLimits } from '../types';
 
 type Handle = 'a' | 'b';
 
-/** Receiving transfers under `limits`, chunks of a byte at least, which record each credit they send. */
+/**
+ * Receiving transfers under `limits`, chunks of a byte at least, on a test clock, which record each
+ * credit they send.
+ */
 const createReceiving = (limits: Partial<IRouterLimits> = {}) => {
+  const clock = createTestClock();
   const credits: string[] = [];
   const receiving = createReceivingTransfers<Handle>({
+    clock,
     failures: SERVER_FAILURES,
     limits: { ...LIMIT_DEFAULTS, windowBytes: 16, ...limits },
     payloadBytesPerChunk: 1,
@@ -20,7 +26,7 @@ const createReceiving = (limits: Partial<IRouterLimits> = {}) => {
     },
   });
 
-  return { credits, receiving };
+  return { clock, credits, receiving };
 };
 
 /** The transfer opened, failing the test when it is refused. */
@@ -212,154 +218,99 @@ test.describe('createReceivingTransfers', () => {
     expect(credits).toEqual(['a 1 20', 'b 1 20']);
   });
 
-  test('stalls a transfer nothing comes for, its timer set going again by bytes placed alone', () => {
-    const { receiving } = createReceiving({ transferInactivityTimeout: 250 });
-    const armed: { delay: unknown; fire: () => void; timeoutId: unknown }[] = [];
-    const cleared: unknown[] = [];
+  test('stalls a transfer nothing comes for, its timer on its clock set going again by bytes placed alone', () => {
+    const { clock, receiving } = createReceiving({ transferInactivityTimeout: 250 });
     const stalled: number[] = [];
-    const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
+    const opened = openedOf(
+      receiving.open(new Uint8Array(1), {
+        call: { callId: 1, connectionHandle: 'a' },
+        onStall: () => {
+          stalled.push(1);
+        },
+        total: 8,
+      })
+    );
 
-    try {
-      globalThis.setTimeout = ((fire: () => void, delay?: number) => {
-        const timeoutId = realSet(() => {
-          return undefined;
-        }, 0);
+    clock.tick(100);
+    receiving.grant(opened);
+    receiving.place(opened, { bytes: Uint8Array.of(2), isLast: false, offset: 1 });
+    // a duplicate is no progress
+    receiving.place(opened, { bytes: Uint8Array.of(2), isLast: false, offset: 1 });
 
-        armed.push({ delay, fire, timeoutId });
-
-        return timeoutId;
-      }) as typeof realSet;
-      globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-        cleared.push(timeoutId);
-        realClear(timeoutId);
-      };
-
-      const opened = openedOf(
-        receiving.open(new Uint8Array(1), {
-          call: { callId: 1, connectionHandle: 'a' },
-          onStall: () => {
-            stalled.push(1);
-          },
-          total: 8,
-        })
-      );
-
-      receiving.grant(opened);
-      receiving.place(opened, { bytes: Uint8Array.of(2), isLast: false, offset: 1 });
-      // a duplicate is no progress
-      receiving.place(opened, { bytes: Uint8Array.of(2), isLast: false, offset: 1 });
-
-      // without `onStall`, no timer
-      openedOf(
-        receiving.open(new Uint8Array(1), { call: { callId: 3, connectionHandle: 'a' }, total: 8 })
-      );
-    } finally {
-      globalThis.setTimeout = realSet;
-      globalThis.clearTimeout = realClear;
-    }
+    // without `onStall`, no timer
+    openedOf(
+      receiving.open(new Uint8Array(1), { call: { callId: 3, connectionHandle: 'a' }, total: 8 })
+    );
 
     expect(
-      armed.map(({ delay }) => {
+      clock.armed.map(({ delay }) => {
         return delay;
       })
     ).toEqual([250, 250]);
     // the stall counts from the last bytes placed, not from the opening
-    expect(cleared).toContain(armed[0]?.timeoutId);
-    expect(cleared).not.toContain(armed[1]?.timeoutId);
+    expect(clock.cleared).toContain(clock.armed[0]?.handle);
+    expect(clock.cleared).not.toContain(clock.armed[1]?.handle);
 
-    armed.at(-1)?.fire();
+    clock.tick(249);
+
+    expect(stalled).toEqual([]);
+
+    clock.tick(1);
 
     expect(stalled).toEqual([1]);
   });
 
   test('stops a transfer’s timer once its payload is whole, and once it is closed', () => {
-    const { receiving } = createReceiving({ transferInactivityTimeout: 250 });
-    const armed: unknown[] = [];
-    const cleared: unknown[] = [];
-    const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
+    const { clock, receiving } = createReceiving({ transferInactivityTimeout: 250 });
     const onStall = () => {
       return undefined;
     };
+    const whole = openedOf(
+      receiving.open(Uint8Array.of(1), {
+        call: { callId: 1, connectionHandle: 'a' },
+        onStall,
+        total: 2,
+      })
+    );
 
-    try {
-      globalThis.setTimeout = ((_: () => void, delay?: number) => {
-        const timeoutId = realSet(() => {
-          return undefined;
-        }, delay);
-
-        armed.push(timeoutId);
-
-        return timeoutId;
-      }) as typeof realSet;
-      globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-        cleared.push(timeoutId);
-        realClear(timeoutId);
-      };
-
-      const whole = openedOf(
+    receiving.grant(whole);
+    receiving.place(whole, { bytes: Uint8Array.of(2), isLast: true, offset: 1 });
+    receiving.complete(whole);
+    receiving.close(
+      openedOf(
         receiving.open(Uint8Array.of(1), {
-          call: { callId: 1, connectionHandle: 'a' },
+          call: { callId: 3, connectionHandle: 'a' },
           onStall,
           total: 2,
         })
-      );
-
-      receiving.grant(whole);
-      receiving.place(whole, { bytes: Uint8Array.of(2), isLast: true, offset: 1 });
-      receiving.complete(whole);
-      receiving.close(
-        openedOf(
-          receiving.open(Uint8Array.of(1), {
-            call: { callId: 3, connectionHandle: 'a' },
-            onStall,
-            total: 2,
-          })
-        )
-      );
-    } finally {
-      globalThis.setTimeout = realSet;
-      globalThis.clearTimeout = realClear;
-    }
+      )
+    );
 
     // the opening's, the one the last bytes set going, and the second transfer's: none left
-    expect(armed).toHaveLength(3);
+    expect(clock.armed).toHaveLength(3);
     expect(
-      armed.every((timeoutId) => {
-        return cleared.includes(timeoutId);
+      clock.armed.every(({ handle }) => {
+        return clock.cleared.includes(handle);
       })
     ).toBe(true);
+    expect(clock.countTimers()).toBe(0);
   });
 
   test('keeps no process alive for a transfer’s timer', () => {
-    const { receiving } = createReceiving();
-    const armed: unknown[] = [];
-    const { setTimeout: realSet } = globalThis;
-    let opened: IReceiving<Handle> | undefined;
-
-    try {
-      globalThis.setTimeout = ((...params: Parameters<typeof realSet>) => {
-        const timeoutId = realSet(...params);
-
-        armed.push(timeoutId);
-
-        return timeoutId;
-      }) as typeof realSet;
-      opened = openedOf(
-        receiving.open(new Uint8Array(1), {
-          call: { callId: 1, connectionHandle: 'a' },
-          onStall: () => {
-            return undefined;
-          },
-          total: 8,
-        })
-      );
-    } finally {
-      globalThis.setTimeout = realSet;
-    }
+    const { clock, receiving } = createReceiving();
+    const opened = openedOf(
+      receiving.open(new Uint8Array(1), {
+        call: { callId: 1, connectionHandle: 'a' },
+        onStall: () => {
+          return undefined;
+        },
+        total: 8,
+      })
+    );
 
     expect(
-      armed.map((timeoutId) => {
-        return (timeoutId as { hasRef: () => boolean }).hasRef();
+      clock.armed.map(({ handle }) => {
+        return hasRef(handle);
       })
     ).toEqual([false]);
 

@@ -10,7 +10,6 @@ import {
   WORKER_MESSAGES,
 } from '../shared/constants';
 import { ProgrammerError } from '../shared/errors';
-import { timestamp } from '../shared/timestamp';
 import { transferableOf } from '../shared/transferable';
 import type { IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
 import { createTransportServer, generateDrawnHandle } from './transport-server';
@@ -57,6 +56,7 @@ export const START_DEFAULTS = Object.freeze({
  * await server.start();
  */
 export const createWorkerTransportServer = ({
+  clock,
   scope,
 }: IWorkerTransportServerOptions): WorkerTransportServer => {
   return createTransportServer<IWorkerPortLike, undefined>((server, connections) => {
@@ -81,7 +81,7 @@ export const createWorkerTransportServer = ({
       const connection: ITransportServerClientAware<IWorkerPortLike> = {
         address: 'local',
         connectionHandle,
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: 0,
         socket: port,
         type: TRANSPORT_WORKER,
@@ -94,7 +94,7 @@ export const createWorkerTransportServer = ({
         }
 
         if (data instanceof ArrayBuffer) {
-          connection.lastActivityTimestamp = timestamp();
+          connection.lastActivity = server.clock.Date.now();
 
           return (server.emit(MESSAGE_EVENT, data, connectionHandle), undefined);
         }
@@ -118,6 +118,7 @@ export const createWorkerTransportServer = ({
     };
 
     return {
+      clock,
       defaults: START_DEFAULTS,
       type: TRANSPORT_WORKER,
 

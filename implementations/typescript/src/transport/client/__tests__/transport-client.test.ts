@@ -15,8 +15,10 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../transport-client';
+import * as clocks from '../../shared/clock';
 import * as constants from '../../shared/constants';
 import { createPromise } from '../../shared/create-promise';
+import { createTestClock, delaysOn, type TestClock } from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
@@ -27,13 +29,15 @@ const drop = (client: ITransportClient<object, never>): void => {
 };
 
 /** A transport with no socket: it records its calls, fails `failures` times, and opens otherwise. */
-const createStubClient = (options?: { failures?: number; hang?: boolean }) => {
+const createStubClient = (options?: { clock?: TestClock; failures?: number; hang?: boolean }) => {
   const calls: string[] = [];
   let failuresLeft = options?.failures ?? 0;
   let failureCount = 0;
 
   const client = createTransportClient<object, ITransportClientAddressOptions>((client) => {
     return {
+      clock: options?.clock,
+
       connect: (connectOptions) => {
         calls.push(`connect:${String(connectOptions.port)}`);
 
@@ -113,6 +117,11 @@ test.describe('@francisdesjardins/bead/transport-client', () => {
     ] as const) {
       expect(entry[name]).toBe(readyState[name]);
     }
+
+    expect([entry.LONGEST_TIMER, entry.PLATFORM_CLOCK]).toEqual([
+      clocks.LONGEST_TIMER,
+      clocks.PLATFORM_CLOCK,
+    ]);
   });
 });
 
@@ -348,16 +357,39 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isOpen()).toBe(true);
   });
 
-  test('waits its delay after each failed attempt, connecting once per attempt', async () => {
-    const { calls, client } = createStubClient({ failures: 2 });
+  test('waits its delay after each failed attempt on the clock its transport runs on, connecting once per attempt', async () => {
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 2 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
 
-    const started = Date.now();
-    await client.reconnect({ delay: 60 });
+    const reconnecting = client.reconnect({ delay: 60 });
 
-    expect(Date.now() - started).toBeGreaterThanOrEqual(50);
+    await expect
+      .poll(() => {
+        return delaysOn(clock);
+      })
+      .toEqual([60]);
+    await clock.tickAsync(59);
+
+    expect(calls).toEqual(['connect:1', 'connect:1']);
+
+    await clock.tickAsync(1);
+    await reconnecting;
+
     expect(calls).toEqual(['connect:1', 'connect:1', 'connect:1']);
+    expect(client.clock).toBe(clock);
+    expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
+  });
+
+  test('refuses a delay past the longest a timer waits, ending CLOSED without another attempt', async () => {
+    const { calls, client } = createStubClient({ failures: 2 });
+
+    await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+    await expect(client.reconnect({ delay: 2 ** 31 })).rejects.toBeInstanceOf(ProgrammerError);
+
+    expect(calls).toEqual(['connect:1', 'connect:1']);
+    expect(client.isClosed()).toBe(true);
   });
 
   test('tells "tap" the wait and the attempt that failed, and nothing when the first one succeeds', async () => {

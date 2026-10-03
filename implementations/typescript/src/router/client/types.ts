@@ -1,5 +1,6 @@
 // dependencies
 
+import type { IClock } from '../../transport/shared/clock';
 import type { Data, EmitterListener, IEventIteratorOptions } from '../../transport/shared/types';
 import type {
   DebugDirection,
@@ -97,6 +98,11 @@ export interface IRouterClient<
 /** What a client's router is built with. */
 export interface IRouterClientOptions {
   /**
+   * The clock it runs on: its transport's, which one given must be; the platform's when neither
+   * has one.
+   */
+  clock?: IClock | undefined;
+  /**
    * How much the router reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing.
    * They must hold together, or the router is a {@link ProgrammerError}.
    */
@@ -105,6 +111,8 @@ export interface IRouterClientOptions {
 
 /** The part of a transport client this router uses — met by any of this package's. */
 export interface IRouterClientTransportLike {
+  /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
+  readonly clock?: IClock | undefined;
   off(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown;
   off(event: 'message', listener: (data: Data) => void): unknown;
   off(event: 'reconnect', listener: () => void): unknown;

@@ -136,18 +136,22 @@ export const offerInterop = (server: InteropServer): void => {
     }
   );
 
-  // cancelled first, it answers all the same, an answer its router must not send
+  // cancelled first, it answers all the same, an answer its router must not send; it waits on its
+  // server's clock, which its router runs on
   services.getRequestResolver(procedureOf('slow'), { serializer: JSON_SERIALIZER })(
     async (request, response) => {
       const { milliseconds } = request.payload as { milliseconds: number };
+      const { clock: serverClock } = router;
 
       await new Promise((resolve) => {
-        const timer = setTimeout(resolve, milliseconds);
+        const timer = serverClock.setTimeout(() => {
+          resolve(undefined);
+        }, milliseconds);
 
         request.signal.addEventListener(
           'abort',
           () => {
-            clearTimeout(timer);
+            serverClock.clearTimeout(timer);
             cancellations.set(
               request.connectionHandle,
               (cancellations.get(request.connectionHandle) ?? 0) + 1

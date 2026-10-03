@@ -1,5 +1,6 @@
 // dependencies
 
+import type { IClock } from '../../transport/shared/clock';
 import type {
   Data,
   EmitterListener,
@@ -412,7 +413,7 @@ export interface IRouterCore<Handle extends string> {
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
    * waiting and none is given — or, once its result came in part, for as long as the peer keeps the
    * call abandoned, should that be longer. A call id reserved already, or a router disposed, sends
-   * nothing.
+   * nothing. A timeout past {@link LONGEST_TIMER} is a {@link ProgrammerError}, and nothing is done.
    */
   cancel(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -481,8 +482,9 @@ export interface IRouterCore<Handle extends string> {
   ): Promise<IRouterResult>;
   /**
    * Reserves this side's `callId` on `connectionHandle` for `timeout`, or for the default time when
-   * it is none a timer can hold: the sequence skips it, and what comes late on it is dropped in
-   * silence. Reserved twice, the later end stands.
+   * it gives none: the sequence skips it, and what comes late on it is dropped in silence. Reserved
+   * twice, the later end stands. A timeout past {@link LONGEST_TIMER} is a
+   * {@link ProgrammerError}, and nothing is reserved.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -515,6 +517,11 @@ export interface IRouterCore<Handle extends string> {
 
 /** How a router's core is built, beyond its port. */
 export interface IRouterCoreOptions {
+  /**
+   * The clock its timers run on — a call's timeout, a call id's reservation, a transfer's inactivity
+   * — and its reservations' ends are read on; the platform's when not given.
+   */
+  clock?: IClock | undefined;
   /** The last call id it draws before its first again; its side's last when not given. */
   lastCallId?: CallId | undefined;
   /**
@@ -630,6 +637,8 @@ export interface IRouterCorePort<Handle extends string> {
  * no notification; a client holds notifications, and notifies nobody.
  */
 export interface IRouterLike<Handle extends string = ConnectionHandle> {
+  /** The clock it runs on, its transport's, which what is built on it runs on too. */
+  readonly clock: IClock;
   readonly failures: IRouterFailures;
 
   /** Whether the router holds this notification — this one, not another of its procedure. */
@@ -756,7 +765,10 @@ export interface IDebugEvent {
   rx: unknown;
   serviceId: ServiceId;
   serviceRevision: ServiceRevision;
-  /** When the call started, and — once it answered — how long it took, in milliseconds. */
+  /**
+   * When the call started, in milliseconds since the epoch on its router's clock, and — once it
+   * answered — how long it took, in whole milliseconds of that clock's monotonic reading.
+   */
   timestamp: { duration: number | undefined; event: number };
   /** What went out, decoded; a copy. */
   tx: unknown;
@@ -982,6 +994,11 @@ export interface IProcedure extends IProcedureAddress {
 }
 
 export interface IServiceManagerOptions<Handle extends string = ConnectionHandle> {
+  /**
+   * The clock its traces read: its router's, which one given must be; the platform's when neither
+   * has one.
+   */
+  clock?: IClock | undefined;
   /**
    * Closes a connection that let a request naming it — a command — go unanswered, when the call's
    * `closeOnTimeout`, or the manager's default, says so. A server gives it; a client has no

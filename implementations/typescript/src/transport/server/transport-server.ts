@@ -2,6 +2,7 @@
 
 // dependencies
 
+import { PLATFORM_CLOCK } from '../shared/clock';
 import { createEmitter } from '../shared/emitter';
 import { ProgrammerError } from '../shared/errors';
 import { gaugesOf, mergeGauges } from '../shared/gauges';
@@ -24,6 +25,8 @@ import type {
   TransportServerResolvedStartOptions,
 } from './types';
 
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
+export type { IClock, TimeoutId } from '../shared/clock';
 export {
   CLOSE_EVENT,
   CONNECTION_EVENT,
@@ -59,8 +62,7 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export { timestamp } from '../shared/timestamp';
-export type { Data, IEventIteratorOptions, ITimestamp } from '../shared/types';
+export type { Data, IEventIteratorOptions } from '../shared/types';
 export type {
   ITransportServer,
   ITransportServerAddress,
@@ -69,6 +71,7 @@ export type {
   ITransportServerClientHandleInfo,
   ITransportServerDrawnHandleInfo,
   ITransportServerImplementation,
+  ITransportServerOptions,
   ITransportServerStartOptions,
   TRANSPORT_SERVER_EVENTS,
   TransportServerConnectionHandle,
@@ -107,7 +110,8 @@ export const generateDrawnHandle = (
  * `clients`, `closeAll`, and the guards around `start` and `stop`.
  *
  * `define` receives the server being built and the registry its transport fills, and returns what
- * only that transport knows — how to listen, stop, close one connection and send to one.
+ * only that transport knows — the clock it runs on, how to listen, stop, close one connection and
+ * send to one.
  *
  * @example
  * const server = createTransportServer((server, connections) => {
@@ -153,10 +157,13 @@ export const createTransportServer = <Socket extends object, Request>(
     get clients() {
       return connections
         .values()
-        .map(({ address, connectionHandle, lastActivityTimestamp, port, type }) => {
-          return { address, connectionHandle, lastActivityTimestamp, port, type };
+        .map(({ address, connectionHandle, lastActivity, port, type }) => {
+          return { address, connectionHandle, lastActivity, port, type };
         })
         .toArray();
+    },
+    get clock() {
+      return implementation.clock ?? PLATFORM_CLOCK;
     },
     get port() {
       return startOptions.port;

@@ -20,7 +20,10 @@ export * from './client';
  */
 export interface IWSClientOptions
   extends Omit<IClientLayers<WSTransportClient>, 'transport'>, IClientOptions {
-  /** The transport's options; binary comes as frames, so as `'arraybuffer'` or `'nodebuffer'`. */
+  /**
+   * The transport's options; binary comes as frames, so as `'arraybuffer'` or `'nodebuffer'`; the
+   * clock is every layer's.
+   */
   transport?:
     | (Omit<IWSTransportClientOptions, 'binaryType'> & {
         binaryType?: 'arraybuffer' | 'nodebuffer' | undefined;

@@ -3,11 +3,11 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import { assertHeld, type IClock, PLATFORM_CLOCK } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { gaugesOf, mergeGauges } from '../../transport/shared/gauges';
 import { createEventMethods } from '../../transport/shared/lifecycle';
-import { timestamp } from '../../transport/shared/timestamp';
 import { SESSION_TOKEN_BYTES } from '../shared/constants';
 import { DisconnectError } from '../shared/errors';
 import { drawSessionToken, isSessionToken } from '../shared/identifiers';
@@ -19,7 +19,7 @@ import {
   CREATED_EVENT,
   DATA_CHANGED_EVENT,
   DELETED_EVENT,
-  LAST_ACTIVITY_TIMESTAMP_CHANGED_EVENT,
+  LAST_ACTIVITY_CHANGED_EVENT,
   SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT,
   SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
   UPDATED_EVENT,
@@ -40,14 +40,16 @@ export {
   CREATED_EVENT,
   DATA_CHANGED_EVENT,
   DELETED_EVENT,
-  LAST_ACTIVITY_TIMESTAMP_CHANGED_EVENT,
+  LAST_ACTIVITY_CHANGED_EVENT,
   SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT,
   SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
   UPDATED_EVENT,
 } from './constants';
 export { SESSION_TOKEN_BYTES } from '../shared/constants';
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
+export type { IClock, TimeoutId } from '../../transport/shared/clock';
 export { GenericError, ProgrammerError } from '../../transport/shared/errors';
-export type { IEventIteratorOptions, ITimestamp } from '../../transport/shared/types';
+export type { IEventIteratorOptions } from '../../transport/shared/types';
 export type { SessionToken } from '../shared/types';
 export type {
   ISession,
@@ -59,7 +61,6 @@ export type {
   SessionManagerEventMap,
   SessionManagerOnInactivityTimeoutCallback,
   SessionManagerOnSessionCallback,
-  TimeoutId,
 } from './types';
 
 // types
@@ -73,19 +74,11 @@ export const DEFAULTS = Object.freeze({
   sessionInactivityTimeout: 30_000,
 });
 
-/** The longest `setTimeout` waits; a longer delay would fire at once instead. */
-const TIMEOUT_MAX = 2 ** 31 - 1;
-
 // helpers
 
-/** Whether `timeout` arms a timer: finite, and no longer than `setTimeout` waits. */
-export const isArmable = (timeout: number): boolean => {
-  return Number.isFinite(timeout) && timeout <= TIMEOUT_MAX;
-};
-
 /**
- * A default the manager falls back on is a timeout itself: positive, or `Infinity` for never. Anything
- * else would let `0` through as a timer that fires at once.
+ * A default the manager falls back on is a timeout itself: positive, up to the longest a timer
+ * waits, or `Infinity` for never. Anything else would let `0` through as a timer that fires at once.
  */
 const assertDefaultTimeout = (name: string, timeout: number): void => {
   if (Number.isNaN(timeout) || timeout <= 0) {
@@ -93,22 +86,27 @@ const assertDefaultTimeout = (name: string, timeout: number): void => {
       `${name} is a positive number of milliseconds, got ${String(timeout)}`
     );
   }
+
+  assertHeld(name, timeout);
 };
 
 /**
- * An inactivity timeout as the manager stores it: `0` or `NaN` takes `fallback`. A negative one is a
- * {@link ProgrammerError}, since `setTimeout` would fire it at once.
+ * An inactivity timeout as the manager stores it: `0` or `NaN` takes `fallback`. A negative one, or
+ * one past the longest a timer waits, is a {@link ProgrammerError}, since a timer would fire it at
+ * once.
  */
 const resolveTimeout = (timeout: number, fallback: number): number => {
   if (timeout < 0) {
     throw new ProgrammerError(`an inactivity timeout cannot be negative, got ${String(timeout)}`);
   }
 
+  assertHeld('an inactivity timeout', timeout);
+
   return timeout || fallback;
 };
 
-/** Each connection's two timers, in a record made on the first one set. */
-export const createTimers = (): ISessionManagerTimers => {
+/** Each connection's two timers, on `clock`, in a record made on the first one set. */
+export const createTimers = (clock: IClock): ISessionManagerTimers => {
   const timeoutIdsByConnection = new Map<TransportServerConnectionHandle, ISessionTimeoutIds>();
 
   const timeoutIdsOf = (connectionHandle: TransportServerConnectionHandle): ISessionTimeoutIds => {
@@ -125,12 +123,12 @@ export const createTimers = (): ISessionManagerTimers => {
   const clearConnectionInactivityTimeout = (
     connectionHandle: TransportServerConnectionHandle
   ): void => {
-    clearTimeout(timeoutIdsByConnection.get(connectionHandle)?.connectionTimeoutId);
+    clock.clearTimeout(timeoutIdsByConnection.get(connectionHandle)?.connectionTimeoutId);
   };
   const clearSessionInactivityTimeout = (
     connectionHandle: TransportServerConnectionHandle
   ): void => {
-    clearTimeout(timeoutIdsByConnection.get(connectionHandle)?.sessionTimeoutId);
+    clock.clearTimeout(timeoutIdsByConnection.get(connectionHandle)?.sessionTimeoutId);
   };
   const clearInactivityTimeout = (connectionHandle: TransportServerConnectionHandle): void => {
     clearConnectionInactivityTimeout(connectionHandle);
@@ -167,13 +165,13 @@ export const createTimers = (): ISessionManagerTimers => {
     setConnectionInactivityTimeout: (timeoutId, connectionHandle) => {
       const timeoutIds = timeoutIdsOf(connectionHandle);
 
-      clearTimeout(timeoutIds.connectionTimeoutId);
+      clock.clearTimeout(timeoutIds.connectionTimeoutId);
       timeoutIds.connectionTimeoutId = timeoutId;
     },
     setSessionInactivityTimeout: (timeoutId, connectionHandle) => {
       const timeoutIds = timeoutIdsOf(connectionHandle);
 
-      clearTimeout(timeoutIds.sessionTimeoutId);
+      clock.clearTimeout(timeoutIds.sessionTimeoutId);
       timeoutIds.sessionTimeoutId = timeoutId;
     },
     [Symbol.dispose]: () => {
@@ -193,7 +191,9 @@ export const createTimers = (): ISessionManagerTimers => {
  * its connection when it changes, its data, and the two inactivity timers that tell the router when
  * to drop it.
  *
- * Nothing handed in or out is shared with what is stored: `data` must be structured-cloneable.
+ * Nothing handed in or out is shared with what is stored: `data` must be structured-cloneable. Its
+ * timers run on its `clock`, which reads its activity too: a timeout past the longest a timer waits
+ * is a {@link ProgrammerError}, and never is `Infinity`.
  *
  * @example
  * import { createSessionManager } from '@francisdesjardins/bead/session-manager';
@@ -216,6 +216,7 @@ export const createSessionManager = <Data>(
   options?: ISessionManagerOptions
 ): ISessionManager<Data> => {
   const {
+    clock = PLATFORM_CLOCK,
     connectionInactivityTimeout:
       defaultConnectionInactivityTimeout = DEFAULTS.connectionInactivityTimeout,
     sessionInactivityTimeout: defaultSessionInactivityTimeout = DEFAULTS.sessionInactivityTimeout,
@@ -229,7 +230,7 @@ export const createSessionManager = <Data>(
   // connection through the token each one holds
   const sessions = new Map<SessionToken, ISession<Data>>();
   const tokens = new Map<TransportServerConnectionHandle, SessionToken>();
-  const timers = createTimers();
+  const timers = createTimers(clock);
 
   // `emit` stays in here: only the manager says what happened to its sessions
   // oxlint-disable-next-line typescript/unbound-method -- `createEventMethods` returns arrow functions, which have no `this` to lose
@@ -301,10 +302,10 @@ export const createSessionManager = <Data>(
       return undefined;
     }
 
-    const newTimestamp = timestamp();
-    const oldTimestamp = storedSession.lastActivityTimestamp;
+    const newActivity = clock.Date.now();
+    const oldActivity = storedSession.lastActivity;
 
-    storedSession.lastActivityTimestamp = newTimestamp;
+    storedSession.lastActivity = newActivity;
 
     // activity restarts both timers, even within the same millisecond
     manager.resetConnectionInactivityTimeout(
@@ -313,9 +314,9 @@ export const createSessionManager = <Data>(
     );
     manager.resetSessionInactivityTimeout(storedSession, storedSession.sessionInactivityTimeout);
 
-    if (newTimestamp.ms !== oldTimestamp.ms) {
-      emitIfHeard(LAST_ACTIVITY_TIMESTAMP_CHANGED_EVENT, () => {
-        return [copyOf(storedSession), { ...newTimestamp }, oldTimestamp];
+    if (newActivity !== oldActivity) {
+      emitIfHeard(LAST_ACTIVITY_CHANGED_EVENT, () => {
+        return [copyOf(storedSession), newActivity, oldActivity];
       });
     }
 
@@ -325,6 +326,9 @@ export const createSessionManager = <Data>(
   const manager: ISessionManager<Data> = {
     ...eventMethods,
 
+    get clock() {
+      return clock;
+    },
     get timers() {
       return timers;
     },
@@ -337,7 +341,7 @@ export const createSessionManager = <Data>(
         connectionHandle,
         connectionInactivityTimeout: Infinity,
         data: undefined,
-        lastActivityTimestamp: timestamp(),
+        lastActivity: clock.Date.now(),
         sessionInactivityTimeout: Infinity,
         sessionToken: undefined,
       };
@@ -401,11 +405,12 @@ export const createSessionManager = <Data>(
       return tokens.has(connectionHandle);
     },
     resetConnectionInactivityTimeout: ({ connectionHandle }, timeout) => {
+      assertHeld('a connection inactivity timeout', timeout);
       timers.clearConnectionInactivityTimeout(connectionHandle);
 
-      if (tokens.has(connectionHandle) && isArmable(timeout)) {
+      if (tokens.has(connectionHandle) && Number.isFinite(timeout)) {
         timers.setConnectionInactivityTimeout(
-          setTimeout(() => {
+          clock.setTimeout(() => {
             reach(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, connectionHandle);
           }, timeout),
           connectionHandle
@@ -413,11 +418,12 @@ export const createSessionManager = <Data>(
       }
     },
     resetSessionInactivityTimeout: ({ connectionHandle }, timeout) => {
+      assertHeld('a session inactivity timeout', timeout);
       timers.clearSessionInactivityTimeout(connectionHandle);
 
-      if (tokens.has(connectionHandle) && isArmable(timeout)) {
+      if (tokens.has(connectionHandle) && Number.isFinite(timeout)) {
         timers.setSessionInactivityTimeout(
-          setTimeout(() => {
+          clock.setTimeout(() => {
             reach(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, connectionHandle);
           }, timeout),
           connectionHandle
@@ -553,7 +559,7 @@ export const createSessionManager = <Data>(
     touch: (connectionHandle) => {
       return stamp(connectionHandle) !== undefined;
     },
-    updateLastActivityTimestamp: (session) => {
+    updateLastActivity: (session) => {
       const storedSession = stamp(session.connectionHandle);
 
       return storedSession === undefined ? undefined : copyOf(storedSession);

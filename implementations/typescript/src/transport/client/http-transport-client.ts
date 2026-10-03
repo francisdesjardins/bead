@@ -12,8 +12,8 @@ import {
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
-  TIMER_MAX,
 } from '../shared/constants';
+import { LONGEST_TIMER, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
   ConnectError,
@@ -199,7 +199,7 @@ const assertDelay = (
   name: string,
   { isUnbounded = false, value }: { isUnbounded?: boolean; value: number }
 ): void => {
-  const isHeld = Number.isInteger(value) && value >= 0 && value <= TIMER_MAX;
+  const isHeld = Number.isInteger(value) && value >= 0 && value <= LONGEST_TIMER;
 
   if (!isHeld && !(isUnbounded && value === Infinity)) {
     throw new ProgrammerError(
@@ -242,6 +242,7 @@ export const createHTTPTransportClient = (
   options?: IHTTPTransportClientOptions
 ): HTTPTransportClient => {
   const {
+    clock,
     fetch: fetchImpl = globalThis.fetch as FetchLike,
     inactivityTimeout = INACTIVITY_TIMEOUT,
     isListening = true,
@@ -428,13 +429,13 @@ export const createHTTPTransportClient = (
           (resolve) => {
             resolve();
           },
-          { delay, signal }
+          { clock: client.clock, delay, signal }
         ).catch(noop);
       };
 
       // the inactivity timeout of a count of losses, armed at its first, which aborts `expiry` as it
       // ends: at once when it is 0, and never when it is Infinity, which a timer would take for 1 ms
-      const expireAfter = (expiry: AbortController): ReturnType<typeof setTimeout> | undefined => {
+      const expireAfter = (expiry: AbortController): TimeoutId | undefined => {
         if (inactivityTimeout === 0) {
           return (expiry.abort(), undefined);
         }
@@ -443,7 +444,7 @@ export const createHTTPTransportClient = (
           return undefined;
         }
 
-        return setTimeout(() => {
+        return client.clock.setTimeout(() => {
           expiry.abort();
         }, inactivityTimeout);
       };
@@ -454,10 +455,10 @@ export const createHTTPTransportClient = (
       const listen = async (connection: IDrawn): Promise<void> => {
         const cursor = { after: 0 };
         let losses = 0;
-        // a timer measures the timeout, never a reading of the clock, which a clock set or a machine
-        // woken from sleep moves: the listens it allows are the same on any machine, however loaded
+        // a timer measures the timeout, never a reading of the wall clock, which a clock set or a
+        // machine woken from sleep moves: the listens it allows are the same on any machine
         let expiry: AbortController | undefined;
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        let timeoutId: TimeoutId | undefined;
 
         try {
           while (drawn === connection) {
@@ -493,7 +494,7 @@ export const createHTTPTransportClient = (
             }
 
             // it reached the server: the count ends, and its timeout with it
-            clearTimeout(timeoutId);
+            client.clock.clearTimeout(timeoutId);
             expiry = undefined;
             losses = 0;
 
@@ -503,11 +504,13 @@ export const createHTTPTransportClient = (
           }
         } finally {
           // the connection's end disarms it, so nothing fires after
-          clearTimeout(timeoutId);
+          client.clock.clearTimeout(timeoutId);
         }
       };
 
       return {
+        clock,
+
         connect: async (connectOptions) => {
           const {
             host,
@@ -571,7 +574,7 @@ export const createHTTPTransportClient = (
                   }
                 );
               },
-              { signal, timeout }
+              { clock: client.clock, signal, timeout }
             );
           } catch (reason) {
             // given up — timed out, cancelled, disposed — as it came: the connection drawn meanwhile
@@ -616,7 +619,9 @@ export const createHTTPTransportClient = (
             connection.controller.abort();
             release(connection);
           } else {
-            // the server ends it first, so what waits there learns it; then what waits here goes
+            // the server ends it first, so what waits there learns it; then what waits here goes. Its
+            // bound is the platform's, on the real clock, as a close handshake's: it bounds the
+            // platform's own exchange with a server that does not answer (decision 0011)
             try {
               drain(
                 await fetchImpl(connection.url, {
@@ -624,6 +629,7 @@ export const createHTTPTransportClient = (
                   keepalive: true,
                   method: 'DELETE',
                   redirect: 'error',
+                  // oxlint-disable-next-line no-restricted-properties -- a disconnect's bound is the platform's
                   signal: AbortSignal.timeout(DISCONNECT_TIMEOUT),
                 })
               );
@@ -686,9 +692,12 @@ export const createHTTPTransportClient = (
                 // its connection gone: told after the refusal is heard, so its caller learns first
                 // that it was never tried
                 if (refusal === CONNECTION_UNKNOWN) {
-                  setTimeout(() => {
+                  const loseIt = (): void => {
                     lose(connection, { isReleased: false });
-                  }, 0);
+                  };
+
+                  // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
+                  globalThis.setTimeout(loseIt, 0);
                 }
 
                 return undefined;

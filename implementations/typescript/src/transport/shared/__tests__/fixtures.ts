@@ -1,7 +1,9 @@
 import { once } from 'node:events';
 import { expect } from '@playwright/test';
+import { createClock } from '@sinonjs/fake-timers';
 import type { AddressInfo } from 'node:net';
 import { WebSocket as WsWebSocket, WebSocketServer, type ServerOptions } from 'ws';
+import type { TimeoutId } from '../clock';
 
 /**
  * What the client and server suites share: a loopback host, raw `ws` servers with a clean stop, and
@@ -82,6 +84,97 @@ export const IMPLEMENTATIONS = [
   ['the global WebSocket', track(WebSocket)],
   ['ws', track(WsWebSocket)],
 ] as const;
+
+/** A timer armed on a test clock: its delay, and the handle it gave. */
+export interface IArmedTimer {
+  delay: number;
+  handle: TimeoutId;
+}
+
+/**
+ * A test's clock: `@sinonjs/fake-timers`' `createClock()`, never installed on the globals, which Bead
+ * runs on once given it as `clock`, and which the test advances. Each timer armed on it is kept in
+ * `armed`, and each handle cleared in `cleared`, for the test to read what Bead means to fire.
+ */
+export const createTestClock = (now?: number) => {
+  const clock = createClock(now);
+  const armed: IArmedTimer[] = [];
+  const cleared: unknown[] = [];
+  const {
+    clearInterval: clearEvery,
+    clearTimeout: clear,
+    setInterval: every,
+    setTimeout: set,
+  } = clock;
+
+  clock.setTimeout = (callback, delay = 0) => {
+    const handle = set(callback, delay);
+
+    armed.push({ delay, handle });
+
+    return handle;
+  };
+  clock.setInterval = (callback, delay = 0) => {
+    const handle = every(callback, delay);
+
+    armed.push({ delay, handle });
+
+    return handle;
+  };
+  // a clear of none, which Bead makes of a timer it never armed, clears nothing to read
+  clock.clearTimeout = (handle) => {
+    if (handle !== undefined) {
+      cleared.push(handle);
+    }
+
+    clear(handle);
+  };
+  clock.clearInterval = (handle) => {
+    if (handle !== undefined) {
+      cleared.push(handle);
+    }
+
+    clearEvery(handle);
+  };
+
+  return Object.assign(clock, { armed, cleared });
+};
+
+export type TestClock = ReturnType<typeof createTestClock>;
+
+/** The delays of the timers armed on `clock` and neither fired nor cleared, by when they are due. */
+export const delaysOn = (clock: TestClock): number[] => {
+  return [...(clock.timers?.values() ?? [])]
+    .toSorted((a, b) => {
+      return (a.callAt ?? 0) - (b.callAt ?? 0) || (a.id ?? 0) - (b.id ?? 0);
+    })
+    .map(({ delay }) => {
+      return delay ?? 0;
+    });
+};
+
+/** The timers `run` arms on `clock`, and the handles it clears there, as it runs. */
+export const timersBy = (clock: TestClock, run: () => void) => {
+  const [armedFrom, clearedFrom] = [clock.armed.length, clock.cleared.length];
+
+  run();
+
+  return { armed: clock.armed.slice(armedFrom), cleared: clock.cleared.slice(clearedFrom) };
+};
+
+/** As {@link timersBy}, for a `run` that waits: the timers until it settles. */
+export const timersUntil = async (clock: TestClock, run: () => Promise<unknown>) => {
+  const [armedFrom, clearedFrom] = [clock.armed.length, clock.cleared.length];
+
+  await run();
+
+  return { armed: clock.armed.slice(armedFrom), cleared: clock.cleared.slice(clearedFrom) };
+};
+
+/** Whether a handle a test clock gave keeps a process alive: an `unref`ed one does not. */
+export const hasRef = (handle: TimeoutId): boolean => {
+  return (handle as { hasRef: () => boolean }).hasRef();
+};
 
 export interface ISpiedInterval {
   beat: () => void;

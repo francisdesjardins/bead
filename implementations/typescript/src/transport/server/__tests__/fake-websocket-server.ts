@@ -13,6 +13,8 @@ import type {
 
 export interface IFakeSocket extends IServerSocketLike {
   closeCodes: number[];
+  /** What the peer sends, or does: `message`, `pong`, `close`. */
+  hear(event: string, ...params: unknown[]): void;
   /** The pings the socket was asked to send. */
   pings: number;
   wasTerminated: boolean;
@@ -29,6 +31,9 @@ export const createFakeSocket = (behaviour?: {
     closeCodes: [],
     readyState: 1,
     wasTerminated: false,
+    hear: (event, ...params) => {
+      emitter.emit(event, ...params);
+    },
     close: (code) => {
       socket.closeCodes.push(code ?? 1005);
       if (behaviour?.onClose === 'throw') {

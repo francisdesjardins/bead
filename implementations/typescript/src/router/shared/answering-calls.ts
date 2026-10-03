@@ -2,6 +2,7 @@
 
 // dependencies
 
+import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { LIMIT_DEFAULTS } from './constants';
@@ -28,7 +29,7 @@ interface IAnswering<Receiving> {
 /** A call whose transfer ended: the end its credit reached, and what forgets it. */
 interface IAbandoned {
   creditEnd: number;
-  timer: ReturnType<typeof setTimeout>;
+  timer: TimeoutId;
 }
 
 /** What a call receives of its payload: a transfer, and the end of the credit it granted so far. */
@@ -98,16 +99,19 @@ export interface IAnsweringCalls<
  * `onRemove` hears it then, once. A call that received a transfer and ends — answered, refused,
  * cancelled — stays abandoned for the inactivity a transfer is allowed, since what its credit let
  * the peer send may still come, a copy or out of order; the oldest of a connection's yields once it
- * keeps `maximumTransfers`, one at least. A call that goes with its connection is abandoned by none.
+ * keeps `maximumTransfers`, one at least, and the inactivity runs on `clock`. A call that goes with
+ * its connection is abandoned by none.
  */
 export const createAnsweringCalls = <
   Handle extends string,
   Receiving extends IReceivingCredit = IReceivingCredit,
->(options?: {
+>(options: {
+  clock: IClock;
   limits?: Pick<IRouterLimits, 'maximumTransfers' | 'transferInactivityTimeout'> | undefined;
   onRemove?: ((receiving: Receiving) => void) | undefined;
 }): IAnsweringCalls<Handle, Receiving> => {
-  const { maximumTransfers, transferInactivityTimeout } = options?.limits ?? LIMIT_DEFAULTS;
+  const { clock } = options;
+  const { maximumTransfers, transferInactivityTimeout } = options.limits ?? LIMIT_DEFAULTS;
   const answering = new Map<Handle, Map<CallId, IAnswering<Receiving>>>();
   // the controller of each request dispatched, by its header
   const dispatched = new WeakMap<IRequestHeader, AbortController>();
@@ -122,7 +126,7 @@ export const createAnsweringCalls = <
       return;
     }
 
-    clearTimeout(entry.timer);
+    clock.clearTimeout(entry.timer);
     calls.delete(callId);
 
     if (calls.size === 0) {
@@ -142,7 +146,7 @@ export const createAnsweringCalls = <
       forgetAbandoned({ callId: oldest, connectionHandle });
     }
 
-    const timer = setTimeout(() => {
+    const timer = clock.setTimeout(() => {
       forgetAbandoned({ callId, connectionHandle });
     }, transferInactivityTimeout);
 
@@ -177,7 +181,7 @@ export const createAnsweringCalls = <
 
     if (entry.receiving !== undefined) {
       abandon({ callId, connectionHandle }, entry.receiving.creditEnd);
-      options?.onRemove?.(entry.receiving);
+      options.onRemove?.(entry.receiving);
     }
 
     return entry;

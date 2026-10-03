@@ -5,10 +5,10 @@ import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
 import { createHTTPClient, type HTTPClient } from '../../client/http-client';
 import { createWSClient } from '../../client/ws-client';
-import { timersOf } from '../../router/shared/__tests__/fixtures';
 import type { IProcedure } from '../../router/shared/types';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createFakeFetch } from '../../transport/client/__tests__/fake-fetch';
+import { createTestClock, timersBy } from '../../transport/shared/__tests__/fixtures';
 import {
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
@@ -299,15 +299,18 @@ test.describe('an HTTP server and client', () => {
 
     expect(await closed).toEqual([false, false]);
 
-    // by default, the timer a connection arms on a server built with no timeout; nothing listens
+    // by default, the timer a connection arms on a server built with no timeout, on the clock its
+    // transport is given; nothing listens
+    const clock = createTestClock();
     await using server = createHTTPServer({
       transport: {
+        clock,
         createServer: (listener) => {
           return createServer(listener);
         },
       },
     });
-    const { armed } = timersOf(() => {
+    const { armed } = timersBy(clock, () => {
       server.transport.emit(
         'connection',
         { ordinal: 1 },

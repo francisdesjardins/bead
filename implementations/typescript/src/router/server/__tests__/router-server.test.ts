@@ -18,12 +18,11 @@ import type {
 } from '../../shared/types';
 import type { IRelayOptions, RelayTarget } from '../types';
 import {
-  callIdsOf,
-  createPipedTransports,
-  envelopeOf,
-  spyTimers,
-  timersWhile,
-} from '../../shared/__tests__/fixtures';
+  createTestClock,
+  type TestClock,
+  timersUntil,
+} from '../../../transport/shared/__tests__/fixtures';
+import { callIdsOf, createPipedTransports, envelopeOf } from '../../shared/__tests__/fixtures';
 import { createRouterClient } from '../../client/router-client';
 import {
   CancelError,
@@ -277,6 +276,22 @@ test.describe('createRouterServer', () => {
     expect(router.transport).toBe(transport);
     expect(router.failures).toBe(SERVER_FAILURES);
     expect(router.notifications.subscriptions()).toEqual([]);
+  });
+
+  test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
+    const clock = createTestClock();
+    const { transport } = createScriptedTransport();
+    using onItsTransport = createRouterServer(createWSTransportServer({ clock, WebSocketServer }));
+    using onItsOwn = createRouterServer(transport, { clock });
+
+    expect([onItsTransport.clock, onItsOwn.clock]).toEqual([clock, clock]);
+    expect(() => {
+      createRouterServer(createWSTransportServer({ WebSocketServer }), { clock });
+    }).toThrow(
+      new ProgrammerError(
+        "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
+      )
+    );
   });
 
   test.describe('a connection’s requests', () => {
@@ -2071,12 +2086,17 @@ test.describe('createRouterServer, relaying', () => {
    * signal aborts; `isDeferred` hands each message a turn later.
    */
   const createDevice = ({
+    clock,
     isDeferred,
     limits,
-  }: { isDeferred?: boolean | undefined; limits?: RouterLimitsOptions | undefined } = {}) => {
+  }: {
+    clock?: TestClock | undefined;
+    isDeferred?: boolean | undefined;
+    limits?: RouterLimitsOptions | undefined;
+  } = {}) => {
     const pipe = createPipedTransports({ connectionHandle: device, isDeferred });
-    const toDevice = createRouterClient(pipe.client, { limits });
-    const deviceRouter = createRouterServer(pipe.server, { limits });
+    const toDevice = createRouterClient(pipe.client, { clock, limits });
+    const deviceRouter = createRouterServer(pipe.server, { clock, limits });
     const services = createServiceManager(deviceRouter);
     const aborted: unknown[] = [];
 
@@ -2117,13 +2137,20 @@ test.describe('createRouterServer, relaying', () => {
    * by default, with the device behind it at destination 7; what the relay reports is recorded.
    */
   const createRelayed = ({
+    clock,
     deviceLimits,
     isDeferred,
     relay = admitting,
-  }: { deviceLimits?: RouterLimitsOptions; isDeferred?: boolean; relay?: IRelayOptions } = {}) => {
+  }: {
+    clock?: TestClock;
+    deviceLimits?: RouterLimitsOptions;
+    isDeferred?: boolean;
+    relay?: IRelayOptions;
+  } = {}) => {
     const legA = createScriptedTransport();
-    const router = createRouterServer(legA.transport, { relay });
+    const router = createRouterServer(legA.transport, { clock, relay });
     const { [Symbol.dispose]: disposeDevice, ...behind } = createDevice({
+      clock,
       isDeferred,
       limits: deviceLimits,
     });
@@ -2323,40 +2350,34 @@ test.describe('createRouterServer, relaying', () => {
   });
 
   test('ends leg B past the relay’s timeout, cancelling it at the target, and answers lost; no timer without one', async () => {
-    using relayed = createRelayed({ relay: { ...admitting, timeout: 250 } });
+    const clock = createTestClock();
+    using relayed = createRelayed({ clock, relay: { ...admitting, timeout: 250 } });
     const { aborted, deliver, errors, sent } = relayed;
-    const { armed, restore } = spyTimers();
+    const delaysArmed = () => {
+      return clock.armed.map(({ delay }) => {
+        return delay;
+      });
+    };
 
-    try {
-      deliver(first, requestOf(1, { destinationId: 7, procedure: held }));
-      await sleep(0);
+    deliver(first, requestOf(1, { destinationId: 7, procedure: held }));
+    await sleep(0);
 
-      expect(
-        armed.map(({ delay }) => {
-          return delay;
-        })
-      ).toEqual([250]);
+    expect(delaysArmed()).toEqual([250]);
 
-      armed[0]?.fire();
-      await sleep(0);
+    await clock.tickAsync(250);
+    await sleep(0);
 
-      // its call id on leg B stays reserved as long as its timeout, against a late answer
-      expect(
-        armed.map(({ delay }) => {
-          return delay;
-        })
-      ).toEqual([250, 250]);
-    } finally {
-      restore();
-    }
+    // its call id on leg B stays reserved as long as its timeout, against a late answer
+    expect(delaysArmed()).toEqual([250, 250]);
 
     expect(aborted).toEqual([expect.any(CancelError)]);
     expect(answersOf(sent)).toEqual([[first, 'failure', 1, ProtocolCode.DESTINATION_LOST]]);
     expect(sent[0]?.envelope).toMatchObject({ failure: { relays: 0 } });
     expect(reportedOf(errors)).toEqual([[expect.stringContaining('250'), first]]);
 
-    using unbounded = createRelayed();
-    const { armed: none } = await timersWhile(async () => {
+    const unboundedClock = createTestClock();
+    using unbounded = createRelayed({ clock: unboundedClock });
+    const { armed: none } = await timersUntil(unboundedClock, async () => {
       unbounded.deliver(first, requestOf(1, { destinationId: 7, procedure: held }));
       await sleep(0);
     });

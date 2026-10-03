@@ -13,7 +13,6 @@ import {
 import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
-import { timestamp } from '../shared/timestamp';
 import type { Data } from '../shared/types';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
@@ -69,6 +68,7 @@ export const START_DEFAULTS = Object.freeze({
 export const createWSTransportServer = (options: IWSTransportServerOptions): WSTransportServer => {
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
+    clock,
     closeTimeout = CLOSE_TIMEOUT,
     heartbeat = HEARTBEAT,
     maxPayload,
@@ -82,15 +82,20 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
   return createTransportServer<IServerSocketLike, IIncomingMessageLike>((server, connections) => {
     let webSocketServer: IWebSocketServerLike | undefined;
 
-    // resolves once `socket` has closed, dropping it when the handshake takes longer than allowed
+    // resolves once `socket` has closed, dropping it when the handshake takes longer than allowed:
+    // on the real clock, whatever the server's is, since it bounds the platform's own close against
+    // a peer that does not answer (decision 0011)
     const closeSocket = (socket: IServerSocketLike, code: number): Promise<void> => {
       return createPromise((resolve) => {
-        const timeoutId = setTimeout(() => {
+        const terminate = (): void => {
           socket.terminate();
-        }, closeTimeout);
+        };
+        // oxlint-disable-next-line no-restricted-properties -- a close handshake's bound is the platform's
+        const timeoutId = globalThis.setTimeout(terminate, closeTimeout);
 
         socket.once(CLOSE_EVENT, () => {
-          clearTimeout(timeoutId);
+          // oxlint-disable-next-line no-restricted-properties -- as its bound above
+          globalThis.clearTimeout(timeoutId);
           resolve();
         });
 
@@ -119,7 +124,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       const connection: ITransportServerClientAware<IServerSocketLike> = {
         address: remoteAddress,
         connectionHandle,
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: remotePort,
         socket,
         type: TRANSPORT_WS,
@@ -163,7 +168,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       });
 
       socket.on(MESSAGE_EVENT, (data, isBinary) => {
-        connection.lastActivityTimestamp = timestamp();
+        connection.lastActivity = server.clock.Date.now();
 
         // a text frame arrives as bytes whatever `binaryType` says
         return (
@@ -182,6 +187,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     };
 
     return {
+      clock,
       defaults: START_DEFAULTS,
       type: TRANSPORT_WS,
 
