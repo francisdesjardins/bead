@@ -251,6 +251,10 @@
       },
       "properties": {
         "status": { "$ref": "#/$defs/status" },
+        "orLost": {
+          "description": "The exchange may be lost instead, its socket ending before any status (spec 15.7).",
+          "const": true
+        },
         "fields": {
           "type": "object",
           "additionalProperties": {

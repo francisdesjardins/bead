@@ -625,8 +625,10 @@ Every response on the path carries `cache-control: no-store` and `x-content-type
 exchange lost — a network that failed, an answer that could not be written, a request unanswered
 past the exchange timeout, 5 minutes by default — closes the connection at both ends, as a socket
 that drops does; the exchanges it handed on are cut, never answered. So does the 404 marked
-`connection-unknown`. A connection with no exchange under way for its inactivity timeout, 5 minutes
-by default, closes.
+`connection-unknown`. A request handed on is never refused: when its connection closes, its exchange
+gets its 200 head and is cut, and a cut that overtakes the head on its way leaves the exchange
+lost, which its client counts so. A connection with no exchange under way for its inactivity
+timeout, 5 minutes by default, closes.
 
 15.8. What the server sends of its own — a notification, a request of its own, a cancel, the failure
 that ends a subscription — reaches a client that listens. The client says so at connect,

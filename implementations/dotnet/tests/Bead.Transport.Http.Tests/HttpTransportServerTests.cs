@@ -180,6 +180,12 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         }
     }
 
+    // an exchange lost before any status: its socket reset, or ended
+    private static bool IsLost(HttpRequestException reason)
+    {
+        return reason.HttpRequestError == HttpRequestError.ResponseEnded || reason.InnerException is IOException or SocketException;
+    }
+
     private static async Task Until(Func<bool> condition)
     {
         var watch = Stopwatch.StartNew();
@@ -936,14 +942,23 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             _ = _server.CloseConnection(connectionHandle);
         };
 
-        using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        string answer;
 
-        // the router had it: a 200, never a refusal that says nothing was tried
-        Assert.Equal(200, (int)waiting.StatusCode);
-        Assert.Equal(HttpTransport.MediaType, HeaderOf(waiting, "content-type"));
-        Assert.Equal("no-store", HeaderOf(waiting, "cache-control"));
-        Assert.Null(HeaderOf(waiting, HttpTransport.RefusalHeader));
-        Assert.Equal("cut", await EndOf(waiting));
+        try
+        {
+            using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+            answer = $"{(int)waiting.StatusCode} {HeaderOf(waiting, "content-type")} {HeaderOf(waiting, "cache-control")} {HeaderOf(waiting, HttpTransport.RefusalHeader) ?? "unmarked"} {await EndOf(waiting)}";
+        }
+        catch (HttpRequestException reason) when (IsLost(reason))
+        {
+            answer = "lost";
+        }
+
+        // the router had it, which no refusal may deny: a 200 whose body is cut, or, the cut
+        // overtaking its head, the exchange lost before any status — never the marked 404 that says
+        // nothing was tried
+        Assert.Contains(answer, (string[])[$"200 {HttpTransport.MediaType} no-store unmarked cut", "lost"]);
         Assert.Single(_messages);
         Assert.Equal((true, connectionHandle), _closes.Last());
     }

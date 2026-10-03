@@ -27,6 +27,8 @@ export interface IResponse extends IResponseHead {
 export interface IResponseReader {
   /** Settles once the head is read, so a response whose body never comes still shows its head. */
   readonly head: Promise<IResponseHead>;
+  /** The stream ended, reset or not, before any status line: the exchange is lost. */
+  readonly isLost: boolean;
   /** Settles once the body is whole. */
   readonly response: Promise<IResponse>;
   /** The stream ended: a body read to its end is whole, any other is cut short. */
@@ -218,6 +220,7 @@ export const createResponseReader = (
   let pending = Buffer.alloc(0);
   let read: { framing: 'chunked' | 'end' | number; head: IResponseHead } | undefined;
   let isSettled = false;
+  let isLost = false;
 
   // a response nobody waits for may be cut short: neither rejection goes unhandled
   head.promise.catch(noop);
@@ -286,6 +289,8 @@ export const createResponseReader = (
 
       const reason = read === undefined ? 'the head' : 'the body';
 
+      isLost = read === undefined;
+
       fail(error ?? new Error(`the stream ended before ${reason} was whole`));
     },
     feed: (bytes) => {
@@ -302,6 +307,9 @@ export const createResponseReader = (
       }
     },
     head: head.promise,
+    get isLost() {
+      return isLost;
+    },
     response: whole.promise,
   };
 };

@@ -70,6 +70,8 @@ interface IExpectation {
   body?: string;
   envelope?: IExpected | string;
   fields?: Record<string, IShaped | string | null>;
+  /** The exchange may be lost instead: its socket ends, reset or not, before any status line. */
+  orLost?: true;
   status: number;
 }
 
@@ -365,17 +367,41 @@ const expectResponse = async (
   { at, exchange, milliseconds }: { at: string; exchange: IExchange; milliseconds: number },
   { expectation, values }: { expectation: IExpectation; values: Map<string, string> }
 ): Promise<void> => {
+  const { orLost, ...expected } = expectation;
   const hasBody =
-    expectation.body !== undefined ||
-    expectation.envelope !== undefined ||
-    expectation.batch !== undefined;
+    expected.body !== undefined || expected.envelope !== undefined || expected.batch !== undefined;
+
+  // a cut that overtook the head, where the case allows it; a head that did not come in time, or
+  // came unreadable, is no loss
+  if (orLost === true) {
+    const isLost = await within(exchange.reader.head, {
+      milliseconds,
+      what: `${at}: the response's head`,
+    }).then(
+      () => {
+        return false;
+      },
+      (reason: unknown) => {
+        if (exchange.reader.isLost) {
+          return true;
+        }
+
+        throw reason;
+      }
+    );
+
+    if (isLost) {
+      return;
+    }
+  }
+
   const response = hasBody
     ? await within(exchange.reader.response, { milliseconds, what: `${at}: the response` })
     : await within(exchange.reader.head, { milliseconds, what: `${at}: the response's head` });
 
-  expect(seenOf(response, expectation), at).toEqual({
-    ...expectation,
-    ...(expectation.body === undefined ? {} : { body: canonicalOf(expectation.body) }),
+  expect(seenOf(response, expected), at).toEqual({
+    ...expected,
+    ...(expected.body === undefined ? {} : { body: canonicalOf(expected.body) }),
   });
 
   for (const [name, expected] of Object.entries(expectation.fields ?? {})) {

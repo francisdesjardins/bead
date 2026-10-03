@@ -820,6 +820,12 @@ public sealed class TransportsTests
             }
             catch (IOException reason)
             {
+                // lost, its socket ended before any status, as a case may let it be
+                if (response.TryGetProperty("orLost", out _) && !exchange.IsStatusRead)
+                {
+                    return;
+                }
+
                 throw new XunitException($"expected {expected[0]}\n    came no head, its socket cut: {reason.Message}");
             }
 
@@ -953,6 +959,7 @@ public sealed class TransportsTests
 
         private readonly TcpClient _tcp;
         private readonly NetworkStream _stream;
+        private readonly Reader _reader;
         private readonly bool _isAnsweringPings;
 
         // what the peer writes on it, a frame at a time: its own, and its pongs
@@ -976,9 +983,19 @@ public sealed class TransportsTests
                 return _stream.ReadAsync(buffer, Cancelled);
             });
 
+            _reader = reader;
             Head = reader.ReadHead();
             Body = BodyAfter((reader, Head));
             _ = HearAfter(reader);
+        }
+
+        // whether its response's status line came
+        public bool IsStatusRead
+        {
+            get
+            {
+                return _reader.IsStatusRead;
+            }
         }
 
         // its own port, which the server sees as its peer's
@@ -1133,10 +1150,15 @@ public sealed class TransportsTests
         // what came and is not read yet
         private readonly List<byte> _came = [];
 
+        // whether its status line came: a socket that ends before it is an exchange lost
+        public bool IsStatusRead { get; private set; }
+
         public async Task<Head> ReadHead()
         {
             var statusLine = await ReadLine();
             var fields = new Dictionary<string, string>();
+
+            IsStatusRead = true;
 
             for (var line = await ReadLine(); line.Length > 0; line = await ReadLine())
             {

@@ -45,6 +45,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Section 15.12 names the HTTP transport's bounds in a table, and states the address a server takes
   from a proxy on its machine it trusts; section 15.3 names `maximumMessageBytes` and `heartbeat`.
 - Section 15.4 says that a connect is of Bead's type, as both servers take it.
+- Section 15.7 says that a request handed on is never refused, and that a cut which overtakes its
+  200 head leaves its exchange lost; a transports' case may expect a status `orLost`.
 
 ### Fixed
 
