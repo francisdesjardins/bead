@@ -2,6 +2,7 @@
 
 // dependencies
 
+import { clockOf } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
@@ -30,6 +31,8 @@ export {
 } from '../shared/constants';
 export { filterEnvelopeDebug, parseDebugFilter } from '../shared/debug-filter';
 export { DisconnectError, FailureError } from '../shared/errors';
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
+export type { IClock, TimeoutId } from '../../transport/shared/clock';
 export {
   CancelError,
   GenericError,
@@ -111,6 +114,9 @@ export const SERVER_CONNECTION_HANDLE: RouterClientConnectionHandle = 'server';
  * the resolvers registered, by service and procedure, and its notifications to the notification
  * whose subscription opened their call. What no call waits on is reported as `error`.
  *
+ * It runs on its transport's clock, and on the one its options give when its transport has none: a
+ * clock given that differs from its transport's is a {@link ProgrammerError}.
+ *
  * @example
  * import { createRouterClient } from '@francisdesjardins/bead/router-client';
  * import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
@@ -126,6 +132,10 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
   transport: Transport,
   options?: IRouterClientOptions
 ): IRouterClient<Transport> => {
+  const clock = clockOf(
+    { beneath: transport.clock, given: options?.clock },
+    { below: 'its transport', layer: "a client's router" }
+  );
   const emitter = createEmitter<RouterClientEventMap>();
   // the notification registered for each procedure, until it is unregistered or dropped
   const notifications = createProcedureMap<INotificationLike>();
@@ -292,7 +302,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         }
       },
     },
-    { limits: options?.limits }
+    { clock, limits: options?.limits }
   );
 
   // binds the calls of a subscription as their call ids are drawn: before the request goes out, so
@@ -371,6 +381,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       return router;
     }),
 
+    get clock() {
+      return clock;
+    },
     get failures() {
       return CLIENT_FAILURES;
     },

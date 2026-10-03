@@ -26,7 +26,7 @@ internal sealed record ReceivingTransfersOptions
     public required Action<Action> Post { get; init; }
 
     /// <summary>What their timers run on.</summary>
-    public required TimeProvider Time { get; init; }
+    public required TimeProvider Clock { get; init; }
 }
 
 /// <summary>
@@ -236,7 +236,7 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
 
         var generation = state.Generation;
 
-        state.Timer = options.Time.CreateTimer(
+        state.Timer = options.Clock.CreateTimer(
             (_) =>
             {
                 options.Post(() =>

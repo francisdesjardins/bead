@@ -3,6 +3,7 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import { clockOf } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { CancelError, ProgrammerError, toError } from '../../transport/shared/errors';
 import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT } from '../../transport/shared/constants';
@@ -35,6 +36,8 @@ export {
 export { PACING_DEFAULTS } from './notification-pacing';
 export { filterEnvelopeDebug, parseDebugFilter } from '../shared/debug-filter';
 export { DisconnectError, FailureError } from '../shared/errors';
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
+export type { IClock, TimeoutId } from '../../transport/shared/clock';
 export {
   CancelError,
   GenericError,
@@ -111,6 +114,9 @@ type ServerCall = ICallAddress<TransportServerConnectionHandle>;
  * names a destination goes on through the relay to the destination registered, as `options.relay`
  * admits it; while none is registered, it is refused: this router relays nothing.
  *
+ * It runs on its transport's clock, and on the one its options give when its transport has none: a
+ * clock given that differs from its transport's is a {@link ProgrammerError}.
+ *
  * @example
  * import { createRouterServer } from '@francisdesjardins/bead/router-server';
  * import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
@@ -126,6 +132,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   transport: Transport,
   options?: IRouterServerOptions
 ): IRouterServer<Transport> => {
+  const clock = clockOf(
+    { beneath: transport.clock, given: options?.clock },
+    { below: 'its transport', layer: "a server's router" }
+  );
   const emitter = createEmitter<RouterServerEventMap>();
   const notifications = createNotificationManager({ pacing: options?.pacing });
   // the request of each paced subscription its resolver subscribed in flight, so one whose queue
@@ -206,7 +216,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         }
       },
     },
-    { limits: options?.limits }
+    { clock, limits: options?.limits }
   );
 
   // one notification to one subscription; a connection that cannot take it keeps none of the others
@@ -354,6 +364,9 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       return router;
     }),
 
+    get clock() {
+      return clock;
+    },
     get failures() {
       return SERVER_FAILURES;
     },

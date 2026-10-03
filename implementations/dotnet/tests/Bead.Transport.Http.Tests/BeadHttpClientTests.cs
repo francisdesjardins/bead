@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Channels;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
 
@@ -183,6 +184,34 @@ public sealed class BeadHttpClientTests
         Assert.Equal((4_096, 4_096, 0, 8_192), (limits.ChunkBytes, limits.MaximumEnvelopeBytes, limits.MaximumTransfers, limits.WindowBytes));
         Assert.Equal([("POST", "http://localhost:8080/bead"), ("POST", "http://localhost:8080/bead")], fetch.Calls);
         await client.Disconnect().WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
+    public async Task Runs_its_router_on_its_transport_s_clock_which_times_a_request_out()
+    {
+        var time = new FakeTimeProvider();
+        using var fetch = new Fetch();
+        await using var client = new BeadHttpClient(new BeadHttpClientOptions
+        {
+            Transport = new HttpTransportClientOptions { Clock = time, Handler = fetch, IsListening = false },
+        });
+
+        Assert.Equal((time, time), (client.Transport.Clock, client.Router.Clock));
+        await Connect(client, fetch);
+
+        var unanswered = client.Services.GetRequest(Echo, Text)("hi")(new RequestOptions { Timeout = TimeSpan.FromSeconds(1) });
+        var exchange = await fetch.Next();
+
+        time.Advance(TimeSpan.FromMilliseconds(999));
+
+        Assert.False(unanswered.IsCompleted);
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return unanswered.WaitAsync(Patience, Cancelled);
+        });
+        exchange.SetResult(new HttpResponseMessage(HttpStatusCode.NoContent));
     }
 
     [Fact]

@@ -45,7 +45,7 @@ public sealed class DebugFilterTests
             ProcedureName = procedureName,
             ServiceId = 2,
             ServiceRevision = 1,
-            Timestamp = new DebugTimestamp(null, 0),
+            StartedAt = DateTimeOffset.UnixEpoch,
             Type = step?.Type ?? DebugType.Request,
         };
     }

@@ -617,7 +617,7 @@ services.getCommandResolver(CALLS.clock.procedure, { serializer: answererOf(CALL
 );
 
 services.on('debug', (error, info) => {
-  const duration = info.timestamp.duration;
+  const { duration } = info;
 
   if (info.procedureName === CALLS.stats.procedure.procedureName) {
     return;

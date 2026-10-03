@@ -158,8 +158,11 @@ public sealed record RouterResult(ResultHeader Header, ReadOnlyMemory<byte> Payl
 public sealed record ResolvedRequestOptions
 {
     /// <summary>
-    /// How long to wait for the answer: at most 2³¹ − 1 ms, as a timer holds;
-    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> waits on.
+    /// How long to wait for the answer, the call's or the manager's default, held as the defaults are
+    /// applied: from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest
+    /// whole one, or <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which waits on. Any
+    /// other, zero among them, is an <see cref="ArgumentOutOfRangeException"/>, and the call draws
+    /// nothing.
     /// </summary>
     public required TimeSpan Timeout { get; init; }
 
@@ -188,7 +191,13 @@ public sealed record ResolvedRequestOptions
 /// <summary>The options of a request, as its caller gives them: what it leaves out is the manager's.</summary>
 public sealed record RequestOptions
 {
-    /// <summary>How long to wait for the answer; the manager's default, 5 s, when none.</summary>
+    /// <summary>
+    /// How long to wait for the answer; the manager's default, 5 s, when none. From 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one, or
+    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which waits on. Any other, zero among
+    /// them, is an <see cref="ArgumentOutOfRangeException"/>, and the call draws nothing: a
+    /// manager's call, before it is traced or told deprecated.
+    /// </summary>
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>What the request is for behind the peer; the peer itself when none.</summary>

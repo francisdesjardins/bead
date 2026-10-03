@@ -3,12 +3,13 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import { assertHeld } from '../../transport/shared/clock';
 import { ProgrammerError, reasonMessage, toError } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { IGauges } from '../../transport/shared/types';
 import { admissionOf, isAdmissionFailure } from '../shared/admission';
-import { EnvelopeKind, FailureScope, ProtocolCode, TIMEOUT_MAX } from '../shared/constants';
+import { EnvelopeKind, FailureScope, ProtocolCode } from '../shared/constants';
 import { FailureError } from '../shared/errors';
 import { headerBytesOf } from '../shared/header';
 import { drawDestinationId } from '../shared/identifiers';
@@ -90,19 +91,9 @@ const isConnectionTarget = (target: RelayTarget): target is IConnectionTarget =>
   return 'connectionHandle' in target;
 };
 
-/** Whether `timeout` is one a timer holds, or none at all. */
-const isTimeout = (timeout: number): boolean => {
-  return (
-    timeout === Infinity || (Number.isFinite(timeout) && timeout > 0 && timeout <= TIMEOUT_MAX)
-  );
-};
-
-const assertTimeout = (timeout: number): void => {
-  if (!isTimeout(timeout)) {
-    throw new ProgrammerError(
-      `a relay's timeout is above 0 and ${String(TIMEOUT_MAX)} milliseconds at most, or none, not ${String(timeout)}`
-    );
-  }
+// the relay's timeout, or a destination's, held: never 0, and `Infinity` without end
+const heldTimeoutOf = (timeout: number): number => {
+  return assertHeld("a relay's timeout", timeout);
 };
 
 // definition
@@ -148,7 +139,7 @@ export const createRelay = ({
     target: { connectionHandle: Handle; header: IRequestHeader }
   ) => Promise<void>;
 }): IRelay => {
-  const { beforeRoute, timeout: relayTimeout = Infinity } = options ?? {};
+  const { beforeRoute, timeout: givenTimeout = Infinity } = options ?? {};
   const registrations = new Map<DestinationId, IRegistration>();
 
   if (beforeRoute?.refusal !== undefined && !isAdmissionFailure(beforeRoute.refusal, failures)) {
@@ -157,7 +148,7 @@ export const createRelay = ({
     );
   }
 
-  assertTimeout(relayTimeout);
+  const relayTimeout = heldTimeoutOf(givenTimeout);
 
   // without a `beforeRoute`, the relay admits nobody: it is a door to what is behind it
   const admission =
@@ -308,9 +299,8 @@ export const createRelay = ({
   };
 
   const register = (target: RelayTarget, options?: IDestinationOptions) => {
-    const { destinationId: given, label, timeout = Infinity } = options ?? {};
-
-    assertTimeout(timeout);
+    const { destinationId: given, label } = options ?? {};
+    const timeout = heldTimeoutOf(options?.timeout ?? Infinity);
 
     if (given !== undefined && (!Number.isInteger(given) || given < 1 || given > 0xffffffff)) {
       throw new ProgrammerError(

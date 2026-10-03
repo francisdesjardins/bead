@@ -4,10 +4,13 @@ namespace Bead;
 
 /// <summary>
 /// What a client's router needs of its transport: what its one connection delivers, its close, its
-/// replacement when it reconnects, and a way to send on it.
+/// replacement when it reconnects, a way to send on it, and the clock it runs on.
 /// </summary>
 public interface IRouterClientTransport
 {
+    /// <summary>What its timers run on: the clock of the stack built on it.</summary>
+    TimeProvider Clock { get; }
+
     /// <summary>The connection delivered a message.</summary>
     event Action<TransportMessage>? Message;
 
@@ -46,8 +49,11 @@ public sealed record RouterClientOptions
     /// <summary>What it reads, writes and holds by; <see cref="RouterLimits.Default"/> when none.</summary>
     public RouterLimits? Limits { get; init; }
 
-    /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What its timers run on: its transport's clock when none; another is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 
     /// <summary>
     /// Where resolvers run, and notifications' callbacks: the thread pool for the first, one
@@ -87,10 +93,15 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     // the session the server announced last, boxed, so a read from any thread sees it whole
     private volatile object? _sessionToken;
 
-    /// <summary>A client's router over <paramref name="transport"/>.</summary>
+    /// <summary>
+    /// A client's router over <paramref name="transport"/>, on its transport's clock: one given that
+    /// differs is an <see cref="ArgumentException"/>.
+    /// </summary>
     public RouterClient(IRouterClientTransport transport, RouterClientOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
+
+        var clock = Clocks.Of((options?.Clock, transport.Clock), ("a client's router", "its transport"));
 
         Transport = transport;
         _callbacks = options?.ResolverScheduler ?? new SerialScheduler();
@@ -101,7 +112,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 Limits = options?.Limits,
                 ResolverScheduler = options?.ResolverScheduler,
                 Scheduler = options?.Scheduler,
-                Time = options?.Time,
+                Clock = clock,
             });
         transport.Message += OnMessage;
         transport.Close += OnClose;
@@ -132,6 +143,15 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         get
         {
             return _core.Limits;
+        }
+    }
+
+    /// <inheritdoc/>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _core.Clock;
         }
     }
 

@@ -12,9 +12,13 @@ import {
   LIMIT_DEFAULTS,
   RESERVATION_MILLISECONDS,
 } from '../../../router/shared/constants';
-import { spyTimers, timersOf } from '../../../router/shared/__tests__/fixtures';
 import { CancelError, ProgrammerError } from '../../shared/errors';
-import { tcpSocketsClosed } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  durationsOf,
+  tcpSocketsClosed,
+  timersBy,
+} from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -725,7 +729,10 @@ test.describe('createHTTPTransportServer', () => {
     for (const [name, value] of [
       ['bodyBytesBudget', 0],
       ['exchangeTimeout', 2 ** 31],
+      ['exchangeTimeout', 0.5],
       ['inactivityTimeout', 0],
+      ['inactivityTimeout', -2],
+      ['maximumWait', 0.5],
       ['maximumBodyBytes', 1.5],
       ['maximumConnections', -1],
       ['maximumConnectionsPerAddress', 0],
@@ -744,16 +751,46 @@ test.describe('createHTTPTransportServer', () => {
       ).toThrow(ProgrammerError);
     }
 
-    expect(() => {
-      return createHTTPTransportServer({
-        createServer: (listener) => {
-          return createServer(listener);
-        },
-        exchangeTimeout: Infinity,
-        inactivityTimeout: Infinity,
-      });
-    }).not.toThrow();
+    for (const timers of [
+      { exchangeTimeout: Infinity, inactivityTimeout: Infinity },
+      { exchangeTimeout: 1, inactivityTimeout: 1, maximumWait: 1 },
+    ]) {
+      expect(() => {
+        return createHTTPTransportServer({
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+          ...timers,
+        });
+      }).not.toThrow();
+    }
+
     expect(EXCHANGE_TIMEOUT).toBe(300_000);
+  });
+
+  test('holds its timeouts and its longest wait to a whole number of milliseconds, rounded, refusing 0, Infinity for the timeouts alone', () => {
+    for (const [option, never] of [
+      ['exchangeTimeout', 'never'],
+      ['inactivityTimeout', 'never'],
+      ['maximumWait', 'refused'],
+    ] as const) {
+      for (const { given, outcome, refusal } of durationsOf(option, { never, zero: 'refused' })) {
+        const building = () => {
+          return createHTTPTransportServer({
+            createServer: (listener) => {
+              return createServer(listener);
+            },
+            [option]: given,
+          });
+        };
+
+        if (outcome === 'refused') {
+          expect(building, `${option} ${String(given)}`).toThrow(new ProgrammerError(refusal));
+        } else {
+          expect(building, `${option} ${String(given)}`).not.toThrow();
+        }
+      }
+    }
   });
 });
 
@@ -1218,36 +1255,30 @@ test.describe('createHTTPTransportServer, its edges', () => {
   });
 
   test('lets a burial lapse, buries only the client’s call ids and so many of them, and answers a body still coming as its connection closes', async () => {
+    const clock = createTestClock();
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
+      clock,
       maximumWaitingExchanges: 2,
     });
     const { connectionHandle, connectionToken } = connectScripted();
-    const { armed, restore } = spyTimers();
-    let burials: number;
 
-    try {
-      // a cancel before its request, whose burial lapses: the request that comes after goes on
+    // a cancel before its request, whose burial lapses on its clock: the request that comes after
+    // goes on
+    fake.feed(exchangeOf(connectionToken).request, [
+      envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 }),
+    ]);
+    clock.tick(BURIAL_MILLISECONDS);
+
+    // an even call id is no client's, and two burials are all a connection holds here
+    for (const callId of [2, 7, 9, 11]) {
       fake.feed(exchangeOf(connectionToken).request, [
-        envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 }),
+        envelopeOf(ENVELOPE_KINDS.CANCEL, { callId }),
       ]);
-      armed
-        .find(({ delay }) => {
-          return delay === BURIAL_MILLISECONDS;
-        })
-        ?.fire();
-      // an even call id is no client's, and two burials are all a connection holds here
-      for (const callId of [2, 7, 9, 11]) {
-        fake.feed(exchangeOf(connectionToken).request, [
-          envelopeOf(ENVELOPE_KINDS.CANCEL, { callId }),
-        ]);
-      }
-
-      burials = armed.filter(({ delay }) => {
-        return delay === BURIAL_MILLISECONDS;
-      }).length;
-    } finally {
-      restore();
     }
+
+    const burials = clock.armed.filter(({ delay }) => {
+      return delay === BURIAL_MILLISECONDS;
+    }).length;
 
     const late = exchangeOf(connectionToken);
 
@@ -1272,8 +1303,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
   });
 
   test('closes, as lost, a connection whose request waited past its timeout, and one idle past its own, never while an exchange is under way', async () => {
-    const { armed, restore } = spyTimers();
-    const started = await startScripted({ exchangeTimeout: 1_000, inactivityTimeout: 2_000 });
+    const clock = createTestClock();
+    const started = await startScripted({
+      clock,
+      exchangeTimeout: 1_000,
+      inactivityTimeout: 2_000,
+    });
     const { connectScripted, events, exchangeOf, fake, server } = started;
 
     try {
@@ -1284,13 +1319,18 @@ test.describe('createHTTPTransportServer, its edges', () => {
       fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
 
       // one idle timer per connection as drawn; the one asking lost its own as its exchange came
-      const delays = armed.map(({ delay }) => {
+      const delays = clock.armed.map(({ delay }) => {
         return delay;
       });
 
       expect(delays).toEqual([2_000, 2_000, 1_000]);
-      armed[2]?.fire();
-      armed[1]?.fire();
+      expect(clock.cleared).toEqual([clock.armed[0]?.handle]);
+
+      clock.tick(999);
+
+      expect(namesOf(events, 'close')).toEqual([]);
+
+      clock.tick(1_001);
 
       expect(asking.response.isDestroyed).toBe(true);
       expect(namesOf(events, 'close')).toEqual([
@@ -1298,7 +1338,6 @@ test.describe('createHTTPTransportServer, its edges', () => {
         ['close', false, idle.connectionHandle],
       ]);
     } finally {
-      restore();
       await server.stop();
     }
   });
@@ -1478,44 +1517,42 @@ test.describe('createHTTPTransportServer, its edges', () => {
   });
 
   test('rests a connection once none of its exchanges is under way, and arms no timer that is Infinity', async () => {
-    const { armed, restore } = spyTimers();
-    let started: Awaited<ReturnType<typeof startScripted>> | undefined;
+    const clock = createTestClock();
+    const started = await startScripted({ clock, inactivityTimeout: 2_000 });
+    const { connectScripted, exchangeOf, fake, server } = started;
+    const { connectionHandle, connectionToken } = connectScripted();
+    const first = exchangeOf(connectionToken);
+    const second = exchangeOf(connectionToken);
 
-    try {
-      started = await startScripted({ inactivityTimeout: 2_000 });
+    fake.feed(first.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+    fake.feed(second.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 })]);
 
-      const { connectScripted, exchangeOf, fake, server } = started;
-      const { connectionHandle, connectionToken } = connectScripted();
-      const first = exchangeOf(connectionToken);
-      const second = exchangeOf(connectionToken);
+    const before = clock.armed.length;
 
-      fake.feed(first.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
-      fake.feed(second.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 })]);
+    // one answered, the other still waiting: no rest yet
+    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle);
 
-      const before = armed.length;
+    expect(clock.armed.slice(before)).toEqual([]);
 
-      // one answered, the other still waiting: no rest yet
-      await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle);
+    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }), connectionHandle);
 
-      expect(armed.slice(before)).toEqual([]);
-
-      await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }), connectionHandle);
-
-      expect(
-        armed.slice(before).map(({ delay }) => {
-          return delay;
-        })
-      ).toEqual([2_000]);
-    } finally {
-      restore();
-      await started?.server.stop();
-    }
+    expect(
+      clock.armed.slice(before).map(({ delay }) => {
+        return delay;
+      })
+    ).toEqual([2_000]);
+    await server.stop();
 
     // a request waits for its answer for ever, and a connection rests for ever: no timer
-    const forever = await startScripted({ exchangeTimeout: Infinity, inactivityTimeout: Infinity });
-    const { connectionToken } = forever.connectScripted();
-    const asking = forever.exchangeOf(connectionToken);
-    const { armed: armedForever } = timersOf(() => {
+    const foreverClock = createTestClock();
+    const forever = await startScripted({
+      clock: foreverClock,
+      exchangeTimeout: Infinity,
+      inactivityTimeout: Infinity,
+    });
+    const { connectionToken: foreverToken } = forever.connectScripted();
+    const asking = forever.exchangeOf(foreverToken);
+    const { armed: armedForever } = timersBy(foreverClock, () => {
       forever.fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
     });
 
@@ -1641,44 +1678,43 @@ test.describe('createHTTPTransportServer, listening', () => {
   });
 
   test('holds a listen until something comes within its wait, no longer than its limit, and ends it empty past it', async () => {
-    const { armed, restore } = spyTimers();
-    let started: Awaited<ReturnType<typeof startScripted>> | undefined;
+    const clock = createTestClock();
+    const { connectScripted, listenOf, server } = await startScripted({
+      clock,
+      inactivityTimeout: Infinity,
+      maximumWait: 1_000,
+    });
+    const { connectionHandle, connectionToken } = connectScripted(undefined, {
+      isListening: true,
+    });
+    const lapsing = listenOf(connectionToken, 'wait=60000');
 
-    try {
-      started = await startScripted({ inactivityTimeout: Infinity, maximumWait: 1_000 });
+    // waiting, as long as the server lets it
+    expect([
+      lapsing.response.status,
+      clock.armed.map(({ delay }) => {
+        return delay;
+      }),
+    ]).toEqual([undefined, [1_000]]);
 
-      const { connectScripted, listenOf, server } = started;
-      const { connectionHandle, connectionToken } = connectScripted(undefined, {
-        isListening: true,
-      });
-      const lapsing = listenOf(connectionToken, 'wait=60000');
+    clock.tick(1_000);
 
-      // waiting, as long as the server lets it
-      expect([
-        lapsing.response.status,
-        armed.map(({ delay }) => {
-          return delay;
-        }),
-      ]).toEqual([undefined, [1_000]]);
-      armed[0]?.fire();
-      expect(lapsing.response.status).toBe(204);
+    expect(lapsing.response.status).toBe(204);
 
-      const held = listenOf(connectionToken, 'after=0&wait=500');
-      const envelope = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
+    const held = listenOf(connectionToken, 'after=0&wait=500');
+    const envelope = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
 
-      await server.send(envelope, connectionHandle);
+    await server.send(envelope, connectionHandle);
 
-      expect([
-        held.response.status,
-        held.response.headers?.[SEQUENCE_HEADER],
-        [...(held.response.body ?? [])],
-      ]).toEqual([200, '1', batchOf(envelope)]);
-      // its timer went with it
-      expect(armed[1]?.timeoutId).toBeDefined();
-    } finally {
-      restore();
-      await started?.server.stop();
-    }
+    expect([
+      held.response.status,
+      held.response.headers?.[SEQUENCE_HEADER],
+      [...(held.response.body ?? [])],
+    ]).toEqual([200, '1', batchOf(envelope)]);
+    // its timer went with it
+    expect(clock.armed[1]?.delay).toBe(500);
+    expect(clock.cleared).toContain(clock.armed[1]?.handle);
+    await server.stop();
   });
 
   test('lets a second listen take the place of the first, which ends empty; a listen lost closes nothing, and what it carried comes again', async () => {
@@ -1823,48 +1859,34 @@ test.describe('createHTTPTransportServer, listening', () => {
   });
 
   test('stamps a connection’s activity as an exchange of an envelope or a listen begins, never at its connect nor at a listen refused', async () => {
-    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted();
-    const { now } = Date;
+    const clock = createTestClock(1_000_250);
+    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({ clock });
     const stampsOf = () => {
-      return server.clients.map(({ lastActivityTimestamp }) => {
-        return lastActivityTimestamp;
+      return server.clients.map(({ lastActivity }) => {
+        return lastActivity;
       });
     };
-    let clock = 1_000_250;
+    const deaf = connectScripted();
+    const listening = connectScripted(undefined, { isListening: true });
 
-    // the clock moved by hand between the steps, none of which waits
-    try {
-      Date.now = () => {
-        return clock;
-      };
+    expect([listenOf(deaf.connectionToken).response.status, stampsOf()]).toEqual([
+      409,
+      [undefined, undefined],
+    ]);
 
-      const deaf = connectScripted();
-      const listening = connectScripted(undefined, { isListening: true });
+    // an envelope's, as its exchange begins: not as its body ends
+    clock.tick(1_000);
+    const coming = exchangeOf(listening.connectionToken);
+    clock.tick(1_000);
+    fake.feed(coming.request, [envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 2 })]);
 
-      expect([listenOf(deaf.connectionToken).response.status, stampsOf()]).toEqual([
-        409,
-        [undefined, undefined],
-      ]);
+    expect([coming.response.status, stampsOf()]).toEqual([204, [undefined, 1_001_250]]);
 
-      // an envelope's, as its exchange begins: not as its body ends
-      clock += 1_000;
-      const coming = exchangeOf(listening.connectionToken);
-      clock += 1_000;
-      fake.feed(coming.request, [envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 2 })]);
+    // a listen's, as it is held
+    clock.tick(1_000);
+    listenOf(listening.connectionToken, 'wait=0');
 
-      expect([coming.response.status, stampsOf()]).toEqual([
-        204,
-        [undefined, { ms: 1_001_250, sec: 1_001, usec: 250_000 }],
-      ]);
-
-      // a listen's, as it is held
-      clock += 1_000;
-      listenOf(listening.connectionToken, 'wait=0');
-
-      expect(stampsOf()).toEqual([undefined, { ms: 1_003_250, sec: 1_003, usec: 250_000 }]);
-    } finally {
-      Date.now = now;
-    }
+    expect(stampsOf()).toEqual([undefined, 1_003_250]);
 
     await server.stop();
   });
@@ -1915,11 +1937,11 @@ test.describe('createHTTPTransportServer, listening', () => {
   });
 
   test('answers a listen held once: what comes after, or its wait running out, before its response closes, waits for the next', async () => {
-    const { armed, cleared, restore } = spyTimers();
+    const clock = createTestClock();
     let started: Awaited<ReturnType<typeof startScripted>> | undefined;
 
     try {
-      started = await startScripted({ inactivityTimeout: Infinity });
+      started = await startScripted({ clock, inactivityTimeout: Infinity });
 
       const { connectScripted, listenOf, server } = started;
       const { connectionHandle, connectionToken } = connectScripted(undefined, {
@@ -1937,7 +1959,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       await server.send(second, connectionHandle);
 
       expect([...(held.response.body ?? [])]).toEqual(batchOf(first));
-      expect(cleared).toContain(armed[0]?.timeoutId);
+      expect(clock.cleared).toContain(clock.armed[0]?.handle);
 
       // what waits is a copy: changed after its send, it goes as it was
       await server.send(changing, connectionHandle);
@@ -1947,24 +1969,21 @@ test.describe('createHTTPTransportServer, listening', () => {
         batchOf(second, third)
       );
     } finally {
-      restore();
       await started?.server.stop();
     }
   });
 
   test('ends a listen asked not to wait at once, with nothing, arming no timer', async () => {
+    const clock = createTestClock();
     const { connectScripted, listenOf, server } = await startScripted({
+      clock,
       inactivityTimeout: Infinity,
     });
     const { connectionToken } = connectScripted(undefined, { isListening: true });
-    const { armed, restore } = spyTimers();
     let status: number | undefined;
-
-    try {
+    const { armed } = timersBy(clock, () => {
       status = listenOf(connectionToken, 'wait=0').response.status;
-    } finally {
-      restore();
-    }
+    });
 
     expect([status, armed]).toEqual([204, []]);
     await server.stop();
@@ -1989,65 +2008,55 @@ test.describe('createHTTPTransportServer, listening', () => {
   });
 
   test('does not rest a connection whose listen is held when another of its exchanges ends', async () => {
-    const { armed, restore } = spyTimers();
-    let started: Awaited<ReturnType<typeof startScripted>> | undefined;
+    const clock = createTestClock();
+    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({
+      clock,
+      inactivityTimeout: 2_000,
+    });
+    const { connectionToken } = connectScripted(undefined, { isListening: true });
 
-    try {
-      started = await startScripted({ inactivityTimeout: 2_000 });
+    listenOf(connectionToken, 'wait=20000');
 
-      const { connectScripted, exchangeOf, fake, listenOf } = started;
-      const { connectionToken } = connectScripted(undefined, { isListening: true });
-
-      listenOf(connectionToken, 'wait=20000');
-
-      const before = armed.length;
-      const cancel = exchangeOf(connectionToken);
-
-      // a cancel, handed on and ended at once: the listen still holds the connection awake
+    const cancel = exchangeOf(connectionToken);
+    // a cancel, handed on and ended at once: the listen still holds the connection awake
+    const { armed } = timersBy(clock, () => {
       fake.feed(cancel.request, [envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 })]);
+    });
 
-      expect([
-        cancel.response.status,
-        armed.slice(before).map(({ delay }) => {
-          return delay;
-        }),
-      ]).toEqual([204, [BURIAL_MILLISECONDS]]);
-    } finally {
-      restore();
-      await started?.server.stop();
-    }
+    expect([
+      cancel.response.status,
+      armed.map(({ delay }) => {
+        return delay;
+      }),
+    ]).toEqual([204, [BURIAL_MILLISECONDS]]);
+    await server.stop();
   });
 
   test('counts a listen held as an exchange under way: its connection does not rest while it waits', async () => {
-    const { armed, restore } = spyTimers();
-    let started: Awaited<ReturnType<typeof startScripted>> | undefined;
-
-    try {
-      started = await startScripted({ inactivityTimeout: 2_000 });
-
-      const { connectScripted, listenOf, server } = started;
-      const { connectionHandle, connectionToken } = connectScripted(undefined, {
-        isListening: true,
+    const clock = createTestClock();
+    const { connectScripted, listenOf, server } = await startScripted({
+      clock,
+      inactivityTimeout: 2_000,
+    });
+    const { connectionHandle, connectionToken } = connectScripted(undefined, {
+      isListening: true,
+    });
+    const before = clock.armed.length;
+    const held = listenOf(connectionToken, 'wait=20000');
+    const delays = () => {
+      return clock.armed.slice(before).map(({ delay }) => {
+        return delay;
       });
-      const before = armed.length;
-      const held = listenOf(connectionToken, 'wait=20000');
-      const delays = () => {
-        return armed.slice(before).map(({ delay }) => {
-          return delay;
-        });
-      };
+    };
 
-      // its wait alone, no rest
-      expect(delays()).toEqual([20_000]);
+    // its wait alone, no rest
+    expect(delays()).toEqual([20_000]);
 
-      await server.send(envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }), connectionHandle);
+    await server.send(envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }), connectionHandle);
 
-      // answered: the connection rests
-      expect([held.response.status, delays()]).toEqual([200, [20_000, 2_000]]);
-    } finally {
-      restore();
-      await started?.server.stop();
-    }
+    // answered: the connection rests
+    expect([held.response.status, delays()]).toEqual([200, [20_000, 2_000]]);
+    await server.stop();
   });
 
   test('counts what it keeps of its connections, at the ceilings it has', async () => {

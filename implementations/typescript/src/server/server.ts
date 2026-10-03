@@ -9,12 +9,13 @@ import {
   SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
 } from '../router/server/constants';
 import { createRouterServer, SERVER_FAILURES } from '../router/server/router-server';
-import { createSessionManager, isArmable } from '../router/server/session-manager';
-import type { ISession, TimeoutId } from '../router/server/types';
+import { createSessionManager } from '../router/server/session-manager';
+import type { ISession } from '../router/server/types';
 import { createServiceManager } from '../router/shared/service-manager';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
+import { assertHeld, clockOf, type TimeoutId } from '../transport/shared/clock';
 import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT } from '../transport/shared/constants';
-import { ProgrammerError, toError } from '../transport/shared/errors';
+import { toError } from '../transport/shared/errors';
 import { gaugesOf } from '../transport/shared/gauges';
 import type { Data as TransportData } from '../transport/shared/types';
 import { healthOf, layerGaugesOf, type ServerGauges } from './health';
@@ -30,6 +31,8 @@ export {
   ProtocolCode,
   SERVER_FAILURES,
 } from '../router/server/router-server';
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../transport/shared/clock';
+export type { IClock, TimeoutId } from '../transport/shared/clock';
 export {
   CancelError,
   GenericError,
@@ -86,6 +89,10 @@ interface IIdleConnection {
  * stay: each subscription is ended with SESSION_REQUIRED. A connection that closes takes its
  * session with it, and a session stored for a connection already closed goes at once.
  *
+ * Every layer runs on the transport's clock: the router is built with it, and the builder of the
+ * sessions is given it. A clock its options give that differs from the transport's, or a layer
+ * built on another, is a {@link ProgrammerError}.
+ *
  * @example
  * import { createServer } from '@francisdesjardins/bead/server';
  * import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
@@ -106,16 +113,30 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   }: IServerLayers<Transport, Data>,
   options?: IServerOptions
 ): IServer<Transport, Data> => {
-  const { connectionInactivityTimeout = Infinity } = options ?? {};
+  const clock = clockOf(
+    { beneath: transport.clock, given: options?.clock },
+    { below: 'its transport', layer: 'a server' }
+  );
+  // held as it is built, as a transfer's inactivity is, rather than refused as a timer is armed
+  const connectionInactivityTimeout = assertHeld(
+    "a connection's inactivity timeout",
+    options?.connectionInactivityTimeout ?? Infinity
+  );
 
-  // refused as it is built, as the session manager refuses its own, rather than timing out at once
-  if (connectionInactivityTimeout < 0) {
-    throw new ProgrammerError(
-      `a connection's inactivity timeout cannot be negative, got ${String(connectionInactivityTimeout)}`
+  const sessions = createSessions({ clock });
+
+  // sessions a builder made on another clock come apart, refused
+  try {
+    clockOf(
+      { beneath: clock, given: sessions.clock },
+      { below: 'its server', layer: "a server's session manager" }
     );
+  } catch (reason) {
+    sessions[Symbol.dispose]();
+
+    throw reason;
   }
 
-  const sessions = createSessions();
   // the connections the transport holds: only these keep a session. The router keeps its own; this
   // one hears of a connection before the router and forgets it first, so a session a close ends
   // finds its connection gone, and asks the router for nothing on it
@@ -125,7 +146,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   const idle = new Map<TransportServerConnectionHandle, IIdleConnection>();
 
   const stopWaiting = (connectionHandle: TransportServerConnectionHandle): void => {
-    clearTimeout(idle.get(connectionHandle)?.timeoutId);
+    clock.clearTimeout(idle.get(connectionHandle)?.timeoutId);
     idle.delete(connectionHandle);
   };
 
@@ -165,9 +186,9 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   const wait = (connectionHandle: TransportServerConnectionHandle, timeout: number): void => {
     const connection = idle.get(connectionHandle) ?? { timeout, timeoutId: undefined };
 
-    clearTimeout(connection.timeoutId);
-    connection.timeoutId = isArmable(connection.timeout)
-      ? setTimeout(() => {
+    clock.clearTimeout(connection.timeoutId);
+    connection.timeoutId = Number.isFinite(connection.timeout)
+      ? clock.setTimeout(() => {
           close(connectionHandle);
         }, connection.timeout)
       : undefined;
@@ -201,6 +222,13 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     forgetConnection(connectionHandle);
   };
 
+  // what the server hears of its transport, and lets go of as it comes apart
+  const release = (): void => {
+    transport.off(CONNECTION_EVENT, onConnection);
+    transport.off(MESSAGE_EVENT, onMessage);
+    transport.off(CLOSE_EVENT, onClose);
+  };
+
   transport.on(CONNECTION_EVENT, onConnection);
   transport.on(MESSAGE_EVENT, onMessage);
   transport.on(CLOSE_EVENT, onClose);
@@ -218,6 +246,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   // limits that do not hold together refuse the router: the server lets go of its transport
   try {
     router = createRouter(transport, {
+      clock,
       limits: options?.limits,
       pacing: options?.pacing,
       relay: { ...options?.relay, beforeRoute: options?.relay?.beforeRoute ?? requireSession },
@@ -226,9 +255,20 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       },
     });
   } catch (reason) {
-    transport.off(CONNECTION_EVENT, onConnection);
-    transport.off(MESSAGE_EVENT, onMessage);
-    transport.off(CLOSE_EVENT, onClose);
+    release();
+
+    throw reason;
+  }
+
+  // so does a router a builder made on another clock, which comes apart first
+  try {
+    clockOf(
+      { beneath: clock, given: router.clock },
+      { below: 'its server', layer: "a server's router" }
+    );
+  } catch (reason) {
+    router[Symbol.dispose]();
+    release();
 
     throw reason;
   }
@@ -250,7 +290,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
 
   // a session that ended takes with it what its connection subscribed to, which the session let it
   // have — each subscription ends with SESSION_REQUIRED, which a client that only listens hears —
-  // and leaves the connection its connection timeout
+  // and leaves the connection its connection timeout, or the server's own when it holds none
   const onSessionDeleted = ({
     connectionHandle,
     connectionInactivityTimeout: timeout,
@@ -260,7 +300,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
         connectionHandle,
         failure: router.failures.sessionRequired,
       });
-      wait(connectionHandle, timeout);
+      wait(connectionHandle, timeout ?? connectionInactivityTimeout);
     }
   };
 
@@ -310,16 +350,14 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     },
     requireSession,
     [Symbol.asyncDispose]: async () => {
-      transport.off(CONNECTION_EVENT, onConnection);
-      transport.off(MESSAGE_EVENT, onMessage);
-      transport.off(CLOSE_EVENT, onClose);
+      release();
       sessions.off(CREATED_EVENT, onSessionCreated);
       sessions.off(DELETED_EVENT, onSessionDeleted);
       sessions.off(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, onConnectionInactive);
       sessions.off(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, onSessionInactive);
 
       for (const { timeoutId } of idle.values()) {
-        clearTimeout(timeoutId);
+        clock.clearTimeout(timeoutId);
       }
 
       idle.clear();

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../shared/errors';
+import { createTestClock } from '../../shared/__tests__/fixtures';
 import type { IWorkerMessageEventLike, IWorkerPortLike } from '../../shared/types';
 import {
   createWorkerTransportServer,
@@ -29,7 +30,9 @@ const recordOf = (port: MessagePort) => {
  */
 const startWorker = async () => {
   const worker = new MessageChannel();
-  const server = createWorkerTransportServer({ scope: worker.port1 });
+  // a clock that never moves: what the server reads of it is the instant it starts at
+  const clock = createTestClock(Date.UTC(2026, 0, 1));
+  const server = createWorkerTransportServer({ clock, scope: worker.port1 });
   const events: unknown[][] = [];
   const channels: MessageChannel[] = [];
 
@@ -115,14 +118,14 @@ test.describe('createWorkerTransportServer', () => {
       {
         address: 'local',
         connectionHandle: 'type=WORKER;ip=local;ordinal=1',
-        lastActivityTimestamp: expect.any(Object),
+        lastActivity: Date.UTC(2026, 0, 1),
         port: 0,
         type: TRANSPORT_WORKER,
       },
       {
         address: 'local',
         connectionHandle: 'type=WORKER;ip=local;ordinal=2',
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: 0,
         type: TRANSPORT_WORKER,
       },

@@ -51,6 +51,5 @@ vocabularies in the tree, and a reader who has to know which file speaks which.
 the vectors and every implementation at once, so changing one is a change of the protocol, with the
 version that follows from it ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-Abbreviations remain to remove on the TypeScript side: its reconnection option `maxAttempts`, where
-the C# side says `MaximumAttempts`, a difference between the sides besides; and the
-`{ ms, sec, usec }` of a transport server client's last activity.
+An abbreviation remains to remove on the TypeScript side: its reconnection option `maxAttempts`,
+where the C# side says `MaximumAttempts`, a difference between the sides besides.

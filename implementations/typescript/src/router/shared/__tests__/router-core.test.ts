@@ -1,5 +1,13 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
+import {
+  createTestClock,
+  durationsOf,
+  hasRef,
+  timersBy,
+  timersUntil,
+} from '../../../transport/shared/__tests__/fixtures';
+import { LONGEST_TIMER } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   CLIENT_FAILURES,
@@ -7,6 +15,7 @@ import {
   FailureScope,
   LIMIT_DEFAULTS,
   ProtocolCode,
+  RESERVATION_MILLISECONDS,
   SERVER_FAILURES,
 } from '../constants';
 import { readEnvelope } from '../envelope';
@@ -28,15 +37,7 @@ import type {
   RouterLimitsOptions,
   SessionToken,
 } from '../types';
-import {
-  callIdsOf,
-  createLoopback,
-  digestOf,
-  envelopeOf,
-  patternOf,
-  timersOf,
-  timersWhile,
-} from './fixtures';
+import { callIdsOf, createLoopback, digestOf, envelopeOf, patternOf } from './fixtures';
 
 // helpers
 
@@ -2164,96 +2165,108 @@ test.describe('createRouterCore', () => {
       expect(core.isReserved(2, 'b')).toBe(false);
     });
 
-    test('reserve a call id as long as its call was given, or 5 s when it was given no time', () => {
+    test('reserve a call id as long as its call was given, or 5 s when it was given no time or waited without end, on its clock', () => {
       const { port } = createPort();
-      using core = createRouterCore(port);
-      const delays: unknown[] = [];
-      const { setTimeout: realSet } = globalThis;
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock });
 
-      try {
-        globalThis.setTimeout = ((...params: Parameters<typeof realSet>) => {
-          delays.push(params[1]);
-
-          return realSet(...params);
-        }) as typeof realSet;
-
-        for (const [callId, timeout] of [
-          [2, 0],
-          [4, 250],
-          [6, Number.POSITIVE_INFINITY],
-          [8, 2 ** 31],
-          [10, undefined],
-        ] as const) {
-          core.reserve({ callId, connectionHandle: 'a', timeout });
-        }
-      } finally {
-        globalThis.setTimeout = realSet;
+      for (const [callId, timeout] of [
+        [2, undefined],
+        [4, 250],
+        [6, Number.POSITIVE_INFINITY],
+        [8, undefined],
+      ] as const) {
+        core.reserve({ callId, connectionHandle: 'a', timeout });
       }
 
-      expect(delays).toEqual([5_000, 250, 5_000, 5_000, 5_000]);
+      expect(
+        clock.armed.map(({ delay }) => {
+          return delay;
+        })
+      ).toEqual([5_000, 250, 5_000, 5_000]);
+
+      clock.tick(250);
+
+      expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([true, false]);
+    });
+
+    test('hold a reservation, and a cancel’s, to a whole number of milliseconds, rounded, refusing 0, Infinity taking the default time, doing nothing for one refused', async () => {
+      for (const { given, held, outcome, refusal } of durationsOf("a call id's reservation", {
+        never: 'never',
+        zero: 'refused',
+      })) {
+        const { port, sent } = createPort();
+        const clock = createTestClock();
+        using core = createRouterCore(port, { clock });
+        const label = String(given);
+        const reserved = () => {
+          return [core.isReserved(1, 'a'), core.isReserved(3, 'a')];
+        };
+
+        if (outcome === 'refused') {
+          expect(() => {
+            core.reserve({ callId: 1, connectionHandle: 'a', timeout: given });
+          }, label).toThrow(new ProgrammerError(refusal));
+          expect(() => {
+            core.cancel({ callId: 3, connectionHandle: 'a', timeout: given });
+          }, label).toThrow(new ProgrammerError(refusal));
+
+          await sleep(0);
+
+          expect([reserved(), sent], label).toEqual([[false, false], []]);
+
+          continue;
+        }
+
+        // reserved for the duration held, or for the default time for never
+        const lasts = outcome === 'taken' && held !== undefined ? held : RESERVATION_MILLISECONDS;
+
+        core.reserve({ callId: 1, connectionHandle: 'a', timeout: given });
+        core.cancel({ callId: 3, connectionHandle: 'a', timeout: given });
+        await clock.tickAsync(lasts - 1);
+
+        expect(reserved(), label).toEqual([true, true]);
+
+        await clock.tickAsync(1);
+
+        expect(reserved(), label).toEqual([false, false]);
+      }
     });
 
     test('reserve a call id with a timer that keeps no process alive: nothing waits on it', () => {
       const { port } = createPort();
-      using core = createRouterCore(port);
-      const armed: unknown[] = [];
-      const { setTimeout: realSet } = globalThis;
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock });
 
-      try {
-        globalThis.setTimeout = ((...params: Parameters<typeof realSet>) => {
-          const timeoutId = realSet(...params);
-
-          armed.push(timeoutId);
-
-          return timeoutId;
-        }) as typeof realSet;
-        core.reserve({ callId: 2, connectionHandle: 'a' });
-      } finally {
-        globalThis.setTimeout = realSet;
-      }
+      core.reserve({ callId: 2, connectionHandle: 'a' });
 
       expect(
-        armed.map((timeoutId) => {
-          return (timeoutId as { hasRef: () => boolean }).hasRef();
+        clock.armed.map(({ handle }) => {
+          return hasRef(handle);
         })
       ).toEqual([false]);
     });
 
-    test('keep the later end of a call id reserved twice, clearing the timer it replaces', async () => {
+    test('keep the later end of a call id reserved twice, clearing the timer it replaces', () => {
       const { port } = createPort();
-      using core = createRouterCore(port);
-      const cleared: unknown[] = [];
-      const armed: unknown[] = [];
-      const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock });
 
-      try {
-        globalThis.setTimeout = ((...params: Parameters<typeof realSet>) => {
-          const timeoutId = realSet(...params);
+      core.reserve({ callId: 2, connectionHandle: 'a', timeout: 20 });
+      core.reserve({ callId: 2, connectionHandle: 'a', timeout: 200 });
+      core.reserve({ callId: 4, connectionHandle: 'a', timeout: 200 });
+      core.reserve({ callId: 4, connectionHandle: 'a', timeout: 20 });
 
-          armed.push(timeoutId);
+      expect(clock.armed).toHaveLength(3);
+      expect(clock.cleared).toEqual([clock.armed[0]?.handle]);
 
-          return timeoutId;
-        }) as typeof realSet;
-        globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-          cleared.push(timeoutId);
-          realClear(timeoutId);
-        };
-
-        core.reserve({ callId: 2, connectionHandle: 'a', timeout: 20 });
-        core.reserve({ callId: 2, connectionHandle: 'a', timeout: 200 });
-        core.reserve({ callId: 4, connectionHandle: 'a', timeout: 200 });
-        core.reserve({ callId: 4, connectionHandle: 'a', timeout: 20 });
-      } finally {
-        globalThis.setTimeout = realSet;
-        globalThis.clearTimeout = realClear;
-      }
-
-      expect(armed).toHaveLength(3);
-      expect(cleared).toContain(armed[0]);
-
-      await sleep(100);
+      clock.tick(100);
 
       expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([true, true]);
+
+      clock.tick(100);
+
+      expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([false, false]);
     });
 
     test('draw no call id reserved, and none at all when every one is', async () => {
@@ -2560,7 +2573,7 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([]);
     });
 
-    test('refuse a procedure’s limit that is not a whole number above 0, and a timeout no timer holds, drawing nothing', async () => {
+    test('refuse a procedure’s limit that is not a whole number above 0, drawing nothing', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
       const drawn: number[] = [];
@@ -2590,18 +2603,73 @@ test.describe('createRouterCore', () => {
         );
       }
 
-      expect(await ask(echo, 2 ** 31)).toBeInstanceOf(ProgrammerError);
       expect(drawn).toEqual([]);
       expect(sent).toEqual([]);
 
-      // at their edges, they are taken: a limit of 1, the longest timeout, and none at all
+      // at its edge, a limit of 1 is taken
       core.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 1 }));
+      void ask(echo);
 
-      for (const timeout of [2 ** 31 - 1, Number.POSITIVE_INFINITY]) {
-        void ask(echo, timeout);
+      expect(drawn).toEqual([2]);
+    });
+
+    test("hold a call's timeout to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on, drawing nothing for one refused", async () => {
+      for (const { given, held, outcome, refusal } of durationsOf("a call's timeout", {
+        never: 'never',
+        zero: 'refused',
+      })) {
+        const { port, sent } = createPort();
+        const clock = createTestClock();
+        using core = createRouterCore(port, { clock });
+        const drawn: number[] = [];
+        const label = String(given);
+        let isSettled = false;
+        const asking = core
+          .request(new Uint8Array(0), {
+            connectionHandle: 'a',
+            onCallId: (callId) => {
+              drawn.push(callId);
+            },
+            options: { timeout: given },
+            procedure: echo,
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          })
+          .finally(() => {
+            isSettled = true;
+          });
+
+        if (outcome === 'refused') {
+          expect(await asking, label).toEqual(new ProgrammerError(refusal));
+          expect([drawn, sent], label).toEqual([[], []]);
+
+          continue;
+        }
+
+        await sleep(0);
+
+        expect(drawn, label).toEqual([2]);
+
+        // a duration held ends the call once it passed, its TimeoutError telling it; never waits on
+        // past the longest
+        if (outcome === 'taken' && held !== undefined) {
+          await clock.tickAsync(held - 1);
+
+          expect(isSettled, label).toBe(false);
+
+          await clock.tickAsync(1);
+
+          const ended = await asking;
+
+          expect(ended, label).toBeInstanceOf(TimeoutError);
+          expect(ended, label).toHaveProperty('timeout', held);
+        } else {
+          await clock.tickAsync(LONGEST_TIMER);
+
+          expect(isSettled, label).toBe(false);
+        }
       }
-
-      expect(drawn).toEqual([2, 4]);
     });
 
     test('take the defaults where they say nothing, and let the transfers and the detail be none', () => {
@@ -2639,14 +2707,13 @@ test.describe('createRouterCore', () => {
         [{ chunkBytes: 2_049, maximumEnvelopeBytes: 2_048 }, /and an envelope at most/],
         [{ windowBytes: 2 * 1_048_576 - 1 }, /a window holds two chunks at least/],
         [{ maximumPayloadBytes: 268_435_457 }, /a payload fits in the budget/],
-        [{ transferInactivityTimeout: 2 ** 31 }, /2147483647 milliseconds at most/],
       ] as const) {
         expect(() => {
           return createRouterCore(port, { limits });
         }, JSON.stringify(limits)).toThrow(rule);
       }
 
-      // the edges hold
+      // the edges hold, a transfer's inactivity of a millisecond among them
       expect(() => {
         using _core = createRouterCore(port, {
           limits: {
@@ -2657,7 +2724,40 @@ test.describe('createRouterCore', () => {
             windowBytes: 128,
           },
         });
+        using _shortest = createRouterCore(port, { limits: { transferInactivityTimeout: 1 } });
       }).not.toThrow();
+    });
+
+    test("hold a transfer's inactivity to a whole number of milliseconds, rounded, refusing 0 and Infinity", () => {
+      const { port } = createPort();
+
+      for (const { given, held, outcome, refusal } of durationsOf("a transfer's inactivity", {
+        never: 'refused',
+        zero: 'refused',
+      })) {
+        const building = (): number => {
+          using core = createRouterCore(port, { limits: { transferInactivityTimeout: given } });
+
+          return core.limits.transferInactivityTimeout;
+        };
+
+        if (outcome === 'refused') {
+          expect(building, String(given)).toThrow(new ProgrammerError(refusal));
+        } else {
+          expect(building(), String(given)).toBe(held);
+        }
+      }
+
+      // a limit read from JSON, which a TimeSpan on the C# side never is
+      expect(() => {
+        return createRouterCore(port, {
+          limits: { transferInactivityTimeout: '1000' as unknown as number },
+        });
+      }).toThrow(
+        new ProgrammerError(
+          'a transfer\'s inactivity is a number of milliseconds from 1 to 2147483647, not "1000"'
+        )
+      );
     });
 
     test('refuse a payload past its own limit, and an envelope past its own', async () => {
@@ -3279,14 +3379,16 @@ test.describe('createRouterCore', () => {
 
     test('end a transfer nothing comes for: a request’s with a failure, a result’s with a timeout', async () => {
       const { port, reported, sent } = createPort();
+      const clock = createTestClock();
       using core = createRouterCore(port, {
+        clock,
         limits: { ...limits, transferInactivityTimeout: 250 },
       });
       let asking: Promise<unknown> = Promise.resolve();
 
       core.registerResolver(resolverOf(echo));
 
-      const { armed } = timersOf(() => {
+      const { armed } = timersBy(clock, () => {
         core.receive(requestOf(1, { payload: new Uint8Array(40), total: 200 }), 'a');
         asking = core.request(new Uint8Array(0), {
           connectionHandle: 'a',
@@ -3302,14 +3404,12 @@ test.describe('createRouterCore', () => {
       // nothing waits on the timer of a request's transfer: it keeps no process alive; the caller
       // waits on its call's, which does
       expect(
-        stalls.map(({ timeoutId }) => {
-          return (timeoutId as { hasRef: () => boolean }).hasRef();
+        stalls.map(({ handle }) => {
+          return hasRef(handle);
         })
       ).toEqual([false, true]);
 
-      for (const { fire } of stalls) {
-        fire();
-      }
+      clock.tick(250);
 
       await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout: 250 });
       // late, and dropped in silence
@@ -3350,7 +3450,9 @@ test.describe('createRouterCore', () => {
 
     test('stall no request whose payload came whole, however long its resolver takes', () => {
       const { port, sent } = createPort();
+      const clock = createTestClock();
       using core = createRouterCore(port, {
+        clock,
         limits: { ...limits, transferInactivityTimeout: 250 },
       });
 
@@ -3363,16 +3465,10 @@ test.describe('createRouterCore', () => {
         }, echo)
       );
 
-      const { armed, cleared } = timersOf(() => {
-        core.receive(requestOf(1, { payload: patternOf(40), total: 60 }), 'a');
-        core.receive(chunkOf(1, { offset: 40, payload: patternOf(20), total: 60 }), 'a');
-      });
-
-      for (const { fire, timeoutId } of armed) {
-        if (!cleared.includes(timeoutId)) {
-          fire();
-        }
-      }
+      core.receive(requestOf(1, { payload: patternOf(40), total: 60 }), 'a');
+      core.receive(chunkOf(1, { offset: 40, payload: patternOf(20), total: 60 }), 'a');
+      // every timer still armed fires
+      clock.runAll();
 
       expect(answersOf(sent)).toEqual([['a', 'credit', 1, 60]]);
     });
@@ -3395,7 +3491,9 @@ test.describe('createRouterCore', () => {
         ['whole', undefined, 5_000],
       ] as const) {
         const { port } = createPort();
+        const clock = createTestClock();
         using core = createRouterCore(port, {
+          clock,
           limits: { ...limits, transferInactivityTimeout: 4_000 },
         });
         const controller = new AbortController();
@@ -3411,7 +3509,7 @@ test.describe('createRouterCore', () => {
 
         core.receive(resultOpeningOf(2, { payload: patternOf(32), total: 40 }), 'a');
 
-        const { armed } = await timersWhile(() => {
+        const { armed } = await timersUntil(clock, () => {
           if (ending === 'whole') {
             core.receive(chunkOf(2, { offset: 32, payload: patternOf(8), total: 40 }), 'a');
           } else if (ending === 'failure') {
@@ -3454,11 +3552,12 @@ test.describe('createRouterCore', () => {
     const createAnswering = (given: RouterLimitsOptions = {}) => {
       const recorded = createPort();
       const seen: IRequestResolverProps<Handle>[] = [];
-      const core = createRouterCore(recorded.port, { limits: { ...limits, ...given } });
+      const clock = createTestClock();
+      const core = createRouterCore(recorded.port, { clock, limits: { ...limits, ...given } });
 
       core.registerResolver(resolverOf(echo, seen));
 
-      return { ...recorded, core, seen };
+      return { ...recorded, clock, core, seen };
     };
 
     /** An answer on the call the peer's `index`th request opened. */
@@ -3858,30 +3957,28 @@ test.describe('createRouterCore', () => {
     test('end a transfer it sends that no credit comes for: a request with a timeout, a result with a failure', async () => {
       const answering = createAnswering({ transferInactivityTimeout: 250 });
       using core = answering.core;
-      const { reported, seen, sent } = answering;
+      const { clock, reported, seen, sent } = answering;
       let asking: Promise<unknown> = Promise.resolve();
       let responding: Promise<unknown> = Promise.resolve();
 
       core.receive(requestOf(1), 'a');
 
-      const { armed } = timersOf(() => {
+      const { armed } = timersBy(clock, () => {
         asking = core.request(patternOf(200), { connectionHandle: 'a', options, procedure: echo });
         responding = answerOf(answering, { payload: patternOf(150) });
       });
 
       // the caller waits on its call's timer; nothing waits on the answer's
       expect(
-        armed.map(({ delay, timeoutId }) => {
-          return [delay, (timeoutId as { hasRef: () => boolean }).hasRef()];
+        armed.map(({ delay, handle }) => {
+          return [delay, hasRef(handle)];
         })
       ).toEqual([
         [250, true],
         [250, false],
       ]);
 
-      for (const { fire } of armed) {
-        fire();
-      }
+      clock.tick(250);
 
       await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout: 250 });
       await expect(responding).rejects.toMatchObject({ code: ProtocolCode.TRANSFER_STALLED });
@@ -3899,11 +3996,13 @@ test.describe('createRouterCore', () => {
 
     test('wait on a request’s own timer: the inactivity while it goes as a transfer, then its timeout for its answer', async () => {
       const { port, sent } = createPort();
+      const clock = createTestClock();
       using core = createRouterCore(port, {
+        clock,
         limits: { ...limits, transferInactivityTimeout: 250 },
       });
       const asked: Promise<unknown>[] = [];
-      const { armed } = timersOf(() => {
+      const { armed } = timersBy(clock, () => {
         for (const length of [0, 200]) {
           asked.push(
             settledOf(
@@ -3927,13 +4026,13 @@ test.describe('createRouterCore', () => {
         })
       ).toEqual([1_000, 250, 250, 250, 250, 250, 250, 1_000]);
       expect(
-        armed.every(({ timeoutId }) => {
-          return (timeoutId as { hasRef: () => boolean }).hasRef();
+        armed.every(({ handle }) => {
+          return hasRef(handle);
         })
       ).toBe(true);
 
-      armed[0]?.fire();
-      armed.at(-1)?.fire();
+      // the first's timeout and the second's, armed as its last chunk went: the rest replaced
+      clock.tick(1_000);
 
       expect(await Promise.all(asked)).toEqual([
         expect.objectContaining({ timeout: 1_000 }),
@@ -3947,11 +4046,13 @@ test.describe('createRouterCore', () => {
 
     test('set a call’s timer going again as the bytes of its result come, and not for bytes it has', () => {
       const { port } = createPort();
+      const clock = createTestClock();
       using core = createRouterCore(port, {
+        clock,
         limits: { ...limits, transferInactivityTimeout: 250 },
       });
       const chunk = chunkOf(2, { offset: 32, payload: new Uint8Array(48), total: 150 });
-      const { armed } = timersOf(() => {
+      const { armed } = timersBy(clock, () => {
         void settledOf(
           core.request(new Uint8Array(0), { connectionHandle: 'a', options, procedure: echo })
         );
@@ -3970,6 +4071,7 @@ test.describe('createRouterCore', () => {
 
     test('arm no timer for a call its own send ended, by a failure or a cancel handed back as a chunk went', async () => {
       const { port, reported, sent } = createPort();
+      const clock = createTestClock();
       const seen: IRequestResolverProps<Handle>[] = [];
       using core = createRouterCore(
         {
@@ -3989,14 +4091,14 @@ test.describe('createRouterCore', () => {
             return sending;
           },
         },
-        { limits: { ...limits, transferInactivityTimeout: 250 } }
+        { clock, limits: { ...limits, transferInactivityTimeout: 250 } }
       );
 
       core.registerResolver(resolverOf(echo, seen));
       core.receive(requestOf(1), 'a');
 
       const ended: Promise<unknown>[] = [];
-      const { armed, cleared } = timersOf(() => {
+      const { armed, cleared } = timersBy(clock, () => {
         ended.push(
           settledOf(
             core.request(patternOf(200), { connectionHandle: 'a', options, procedure: echo })
@@ -4009,10 +4111,11 @@ test.describe('createRouterCore', () => {
 
       // every timer stopped: none keeps the process waiting, none sends a stall for a call cancelled
       expect(
-        armed.filter(({ timeoutId }) => {
-          return !cleared.includes(timeoutId);
+        armed.filter(({ handle }) => {
+          return !cleared.includes(handle);
         })
       ).toEqual([]);
+      expect(clock.countTimers()).toBe(0);
       expect(await Promise.all(ended)).toEqual([
         expect.objectContaining({ code: 21 }),
         expect.any(CancelError),
@@ -4028,6 +4131,7 @@ test.describe('createRouterCore', () => {
 
     test('keep the inactivity of a result that opens as the last chunk of its request goes', async () => {
       const { port, sent } = createPort();
+      const clock = createTestClock();
       const core: IRouterCore<Handle> = createRouterCore(
         {
           ...port,
@@ -4043,15 +4147,15 @@ test.describe('createRouterCore', () => {
             return sending;
           },
         },
-        { limits }
+        { clock, limits }
       );
       let asking: Promise<unknown> = Promise.resolve();
-      const { armed, cleared } = timersOf(() => {
+      const { armed, cleared } = timersBy(clock, () => {
         asking = core.request(patternOf(200), { connectionHandle: 'a', options, procedure: echo });
         core.receive(creditOf(2, 200), 'a');
       });
-      const live = armed.filter(({ timeoutId }) => {
-        return !cleared.includes(timeoutId);
+      const live = armed.filter(({ handle }) => {
+        return !cleared.includes(handle);
       });
 
       // the result's inactivity, not the call's timeout, which counts no transfer
@@ -4067,8 +4171,9 @@ test.describe('createRouterCore', () => {
 
     test('stop a call’s timer as the call leaves, whichever way, so none keeps the process waiting', () => {
       const { port } = createPort();
-      using core = createRouterCore(port, { limits });
-      const { armed, cleared } = timersOf(() => {
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock, limits });
+      const { armed, cleared } = timersBy(clock, () => {
         for (let index = 0; index < 3; index += 1) {
           void settledOf(
             core.request(new Uint8Array(0), { connectionHandle: 'a', options, procedure: echo })
@@ -4082,8 +4187,8 @@ test.describe('createRouterCore', () => {
       });
 
       expect(
-        armed.slice(0, 3).map(({ timeoutId }) => {
-          return cleared.includes(timeoutId);
+        armed.slice(0, 3).map(({ handle }) => {
+          return cleared.includes(handle);
         })
       ).toEqual([true, true, true]);
     });
@@ -4091,12 +4196,14 @@ test.describe('createRouterCore', () => {
     test('end a result it receives as its caller ends the call: its budget and place given back, the peer told, its call id reserved', async () => {
       for (const ending of ['cancel', 'signal', 'timer'] as const) {
         const { port, sent } = createPort();
+        const clock = createTestClock();
         using core = createRouterCore(port, {
+          clock,
           limits: { ...narrow, maximumTransfers: 1, transferInactivityTimeout: 250 },
         });
         const controller = new AbortController();
         let asking: Promise<unknown> = Promise.resolve();
-        const { armed } = timersOf(() => {
+        const { armed } = timersBy(clock, () => {
           asking = settledOf(
             core.request(new Uint8Array(0), {
               connectionHandle: 'a',
@@ -4112,7 +4219,9 @@ test.describe('createRouterCore', () => {
         } else if (ending === 'signal') {
           controller.abort();
         } else {
-          armed.at(-1)?.fire();
+          // the call's own timer, its result's inactivity, the last armed
+          expect(armed.at(-1)?.delay).toBe(250);
+          clock.tick(250);
         }
 
         expect(await asking, ending).toBeInstanceOf(

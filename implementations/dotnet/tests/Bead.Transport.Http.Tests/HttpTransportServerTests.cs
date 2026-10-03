@@ -10,6 +10,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -317,7 +318,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     {
         return [.. _server.Clients.Select((client) =>
         {
-            return client.LastActivityTimestamp;
+            return client.LastActivity;
         })];
     }
 
@@ -332,7 +333,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     private async Task Start(HttpTransportServerOptions? options = null)
     {
         await _server.Stop().WaitAsync(Patience, Cancelled);
-        _server = new HttpTransportServer((options ?? new HttpTransportServerOptions()) with { Time = _time });
+        _server = new HttpTransportServer((options ?? new HttpTransportServerOptions()) with { Clock = _time });
         _server.Connection += (connectionHandle) =>
         {
             _connections.Enqueue(connectionHandle);
@@ -1081,13 +1082,15 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         {
             ("BodyBytesBudget", new() { BodyBytesBudget = 0 }),
             ("ExchangeTimeout", new() { ExchangeTimeout = TimeSpan.FromMilliseconds(2L << 30) }),
+            ("ExchangeTimeout", new() { ExchangeTimeout = TimeSpan.FromMilliseconds(0.5) }),
             ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.Zero }),
-            ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.FromMilliseconds(1.5) }),
+            ("InactivityTimeout", new() { InactivityTimeout = TimeSpan.FromMilliseconds(-2) }),
             ("MaximumBodyBytes", new() { MaximumBodyBytes = 0 }),
             ("MaximumConnections", new() { MaximumConnections = -1 }),
             ("MaximumConnectionsPerAddress", new() { MaximumConnectionsPerAddress = 0 }),
             ("MaximumOutboxBytes", new() { MaximumOutboxBytes = 0 }),
             ("MaximumWait", new() { MaximumWait = Timeout.InfiniteTimeSpan }),
+            ("MaximumWait", new() { MaximumWait = TimeSpan.FromMilliseconds(0.5) }),
             ("MaximumWaitingExchanges", new() { MaximumWaitingExchanges = int.MinValue }),
         })
         {
@@ -1098,7 +1101,54 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         }
 
         _ = new HttpTransportServer(new HttpTransportServerOptions { ExchangeTimeout = Timeout.InfiniteTimeSpan, InactivityTimeout = Timeout.InfiniteTimeSpan });
+        _ = new HttpTransportServer(new HttpTransportServerOptions
+        {
+            ExchangeTimeout = TimeSpan.FromMilliseconds(1),
+            InactivityTimeout = TimeSpan.FromMilliseconds(1),
+            MaximumWait = TimeSpan.FromMilliseconds(1),
+        });
         Assert.Equal(TimeSpan.FromMinutes(5), new HttpTransportServerOptions().ExchangeTimeout);
+    }
+
+    [Fact]
+    public void Holds_its_timeouts_and_its_longest_wait_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_for_the_timeouts_alone()
+    {
+        var options = new (string Option, DurationOutcome Never, Func<TimeSpan, HttpTransportServerOptions> Of)[]
+        {
+            (nameof(HttpTransportServerOptions.ExchangeTimeout), DurationOutcome.Never, (given) =>
+            {
+                return new HttpTransportServerOptions { ExchangeTimeout = given };
+            }),
+            (nameof(HttpTransportServerOptions.InactivityTimeout), DurationOutcome.Never, (given) =>
+            {
+                return new HttpTransportServerOptions { InactivityTimeout = given };
+            }),
+            (nameof(HttpTransportServerOptions.MaximumWait), DurationOutcome.Refused, (given) =>
+            {
+                return new HttpTransportServerOptions { MaximumWait = given };
+            }),
+        };
+
+        foreach (var (option, never, of) in options)
+        {
+            foreach (var (given, outcome, _, refusal) in Durations.Of(option, (DurationOutcome.Refused, never)))
+            {
+                if (outcome == DurationOutcome.Refused)
+                {
+                    var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return new HttpTransportServer(of(given));
+                    });
+
+                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.Equal(option, refused.ParamName);
+                }
+                else
+                {
+                    _ = new HttpTransportServer(of(given));
+                }
+            }
+        }
     }
 
     // createHTTPTransportServer, over HTTP/2

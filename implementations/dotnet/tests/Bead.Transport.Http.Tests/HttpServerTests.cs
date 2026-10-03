@@ -306,7 +306,7 @@ public sealed class HttpServerTests
         // by default, 30 s: a connection with no session stays for 30 s, then goes
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
 
-        await using var server = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Time = time } });
+        await using var server = new HttpServer<string>(new HttpServerOptions { Transport = new HttpTransportServerOptions { Clock = time } });
         var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
         await using var client = new BeadHttpClient();
 
@@ -509,6 +509,15 @@ public sealed class HttpServerTests
         await using var client = new BeadHttpClient(new BeadHttpClientOptions { Limits = RouterLimits.Default with { MaximumTransfers = 2 } });
 
         Assert.Equal((0, 0), (server.Router.Limits.MaximumTransfers, client.Router.Limits.MaximumTransfers));
+    }
+
+    [Fact]
+    public void Refuse_an_inactivity_timeout_of_0_which_its_default_does_not_stand_in_for()
+    {
+        Assert.StartsWith("a connection's inactivity timeout is a number of milliseconds from 1 to 2147483647, or infinite for never, not 0", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            return new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { ConnectionInactivityTimeout = TimeSpan.Zero } });
+        }).Message, StringComparison.Ordinal);
     }
 
     // an HTTP server and its client, connected: taken apart once each layer keeps nothing of the

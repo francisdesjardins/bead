@@ -2,12 +2,11 @@
 
 // dependencies
 
+import { assertHeld, clockOf } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { noop } from '../../transport/shared/noop';
-import { timestamp } from '../../transport/shared/timestamp';
-import type { ITimestamp } from '../../transport/shared/types';
 import { admissionOf, isAdmissionFailure } from './admission';
 import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT, FailureScope } from './constants';
 import { FailureError } from './errors';
@@ -49,6 +48,15 @@ import type {
 
 // interfaces
 
+/**
+ * When a call started, on its router's clock: the wall clock's instant it reports, and the
+ * monotonic reading its duration counts from.
+ */
+interface IStarted {
+  instant: number;
+  timestamp: number;
+}
+
 /** One step of a call, as `trace` tells it to `debug`. */
 interface ITraceStep {
   direction: DebugDirection;
@@ -57,7 +65,8 @@ interface ITraceStep {
   isAnswered?: boolean | undefined;
   options?: IResolvedRequestOptions | undefined;
   rx?: unknown;
-  started?: ITimestamp | undefined;
+  /** When its call started: every step of one call carries the same. */
+  started: IStarted;
   tx?: unknown;
   type: DebugType;
 }
@@ -139,8 +148,10 @@ const nameAfter = <Resolver extends (...params: never[]) => unknown>(
 };
 
 /**
- * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one;
- * `options` is left alone.
+ * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one
+ * — and the timeout held as a call's, so the trace, the router and the error tell one number:
+ * rounded to the nearest whole millisecond, `Infinity` to wait on, and a {@link ProgrammerError} for
+ * any other not from 1 to 2³¹ − 1, 0 among them. `options` is left alone.
  */
 export const resolveRequestOptions = (
   options?: IRequestOptions,
@@ -148,9 +159,10 @@ export const resolveRequestOptions = (
 ): IResolvedRequestOptions => {
   const {
     closeOnTimeout = defaults.closeOnTimeout,
-    timeout = defaults.timeout,
+    timeout: givenTimeout = defaults.timeout,
     ...rest
   } = options ?? {};
+  const timeout = assertHeld("a call's timeout", givenTimeout);
 
   return closeOnTimeout === undefined ? { ...rest, timeout } : { ...rest, closeOnTimeout, timeout };
 };
@@ -206,7 +218,8 @@ const snapshot = (value: unknown): unknown => {
 
 /**
  * The requesters and resolvers of the services on one router: what a requester calls, and what
- * answers it on the other side. Both sides of a router use the same manager.
+ * answers it on the other side. Both sides of a router use the same manager, which runs on its
+ * router's clock: one its options give that differs is a {@link ProgrammerError}.
  *
  * @example
  * import { createServiceManager } from '@francisdesjardins/bead/service-manager';
@@ -228,15 +241,28 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   router: IRouterLike<Handle>,
   options?: IServiceManagerOptions<Handle>
 ): IServiceManager<Handle> => {
+  const clock = clockOf(
+    { beneath: router.clock, given: options?.clock },
+    { below: 'its router', layer: 'a service manager' }
+  );
   const closeConnection = options?.closeConnection;
+  // held as the manager is built, rather than refused at each call it would time
   const defaults = Object.freeze({
     closeOnTimeout: options?.defaults?.closeOnTimeout,
-    timeout: options?.defaults?.timeout ?? REQUEST_DEFAULTS.timeout,
+    timeout: assertHeld(
+      "a call's default timeout",
+      options?.defaults?.timeout ?? REQUEST_DEFAULTS.timeout
+    ),
   });
   const emitter = createEmitter<ServiceManagerEventMap>();
   // the notifications this manager made, one per procedure, kept for its life: asked for again,
   // the same one is given
   const notifications = createProcedureMap<{ notification: unknown; procedure: IProcedure }>();
+
+  // now, for a call starting
+  const startedNow = (): IStarted => {
+    return { instant: clock.Date.now(), timestamp: clock.performance.now() };
+  };
 
   // tells `debug` about one step of a call; nothing is built when nobody listens
   const trace = (procedure: IProcedure, step: ITraceStep): void => {
@@ -244,26 +270,18 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       return;
     }
 
-    const {
-      direction,
-      error = null,
-      isAnswered = false,
-      options,
-      rx,
-      started = timestamp(),
-      tx,
-      type,
-    } = step;
+    const { direction, error = null, isAnswered = false, options, rx, started, tx, type } = step;
 
     emitter.emit(DEBUG_EVENT, error, {
       direction,
+      duration: isAnswered ? Math.trunc(clock.performance.now() - started.timestamp) : undefined,
       options: options === undefined ? undefined : { ...options },
       procedureId: procedure.procedureId,
       procedureName: procedure.procedureName,
       rx: snapshot(rx),
       serviceId: procedure.serviceId,
       serviceRevision: procedure.serviceRevision,
-      timestamp: { duration: isAnswered ? timestamp(started).ms : undefined, event: started.ms },
+      startedAt: started.instant,
       tx: snapshot(tx),
       type,
     });
@@ -271,7 +289,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
   // the requester body that `getRequest`, `getCommand` and a notification's subscribing call share:
   // the options, the trace, the request, the close on timeout and the decoding; `subscribes` names
-  // the notification the call subscribes
+  // the notification the call subscribes; a timeout refused fails as the options are resolved,
+  // before the trace and the deprecation
   const callOf = <RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     {
@@ -294,7 +313,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         const resolvedOptions = resolveRequestOptions(options, defaults);
         const { closeOnTimeout, destinationId } = resolvedOptions;
         const connectionHandle = options?.connectionHandle;
-        const started = timestamp();
+        const started = startedNow();
         const step = {
           options: resolvedOptions,
           started,
@@ -419,7 +438,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       },
       router,
       trace: (step) => {
-        trace(procedure, { ...step, type: 'notification' });
+        trace(procedure, { ...step, started: startedNow(), type: 'notification' });
       },
     });
 
@@ -456,7 +475,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
     const resolver = nameAfter(async (props: IRequestResolverProps<Handle>): Promise<void> => {
       const { connectionHandle, header, signal } = props;
-      const started = timestamp();
+      // the call starts as it arrives: its admission and its decoding count in its duration
+      const started = startedNow();
       const target = { connectionHandle, header };
       // a request is answered once: by its callback, by a refusal, or as failed; the answer sets it,
       // out of the flow a type follows here
@@ -639,8 +659,16 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
           notification: NotificationPayload,
           notifyOptions?: INotifyOptions<Handle>
         ): Promise<void> => {
-          trace(procedure, { direction: 'tx', tx: notification, type: 'notification' });
+          const step = {
+            direction: 'tx',
+            started: startedNow(),
+            tx: notification,
+            type: 'notification',
+          } as const;
 
+          trace(procedure, step);
+
+          // what keeps it from going out is told at the start it was sent with
           await router
             .notify(serializer.encodeNotification(notification), {
               filter: filterOf(notifyOptions),
@@ -648,12 +676,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
               procedure: procedureOf(resolver),
             })
             .catch((reason: unknown) => {
-              trace(procedure, {
-                direction: 'tx',
-                error: reason,
-                tx: notification,
-                type: 'notification',
-              });
+              trace(procedure, { ...step, error: reason });
             });
         },
       });

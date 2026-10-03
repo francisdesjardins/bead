@@ -2,24 +2,29 @@
 
 // dependencies
 
+import {
+  assertHeld,
+  assertHeldFinite,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from '../../transport/shared/clock';
 import { createPromise } from '../../transport/shared/create-promise';
 import { CancelError, ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import { mergeGauges } from '../../transport/shared/gauges';
 import type { Data } from '../../transport/shared/types';
 import { createAnnouncements } from './announcements';
 import { createAnsweringCalls } from './answering-calls';
-import {
-  EnvelopeKind,
-  EnvelopeLayout,
-  LIMIT_DEFAULTS,
-  SESSION_TOKEN_BYTES,
-  TIMEOUT_MAX,
-} from './constants';
+import { EnvelopeKind, EnvelopeLayout, LIMIT_DEFAULTS, SESSION_TOKEN_BYTES } from './constants';
 import { bytesOf, readEnvelope, writeEnvelope, writeFailure } from './envelope';
 import { DisconnectError, FailureError, failureErrorOf, redactHeader } from './errors';
 import { headerBytesOf, readPrefix } from './header';
 import { sideOfCallId } from './identifiers';
-import { createPendingCalls, type IPendingRequest, reservationOf } from './pending-calls';
+import {
+  assertReservation,
+  createPendingCalls,
+  type IPendingRequest,
+  reservationOf,
+} from './pending-calls';
 import { createProcedureMap } from './procedure-map';
 import { createReceivingTransfers, type IReceiving } from './receiving-transfers';
 import { createSendingTransfers } from './sending-transfers';
@@ -126,12 +131,6 @@ const LIMIT_RULES: readonly { holds: (limits: IRouterLimits) => boolean; rule: s
       },
       rule: 'a payload fits in the budget of the transfers received',
     },
-    {
-      holds: ({ transferInactivityTimeout }) => {
-        return transferInactivityTimeout <= TIMEOUT_MAX;
-      },
-      rule: `a transfer's inactivity is ${String(TIMEOUT_MAX)} milliseconds at most, as a timer holds`,
-    },
   ]);
 
 // the limits that may be 0: no transfer taken, and no detail told
@@ -159,8 +158,9 @@ const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMal
 
 /**
  * `given` over {@link LIMIT_DEFAULTS}, where it says nothing. A {@link ProgrammerError} for a limit
- * that is not a whole number — positive, but for the transfers and the detail — or for limits that
- * do not hold together.
+ * that is not a whole number — positive, but for the transfers and the detail — for limits that do
+ * not hold together, or for a transfer's inactivity that is not from 1 to 2³¹ − 1 milliseconds, 0
+ * and `Infinity` among them; the inactivity is held rounded to the nearest whole millisecond.
  */
 const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
   const keys = Object.keys(LIMIT_DEFAULTS) as (keyof IRouterLimits)[];
@@ -173,7 +173,11 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
   for (const key of keys) {
     const value = limits[key];
 
-    if (!Number.isSafeInteger(value) || value < (MAY_BE_NONE.has(key) ? 0 : 1)) {
+    // a transfer's inactivity is a duration, held below as every other is
+    if (
+      key !== 'transferInactivityTimeout' &&
+      (!Number.isSafeInteger(value) || value < (MAY_BE_NONE.has(key) ? 0 : 1))
+    ) {
       throw new ProgrammerError(
         `${key} is a whole number${MAY_BE_NONE.has(key) ? '' : ' above 0'}, not ${String(value)}`
       );
@@ -186,7 +190,15 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
     }
   }
 
-  return Object.freeze(limits);
+  // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free;
+  // held, as its failures' details say it on the wire
+  return Object.freeze({
+    ...limits,
+    transferInactivityTimeout: assertHeldFinite(
+      "a transfer's inactivity",
+      limits.transferInactivityTimeout
+    ),
+  });
 };
 
 /** Whether `value` limits a procedure's payloads: none, or a whole number above 0. */
@@ -194,7 +206,7 @@ const isPayloadLimit = (value: unknown): boolean => {
   return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 1);
 };
 
-/** Whether a call waits `timeout` at most: any positive finite number; anything else waits on. */
+/** Whether a call waits `timeout` at most: a duration held; none and `Infinity` wait on. */
 const isTimeout = (timeout: number | undefined): timeout is number => {
   return timeout !== undefined && Number.isFinite(timeout) && timeout > 0;
 };
@@ -224,6 +236,7 @@ export const createRouterCore = <Handle extends string>(
   options?: IRouterCoreOptions
 ): IRouterCore<Handle> => {
   const { failures } = port;
+  const clock = options?.clock ?? PLATFORM_CLOCK;
   const limits = limitsOf(options?.limits);
   // a failure's detail fits in an envelope, whatever the limit of a detail says
   const detailBytes = Math.min(
@@ -234,6 +247,7 @@ export const createRouterCore = <Handle extends string>(
   const wholeBytes = Math.min(limits.chunkBytes, limits.maximumEnvelopeBytes);
   const payloadBytesPerChunk = chunkPayloadBytes(limits, CHUNK_HEADER_BYTES);
   const receivings = createReceivingTransfers<Handle>({
+    clock,
     failures,
     limits,
     payloadBytesPerChunk,
@@ -248,9 +262,10 @@ export const createRouterCore = <Handle extends string>(
   // what a call holds leaves with the call, whichever way the call leaves: its timer, and the
   // transfers it sends and receives
   const pendingCalls = createPendingCalls(port, {
+    clock,
     lastCallId: options?.lastCallId,
     onRemove: ({ receiving, sending, timer }) => {
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
 
       if (receiving !== undefined) {
         receivings.close(receiving.transfer);
@@ -262,6 +277,7 @@ export const createRouterCore = <Handle extends string>(
     },
   });
   const answeringCalls = createAnsweringCalls<Handle, IRequestReceiving<Handle>>({
+    clock,
     limits,
     onRemove: ({ transfer }) => {
       receivings.close(transfer);
@@ -444,9 +460,9 @@ export const createRouterCore = <Handle extends string>(
       return;
     }
 
-    clearTimeout(pendingRequest.timer);
+    clock.clearTimeout(pendingRequest.timer);
     pendingRequest.timer = isTimeout(delay)
-      ? setTimeout(() => {
+      ? clock.setTimeout(() => {
           endPending(new TimeoutError(delay), waiting);
         }, delay)
       : undefined;
@@ -572,13 +588,13 @@ export const createRouterCore = <Handle extends string>(
     const call = { callId, connectionHandle };
     const { promise, reject, resolve } = Promise.withResolvers<void>();
     let isOpen = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: TimeoutId | undefined;
 
     // nothing more goes, and nothing more ends it
     const stop = (): void => {
       isOpen = false;
       sendings.close(sending);
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       controller.signal.removeEventListener('abort', onAbort);
     };
     // the call goes with it: its call id is the peer's to open again
@@ -599,9 +615,9 @@ export const createRouterCore = <Handle extends string>(
         return;
       }
 
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       // silent too long, it ends, and the peer is told
-      timer = setTimeout(() => {
+      timer = clock.setTimeout(() => {
         const stalled = {
           ...failures.transferStalled,
           detail: `no credit came for ${String(limits.transferInactivityTimeout)} milliseconds`,
@@ -656,7 +672,9 @@ export const createRouterCore = <Handle extends string>(
     return promise;
   };
 
-  const cancel: IRouterCore<Handle>['cancel'] = ({ callId, connectionHandle, timeout }) => {
+  const cancel: IRouterCore<Handle>['cancel'] = ({ callId, connectionHandle, timeout: given }) => {
+    const timeout = assertReservation(given);
+
     const pendingRequest = pendingCalls.get({ callId, connectionHandle });
 
     pendingCalls.forget({ callId, connectionHandle });
@@ -1510,7 +1528,7 @@ export const createRouterCore = <Handle extends string>(
         procedure,
       }
     ) => {
-      const { destinationId, signal, timeout } = requestOptions;
+      const { destinationId, signal, timeout: givenTimeout } = requestOptions;
       const procedureAddress = {
         procedureId: procedure.procedureId,
         serviceId: procedure.serviceId,
@@ -1530,13 +1548,8 @@ export const createRouterCore = <Handle extends string>(
             return (reject(refused), undefined);
           }
 
-          if (Number.isFinite(timeout) && timeout > TIMEOUT_MAX) {
-            const refused = new ProgrammerError(
-              `a call's timeout is ${String(TIMEOUT_MAX)} milliseconds at most, as a timer holds, not ${String(timeout)}`
-            );
-
-            return (reject(refused), undefined);
-          }
+          // held, which its timer, its reservation and its TimeoutError all take
+          const timeout = assertHeld("a call's timeout", givenTimeout);
 
           // drawn once the call starts: an aborted signal draws nothing
           const callId = pendingCalls.draw(connectionHandle);
@@ -1640,7 +1653,7 @@ export const createRouterCore = <Handle extends string>(
         });
     },
     reserve: (call) => {
-      pendingCalls.reserve(call);
+      pendingCalls.reserve({ ...call, timeout: assertReservation(call.timeout) });
     },
     respond,
     send: (envelope, connectionHandle) => {

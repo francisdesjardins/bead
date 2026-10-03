@@ -21,13 +21,13 @@ export * from './server';
  * them.
  */
 export interface IWSServerOptions<Data = unknown>
-  extends Omit<IServerLayers<WSTransportServer, Data>, 'transport'>, IServerOptions {
+  extends Omit<IServerLayers<WSTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'> {
   /**
    * The transport's options; binary comes as frames, so as `'arraybuffer'` or `'nodebuffer'`. A
    * message is an envelope at most — the limits' `maximumEnvelopeBytes` — unless `maxPayload` says
    * more: `ws` closes a connection that sends a larger one with 1009. A `maxPayload` below an
    * envelope's limit is a {@link ProgrammerError}: the socket would cut off envelopes the router
-   * takes.
+   * takes. Its clock is every layer's.
    */
   transport: Omit<IWSTransportServerOptions, 'binaryType'> & {
     binaryType?: 'arraybuffer' | 'nodebuffer' | undefined;

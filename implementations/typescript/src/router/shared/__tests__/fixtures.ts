@@ -191,62 +191,6 @@ export const createLoopback = ({
   return { client, flush, recorded, server, sizes, traffic };
 };
 
-/** The timers armed and cleared from now on, each fired by hand and never by the clock, until restored. */
-export const spyTimers = () => {
-  const armed: { delay: unknown; fire: () => void; timeoutId: unknown }[] = [];
-  const cleared: unknown[] = [];
-  const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
-
-  globalThis.setTimeout = ((fire: () => void, delay?: number) => {
-    const timeoutId = realSet(() => {
-      return undefined;
-    }, 0);
-
-    armed.push({ delay, fire, timeoutId });
-
-    return timeoutId;
-  }) as typeof realSet;
-  globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-    cleared.push(timeoutId);
-    realClear(timeoutId);
-  };
-
-  return {
-    armed,
-    cleared,
-    restore: () => {
-      globalThis.setTimeout = realSet;
-      globalThis.clearTimeout = realClear;
-    },
-  };
-};
-
-/** The timers `run` arms, each fired by hand and never by the clock, and the timers it clears. */
-export const timersOf = (run: () => void) => {
-  const { armed, cleared, restore } = spyTimers();
-
-  try {
-    run();
-  } finally {
-    restore();
-  }
-
-  return { armed, cleared };
-};
-
-/** As {@link timersOf}, for a `run` that waits: the timers until it settles. */
-export const timersWhile = async (run: () => Promise<unknown>) => {
-  const { armed, cleared, restore } = spyTimers();
-
-  try {
-    await run();
-  } finally {
-    restore();
-  }
-
-  return { armed, cleared };
-};
-
 /**
  * A client transport and a server transport joined back to back, as one connection `connectionHandle`:
  * what the client sends the server takes from it, and the other way. A message is handed over within

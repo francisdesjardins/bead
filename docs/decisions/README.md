@@ -25,10 +25,11 @@ never given to another decision.
 | [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)    | The C# side composes interfaces, writes every body as a block, takes two parameters, and builds without a warning            | accepted |
 | [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) | Versions run on three axes, and names are qualified by their owner                                                           | accepted |
 | [0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)       | The repository follows Conventional Commits, git-flow and Keep a Changelog, and what the languages share meets the Tenth Man | accepted |
+| [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)    | Every side takes its time from a clock it is given                                                                           | accepted |
 
 ## Writing one
 
-The next decision is 0010. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0012; 0010 is accepted, and lands with its implementation. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject.
 
 Nygard's shape, trimmed to what gets read, under a `Status` (accepted, or what replaced it) and a

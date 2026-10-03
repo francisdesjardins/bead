@@ -1,5 +1,6 @@
 // dependencies
 
+import type { IClock } from '../shared/clock';
 import type {
   CLOSE_EVENT,
   CONNECTION_EVENT,
@@ -13,7 +14,6 @@ import type {
   IEventIteratorOptions,
   IGauges,
   IReadyStateMethods,
-  ITimestamp,
   IWorkerMessageEventLike,
   IWorkerPortLike,
 } from '../shared/types';
@@ -30,8 +30,11 @@ export interface ITransportServerAddress {
 export interface ITransportServerClient {
   address: string;
   connectionHandle: TransportServerConnectionHandle;
-  /** When the connection last delivered a message; `undefined` until it has. */
-  lastActivityTimestamp: ITimestamp | undefined;
+  /**
+   * When the connection last delivered a message, in milliseconds since the epoch, as its server's
+   * clock reads the wall clock; `undefined` until it has.
+   */
+  lastActivity: number | undefined;
   port: number;
   type: TRANSPORTS;
 }
@@ -57,6 +60,14 @@ export interface ITransportServerDrawnHandleInfo {
   type: TRANSPORTS;
 }
 
+/** What every transport server takes, and each transport extends with its own. */
+export interface ITransportServerOptions {
+  /**
+   * The clock its timers run on, and the layers built on it with it; the platform's when not given.
+   */
+  clock?: IClock | undefined;
+}
+
 export interface ITransportServerStartOptions {
   /** The address to listen on. */
   address?: string | undefined;
@@ -77,6 +88,8 @@ export interface ITransportServer<
   readonly address: string;
   /** A copy, so a caller may consume it; each entry is what the connection looked like then. */
   readonly clients: ITransportServerClient[];
+  /** The clock it runs on, which a layer built on it runs on too. */
+  readonly clock: IClock;
   readonly port: number;
   readonly type: TRANSPORTS;
 
@@ -139,6 +152,8 @@ export interface ITransportServer<
  * ready state, and hands `close` and `send` a connection it found registered, never a handle.
  */
 export interface ITransportServerImplementation<Socket = unknown> {
+  /** The clock it runs on; the platform's when none. */
+  readonly clock?: IClock | undefined;
   readonly defaults: TransportServerResolvedStartOptions;
   readonly type: TRANSPORTS;
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;
@@ -250,17 +265,20 @@ export interface IWebSocketServerConstructor {
   }): IWebSocketServerLike;
 }
 
-export interface IWSTransportServerOptions {
+export interface IWSTransportServerOptions extends ITransportServerOptions {
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
    * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close` and
-   * `stop`. Defaults to {@link CLOSE_TIMEOUT}.
+   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake.
+   * From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end; any
+   * other, 0 among them, is a {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
    */
   closeTimeout?: number | undefined;
   /**
-   * Milliseconds between two pings of each connection, and `Infinity` for none: a connection that
-   * has not answered one by the next is dropped, and its `close` says it was not clean. Defaults to
+   * Milliseconds between two pings of each connection, rounded to the nearest whole one, from 1 to
+   * 2³¹ − 1, and `Infinity` for none; 0 is refused: a connection that has not answered one by the
+   * next is dropped, and its `close` says it was not clean. Defaults to
    * {@link HEARTBEAT}. A heartbeat keeps nothing of a session alive: it tells a live connection
    * from a dead one, and the session's own timers still count what the peer sends.
    */
@@ -350,7 +368,7 @@ export interface IHTTPServerLike {
   on(event: 'session', listener: (session: IHTTPSessionLike) => void): unknown;
 }
 
-export interface IHTTPTransportServerOptions {
+export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   /**
    * The bytes of body the exchanges under way may hold together, counted as they come; past them,
    * an exchange is refused 503. Defaults to {@link BODY_BYTES_BUDGET}.
@@ -365,7 +383,8 @@ export interface IHTTPTransportServerOptions {
   createServer: (listener: HTTPRequestListener) => IHTTPServerLike;
   /**
    * Milliseconds a request handed on waits for its answer before its exchange counts as lost, which
-   * closes its connection; `Infinity` for ever. Defaults to {@link EXCHANGE_TIMEOUT}.
+   * closes its connection: from 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for
+   * ever; 0 is refused. Defaults to {@link EXCHANGE_TIMEOUT}.
    */
   exchangeTimeout?: number | undefined;
   /**
@@ -375,11 +394,11 @@ export interface IHTTPTransportServerOptions {
    */
   hosts?: readonly string[] | undefined;
   /**
-   * Milliseconds a connection may go with no exchange under way before it is closed; `Infinity` for
-   * never. It tells a client alive from one gone, as a WebSocket's heartbeat does: a listen held is an
-   * exchange under way, so a client that listens again as each listen ends — or pauses less than
-   * this — stays. A session's own timers still count what the client says. Defaults to
-   * {@link INACTIVITY_TIMEOUT}.
+   * Milliseconds a connection may go with no exchange under way before it is closed: from 1 to
+   * 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for never; 0 is refused. It tells a
+   * client alive from one gone, as a WebSocket's heartbeat does: a listen held is an exchange under
+   * way, so a client that listens again as each listen ends — or pauses less than this — stays. A
+   * session's own timers still count what the client says. Defaults to {@link INACTIVITY_TIMEOUT}.
    */
   inactivityTimeout?: number | undefined;
   /**
@@ -407,8 +426,9 @@ export interface IHTTPTransportServerOptions {
    */
   maximumOutboxBytes?: number | undefined;
   /**
-   * Milliseconds a listen waits at most for something to bring back, whatever `wait` it asks; an
-   * intermediary's own timeout must be longer. Defaults to {@link MAXIMUM_WAIT}.
+   * Milliseconds a listen waits at most for something to bring back, whatever `wait` it asks: from 1
+   * to 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. An intermediary's
+   * own timeout must be longer. Defaults to {@link MAXIMUM_WAIT}.
    */
   maximumWait?: number | undefined;
   /**
@@ -449,7 +469,7 @@ export interface IWorkerScopeLike {
   removeEventListener(type: 'message', listener: (event: IWorkerMessageEventLike) => void): void;
 }
 
-export interface IWorkerTransportServerOptions {
+export interface IWorkerTransportServerOptions extends ITransportServerOptions {
   /** Where connects come: a worker's `self`, or a port a test holds. */
   scope: IWorkerScopeLike;
 }

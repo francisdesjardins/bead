@@ -59,6 +59,7 @@ export const CONNECT_DEFAULTS = Object.freeze({
  * await client.disconnect();
  */
 export const createWorkerTransportClient = ({
+  clock,
   MessageChannel: Channel = globalThis.MessageChannel,
   worker,
 }: IWorkerTransportClientOptions): WorkerTransportClient => {
@@ -93,6 +94,8 @@ export const createWorkerTransportClient = ({
     };
 
     return {
+      clock,
+
       connect: async ({ signal, timeout = CONNECT_DEFAULTS.timeout }) => {
         const channel = new Channel();
         const opened = channel.port1;
@@ -123,7 +126,7 @@ export const createWorkerTransportClient = ({
               opened.start();
               worker.postMessage(WORKER_MESSAGES.CONNECT, [channel.port2]);
             },
-            { signal, timeout }
+            { clock: client.clock, signal, timeout }
           );
         } catch (reason) {
           // given up on — timed out, cancelled, disposed: a server that takes the port later ends it

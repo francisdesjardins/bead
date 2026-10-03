@@ -24,8 +24,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- the conformance vectors and the conversations: the files both implementations' tests read -->
+    <!-- the conformance vectors, the conversations and the clock cases: the files both implementations' tests read -->
     <Content Include="../../../../spec/vectors.json" Link="vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../../spec/conversations.json" Link="conversations.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/clocks.json" Link="clocks.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the clock the conformance files' harnesses give the side under test, shared with the transports' -->
+    <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
+    <!-- the durations every place is held to, each place's outcomes its own -->
+    <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
   </ItemGroup>
 </Project>

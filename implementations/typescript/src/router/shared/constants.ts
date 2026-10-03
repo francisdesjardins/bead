@@ -127,9 +127,6 @@ export const CALL_ID_RANGES = Object.freeze({
 /** A session token's length, in bytes: 128 bits drawn from `crypto`. */
 export const SESSION_TOKEN_BYTES = 16;
 
-/** The longest a timer waits, in milliseconds: longer, it would fire at once. */
-export const TIMEOUT_MAX = 2 ** 31 - 1;
-
 /** How long a call id stays reserved when its call gave no timeout a timer can hold. */
 export const RESERVATION_MILLISECONDS = 5_000;
 

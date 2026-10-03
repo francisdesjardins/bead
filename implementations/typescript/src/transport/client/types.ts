@@ -1,5 +1,6 @@
 // dependencies
 
+import type { IClock } from '../shared/clock';
 import type { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constants';
 import type {
   Data,
@@ -19,7 +20,11 @@ export interface ITransportClientConnectOptions {
    * before the transport is reached.
    */
   signal?: AbortSignal | undefined;
-  /** Milliseconds before `connect` rejects with a {@link TimeoutError}; `0` never times out. */
+  /**
+   * Milliseconds before `connect` rejects with a {@link TimeoutError}: from 1 to 2³¹ − 1, rounded to
+   * the nearest whole one, or `Infinity`, which never times out. Any other, 0 among them, rejects
+   * with a {@link ProgrammerError}.
+   */
   timeout?: number | undefined;
 }
 
@@ -38,15 +43,21 @@ export interface ITransportClientDisconnectOptions {
   isQuick?: boolean | undefined;
 }
 
-/** Reserved: the shared half takes no option yet, and each transport extends this with its own. */
+/** What every transport client takes, and each transport extends with its own. */
 export interface ITransportClientOptions {
-  TBD?: undefined;
+  /**
+   * The clock its connects, its waits and its reconnection run on, and the layers built on it with
+   * it; the platform's when not given.
+   */
+  clock?: IClock | undefined;
 }
 
 export interface ITransportClientReconnectOptions {
   /**
    * Milliseconds to wait after a failed attempt before the next one, or a function of the previous
-   * wait and the number of the attempt that failed. The first attempt goes at once.
+   * wait and the number of the attempt that failed. The first attempt goes at once; one of 0 waits
+   * none, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which `tap` hears, and any
+   * other — `Infinity` among them — rejects with a {@link ProgrammerError}, before `tap` hears it.
    */
   delay?: TransportClientReconnectDelayOrDelayResolver | undefined;
   /** Attempts before giving up with a {@link ReconnectError}; there is always at least one. */
@@ -65,11 +76,15 @@ export interface ITransportClient<
   Socket extends object = object,
   ConnectOptions extends ITransportClientConnectOptions = ITransportClientAddressOptions,
 > extends IReadyStateMethods {
+  /** The clock it runs on, which a layer built on it runs on too. */
+  readonly clock: IClock;
   /** The current or last connection, possibly closed; `null` before the first and once dropped. */
   socket: Socket | null;
 
   /**
-   * Opens the connection. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, a
+   * Opens the connection. Refused with a {@link ProgrammerError} for a timeout `timeout` does not
+   * take, which leaves the state, and the target a reconnection replays, as they were; with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED; and with a
+   * {@link CancelError}, nothing changed, when its signal is aborted already. Then it rejects with a
    * {@link ConnectError} when it cannot open, a {@link TimeoutError}, or a {@link CancelError}.
    */
   connect(options: ConnectOptions): Promise<void>;
@@ -149,6 +164,8 @@ export interface ITransportClientInternal<
 export interface ITransportClientImplementation<
   ConnectOptions extends ITransportClientConnectOptions,
 > {
+  /** The clock it runs on, which the shared half waits on too; the platform's when none. */
+  readonly clock?: IClock | undefined;
   connect(options: ConnectOptions): Promise<void>;
   disconnect(options?: ITransportClientDisconnectOptions): Promise<void>;
   send(data: Data): Promise<void>;
@@ -253,9 +270,10 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
    */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
-   * Milliseconds between two pings of the server, and `Infinity` for none: a server that has not
-   * answered one by the next is dropped, and the client closes. Defaults to {@link HEARTBEAT}. Only a
-   * socket that can ping beats — `ws`'s; a browser's cannot, and its server's pings stand for it.
+   * Milliseconds between two pings of the server, rounded to the nearest whole one, from 1 to
+   * 2³¹ − 1, and `Infinity` for none; 0 is refused: a server that has not answered one by the next
+   * is dropped, and the client closes. Defaults to {@link HEARTBEAT}. Only a socket that can ping
+   * beats — `ws`'s; a browser's cannot, and its server's pings stand for it.
    */
   heartbeat?: number | undefined;
   /** Defaults to the global `WebSocket`; pass `ws`'s where there is none. */
@@ -315,7 +333,8 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
   /**
    * Milliseconds the client goes on listening again, its listens lost, before it counts its
    * connection lost: the server's own inactivity timeout by default, past which the server would
-   * have closed it; `Infinity` for as long as the server does not say it is gone. Defaults to
+   * have closed it; `Infinity` for as long as the server does not say it is gone. From 1 to 2³¹ − 1
+   * otherwise, rounded to the nearest whole one; 0 is refused. Defaults to
    * {@link INACTIVITY_TIMEOUT}.
    */
   inactivityTimeout?: number | undefined;
@@ -332,13 +351,15 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
    */
   maximumBodyBytes?: number | undefined;
   /**
-   * Milliseconds between a listen that brought nothing back and the next: `0` listens again at once.
-   * A pause past the server's inactivity timeout loses the connection. Defaults to `0`.
+   * Milliseconds between a listen that brought nothing back and the next: `0` listens again at once,
+   * and from 1 to 2³¹ − 1, rounded to the nearest whole one, waits; `Infinity` is refused. A pause
+   * past the server's inactivity timeout loses the connection. Defaults to `0`.
    */
   pause?: number | undefined;
   /**
    * Milliseconds each listen asks the server to wait for something to bring back, which the server
-   * caps; `0` asks it to answer at once, which polls. Defaults to {@link WAIT}.
+   * caps; `0` asks it to answer at once, which polls, and from 1 to 2³¹ − 1, rounded to the nearest
+   * whole one, to wait; `Infinity` is refused. Defaults to {@link WAIT}.
    */
   wait?: number | undefined;
 }

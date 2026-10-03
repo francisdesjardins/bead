@@ -59,9 +59,6 @@ export const WORKER_MESSAGES = Object.freeze({
   OPEN: 'bead-open',
 });
 
-/** The longest delay a timer holds, in milliseconds: past it, `setTimeout` fires at once. */
-export const TIMER_MAX = 2 ** 31 - 1;
-
 /** `'arraybuffer'` rather than `'blob'`: an envelope is read synchronously, and a `Blob` cannot be. */
 export const TRANSPORT_WEBSOCKET_BINARYTYPE = 'arraybuffer' as const;
 

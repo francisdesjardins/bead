@@ -84,10 +84,12 @@ nullable `SessionAnnouncement`, which holds a nullable `SessionToken`; the C# si
 two sessions by their type, `SessionToken` on a request and `Session` on an answer, as one field
 cannot be two types. Names stay the TypeScript side's, in PascalCase, but where .NET names
 otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and the HTTP client is `BeadHttpClient`, as
-.NET's own is `HttpClient`. A time in milliseconds is a `TimeSpan`, and a timer a `TimeProvider`'s,
-so a test moves the clock itself. A synchronous question of a router's state is a `Task`, since the
-state is on the router's scheduler. A callable that carries members, a requester or a notification,
-is a delegate or an interface: a request is made in three calls, as on the TypeScript side,
+.NET's own is `HttpClient`. A time in milliseconds is a `TimeSpan`, and the clock a layer takes and
+exposes, the TypeScript side's `IClock`, is a `TimeProvider`, named `Clock`
+([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), so a test moves it itself. A
+synchronous question of a router's state is a `Task`, since the state is on the router's scheduler.
+A callable that carries members, a requester or a notification, is a delegate or an interface: a
+request is made in three calls, as on the TypeScript side,
 `GetRequest(procedure, dependencies)(payload)(options)`, and a notification registers with
 `Register(payload, callback)(options)`.
 
@@ -139,9 +141,12 @@ test ran. CI's `dotnet` job runs both, then the interop
   side's application may give an HTTP/2 server without TLS. Kestrel shows no HTTP/2 session, which
   the TypeScript side counts.
 - A transport server's `Clients` lists a `TransportServerClient` each, in the order the connections
-  came; its last activity is a `DateTimeOffset` from the transport's `TimeProvider`, where the
-  TypeScript side's is `{ ms, sec, usec }` from `Date.now()`. A connection that takes a handle still
-  held is listed at its own arrival, where a JavaScript `Map` keeps the older one's place.
+  came. A connection that takes a handle still held is listed at its own arrival, where a
+  JavaScript `Map` keeps the older one's place.
+- An instant a side reports — a transport server client's and a session's `LastActivity`, a trace's
+  `StartedAt` — is a `DateTimeOffset` its clock's wall reading gives, and a trace's `Duration` a
+  `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
+  for an instant.
 - A stop over HTTP lets the exchanges under way write their end, and Kestrel put it on the wire, a
   second at most, before it cuts what it holds: Node writes a 404 into its socket as the stop ends
   the exchange, where Kestrel's handler writes it a moment later, and a cut that comes first loses

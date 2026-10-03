@@ -15,6 +15,7 @@ import type {
   RouterLimitsOptions,
 } from '../router/shared/types';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
+import type { IClock } from '../transport/shared/clock';
 import type { IGauges } from '../transport/shared/types';
 import type { IHealth, ServerGauges } from './health';
 
@@ -92,12 +93,20 @@ export interface IServerLayers<Transport extends IServerTransportLike, Data = un
         options: IServiceManagerOptions<TransportServerConnectionHandle>
       ) => IServiceManager<TransportServerConnectionHandle>)
     | undefined;
-  /** Builds the sessions; `createSessionManager` when not given. */
-  sessions?: (() => ISessionManager<Data>) | undefined;
+  /**
+   * Builds the sessions on the clock it is given, the transport's, which they must run on;
+   * `createSessionManager` when not given.
+   */
+  sessions?: ((options: { clock: IClock }) => ISessionManager<Data>) | undefined;
   transport: Transport;
 }
 
 export interface IServerOptions {
+  /**
+   * The clock the server runs on: its transport's, which one given must be; the platform's when
+   * neither has one.
+   */
+  clock?: IClock | undefined;
   /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the server is a {@link ProgrammerError}.
@@ -105,8 +114,9 @@ export interface IServerOptions {
   limits?: RouterLimitsOptions | undefined;
   /**
    * Milliseconds a connection with no session may stay silent before it is closed — one that never
-   * opened a session. One whose session ended keeps that session's connection timeout. Never, when
-   * not given.
+   * opened a session. One whose session ended keeps that session's connection timeout. From 1 to
+   * {@link LONGEST_TIMER}, rounded to the nearest whole one, or `Infinity` for never, the default;
+   * anything else, 0 among them, is a {@link ProgrammerError}.
    */
   connectionInactivityTimeout?: number | undefined;
   /**

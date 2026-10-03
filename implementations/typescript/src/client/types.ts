@@ -39,8 +39,8 @@ export interface IClient<Transport extends IClientTransportLike = IClientTranspo
  */
 export interface IClientLayers<Transport extends IClientTransportLike> {
   /**
-   * Builds the router on the transport, with the client's limits; `createRouterClient` when not
-   * given.
+   * Builds the router on the transport, with the client's limits and the transport's clock, which it
+   * must run on; `createRouterClient` when not given.
    */
   router?:
     | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>)

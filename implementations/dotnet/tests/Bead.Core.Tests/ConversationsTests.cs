@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Bead.Interop;
 
@@ -6,7 +7,8 @@ namespace Bead.Tests;
 /// <summary>
 /// Bead's conversations, <c>spec/conversations.json</c>, played against the C# server of the
 /// interop service: what its clients send, each on its own connection, what the server sends back
-/// on each and reports. The TypeScript server plays the same file.
+/// on each and reports, on a clock the conversation alone advances. The TypeScript server plays the
+/// same file.
 /// </summary>
 public sealed class ConversationsTests
 {
@@ -15,7 +17,12 @@ public sealed class ConversationsTests
     // the one connection of a conversation that opens none, opened before its first step
     private const string OnlyConnection = "connection";
 
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
     private static readonly JsonElement Root = Load();
+
+    // where every conversation's wall clock starts
+    private static readonly DateTimeOffset WallClock = DateTimeOffset.Parse(Root.GetProperty("wallClock").GetString()!, CultureInfo.InvariantCulture);
 
     // helpers
 
@@ -181,7 +188,10 @@ public sealed class ConversationsTests
         var conversation = ConversationOf(name);
         var steps = conversation.GetProperty("steps");
         var scheduler = new SerialScheduler();
-        var transport = new ScriptedTransport();
+
+        // the server's clock, which settles once its router and its resolvers are idle
+        var clock = new SteppingClock(WallClock) { Settle = scheduler.WhenIdle };
+        var transport = new ScriptedTransport { Clock = clock };
 
         // what the server reported, each with the connection it came with
         var reports = new List<(string Report, string ConnectionHandle)>();
@@ -261,6 +271,24 @@ public sealed class ConversationsTests
                     await scheduler.WhenIdle();
                 }
 
+                // a timer armed on the server's clock, due that many milliseconds from now, within a patience
+                if (step.TryGetProperty("until", out var until))
+                {
+                    var due = TimeSpan.FromMilliseconds(until.GetProperty("timer").GetInt64());
+
+                    Assert.Contains(due, await clock.UntilArmed(due, Patience));
+                }
+
+                if (step.TryGetProperty("advance", out var advance))
+                {
+                    await clock.Advance(TimeSpan.FromMilliseconds(advance.GetInt64()));
+                }
+
+                if (step.TryGetProperty("wall", out var wall))
+                {
+                    clock.Wall(TimeSpan.FromMilliseconds(wall.GetInt64()));
+                }
+
                 // the next envelope sent on its connection; when none was, what came instead
                 if (step.TryGetProperty("expect", out var expected))
                 {
@@ -313,6 +341,8 @@ public sealed class ConversationsTests
         // the handles of the connections open, and of those that carry nothing back
         private readonly HashSet<string> _open = [];
         private readonly HashSet<string> _oneWay = [];
+
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<string>? Connection;
 

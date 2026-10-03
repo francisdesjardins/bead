@@ -62,6 +62,17 @@ await client.connect({ host: 'localhost', port });
 await client.send('hello');
 ```
 
+Each end takes its time from a `clock`: the part of the globals Bead calls — `setTimeout`,
+`clearTimeout`, `setInterval`, `clearInterval`, `Date.now` and `performance.now` — in their own
+shape, so the platform's, `globalThis`, is the default, and `@sinonjs/fake-timers`' `createClock()`,
+never installed on the globals, is a test's. A stack has one clock, set where it starts and read
+upward: a router or a server built on a transport runs on the transport's, a server's sessions on
+the server's, a service manager on its router's, and one given that differs is a `ProgrammerError`.
+Each transport, router and session manager exposes the one it runs on as `clock`. What bounds a
+platform's own close stays on the real clock — a ping, the WebSocket server's close handshake, the
+HTTP client's disconnect. A timeout past `LONGEST_TIMER`, 2³¹ − 1 milliseconds, is refused wherever
+one is taken; never is `Infinity`, which arms nothing.
+
 The router's layer sits under `src/router/`. Both sides build on one core, under `shared/`: it
 writes the envelopes that go out and reads those that come in, pairs each result and failure with
 its request by call id, sends a payload too large for one envelope as a transfer and puts one that
@@ -110,9 +121,9 @@ unreadable, a transfer refused, a subscription unregistered — sends a cancel: 
 that call id, never answered. The other end forgets the call, takes away what it subscribed, then
 aborts the signal its resolver holds, so nothing more goes out on that call id; a cancel for no call
 has crossed its answer, and is dropped in silence. The requester reserves the call id as long as the
-call was given, 5 s when it was given no time — and, once a result came to it as a transfer, as long
-as the other end keeps the call abandoned, should that be longer: its draws skip it, and what comes
-late on it is dropped in silence.
+call was given, 5 s when it was given no time or waited without end — and, once a result came to it
+as a transfer, as long as the other end keeps the call abandoned, should that be longer: its draws
+skip it, and what comes late on it is dropped in silence.
 
 A failure travels once, in a failure's payload: its code on two bytes, the relays it crossed, whether
 the code is the procedure's own, and a readable detail — `maximumDetailBytes` at most, 1,024 by

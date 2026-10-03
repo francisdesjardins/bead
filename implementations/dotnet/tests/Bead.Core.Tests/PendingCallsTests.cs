@@ -39,7 +39,7 @@ public sealed class PendingCallsTests
             {
                 action();
             },
-            Time = time,
+            Clock = time,
         };
     }
 
@@ -101,16 +101,58 @@ public sealed class PendingCallsTests
         Assert.Equal((false, false), (calls.IsReserved(1, "a"), calls.IsReserved(3, "a")));
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(3_000_000_000)]
-    public void Reserves_a_call_id_5_s_when_its_call_gave_no_time_a_timer_holds(long milliseconds)
+    [Fact]
+    public void Refuses_a_reservation_longer_than_a_timer_holds_or_under_a_millisecond_and_reserves_nothing()
     {
         var time = new FakeTimeProvider();
         var calls = CallsOf(RouterSide.Client, OptionsOf(time));
 
-        calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(milliseconds));
+        // 2³¹ ms, one past what JavaScript's timers hold
+        foreach (var timeout in new[] { Clocks.LongestTimer + TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(0.5) })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                calls.Reserve(new CallAddress(1, "a"), timeout);
+            });
+        }
+
+        Assert.False(calls.IsReserved(1, "a"));
+
+        calls.Reserve(new CallAddress(1, "a"), Clocks.LongestTimer);
+        calls.Reserve(new CallAddress(3, "a"), TimeSpan.FromMilliseconds(1));
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal((true, false), (calls.IsReserved(1, "a"), calls.IsReserved(3, "a")));
+        time.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(2));
+        Assert.True(calls.IsReserved(1, "a"));
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.False(calls.IsReserved(1, "a"));
+    }
+
+    // a deadline of its own: a wall clock that leaps an hour at each reading moves no reservation
+    [Fact]
+    public void Keeps_the_later_end_of_two_reservations_by_the_monotonic_reading_never_the_wall_clock()
+    {
+        var time = new FakeTimeProvider();
+        var calls = CallsOf(RouterSide.Client, OptionsOf(new LeapingClock(time)));
+
+        calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(40));
+        calls.Reserve(new CallAddress(1, "a"), TimeSpan.FromMilliseconds(10));
+        time.Advance(TimeSpan.FromMilliseconds(39));
+        Assert.True(calls.IsReserved(1, "a"));
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.False(calls.IsReserved(1, "a"));
+    }
+
+    // -1 ms is .NET's infinite: a call that waited without end
+    [Theory]
+    [InlineData(null)]
+    [InlineData(-1L)]
+    public void Reserves_a_call_id_5_s_when_its_call_gave_no_time_or_waited_without_end(long? milliseconds)
+    {
+        var time = new FakeTimeProvider();
+        var calls = CallsOf(RouterSide.Client, OptionsOf(time));
+
+        calls.Reserve(new CallAddress(1, "a"), milliseconds is { } given ? TimeSpan.FromMilliseconds(given) : null);
         time.Advance(TimeSpan.FromSeconds(4.9));
         Assert.True(calls.IsReserved(1, "a"));
         time.Advance(TimeSpan.FromSeconds(0.1));
@@ -186,5 +228,34 @@ public sealed class PendingCallsTests
         Assert.Equal([first, second, third], removed);
         calls.TakeAll(null);
         Assert.Equal([first, second, third, fourth], removed);
+    }
+
+    // the test's clock, its wall reading an hour later at each reading, as a clock set by hand moves
+    private sealed class LeapingClock(TimeProvider clock) : TimeProvider
+    {
+        private long _readings;
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return clock.TimestampFrequency;
+            }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return clock.GetUtcNow() + TimeSpan.FromHours(Interlocked.Increment(ref _readings));
+        }
+
+        public override long GetTimestamp()
+        {
+            return clock.GetTimestamp();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return clock.CreateTimer(callback, state, dueTime, period);
+        }
     }
 }

@@ -22,13 +22,21 @@ public sealed record HttpTransportServerOptions
     /// <summary>The bytes of body the exchanges under way may hold together: 256 MiB by default; past it, 503.</summary>
     public long BodyBytesBudget { get; init; } = 268_435_456;
 
-    /// <summary>How long a request handed on waits for its answer: 5 minutes by default; infinite for none.</summary>
+    /// <summary>
+    /// How long a request handed on waits for its answer: 5 minutes by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one, or infinite
+    /// for none; zero is refused.
+    /// </summary>
     public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>The hosts a request may name; any when none — against a page that rebinds its name to the server's address.</summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
-    /// <summary>How long a connection may go with no exchange under way: 5 minutes by default; infinite for none.</summary>
+    /// <summary>
+    /// How long a connection may go with no exchange under way: 5 minutes by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one, or infinite
+    /// for none; zero is refused.
+    /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
@@ -49,7 +57,11 @@ public sealed record HttpTransportServerOptions
     /// <summary>The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the connection closes.</summary>
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
 
-    /// <summary>The longest a listen waits for something to bring back: 30 seconds by default, under an intermediary's 60.</summary>
+    /// <summary>
+    /// The longest a listen waits for something to bring back: 30 seconds by default, under an
+    /// intermediary's 60; from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the
+    /// nearest whole one; zero and infinite are refused.
+    /// </summary>
     public TimeSpan MaximumWait { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>The requests one connection has waiting at once: 64 by default; the exchanges under way on it, twice that.</summary>
@@ -64,8 +76,11 @@ public sealed record HttpTransportServerOptions
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
 
-    /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What the stack built on it runs on, its timers among them; the system's clock when none. A
+    /// stop's grace bounds the platform's own, on the real clock.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>Where an HTTP transport server listens.</summary>
@@ -111,8 +126,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // reserves one for
     private static readonly TimeSpan Burial = TimeSpan.FromSeconds(5);
 
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
-
     // how long a stop lets the exchanges under way write their end before it cuts them, at most: an
     // end its closes wrote is a few bytes, where the TypeScript side's go out as they are written,
     // and a client that does not read holds the stop back no longer than this
@@ -127,7 +140,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy, new Dictionary<string, string> { ["retry-after"] = "1" });
 
     private readonly HttpTransportServerOptions _options;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
 
     // what the transport holds, under its lock: the connections by handle and by token, how many
     // each address holds, the exchanges under way, and the bytes of body being read
@@ -144,22 +157,29 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private WebApplication? _application;
 
     /// <summary>
-    /// A transport server, not yet listening. A bound not above 0, or a timeout no timer holds, is an
-    /// <see cref="ArgumentOutOfRangeException"/> naming it.
+    /// A transport server, not yet listening, its durations held. A bound not above 0, or a timeout
+    /// that is not from 1 to <see cref="Clocks.LongestTimer"/> milliseconds — infinite aside, but for
+    /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
-        _options = options ?? new HttpTransportServerOptions();
-        AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), _options.BodyBytesBudget));
-        AssertTimer((nameof(HttpTransportServerOptions.ExchangeTimeout), _options.ExchangeTimeout), true);
-        AssertTimer((nameof(HttpTransportServerOptions.InactivityTimeout), _options.InactivityTimeout), true);
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumBodyBytes), _options.MaximumBodyBytes));
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnections), _options.MaximumConnections));
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnectionsPerAddress), _options.MaximumConnectionsPerAddress));
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumOutboxBytes), _options.MaximumOutboxBytes));
-        AssertTimer((nameof(HttpTransportServerOptions.MaximumWait), _options.MaximumWait), false);
-        AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), _options.MaximumWaitingExchanges));
-        _time = _options.Time ?? TimeProvider.System;
+        var given = options ?? new HttpTransportServerOptions();
+
+        AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), given.BodyBytesBudget));
+
+        var exchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), given.ExchangeTimeout);
+        var inactivityTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.InactivityTimeout), nameof(HttpTransportServerOptions.InactivityTimeout)), given.InactivityTimeout);
+
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumBodyBytes), given.MaximumBodyBytes));
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnections), given.MaximumConnections));
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumConnectionsPerAddress), given.MaximumConnectionsPerAddress));
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumOutboxBytes), given.MaximumOutboxBytes));
+
+        var maximumWait = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.MaximumWait), nameof(HttpTransportServerOptions.MaximumWait)), given.MaximumWait);
+
+        AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), given.MaximumWaitingExchanges));
+        _options = given with { ExchangeTimeout = exchangeTimeout, InactivityTimeout = inactivityTimeout, MaximumWait = maximumWait };
+        _clock = _options.Clock ?? TimeProvider.System;
     }
 
     /// <inheritdoc/>
@@ -183,6 +203,15 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         get
         {
             return _life.ReadyState;
+        }
+    }
+
+    /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
         }
     }
 
@@ -467,19 +496,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
     }
 
-    // a whole number of milliseconds above 0 a timer holds, or, when it may be, infinite
-    private static void AssertTimer((string Name, TimeSpan Value) timer, bool mayBeInfinite)
-    {
-        var isHeld = timer.Value > TimeSpan.Zero && timer.Value <= LongestTimer && timer.Value.Ticks % TimeSpan.TicksPerMillisecond == 0;
-
-        if (!isHeld && !(mayBeInfinite && timer.Value == Timeout.InfiniteTimeSpan))
-        {
-            throw new ArgumentOutOfRangeException(
-                timer.Name,
-                $"{timer.Name} is a whole number of milliseconds above 0 a timer holds{(mayBeInfinite ? ", or infinite" : "")}, not {timer.Value.TotalMilliseconds}");
-        }
-    }
-
     // whether the request says it has a body: a length above 0, or a transfer coding, as its headers
     // say it and as the TypeScript side reads them — never whether HTTP/2's end of stream has come
     // in yet, which an empty body's last frame races
@@ -613,7 +629,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // one grace for the whole stop, in real time, since what it waits on is the network's: the
         // exchanges under way write their end, then Kestrel puts what they wrote on the wire before
         // it closes their connections — cut at once, a 404 just written can go as a reset instead
-        using var grace = new CancellationTokenSource(EndsGrace);
+        using var grace = new CancellationTokenSource(EndsGrace, TimeProvider.System);
 
         try
         {
@@ -866,7 +882,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             else
             {
                 connection.Open += 1;
-                connection.LastActivity = _time.GetUtcNow();
+                connection.LastActivity = _clock.GetUtcNow();
                 StopIdle(connection);
             }
         }
@@ -1143,7 +1159,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
             if (isWaiting && _options.ExchangeTimeout != Timeout.InfiniteTimeSpan)
             {
-                waiting.Timer = _time.CreateTimer(
+                waiting.Timer = _clock.CreateTimer(
                     (_) =>
                     {
                         CloseDrawn(connection, false);
@@ -1309,7 +1325,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         ITimer? burial = null;
 
-        burial = _time.CreateTimer(
+        burial = _clock.CreateTimer(
             (_) =>
             {
                 lock (_gate)
@@ -1364,7 +1380,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                     return (long)outgoing.Bytes.Length;
                 });
                 connection.Open += 1;
-                connection.LastActivity = _time.GetUtcNow();
+                connection.LastActivity = _clock.GetUtcNow();
                 StopIdle(connection);
 
                 if (connection.Listen is { } replaced)
@@ -1379,7 +1395,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 else
                 {
                     connection.Listen = listening;
-                    listening.Timer = _time.CreateTimer(
+                    listening.Timer = _clock.CreateTimer(
                         (_) =>
                         {
                             lock (_gate)
@@ -1514,7 +1530,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        connection.Idle = _time.CreateTimer(
+        connection.Idle = _clock.CreateTimer(
             (_) =>
             {
                 CloseDrawn(connection, false);

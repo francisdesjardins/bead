@@ -37,7 +37,7 @@ internal sealed record AnsweringCallsOptions
     public required Action<Action> Post { get; init; }
 
     /// <summary>What its timers run on.</summary>
-    public required TimeProvider Time { get; init; }
+    public required TimeProvider Clock { get; init; }
 
     /// <summary>Hears what a call received of its payload as the call leaves, once.</summary>
     public Action<RequestReceiving>? OnRemove { get; init; }
@@ -265,7 +265,7 @@ internal sealed class AnsweringCalls(AnsweringCallsOptions options)
         _abandoned[call.ConnectionHandle] = calls;
 
         Abandoned? abandoned = null;
-        var timer = options.Time.CreateTimer(
+        var timer = options.Clock.CreateTimer(
             (_) =>
             {
                 options.Post(() =>

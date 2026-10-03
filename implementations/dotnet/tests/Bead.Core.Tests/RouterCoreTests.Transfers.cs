@@ -1,3 +1,4 @@
+using System.Globalization;
 using Bead.Interop;
 using Microsoft.Extensions.Time.Testing;
 
@@ -341,6 +342,44 @@ public sealed partial class RouterCoreTests
         });
         await peer.Deliver(ChunkOf(1, (payload, 32, 48)));
         Assert.Empty(peer.Reports);
+    }
+
+    // fr-CA writes 0.5 as "0,5": a refusal, and a detail that goes on the wire, read alike on every
+    // machine, whatever its culture
+    [Fact]
+    public async Task Writes_its_milliseconds_with_a_dot_under_a_culture_that_writes_a_comma_a_refusal_and_a_failure_s_detail_alike()
+    {
+        var culture = CultureInfo.CurrentCulture;
+
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-CA");
+
+        try
+        {
+            Assert.Equal("0,5", 0.5.ToString(CultureInfo.CurrentCulture));
+            Assert.StartsWith("a transfer's inactivity is a number of milliseconds from 1 to 2147483647, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return (RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(0.5) }).Validate();
+            }).Message, StringComparison.Ordinal);
+
+            var server = new Peer(RouterSide.Server);
+            var resolver = server.Resolve();
+
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+
+            var answered = resolver.Answer(0, PatternOf(300));
+
+            await server.Settle();
+            await server.Advance(TimeSpan.FromSeconds(2));
+            await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+            Assert.Equal("no credit came for 2000 milliseconds", server.Sent[^1].Failure!.Detail);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+        }
     }
 
     [Fact]
@@ -766,7 +805,7 @@ public sealed partial class RouterCoreTests
             gate.Wait(TestContext.Current.CancellationToken);
         });
         peer.Core.Receive(EnvelopeCodec.WriteEnvelope(CreditOf(1, 172)), Handle);
-        peer.Time.Advance(TimeSpan.FromSeconds(2));
+        peer.Clock.Advance(TimeSpan.FromSeconds(2));
         gate.Set();
         await peer.Settle();
         Assert.False(asked.IsCompleted);
@@ -884,7 +923,7 @@ public sealed partial class RouterCoreTests
             gate.Wait(TestContext.Current.CancellationToken);
         });
         server.Core.Receive(EnvelopeCodec.WriteEnvelope(CreditOf(1, 80)), Handle);
-        server.Time.Advance(TimeSpan.FromSeconds(2));
+        server.Clock.Advance(TimeSpan.FromSeconds(2));
         gate.Set();
         await server.Settle();
         Assert.False(answered.IsCompleted);
@@ -974,13 +1013,13 @@ public sealed partial class RouterCoreTests
                     Limits = limits ?? Chunked,
                     ResolverScheduler = Loop,
                     Scheduler = Loop,
-                    Time = Time,
+                    Clock = Clock,
                 });
         }
 
         public RouterSide Side { get; }
 
-        public FakeTimeProvider Time { get; } = new();
+        public FakeTimeProvider Clock { get; } = new();
 
         public SerialScheduler Loop { get; } = new();
 
@@ -1128,7 +1167,7 @@ public sealed partial class RouterCoreTests
 
         public async Task Advance(TimeSpan by)
         {
-            Time.Advance(by);
+            Clock.Advance(by);
             await Settle();
         }
 

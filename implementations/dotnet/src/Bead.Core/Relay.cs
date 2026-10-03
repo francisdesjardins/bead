@@ -14,8 +14,9 @@ public sealed record RelayOptions
 
     /// <summary>
     /// How long leg B waits for its answer at most, whatever a destination says; without end by
-    /// default: the requester's own timeout governs, end to end, by the cancel it sends. Above 0, and
-    /// 2³¹ − 1 ms at most, or infinite; another is an <see cref="ArgumentOutOfRangeException"/>.
+    /// default: the requester's own timeout governs, end to end, by the cancel it sends. From 1 to
+    /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or infinite; another, zero among them,
+    /// is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan Timeout { get; init; } = System.Threading.Timeout.InfiniteTimeSpan;
 
@@ -37,7 +38,11 @@ public sealed record DestinationOptions
     /// <summary>What the application calls it, for a list of its own.</summary>
     public string? Label { get; init; }
 
-    /// <summary>How long leg B waits for its answer, the relay's at most; the relay's when none.</summary>
+    /// <summary>
+    /// How long leg B waits for its answer, the relay's at most; the relay's when none. From 1 to
+    /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or infinite; another, zero among them,
+    /// is an <see cref="ArgumentOutOfRangeException"/>.
+    /// </summary>
     public TimeSpan? Timeout { get; init; }
 }
 
@@ -120,7 +125,6 @@ internal sealed class Relay
     // a request's header on leg B: no block, since it names no destination and presents no session
     private static readonly int RequestHeaderBytes = EnvelopeCodec.HeaderBytesOf(new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 });
 
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private readonly Lock _gate = new();
 
@@ -136,8 +140,7 @@ internal sealed class Relay
         _router = router;
         _beforeRoute = options?.BeforeRoute;
         _fill = options?.Fill ?? RandomNumberGenerator.Fill;
-        _timeout = options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan;
-        AssertTimeout(_timeout);
+        _timeout = HeldTimeoutOf(options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>
@@ -215,15 +218,14 @@ internal sealed class Relay
     }
 
     /// <summary>
-    /// Registers a target as a destination: given, or drawn. A timeout not above 0, or past 2³¹ − 1
-    /// ms, is an <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered
-    /// already, an <see cref="ArgumentException"/>.
+    /// Registers a target as a destination: given, or drawn. A timeout is rounded to the nearest whole
+    /// millisecond; one neither infinite nor from 1 to 2³¹ − 1, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered already, an
+    /// <see cref="ArgumentException"/>.
     /// </summary>
     public DestinationRegistration Register(object target, DestinationOptions? options)
     {
-        var timeout = options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan;
-
-        AssertTimeout(timeout);
+        var timeout = HeldTimeoutOf(options?.Timeout ?? System.Threading.Timeout.InfiniteTimeSpan);
 
         if (options?.DestinationId == 0)
         {
@@ -255,15 +257,10 @@ internal sealed class Relay
         }
     }
 
-    // whether `timeout` is one a timer holds, or none at all
-    private static void AssertTimeout(TimeSpan timeout)
+    // the relay's timeout, or a destination's, held: never zero, and infinite without end
+    private static TimeSpan HeldTimeoutOf(TimeSpan timeout)
     {
-        if (timeout != System.Threading.Timeout.InfiniteTimeSpan && (timeout <= TimeSpan.Zero || timeout > LongestTimer))
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(timeout),
-                $"a relay's timeout is above 0 and {int.MaxValue} milliseconds at most, or infinite, not {timeout.TotalMilliseconds}");
-        }
+        return Clocks.AssertHeld(("a relay's timeout", nameof(RelayOptions.Timeout)), timeout);
     }
 
     // the shorter of two timeouts, infinite the longest

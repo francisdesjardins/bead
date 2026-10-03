@@ -74,13 +74,14 @@ public sealed partial class RouterServerTests : IDisposable
         }
     }
 
-    // a router on the test's scheduler and clock — or the clock its options give — its errors and
-    // its activity recorded
+    // a router on the test's scheduler, over a transport on the test's clock — or the clock its
+    // options give — its errors and its activity recorded
     private void Start(RouterServerOptions? options = null)
     {
+        _transport.Clock = options?.Clock ?? _time;
         _router = new RouterServer(
             _transport,
-            (options ?? new RouterServerOptions()) with { ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = options?.Time ?? _time });
+            (options ?? new RouterServerOptions()) with { ResolverScheduler = _scheduler, Scheduler = _scheduler });
         _services = new ServiceManager(_router);
         _router.Error += (reason, connectionHandle) =>
         {
@@ -332,6 +333,22 @@ public sealed partial class RouterServerTests : IDisposable
     public void Dispose()
     {
         _router?.Dispose();
+    }
+
+    [Fact]
+    public void Runs_on_its_transport_s_clock_and_refuses_another()
+    {
+        Start();
+
+        using var same = new RouterServer(_transport, new RouterServerOptions { Clock = _time });
+
+        Assert.Equal((_time, _time), (Router.Clock, same.Clock));
+        Assert.Equal(
+            "a server's router runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new RouterServer(_transport, new RouterServerOptions { Clock = TimeProvider.System });
+            }).Message);
     }
 
     [Fact]
@@ -1545,7 +1562,7 @@ public sealed partial class RouterServerTests : IDisposable
         Start();
         _transport.Peer = clientEnd;
 
-        using var client = new RouterClient(clientEnd, new RouterClientOptions { ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = _time });
+        using var client = new RouterClient(clientEnd, new RouterClientOptions { ResolverScheduler = _scheduler, Scheduler = _scheduler });
 
         var clientServices = new ServiceManager(client);
 
@@ -2007,6 +2024,15 @@ public sealed partial class RouterServerTests : IDisposable
     // a client's end of a connection linked in memory to the server's transport, as the first
     private sealed class ClientEnd(ScriptedTransport server) : IRouterClientTransport
     {
+        // the link's, which its server end runs on
+        public TimeProvider Clock
+        {
+            get
+            {
+                return server.Clock;
+            }
+        }
+
         public event Action<TransportMessage>? Message;
 
         public event Action<bool, bool>? Close;
@@ -2033,6 +2059,8 @@ public sealed partial class RouterServerTests : IDisposable
     // handed to it, read as a client reads it — one it fails to send too
     private sealed class ScriptedTransport : IRouterServerTransport
     {
+        public TimeProvider Clock { get; set; } = TimeProvider.System;
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;

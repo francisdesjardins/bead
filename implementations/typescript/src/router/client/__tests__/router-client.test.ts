@@ -13,7 +13,12 @@ import type {
   IRequestResolverProps,
   OutgoingEnvelope,
 } from '../../shared/types';
-import { envelopeOf, spyTimers } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  delaysOn,
+  timersUntil,
+} from '../../../transport/shared/__tests__/fixtures';
+import { envelopeOf } from '../../shared/__tests__/fixtures';
 import {
   CancelError,
   createRouterClient,
@@ -22,6 +27,7 @@ import {
   FailureError,
   FailureScope,
   LIMIT_DEFAULTS,
+  PLATFORM_CLOCK,
   ProgrammerError,
   ProtocolCode,
   SERVER_FAILURES,
@@ -121,30 +127,6 @@ const recordErrors = (router: IRouterClient) => {
   return errors;
 };
 
-/**
- * The timers `spied` armed and nothing stopped since: those the clock would fire, each fired by
- * hand here, so a late machine moves no deadline past another.
- */
-const runningOf = ({ armed, cleared }: ReturnType<typeof spyTimers>) => {
-  return armed.filter(({ timeoutId }) => {
-    return !cleared.includes(timeoutId);
-  });
-};
-
-/** The delays of `timers`, in the order they were armed. */
-const delaysOf = (timers: ReturnType<typeof spyTimers>['armed']) => {
-  return timers.map(({ delay }) => {
-    return delay;
-  });
-};
-
-/** Fires each of `timers`, as its clock would. */
-const fireEach = (timers: ReturnType<typeof spyTimers>['armed']) => {
-  for (const { fire } of timers) {
-    fire();
-  }
-};
-
 const codesOf = (errors: Error[]) => {
   return errors.map((error) => {
     return error instanceof FailureError ? error.code : error.message;
@@ -175,6 +157,27 @@ test.describe('createRouterClient', () => {
     expect(router.transport).toBe(transport);
     expect(router.sessionToken).toBeUndefined();
     expect(router.failures.side).toBe('client');
+  });
+
+  test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
+    const clock = createTestClock();
+    const { transport } = createScriptedTransport();
+    using onItsTransport = createRouterClient(createWSTransportClient({ clock }));
+    using onItsOwn = createRouterClient(transport, { clock });
+    using alone = createRouterClient(transport);
+
+    expect([onItsTransport.clock, onItsOwn.clock, alone.clock]).toEqual([
+      clock,
+      clock,
+      PLATFORM_CLOCK,
+    ]);
+    expect(() => {
+      createRouterClient(createWSTransportClient({ clock }), { clock: PLATFORM_CLOCK });
+    }).toThrow(
+      new ProgrammerError(
+        "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's"
+      )
+    );
   });
 
   test.describe('requests', () => {
@@ -262,46 +265,41 @@ test.describe('createRouterClient', () => {
 
     test('times out and cancels its call; a result too late says nothing while its call id is reserved', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+      const clock = createTestClock();
+      using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
-      const spied = spyTimers();
+      const failing = router
+        .request(new Uint8Array(0), { options: { timeout: 10 }, procedure: service })
+        .catch((reason: unknown) => {
+          return reason;
+        });
 
-      try {
-        const failing = router
-          .request(new Uint8Array(0), { options: { timeout: 10 }, procedure: service })
-          .catch((reason: unknown) => {
-            return reason;
-          });
+      await sleep(0);
 
-        await sleep(0);
+      // the call's own, past which it times out
+      expect(delaysOn(clock)).toEqual([10]);
 
-        // the call's own, past which it times out
-        expect(delaysOf(runningOf(spied))).toEqual([10]);
+      clock.runToLast();
 
-        fireEach(runningOf(spied));
+      expect(await failing).toBeInstanceOf(TimeoutError);
+      expect(
+        sent.map((envelope) => {
+          return [envelope?.kind, envelope?.header.callId];
+        })
+      ).toEqual([
+        [EnvelopeKind.REQUEST, 1],
+        [EnvelopeKind.CANCEL, 1],
+      ]);
 
-        expect(await failing).toBeInstanceOf(TimeoutError);
-        expect(
-          sent.map((envelope) => {
-            return [envelope?.kind, envelope?.header.callId];
-          })
-        ).toEqual([
-          [EnvelopeKind.REQUEST, 1],
-          [EnvelopeKind.CANCEL, 1],
-        ]);
+      deliver(resultOf(1));
 
-        deliver(resultOf(1));
+      expect(errors).toEqual([]);
 
-        expect(errors).toEqual([]);
+      // reserved as long as the call was given, then free
+      expect(delaysOn(clock)).toEqual([10]);
 
-        // reserved as long as the call was given, then free
-        expect(delaysOf(runningOf(spied))).toEqual([10]);
-
-        fireEach(runningOf(spied));
-        deliver(resultOf(1));
-      } finally {
-        spied.restore();
-      }
+      clock.runToLast();
+      deliver(resultOf(1));
 
       expect(codesOf(errors)).toEqual([ProtocolCode.CALL_UNKNOWN]);
     });
@@ -596,7 +594,8 @@ test.describe('createRouterClient', () => {
 
     test('a subscription refused lets go of its call id; one that times out is cancelled, its call id reserved a while', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+      const clock = createTestClock();
+      using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
       const triggered: Uint8Array[] = [];
       const notification = notificationOf(triggered);
@@ -616,50 +615,44 @@ test.describe('createRouterClient', () => {
       });
       await expect(refused).rejects.toMatchObject({ code: ProtocolCode.ACCESS_DENIED });
 
-      const spied = spyTimers();
+      const failing = router
+        .request(new Uint8Array(0), {
+          options: { timeout: 10 },
+          procedure: service,
+          subscribes: notification,
+        })
+        .catch((reason: unknown) => {
+          return reason;
+        });
 
-      try {
-        const failing = router
-          .request(new Uint8Array(0), {
-            options: { timeout: 10 },
-            procedure: service,
-            subscribes: notification,
-          })
-          .catch((reason: unknown) => {
-            return reason;
-          });
+      await sleep(0);
 
-        await sleep(0);
+      // the call's own, past which it times out
+      expect(delaysOn(clock)).toEqual([10]);
 
-        // the call's own, past which it times out
-        expect(delaysOf(runningOf(spied))).toEqual([10]);
+      clock.runToLast();
 
-        fireEach(runningOf(spied));
+      expect(await failing).toBeInstanceOf(TimeoutError);
 
-        expect(await failing).toBeInstanceOf(TimeoutError);
+      deliver(notificationEnvelopeOf(1));
+      deliver(notificationEnvelopeOf(3));
 
-        deliver(notificationEnvelopeOf(1));
-        deliver(notificationEnvelopeOf(3));
+      expect(triggered).toEqual([]);
+      expect(codesOf(errors)).toEqual([ProtocolCode.SUBSCRIPTION_UNKNOWN]);
+      expect(
+        sent.map((envelope) => {
+          return [envelope?.kind, envelope?.header.callId];
+        })
+      ).toEqual([
+        [EnvelopeKind.REQUEST, 1],
+        [EnvelopeKind.REQUEST, 3],
+        [EnvelopeKind.CANCEL, 3],
+      ]);
+      // reserved as long as the call was given, then free
+      expect(delaysOn(clock)).toEqual([10]);
 
-        expect(triggered).toEqual([]);
-        expect(codesOf(errors)).toEqual([ProtocolCode.SUBSCRIPTION_UNKNOWN]);
-        expect(
-          sent.map((envelope) => {
-            return [envelope?.kind, envelope?.header.callId];
-          })
-        ).toEqual([
-          [EnvelopeKind.REQUEST, 1],
-          [EnvelopeKind.REQUEST, 3],
-          [EnvelopeKind.CANCEL, 3],
-        ]);
-        // reserved as long as the call was given, then free
-        expect(delaysOf(runningOf(spied))).toEqual([10]);
-
-        fireEach(runningOf(spied));
-        deliver(notificationEnvelopeOf(3));
-      } finally {
-        spied.restore();
-      }
+      clock.runToLast();
+      deliver(notificationEnvelopeOf(3));
 
       expect(codesOf(errors)).toEqual([
         ProtocolCode.SUBSCRIPTION_UNKNOWN,
@@ -697,7 +690,8 @@ test.describe('createRouterClient', () => {
 
     test('keeps the call id of a subscription let go of a while, silent on what comes under it, then reports it', async () => {
       const { deliver, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+      const clock = createTestClock();
+      using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
       const notification = notificationOf([]);
       const ending: OutgoingEnvelope = {
@@ -716,28 +710,21 @@ test.describe('createRouterClient', () => {
 
       deliver(resultOf(1, { sessionToken: TOKEN }));
       await subscribing;
+      await router.unregisterNotification(notification);
 
-      const spied = spyTimers();
+      // on its way when it was let go of: dropped in silence, and so is the failure that ends it,
+      // whose end of session is learned all the same
+      deliver(notificationEnvelopeOf(1));
+      deliver(ending);
 
-      try {
-        await router.unregisterNotification(notification);
+      expect(errors).toEqual([]);
+      expect(router.sessionToken).toBeUndefined();
+      // kept as long as the subscription's call was given
+      expect(delaysOn(clock)).toEqual([20]);
 
-        // on its way when it was let go of: dropped in silence, and so is the failure that ends it,
-        // whose end of session is learned all the same
-        deliver(notificationEnvelopeOf(1));
-        deliver(ending);
-
-        expect(errors).toEqual([]);
-        expect(router.sessionToken).toBeUndefined();
-        // kept as long as the subscription's call was given
-        expect(delaysOf(runningOf(spied))).toEqual([20]);
-
-        fireEach(runningOf(spied));
-        deliver(notificationEnvelopeOf(1));
-        deliver(ending);
-      } finally {
-        spied.restore();
-      }
+      clock.runToLast();
+      deliver(notificationEnvelopeOf(1));
+      deliver(ending);
 
       expect(codesOf(errors)).toEqual([
         ProtocolCode.SUBSCRIPTION_UNKNOWN,
@@ -745,18 +732,17 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
-    test('a subscription given no time, let go of, is cancelled and its call id reserved 5 s, or until the connection closes', async () => {
+    test('a subscription that waits without end, let go of, is cancelled and its call id reserved 5 s, or until the connection closes', async () => {
       const { close, deliver, sent, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+      const clock = createTestClock();
+      using router = createRouterClient(transport, { clock });
       const errors = recordErrors(router);
       const notification = notificationOf([]);
-      const delays: unknown[] = [];
-      const { setTimeout: realSet } = globalThis;
 
       await router.registerNotification(notification);
 
       const subscribing = router.request(new Uint8Array(0), {
-        options: { timeout: 0 },
+        options: { timeout: Infinity },
         procedure: service,
         subscribes: notification,
       });
@@ -764,21 +750,17 @@ test.describe('createRouterClient', () => {
       deliver(resultOf(1));
       await subscribing;
 
-      try {
-        globalThis.setTimeout = ((...params: Parameters<typeof realSet>) => {
-          delays.push(params[1]);
-
-          return realSet(...params);
-        }) as typeof realSet;
-
-        await router.unregisterNotification(notification);
-      } finally {
-        globalThis.setTimeout = realSet;
-      }
+      const { armed } = await timersUntil(clock, () => {
+        return router.unregisterNotification(notification);
+      });
 
       deliver(notificationEnvelopeOf(1));
 
-      expect(delays).toEqual([5_000]);
+      expect(
+        armed.map(({ delay }) => {
+          return delay;
+        })
+      ).toEqual([5_000]);
       expect(errors).toEqual([]);
 
       close();
@@ -1105,11 +1087,9 @@ test.describe('createRouterClient', () => {
 
     test('clears the timers of its reservations with the connection', async () => {
       const { close, deliver, transport } = createScriptedTransport();
-      using router = createRouterClient(transport);
+      const clock = createTestClock();
+      using router = createRouterClient(transport, { clock });
       const notification = notificationOf([]);
-      const armed: unknown[] = [];
-      const cleared: unknown[] = [];
-      const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
 
       await router.registerNotification(notification);
 
@@ -1122,28 +1102,14 @@ test.describe('createRouterClient', () => {
       deliver(resultOf(1));
       await subscribing;
 
-      try {
-        globalThis.setTimeout = ((...params: Parameters<typeof realSet>) => {
-          const timeoutId = realSet(...params);
-
-          armed.push(timeoutId);
-
-          return timeoutId;
-        }) as typeof realSet;
-        globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-          cleared.push(timeoutId);
-          realClear(timeoutId);
-        };
-
+      const { armed, cleared } = await timersUntil(clock, async () => {
         await router.unregisterNotification(notification);
         close();
-      } finally {
-        globalThis.setTimeout = realSet;
-        globalThis.clearTimeout = realClear;
-      }
+      });
 
       expect(armed).toHaveLength(1);
-      expect(cleared).toContain(armed[0]);
+      expect(cleared).toContain(armed[0]?.handle);
+      expect(clock.countTimers()).toBe(0);
     });
 
     test('drops every notification though one of them throws, and keeps what a drop registers again', async () => {

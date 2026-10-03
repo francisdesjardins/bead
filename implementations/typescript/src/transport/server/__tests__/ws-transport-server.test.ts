@@ -11,7 +11,14 @@ import type {
 import { createWSTransportClient, type WSTransportClient } from '../../client/ws-transport-client';
 import * as constants from '../../shared/constants';
 import { CancelError, ConnectError } from '../../shared/errors';
-import { allClosed, host, IMPLEMENTATIONS, spyIntervals } from '../../shared/__tests__/fixtures';
+import {
+  allClosed,
+  createTestClock,
+  durationsOf,
+  host,
+  IMPLEMENTATIONS,
+  spyIntervals,
+} from '../../shared/__tests__/fixtures';
 import {
   ProgrammerError,
   type TRANSPORT_SERVER_EVENTS,
@@ -159,7 +166,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       test('delivers text as a string and binary as an ArrayBuffer, stamping the activity', async () => {
         await connectClient(client);
         const [before] = server.clients;
-        expect(before?.lastActivityTimestamp).toBeUndefined();
+        expect(before?.lastActivity).toBeUndefined();
 
         const text = nextServerEvent(server, 'message');
         await client.send('hello');
@@ -171,7 +178,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(data).toBeInstanceOf(ArrayBuffer);
         expect(new TextDecoder().decode(data as ArrayBuffer)).toBe('bytes');
 
-        expect(server.clients[0]?.lastActivityTimestamp).toBeDefined();
+        expect(server.clients[0]?.lastActivity).toBeGreaterThan(0);
       });
     });
 
@@ -562,6 +569,78 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
+  test('holds its close timeout to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on its peer without end', async () => {
+    const fake = createFakeWebSocketServer();
+
+    for (const { given, outcome, refusal } of durationsOf('a close timeout', {
+      never: 'never',
+      zero: 'refused',
+    })) {
+      const building = () => {
+        return createWSTransportServer({
+          closeTimeout: given,
+          WebSocketServer: fake.FakeWebSocketServer,
+        });
+      };
+
+      if (outcome === 'refused') {
+        expect(building, String(given)).toThrow(new ProgrammerError(refusal));
+      } else {
+        expect(building, String(given)).not.toThrow();
+      }
+    }
+
+    // Infinity arms no timer, where Node's would take it for 1 ms and drop the peer at once
+    const server = createWSTransportServer({
+      closeTimeout: Infinity,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start();
+
+    fake.instances.at(-1)?.emit('listening');
+    await starting;
+
+    const silent = createFakeSocket({ onClose: 'ignore' });
+    const closing = server.close(fake.connect(silent));
+
+    await sleep(50);
+
+    expect(silent.wasTerminated).toBe(false);
+
+    silent.hear('close', 1000);
+
+    await expect(closing).resolves.toBe(true);
+    await server.stop();
+  });
+
+  test('stamps the activity on its clock, and bounds a close on the real one, which the clock given never times', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({
+      clock,
+      closeTimeout: 20,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start();
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const silent = createFakeSocket({ onClose: 'ignore' });
+
+    fake.connect(silent);
+    clock.tick(5);
+    silent.hear('message', Buffer.from('bytes'), true);
+
+    expect(server.clock).toBe(clock);
+    expect(server.clients[0]?.lastActivity).toBe(Date.UTC(2026, 0, 1) + 5);
+
+    // its 20 ms pass on the real clock, the clock given never advanced
+    await server.stop();
+
+    expect(silent.wasTerminated).toBe(true);
+    expect(clock.armed).toEqual([]);
+  });
+
   test('drops a connection whose close throws, and still resolves "close" to true', async () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
@@ -677,7 +756,7 @@ test.describe('WSTransportServer, heartbeat', () => {
 
     await server.stop();
 
-    for (const heartbeat of [0, 1.5, 2 ** 31]) {
+    for (const heartbeat of [0, 0.5, 2 ** 31]) {
       expect(() => {
         return createWSTransportServer({ heartbeat, WebSocketServer: fake.FakeWebSocketServer });
       }, String(heartbeat)).toThrow(ProgrammerError);

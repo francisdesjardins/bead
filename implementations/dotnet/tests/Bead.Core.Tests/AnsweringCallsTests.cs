@@ -30,7 +30,7 @@ public sealed class AnsweringCallsTests
             {
                 action();
             },
-            Time = time,
+            Clock = time,
         };
     }
 

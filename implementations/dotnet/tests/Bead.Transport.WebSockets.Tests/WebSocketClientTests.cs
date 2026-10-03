@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Bead.Interop;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.WebSockets.Tests;
 
@@ -61,6 +62,37 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         await _client.DisposeAsync();
         await _server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Runs_its_router_on_its_transport_s_clock_which_times_a_request_out()
+    {
+        var time = new FakeTimeProvider();
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var client = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Clock = time } });
+
+        Assert.Equal((time, time), (client.Transport.Clock, client.Router.Clock));
+        await client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
+
+        // its timer is armed before its request goes out
+        client.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Tx && envelope.Header is RequestHeader)
+            {
+                sent.TrySetResult();
+            }
+        };
+
+        var slow = client.Services.GetRequest(
+            InteropService.ProcedureOf("slow"),
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked })(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { Timeout = TimeSpan.FromSeconds(1) });
+
+        await sent.Task.WaitAsync(Patience, Cancelled);
+        time.Advance(TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return slow.WaitAsync(Patience, Cancelled);
+        });
     }
 
     [Fact]

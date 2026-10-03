@@ -10,6 +10,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Badges in the README: CI on `main`, and the license.
+- The conformance files' steps for time (decision 0011): `advance`, which steps the clock a side is
+  given from due to due, `until` a timer armed on it, `wall`, which moves the wall clock alone, and
+  each file's `wallClock`, where it starts; `spec/check.py` refuses an `advance` that no timer armed
+  precedes.
 - `specVersion` in each conformance file, repeating the version `spec/spec.md` now states, `0.1.0`,
   and when it moves, in decision 0008.
 - JSON Schemas for the conformance files, in `spec/schemas/`.
@@ -32,8 +36,60 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The WebSocket's cases in `spec/transports.json`, played with frames the peer writes itself: a
   message whole or in fragments, a text message reported, a message past its limit closed 1009, a
   clean close and a stop, and, on the real clock, the ping and the peer that leaves it unanswered.
+- `spec/clocks.json`, its schema and its generator: what every side's test clock does when a case
+  advances it — timers chained in one advance, a periodic timer across its periods and armed again as
+  it is taken, timers due at once, the wall clock moved alone — which both sides play, so that
+  `advance` means one thing in every file (decision 0011). Both test clocks refuse a timer for less
+  than a millisecond or past the ceiling, and an advance within another.
+- The first cases that advance the clock a server is given: in the transports' file, a call id
+  buried 5 seconds, then handed on; in the conversations, a command past its 10 seconds, its call id
+  reserved as long, an answer within dropped and one after reported `CALL_UNKNOWN`.
+- The `spec` job regenerates `spec/transports.json` and `spec/clocks.json` too.
 
 ### Changed
+
+- Every layer of both sides takes its time from a clock it is given, exposes it, and refuses one
+  that differs from the clock of the layer beneath it (decision 0011): `Clock`, a `TimeProvider`,
+  where the C# side's options said `Time`; `clock`, the part of the globals Bead calls, on the
+  TypeScript side, the platform's by default. What bounds a platform's own close or stop, and a
+  WebSocket's ping, stay on the real clock.
+- Every duration an application gives a side — a timeout, a delay, a limit, a bound — is held as a
+  whole number of milliseconds from 1 to 2³¹ − 1, as section 1.4 now states: a fraction is rounded
+  to the nearest, a half up, and one under a millisecond or past the ceiling is refused, and on the
+  TypeScript side `NaN` and a non-number, in the same words on both sides, by one assertion a side,
+  `assertHeld` and `Clocks.AssertHeld`, beside `LONGEST_TIMER` and `Clocks.LongestTimer`. A timeout
+  or a bound refuses 0, where a call's and a connect's waited without end, a reservation and a
+  session took their default, the HTTP client's inactivity was lost at once and a close timeout cut
+  at once: one left out is its default, and never is `Infinity` and `Timeout.InfiniteTimeSpan`
+  alone, where its place takes it. A delay takes 0 as at once, and refuses never: a reconnection's
+  delay of never retried at once. A session's timeouts may be left out, `number | undefined` and
+  `TimeSpan?`, for the manager's default, as a C# session built without them now takes too; a
+  service manager's default timeout is checked as it is built, and a call's own as the defaults are
+  applied, so a call's trace shows the duration held, and a refused one fails before the trace and
+  the deprecation event, `resolveRequestOptions` refusing it. The TypeScript session manager's
+  `isArmable` goes.
+- The TypeScript reconnection arms its wait before its tap hears it, as the C# one does, and refuses
+  a delay before its tap hears it; a connect refused for its timeout leaves the TypeScript client
+  as it was, uninitialized, its target kept for no reconnection, as the C# one does. The TypeScript
+  WebSocket server's close timeout of `Infinity` waits without end, where Node took it for a
+  millisecond. The C# side writes milliseconds in the invariant culture, in its refusals and in
+  the failure details that go on the wire.
+- A transport server client's last activity is `lastActivity`, milliseconds since the epoch, and
+  `LastActivity`, a `DateTimeOffset`, each read from its clock; its event is `lastActivityChanged`
+  and `LastActivityChanged`, and a session manager's update `updateLastActivity` and
+  `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
+- A trace tells `startedAt` and `duration`, flat on its event, where it told `timestamp: { event,
+duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
+  whole milliseconds, its statistics' `DurationSummary` in `TimeSpan`, and `DebugTimestamp` goes. A
+  notification's one step starts as it is sent or heard, and a failed notify tells its failure at
+  that same start.
+- The banned-API analyzer (RS0030) on the C# side, and oxlint's `no-restricted-globals` and
+  `no-restricted-properties` on the TypeScript side, refuse the platform's clocks and timers; an
+  exception is suppressed where it stands, with its reason.
+- The TypeScript side's tests run on `@sinonjs/fake-timers`' `createClock()`, never installed on the
+  globals, a development dependency; the C# side's harnesses on a clock of their own, which keeps
+  its timers and fires them from due to due over a `FakeTimeProvider`'s readings.
+- Section 15.10 says that a listen's inactivity timeout never reads the wall clock.
 
 - The Tenth Man meets every change to what every language's tests answer to: the spec, its
   conformance files, their shape and their tooling, and the gates the implementations share.
@@ -54,6 +110,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The HTTP transport, on both sides, answers 200, then cuts, the exchange of a request it handed on
   when handing it on closes the connection, where it answered 404 `connection-unknown`, a refusal
   that says nothing was tried.
+- The C# side's trace counts a call's duration on its clock's monotonic reading, as the TypeScript
+  side's does, where it read the wall clock, which a clock set by hand moves; the twin test plays on
+  both sides.
+- The C# side's trace of a received call starts as its resolver takes it, before its admission and
+  its decoding, as the TypeScript side's does, where it started once the payload decoded; through a
+  router, which asks the admission itself, both start once it admitted the call.
 
 ## [0.1.0] - 2026-10-02
 

@@ -24,17 +24,27 @@ public sealed record WebSocketTransportServerOptions
 
     /// <summary>
     /// How often each connection is pinged, and how long its pong may take: a peer gone without a
-    /// word ends in a close rather than never. A whole number of milliseconds from 1 to 2³¹ − 1, or
-    /// <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses any other with an
-    /// <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// word ends in a close rather than never. From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses
+    /// any other, zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// The platform's, on the real clock.
     /// </summary>
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>How long a close handshake may take: a peer that never answers is dropped after it.</summary>
+    /// <summary>
+    /// How long a close handshake may take: a peer that never answers is dropped after it. From 1 to
+    /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or
+    /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other,
+    /// zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
+    /// the platform's close, on the real clock.
+    /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>What tells when a connection last delivered a message; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What the stack built on it runs on, and what tells when a connection last delivered a
+    /// message; the system's clock when none.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -61,7 +71,7 @@ public sealed record WebSocketTransportStartOptions
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
     private readonly WebSocketTransportServerOptions _options;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     // each connection, and its end as the server tells it: gone from the handles, its close raised
     private readonly ConcurrentDictionary<string, Held> _connections = new();
     // its ready state, and the guards around its start and its stop, as every transport server's
@@ -71,14 +81,19 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     private long _arrivals;
 
     /// <summary>
-    /// A transport server, not yet listening. A heartbeat no timer holds is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
-        _options = options ?? new WebSocketTransportServerOptions();
-        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(options));
-        _time = _options.Time ?? TimeProvider.System;
+        var given = options ?? new WebSocketTransportServerOptions();
+
+        _options = given with
+        {
+            Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
+            CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportServerOptions.CloseTimeout)),
+        };
+        _clock = _options.Clock ?? TimeProvider.System;
     }
 
     /// <inheritdoc/>
@@ -118,6 +133,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         get
         {
             return _life.ReadyState;
+        }
+    }
+
+    /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
         }
     }
 
@@ -360,7 +384,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             Connection?.Invoke(connectionHandle);
             await connection.Read((message) =>
             {
-                held.Client = held.Client with { LastActivityTimestamp = _time.GetUtcNow() };
+                held.Client = held.Client with { LastActivity = _clock.GetUtcNow() };
                 Message?.Invoke(message, connectionHandle);
             });
         }

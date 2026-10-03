@@ -10,13 +10,14 @@ import type { DebugDirection, IDebugEvent } from '../types';
 const eventOf = (duration: number | undefined, direction: DebugDirection = 'rx'): IDebugEvent => {
   return {
     direction,
+    duration,
     options: undefined,
     procedureId: 1,
     procedureName: 'echo',
     rx: undefined,
     serviceId: 2,
     serviceRevision: 1,
-    timestamp: { duration, event: 0 },
+    startedAt: 0,
     tx: undefined,
     type: 'request',
   };

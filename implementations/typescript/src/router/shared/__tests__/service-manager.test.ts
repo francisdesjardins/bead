@@ -1,6 +1,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { createTestClock, durationsOf } from '../../../transport/shared/__tests__/fixtures';
+import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { CancelError, TimeoutError } from '../../../transport/shared/errors';
 import { createSessionManager } from '../../server/session-manager';
 import { failureTableOf } from '../constants';
@@ -96,10 +98,10 @@ const answerOf = (payload: Uint8Array): IRouterResult => {
 
 /**
  * A router that records every call, answers each request with `answer`, and holds notifications;
- * it raises the failures of its `side`, a server's unless given, and subscribes a request under
- * its own call id.
+ * it raises the failures of its `side`, a server's unless given, subscribes a request under its own
+ * call id, and runs on `clock`, the platform's unless given.
  */
-const createFakeRouter = (side: RouterSide = 'server') => {
+const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_CLOCK) => {
   const keyOf = ({ procedureId, serviceId }: IProcedureAddress) => {
     return `${String(serviceId)}/${String(procedureId)}`;
   };
@@ -133,6 +135,8 @@ const createFakeRouter = (side: RouterSide = 'server') => {
       return Promise.resolve(answerOf(payload));
     },
     notifyError: undefined as Error | undefined,
+    /** What a notify waits on once recorded, before it settles: with `notifyError`, when set. */
+    notifyGate: Promise.resolve(),
     /** What `respond` rejects with, once it recorded the answer; none unless set. */
     respondError: undefined as Error | undefined,
     /** What a registration waits on once the router holds it, as a subscription would. */
@@ -143,17 +147,19 @@ const createFakeRouter = (side: RouterSide = 'server') => {
   };
 
   const router: IRouterLike = {
+    clock,
     failures: failureTableOf(side),
 
     hasNotification: (notification) => {
       return notifications.get(keyOf(notification)) === notification;
     },
-    notify: (payload, { filter, key, procedure }) => {
+    notify: async (payload, { filter, key, procedure }) => {
       calls.notify.push({ filter, key, payload: decode(payload) as IText, procedure });
+      await control.notifyGate;
 
-      return control.notifyError === undefined
-        ? Promise.resolve()
-        : Promise.reject(control.notifyError);
+      if (control.notifyError !== undefined) {
+        throw control.notifyError;
+      }
     },
     registerNotification: async (notification) => {
       calls.registerNotification.push(notification.procedureName);
@@ -321,6 +327,65 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    test('holds its default timeout as it is built, rounded, refusing 0, Infinity waiting on, building nothing for one refused', async () => {
+      for (const { given, held, outcome, refusal } of durationsOf("a call's default timeout", {
+        never: 'never',
+        zero: 'refused',
+      })) {
+        const { calls, router } = createFakeRouter();
+        const building = () => {
+          return createServiceManager(router, { defaults: { timeout: given } });
+        };
+
+        if (outcome === 'refused') {
+          expect(building, String(given)).toThrow(new ProgrammerError(refusal));
+
+          continue;
+        }
+
+        await building().getRequest(echo, { serializer })({ text: 'a' })();
+
+        expect(calls.request[0]?.request.options.timeout, String(given)).toBe(held);
+      }
+    });
+
+    test('holds a call’s own timeout as it applies the defaults, traced and sent alike, refusing 0 before the trace and the deprecation, Infinity waiting on', async () => {
+      for (const { given, held, outcome, refusal } of durationsOf("a call's timeout", {
+        never: 'never',
+        zero: 'refused',
+      })) {
+        const { calls, router } = createFakeRouter();
+        const manager = createServiceManager(router);
+        const seen = recordDebug(manager);
+        const deprecated: unknown[] = [];
+        const label = String(given);
+
+        manager.on('deprecated', (procedure) => {
+          deprecated.push(procedure);
+        });
+
+        const calling = manager.getRequest(
+          { ...echo, deprecation: {} },
+          { serializer }
+        )({ text: 'a' })({ timeout: given });
+
+        if (outcome === 'refused') {
+          await expect(calling, label).rejects.toThrow(new ProgrammerError(refusal));
+          expect([seen, deprecated, calls.request], label).toEqual([[], [], []]);
+
+          continue;
+        }
+
+        await calling;
+
+        // 1.4 ms is traced as 1, the very timeout the router is handed
+        expect(
+          [seen[0]?.info.options?.timeout, calls.request[0]?.request.options.timeout],
+          label
+        ).toEqual([held, held]);
+      }
+    });
+
     test('on a server’s router, names the connection it goes to, as the types require', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router as IRouterLike<TransportServerConnectionHandle>);
@@ -427,15 +492,137 @@ test.describe('createServiceManager', () => {
         ['tx', 'request', { text: 'hello' }, undefined],
         ['rx', 'request', { text: 'hello' }, { text: 'hello' }],
       ]);
-      expect(seen[0]?.info.timestamp.duration).toBeUndefined();
-      expect(seen[1]?.info.timestamp.duration).toBeGreaterThanOrEqual(0);
-      expect(seen[1]?.info.timestamp.duration).toBeLessThan(1_000);
+      expect(seen[0]?.info.duration).toBeUndefined();
+      expect(seen[1]?.info.duration).toBeGreaterThanOrEqual(0);
+      expect(seen[1]?.info.duration).toBeLessThan(1_000);
       expect(seen[1]?.info).toMatchObject({
         procedureId: 1,
         procedureName: 'echo',
         serviceId: 2,
         serviceRevision: 3,
       });
+    });
+
+    test("reads its router's clock: a call's start on the wall clock, its duration on the monotonic reading", async () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const { control, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+
+      control.answer = (payload) => {
+        return new Promise((resolve) => {
+          clock.setTimeout(() => {
+            resolve(answerOf(payload));
+          }, 250);
+        });
+      };
+
+      const answering = manager.getRequest(echo, { serializer })({ text: 'hello' })();
+
+      // a wall clock set back by hand moves no duration
+      clock.setSystemTime(Date.UTC(2025, 11, 31));
+      await clock.tickAsync(250);
+      await answering;
+
+      expect(
+        seen.map(({ info: { duration, startedAt } }) => {
+          return { duration, startedAt };
+        })
+      ).toEqual([
+        { duration: undefined, startedAt: Date.UTC(2026, 0, 1) },
+        { duration: 250, startedAt: Date.UTC(2026, 0, 1) },
+      ]);
+    });
+
+    test('tells a duration in whole milliseconds, its fraction dropped', async () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const { control, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      // the readings, as Bead reads them
+      const given: IClock = clock;
+      const before = given.performance.now();
+
+      control.answer = async (payload) => {
+        await clock.tickAsync(30.6);
+
+        return answerOf(payload);
+      };
+
+      await manager.getRequest(echo, { serializer })({ text: 'hello' })();
+
+      // the call took 30.6 ms of the monotonic reading, and is told as 30
+      expect(given.performance.now() - before).toBeCloseTo(30.6);
+      expect(
+        seen.map(({ info }) => {
+          return info.duration;
+        })
+      ).toEqual([undefined, 30]);
+    });
+
+    test('a notification starts as it is heard or sent, and a failed notify tells its failure at that same start', async () => {
+      const start = Date.UTC(2026, 0, 1);
+      const clock = createTestClock(start);
+      const client = createFakeRouter('client', clock);
+      const server = createFakeRouter('server', clock);
+      const hearing = createServiceManager(client.router);
+      const notifying = createServiceManager(server.router);
+      const notification = hearing.getNotification(echo, { serializer });
+      const resolver = notifying.getNotificationResolver(echo, { serializer: serverSerializer })(
+        () => {
+          return Promise.resolve();
+        }
+      );
+      const failure = new Error('gone');
+      const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+
+      await notification({ text: 's' }, () => {
+        return undefined;
+      })();
+
+      const heard = recordDebug(hearing);
+      const sent = recordDebug(notifying);
+
+      await clock.tickAsync(10);
+      client.deliver(echo, { text: 'news' });
+      await clock.tickAsync(10);
+
+      // the router fails the notify 30 ms after it was sent
+      server.control.notifyError = failure;
+      server.control.notifyGate = gate;
+
+      const failing = resolver.notify({ text: 'late' });
+
+      await clock.tickAsync(30);
+      open();
+      await failing;
+
+      expect(
+        heard.map(({ info: { direction, duration, startedAt } }) => {
+          return [direction, startedAt, duration];
+        })
+      ).toEqual([['rx', start + 10, undefined]]);
+      expect(
+        sent.map(({ error, info: { duration, startedAt } }) => {
+          return [error, startedAt, duration];
+        })
+      ).toEqual([
+        [null, start + 20, undefined],
+        [failure, start + 20, undefined],
+      ]);
+    });
+
+    test("refuses a clock that differs from its router's", () => {
+      const { router } = createFakeRouter('server', createTestClock());
+
+      expect(createServiceManager(router, { clock: router.clock })).toBeDefined();
+      expect(() => {
+        createServiceManager(router, { clock: PLATFORM_CLOCK });
+      }).toThrow(
+        new ProgrammerError(
+          "a service manager runs on the clock of its router, one of its own, and was given another, the platform's"
+        )
+      );
     });
 
     test('a debug listener that throws on the answer rejects the call once, with no second trace', async () => {
@@ -911,13 +1098,45 @@ test.describe('createServiceManager', () => {
 
       expect(
         seen.map(({ info }) => {
-          return [info.direction, info.rx, info.tx, info.timestamp.duration === undefined];
+          return [info.direction, info.rx, info.tx, info.duration === undefined];
         })
       ).toEqual([
         ['rx', { text: 'hi' }, undefined, true],
         ['tx', { text: 'hi' }, { text: 'hi!' }, false],
       ]);
-      expect(seen[1]?.info.timestamp.duration).toBeLessThan(1_000);
+      expect(seen[1]?.info.duration).toBeLessThan(1_000);
+    });
+
+    test('a received call starts as it arrives: its admission and its decoding count in its duration', async () => {
+      const start = Date.UTC(2026, 0, 1);
+      const clock = createTestClock(start);
+      const manager = createServiceManager(createFakeRouter('server', clock).router);
+      const seen = recordDebug(manager);
+
+      // its admission takes 20 ms, and its callback 10 more
+      const resolver = manager.getRequestResolver(echo, {
+        beforeRequest: () => {
+          clock.tick(20);
+
+          return true;
+        },
+        serializer: serverSerializer,
+      })(async (request, response) => {
+        await clock.tickAsync(10);
+
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(
+        seen.map(({ info: { direction, duration, startedAt } }) => {
+          return [direction, startedAt, duration];
+        })
+      ).toEqual([
+        ['rx', start, undefined],
+        ['tx', start, 30],
+      ]);
     });
   });
 

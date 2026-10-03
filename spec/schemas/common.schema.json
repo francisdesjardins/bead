@@ -18,6 +18,30 @@
       "type": "string",
       "minLength": 1
     },
+    "wallClock": {
+      "description": "Where a file's wall clock starts, an RFC 3339 instant in UTC: both sides' test clocks start there.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "advance": {
+      "description": "Milliseconds the given clock steps through, from due to due, its timers fired in their order.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "wall": {
+      "description": "Milliseconds the wall clock moves alone, forward or back, as a clock set by hand moves.",
+      "type": "integer",
+      "minimum": -2147483647,
+      "maximum": 2147483647,
+      "not": { "const": 0 }
+    },
+    "timer": {
+      "description": "A timer armed on the side's given clock, due exactly these milliseconds from now.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
     "clauses": {
       "description": "The units of spec/spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
       "type": "array",

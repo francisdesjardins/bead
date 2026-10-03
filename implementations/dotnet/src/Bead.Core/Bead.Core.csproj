@@ -7,8 +7,15 @@
   <ItemGroup>
     <!-- the tests run a router on a scheduler they wait on, so they know when it settled -->
     <InternalsVisibleTo Include="Bead.Core.Tests" />
+    <InternalsVisibleTo Include="Bead.Transport.Http.Tests" />
     <!-- the transports share what makes a client reconnect, as the TypeScript side's createTransportClient -->
     <InternalsVisibleTo Include="Bead.Transport.Http" />
     <InternalsVisibleTo Include="Bead.Transport.WebSockets" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what Bead times takes the clock it is given, never the platform's own: 0011 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="../BannedSymbols.txt" />
   </ItemGroup>
 </Project>

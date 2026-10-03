@@ -50,7 +50,7 @@ public sealed class ServiceManagerTests
         return Task.CompletedTask;
     };
 
-    // when a test's clock starts: a trace's timestamps are read from it
+    // where a test's wall clock starts: a call traced at once starts there
     private static readonly DateTimeOffset Started = DateTimeOffset.FromUnixTimeMilliseconds(1_000);
 
     // helpers
@@ -188,6 +188,21 @@ public sealed class ServiceManagerTests
     // definition
 
     [Fact]
+    public void Runs_on_its_router_s_clock_and_refuses_another()
+    {
+        var time = new FakeTimeProvider();
+        var router = new RecordingRouter { Clock = time };
+
+        Assert.NotNull(new ServiceManager(router, new ServiceManagerOptions { Clock = time }));
+        Assert.Equal(
+            "a service manager runs on the clock of its router, a FakeTimeProvider, and was given another, the system's",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new ServiceManager(router, new ServiceManagerOptions { Clock = TimeProvider.System });
+            }).Message);
+    }
+
+    [Fact]
     public async Task Fills_what_the_options_leave_out_and_passes_a_destination_as_it_is()
     {
         var router = new RecordingRouter();
@@ -258,6 +273,72 @@ public sealed class ServiceManagerTests
             {
                 return sent.Request.Options;
             }));
+    }
+
+    [Fact]
+    public async Task Holds_its_default_timeout_as_it_is_built_rounded_refusing_zero_infinite_waiting_on_building_nothing_for_one_refused()
+    {
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a call's default timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
+        {
+            var router = new RecordingRouter();
+            var options = new ServiceManagerOptions { Defaults = new RequestDefaults { Timeout = given } };
+
+            if (outcome == DurationOutcome.Refused)
+            {
+                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                {
+                    return new ServiceManager(router, options);
+                });
+
+                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.Equal(nameof(RequestDefaults.Timeout), refused.ParamName);
+
+                continue;
+            }
+
+            await new ServiceManager(router, options).GetRequest(Echo, Asked)(new Text("a"))().WaitAsync(Patience, Cancelled);
+            Assert.Equal(held, Assert.Single(router.Requests).Request.Options.Timeout);
+        }
+    }
+
+    [Fact]
+    public async Task Holds_a_call_s_own_timeout_as_it_applies_the_defaults_traced_and_sent_alike_refusing_zero_before_the_trace_and_the_deprecation_infinite_waiting_on()
+    {
+        foreach (var (given, outcome, held, refusal) in Durations.Of("a call's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
+        {
+            var router = new RecordingRouter();
+            var manager = new ServiceManager(router);
+            var seen = RecordDebug(manager);
+            var deprecated = new List<Procedure>();
+
+            manager.Deprecated += deprecated.Add;
+
+            var calling = manager.GetRequest(Echo with { Deprecation = new ProcedureDeprecation() }, Asked)(new Text("a"))(
+                new RequestOptions { Timeout = given });
+
+            if (outcome == DurationOutcome.Refused)
+            {
+                var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+                {
+                    return calling.WaitAsync(Patience, Cancelled);
+                });
+
+                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.Equal(nameof(RequestOptions.Timeout), refused.ParamName);
+                Assert.Empty(seen);
+                Assert.Empty(deprecated);
+                Assert.Empty(router.Requests);
+
+                continue;
+            }
+
+            await calling.WaitAsync(Patience, Cancelled);
+
+            // 1.4 ms is traced as 1, the very timeout the router is handed
+            Assert.Equal<(TimeSpan?, TimeSpan?)>(
+                (held, held),
+                (seen[0].Event.Options!.Timeout, Assert.Single(router.Requests).Request.Options.Timeout));
+        }
     }
 
     [Fact]
@@ -353,8 +434,8 @@ public sealed class ServiceManagerTests
     public async Task Tells_each_step_of_a_request_and_once_answered_its_duration()
     {
         var time = new FakeTimeProvider(Started);
-        var router = new RecordingRouter();
-        var manager = new ServiceManager(router, new ServiceManagerOptions { Time = time });
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
 
         router.Answer = (payload) =>
@@ -373,13 +454,13 @@ public sealed class ServiceManagerTests
             ProcedureName = "echo",
             ServiceId = 2,
             ServiceRevision = 3,
-            Timestamp = new DebugTimestamp(null, 1_000),
+            StartedAt = Started,
             Tx = new Text("hello"),
             Type = DebugType.Request,
         };
 
         Assert.Equal(
-            [sent, sent with { Direction = DebugDirection.Rx, Rx = new Text("hello"), Timestamp = new DebugTimestamp(30, 1_000) }],
+            [sent, sent with { Direction = DebugDirection.Rx, Duration = TimeSpan.FromMilliseconds(30), Rx = new Text("hello") }],
             seen.Select((told) =>
             {
                 return told.Event;
@@ -389,6 +470,105 @@ public sealed class ServiceManagerTests
             seen.Select((told) =>
             {
                 return told.Error;
+            }));
+    }
+
+    [Fact]
+    public async Task Reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_on_the_monotonic_reading()
+    {
+        var clock = new SteppingClock(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+
+        router.Answer = async (payload) =>
+        {
+            // a wall clock set back by hand moves no duration
+            clock.Wall(TimeSpan.FromDays(-1));
+            await clock.Advance(TimeSpan.FromMilliseconds(250));
+
+            return await EchoOf(payload);
+        };
+        await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DateTimeOffset, TimeSpan?)>(
+            [(Started, null), (Started, TimeSpan.FromMilliseconds(250))],
+            seen.Select((told) =>
+            {
+                return (told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_a_duration_in_whole_milliseconds_its_fraction_dropped()
+    {
+        var clock = new SteppingClock(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var before = clock.GetTimestamp();
+
+        router.Answer = async (payload) =>
+        {
+            await clock.Advance(TimeSpan.FromMicroseconds(30_600));
+
+            return await EchoOf(payload);
+        };
+        await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
+
+        // the call took 30.6 ms of the monotonic reading, and is told as 30
+        Assert.Equal(TimeSpan.FromMicroseconds(30_600), clock.GetElapsedTime(before));
+        Assert.Equal<TimeSpan?>(
+            [null, TimeSpan.FromMilliseconds(30)],
+            seen.Select((told) =>
+            {
+                return told.Event.Duration;
+            }));
+    }
+
+    [Fact]
+    public async Task A_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_its_failure_at_that_same_start()
+    {
+        var time = new FakeTimeProvider(Started);
+        var client = new RecordingRouter(RouterSide.Client) { Clock = time };
+        var server = new RecordingRouter { Clock = time };
+        var hearing = new ServiceManager(client);
+        var notifying = new ServiceManager(server);
+        var notification = hearing.GetNotification(Echo, Notified());
+        var resolver = notifying.GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
+        var failure = new IOException("gone");
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
+
+        var heard = RecordDebug(hearing);
+        var sent = RecordDebug(notifying);
+
+        time.Advance(TimeSpan.FromMilliseconds(10));
+        await client.Deliver(Echo.Address, new Text("news")).WaitAsync(Patience, Cancelled);
+        time.Advance(TimeSpan.FromMilliseconds(10));
+
+        // the router fails the notify 30 ms after it was sent
+        server.NotifyError = failure;
+        server.NotifyGate = gate.Task;
+
+        var failing = resolver.Notify(new Text("late"));
+
+        time.Advance(TimeSpan.FromMilliseconds(30));
+        gate.SetResult();
+        await failing.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, DateTimeOffset, TimeSpan?)>(
+            [(DebugDirection.Rx, Started.AddMilliseconds(10), null)],
+            heard.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.StartedAt, told.Event.Duration);
+            }));
+        Assert.Equal<(Exception?, DateTimeOffset, TimeSpan?)>(
+            [(null, Started.AddMilliseconds(20), null), (failure, Started.AddMilliseconds(20), null)],
+            sent.Select((told) =>
+            {
+                return (told.Error, told.Event.StartedAt, told.Event.Duration);
             }));
     }
 
@@ -796,7 +976,7 @@ public sealed class ServiceManagerTests
     public async Task Tells_debug_the_request_it_received_and_the_answer_it_sent()
     {
         var time = new FakeTimeProvider(Started);
-        var manager = new ServiceManager(new RecordingRouter(), new ServiceManagerOptions { Time = time });
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
         var seen = RecordDebug(manager);
         var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
         {
@@ -815,15 +995,45 @@ public sealed class ServiceManagerTests
             Rx = new Text("hi"),
             ServiceId = 2,
             ServiceRevision = 3,
-            Timestamp = new DebugTimestamp(null, 1_000),
+            StartedAt = Started,
             Type = DebugType.Request,
         };
 
         Assert.Equal(
-            [received, received with { Direction = DebugDirection.Tx, Timestamp = new DebugTimestamp(30, 1_000), Tx = new Text("hi!") }],
+            [received, received with { Direction = DebugDirection.Tx, Duration = TimeSpan.FromMilliseconds(30), Tx = new Text("hi!") }],
             seen.Select((told) =>
             {
                 return told.Event;
+            }));
+    }
+
+    [Fact]
+    public async Task A_received_call_starts_as_it_arrives_its_admission_and_its_decoding_count_in_its_duration()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+
+        // its admission takes 20 ms, and its callback 10 more
+        var resolver = manager.GetRequestResolver(Echo, Answered(new BeforeRequest((_) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(20));
+
+            return true;
+        })))((request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, DateTimeOffset, TimeSpan?)>(
+            [(DebugDirection.Rx, Started, null), (DebugDirection.Tx, Started, TimeSpan.FromMilliseconds(30))],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.StartedAt, told.Event.Duration);
             }));
     }
 
@@ -1871,6 +2081,8 @@ public sealed class ServiceManagerTests
         private readonly Lock _gate = new();
         private readonly Dictionary<ProcedureAddress, INotificationLike> _held = [];
 
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public List<IRequestResolver> RegisteredResolvers { get; } = [];
 
         public List<(Text Payload, RouterRequest Request)> Requests { get; } = [];
@@ -1894,6 +2106,9 @@ public sealed class ServiceManagerTests
         {
             return null;
         };
+
+        // what a notify waits on once recorded, before it settles, and what it then fails with
+        public Task NotifyGate { get; set; } = Task.CompletedTask;
 
         public Exception? NotifyError { get; set; }
 
@@ -1944,14 +2159,19 @@ public sealed class ServiceManagerTests
             return Answer(payload);
         }
 
-        public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
+        public async Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
         {
             lock (_gate)
             {
                 Notified.Add((Json.Decode(payload), request));
             }
 
-            return NotifyError is { } error ? Task.FromException(error) : Task.CompletedTask;
+            await NotifyGate;
+
+            if (NotifyError is { } error)
+            {
+                throw error;
+            }
         }
 
         public Task<uint> Subscribe(AnswerTarget target)

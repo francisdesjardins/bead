@@ -2,12 +2,15 @@ namespace Bead;
 
 /// <summary>
 /// The part of a router a service manager calls: it registers the resolvers, answers through the
-/// router, and names the side whose failures it raises.
+/// router, and names the side whose failures it raises and the clock the manager runs on.
 /// </summary>
 public interface IRouterLike
 {
     /// <summary>Which side the router is.</summary>
     RouterSide Side { get; }
+
+    /// <summary>What the router's timers run on: its transport's clock.</summary>
+    TimeProvider Clock { get; }
 
     /// <summary>Registers a resolver; a second one for its procedure is an <see cref="ArgumentException"/>.</summary>
     void RegisterResolver(IRequestResolver resolver);
@@ -282,16 +285,18 @@ public enum DebugType
     Request,
 }
 
-/// <summary>When a step of a call came, and — once the call answered — how long it took, in milliseconds.</summary>
-/// <param name="Duration">How long the call took, once it answered; none before.</param>
-/// <param name="Event">When the call started, in milliseconds since 1970.</param>
-public readonly record struct DebugTimestamp(long? Duration, long Event);
-
 /// <summary>What one step of a call tells whoever hears a manager's <c>Debug</c>.</summary>
 public sealed record DebugEvent
 {
     /// <summary>Whether it went out or came in.</summary>
     public required DebugDirection Direction { get; init; }
+
+    /// <summary>
+    /// How long the call took once it answered, in whole milliseconds of its router clock's
+    /// monotonic reading, a fraction dropped; none before, and for a notification. A span's duration,
+    /// as <see cref="System.Diagnostics.Activity.Duration"/> and an OpenTelemetry span carry it.
+    /// </summary>
+    public TimeSpan? Duration { get; init; }
 
     /// <summary>The call's options, its defaults applied; none for a step that has none.</summary>
     public ResolvedRequestOptions? Options { get; init; }
@@ -311,8 +316,12 @@ public sealed record DebugEvent
     /// <summary>The revision of the procedure's service.</summary>
     public required int ServiceRevision { get; init; }
 
-    /// <summary>When the call started, and how long it took once it answered.</summary>
-    public required DebugTimestamp Timestamp { get; init; }
+    /// <summary>
+    /// When the call started, on its router clock's wall reading; a notification, one step, starts
+    /// as it is sent or heard. A span's start, as <see cref="System.Diagnostics.Activity.StartTimeUtc"/>
+    /// and an OpenTelemetry span's start time carry it.
+    /// </summary>
+    public required DateTimeOffset StartedAt { get; init; }
 
     /// <summary>What went out, decoded.</summary>
     public object? Tx { get; init; }
@@ -324,7 +333,12 @@ public sealed record DebugEvent
 /// <summary>What a call's options leave out, for a manager to fill.</summary>
 public sealed record RequestDefaults
 {
-    /// <summary>How long a call waits for its answer; 5 s when none.</summary>
+    /// <summary>
+    /// How long a call waits for its answer; 5 s when none. Held as a call's, as the manager is
+    /// built: rounded to the nearest whole millisecond, infinite to wait on, and an
+    /// <see cref="ArgumentOutOfRangeException"/> for any other not from 1 to
+    /// <see cref="Clocks.LongestTimer"/>, zero among them.
+    /// </summary>
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>Whether a command unanswered in time closes the connection it went to; none closes nothing.</summary>
@@ -344,8 +358,11 @@ public sealed record ServiceManagerOptions
     /// <summary>What a call's options leave out.</summary>
     public RequestDefaults? Defaults { get; init; }
 
-    /// <summary>What a trace's timestamps are read from; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What a trace's instants are read from: its router's clock when none; another is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>
@@ -360,21 +377,30 @@ public sealed class ServiceManager
     private readonly IRouterLike _router;
     private readonly Action<string>? _closeConnection;
     private readonly RequestDefaults _defaults;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
 
     // the notifications this manager made, one per procedure, kept for its life: asked for again,
     // the same one is given
     private readonly Dictionary<ProcedureAddress, (Procedure Procedure, object Notification)> _notifications = [];
 
-    /// <summary>A manager of the services on <paramref name="router"/>, with its options.</summary>
+    /// <summary>
+    /// A manager of the services on <paramref name="router"/>, with its options, on its router's
+    /// clock: one given that differs is an <see cref="ArgumentException"/>, and a default timeout
+    /// not held an <see cref="ArgumentOutOfRangeException"/>.
+    /// </summary>
     public ServiceManager(IRouterLike router, ServiceManagerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(router);
 
         _router = router;
         _closeConnection = options?.CloseConnection;
-        _defaults = options?.Defaults ?? new RequestDefaults();
-        _time = options?.Time ?? TimeProvider.System;
+
+        // held as the manager is built, rather than refused at each call it would time
+        _defaults = (options?.Defaults ?? new RequestDefaults()) with
+        {
+            Timeout = Clocks.AssertHeld(("a call's default timeout", nameof(RequestDefaults.Timeout)), options?.Defaults?.Timeout ?? TimeoutDefault),
+        };
+        _clock = Clocks.Of((options?.Clock, router.Clock), ("a service manager", "its router"));
     }
 
     /// <summary>A notification dropped: its procedure, and the failure the other end ended it with, if any.</summary>
@@ -438,7 +464,7 @@ public sealed class ServiceManager
                 },
                 (error, notification) =>
                 {
-                    Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification });
+                    Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification, Started = StartedNow() });
                 }
             ));
 
@@ -541,6 +567,13 @@ public sealed class ServiceManager
         return reason is FailureException failure ? failure.Failure : null;
     }
 
+    // now, for a call starting: the instant it is told at, on the wall clock, and the reading its
+    // duration counts from, on the monotonic one
+    private Started StartedNow()
+    {
+        return new Started(_clock.GetUtcNow(), _clock.GetTimestamp());
+    }
+
     // tells Debug of one step of a call; nothing is built when nobody hears it
     private void Trace(Procedure procedure, DebugStep step)
     {
@@ -549,22 +582,26 @@ public sealed class ServiceManager
             return;
         }
 
-        var now = _time.GetUtcNow();
-        var started = step.Started ?? now;
-
         debug(step.Error, new DebugEvent
         {
             Direction = step.Direction,
+            Duration = step.IsAnswered ? WholeMillisecondsOf(_clock.GetElapsedTime(step.Started.Timestamp)) : null,
             Options = step.Options,
             ProcedureId = procedure.ProcedureId,
             ProcedureName = procedure.ProcedureName,
             Rx = step.Rx,
             ServiceId = procedure.ServiceId,
             ServiceRevision = procedure.ServiceRevision,
-            Timestamp = new DebugTimestamp(step.IsAnswered ? (long)(now - started).TotalMilliseconds : null, started.ToUnixTimeMilliseconds()),
+            StartedAt = step.Started.Instant,
             Tx = step.Tx,
             Type = step.Type,
         });
+    }
+
+    // a time in whole milliseconds, a fraction dropped
+    private static TimeSpan WholeMillisecondsOf(TimeSpan time)
+    {
+        return TimeSpan.FromTicks(time.Ticks - (time.Ticks % TimeSpan.TicksPerMillisecond));
     }
 
     // a requester: given a payload, then options, one call
@@ -619,7 +656,9 @@ public sealed class ServiceManager
         };
     }
 
-    // a call's options, with the defaults applied: the call's, then the manager's, then 5 s and no close
+    // a call's options, with the defaults applied: the call's, then the manager's, which is 5 s when
+    // none, and no close; the timeout held as a call's, so the trace, the router and the error tell
+    // one number
     private ResolvedRequestOptions OptionsOf(RequestOptions? given)
     {
         return new ResolvedRequestOptions
@@ -628,7 +667,7 @@ public sealed class ServiceManager
             CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
             ConnectionHandle = given?.ConnectionHandle,
             DestinationId = given?.DestinationId,
-            Timeout = given?.Timeout ?? _defaults.Timeout ?? TimeoutDefault,
+            Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
         };
     }
 
@@ -655,14 +694,16 @@ public sealed class ServiceManager
     }
 
     // one call — a request, a command, or the request that subscribes a notification: its options
-    // with the defaults applied, its trace, the request, the close on timeout, and its result decoded
+    // with the defaults applied, its trace, the request, the close on timeout, and its result
+    // decoded; a timeout refused fails as the options are resolved, before the trace and the
+    // deprecation
     private async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
         TRequest payload,
         (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes) Made) call)
     {
         var (procedure, serializer, given, (type, subscribes)) = call;
         var options = OptionsOf(given);
-        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = _time.GetUtcNow(), Tx = payload };
+        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = StartedNow(), Tx = payload };
 
         // what the call fails with once it went out is told as its answer
         void Failed(Exception reason)
@@ -726,10 +767,14 @@ public sealed class ServiceManager
 
         public object? Rx { get; init; }
 
-        public DateTimeOffset? Started { get; init; }
+        // when its call started: every step of one call carries the same
+        public required Started Started { get; init; }
 
         public object? Tx { get; init; }
     }
+
+    // when a call started: its instant on the wall clock, and the monotonic reading its duration counts from
+    private readonly record struct Started(DateTimeOffset Instant, long Timestamp);
 
     // what a resolver is made of: its procedure, its serializer, its admission, its callback, and
     // what its calls are
@@ -783,12 +828,12 @@ public sealed class ServiceManager
                     return connectionHandle != exclude && (filter is null || filter(connectionHandle));
                 };
 
-            var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Tx = notification };
+            var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.StartedNow(), Tx = notification };
 
             manager.Trace(Procedure, step);
 
-            // what keeps it from going out is the router's to report, and the trace's to tell:
-            // notifying never fails its caller
+            // what keeps it from going out is the router's to report, and the trace's to tell, at the
+            // start it was sent with: notifying never fails its caller
             try
             {
                 await manager._router.Notify(made.Serializer.EncodeNotification(notification), new NotifyRequest(Procedure.Address, filtered, options?.Key));
@@ -837,6 +882,8 @@ public sealed class ServiceManager
         {
             ArgumentNullException.ThrowIfNull(props);
 
+            // the call starts as it arrives: its admission and its decoding count in its duration
+            var started = manager.StartedNow();
             var target = new AnswerTarget(props.ConnectionHandle, props.Header);
             TRequest payload;
 
@@ -875,8 +922,6 @@ public sealed class ServiceManager
 
                 return;
             }
-
-            var started = manager._time.GetUtcNow();
 
             manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { Rx = payload, Started = started });
 
@@ -956,7 +1001,7 @@ public sealed class ServiceManager
                 nameof(failure));
         }
 
-        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, DateTimeOffset Started) answering) : INotificationResponse<TResponse>
+        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started Started) answering) : INotificationResponse<TResponse>
         {
             public bool IsAnswered { get; set; }
 

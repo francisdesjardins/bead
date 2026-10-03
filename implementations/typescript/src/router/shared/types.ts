@@ -1,5 +1,6 @@
 // dependencies
 
+import type { IClock } from '../../transport/shared/clock';
 import type {
   Data,
   EmitterListener,
@@ -182,9 +183,10 @@ export interface IRouterLimits {
    */
   maximumTransfers: number;
   /**
-   * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls; and
-   * how long, at least, a call that received one keeps its call id once it ends — abandoned by the
-   * side that answers, reserved by the requester.
+   * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls, from 1
+   * to 2³¹ − 1, rounded to the nearest whole one, never 0 nor `Infinity`; and how long, at least, a
+   * call that received one keeps its call id once it ends — abandoned by the side that answers,
+   * reserved by the requester.
    */
   transferInactivityTimeout: number;
   /** How far past the bytes it received, contiguous, a receiver lets its sender send. */
@@ -340,8 +342,10 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
   signal?: AbortSignal | undefined;
   /**
    * Milliseconds to wait for the answer; 5 s. While the payload, or its result, goes as a transfer,
-   * the transfer's inactivity counts instead, and the timeout counts anew once the payload went. At
-   * most 2³¹ − 1, as a timer holds; `Infinity` waits on.
+   * the transfer's inactivity counts instead, and the timeout counts anew once the payload went.
+   * From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity`, which waits on. Any other,
+   * 0 among them, rejects with a {@link ProgrammerError}, and the call draws nothing: a manager's
+   * call, before it is traced or told deprecated.
    */
   timeout?: number | undefined;
 }
@@ -391,6 +395,10 @@ export interface IRequestResolverProps<Handle extends string = ConnectionHandle>
 /** The options of a request, with the manager's defaults applied. */
 export interface IResolvedRequestOptions extends IRequestOptions {
   closeOnTimeout?: boolean | undefined;
+  /**
+   * The call's timeout, or the manager's default, held as the defaults are applied: in whole
+   * milliseconds, rounded, or `Infinity`, which waits on.
+   */
   timeout: number;
 }
 
@@ -412,7 +420,9 @@ export interface IRouterCore<Handle extends string> {
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
    * waiting and none is given — or, once its result came in part, for as long as the peer keeps the
    * call abandoned, should that be longer. A call id reserved already, or a router disposed, sends
-   * nothing.
+   * nothing. A timeout is rounded to the nearest whole millisecond; `Infinity`, a call that waited
+   * on, reserves it for the default time; any other that is not from 1 to {@link LONGEST_TIMER}, 0
+   * among them, is a {@link ProgrammerError}, and nothing is done.
    */
   cancel(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -480,9 +490,11 @@ export interface IRouterCore<Handle extends string> {
     }
   ): Promise<IRouterResult>;
   /**
-   * Reserves this side's `callId` on `connectionHandle` for `timeout`, or for the default time when
-   * it is none a timer can hold: the sequence skips it, and what comes late on it is dropped in
-   * silence. Reserved twice, the later end stands.
+   * Reserves this side's `callId` on `connectionHandle` for `timeout`, rounded to the nearest whole
+   * millisecond, or for the default time for none or `Infinity`: the sequence skips it, and what
+   * comes late on it is dropped in silence. Reserved twice, the later end stands. Any other timeout
+   * that is not from 1 to {@link LONGEST_TIMER}, 0 among them, is a {@link ProgrammerError}, as for
+   * {@link IRouterCore.cancel}, and nothing is reserved.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -515,14 +527,19 @@ export interface IRouterCore<Handle extends string> {
 
 /** How a router's core is built, beyond its port. */
 export interface IRouterCoreOptions {
+  /**
+   * The clock its timers run on — a call's timeout, a call id's reservation, a transfer's inactivity
+   * — and its reservations' ends are read on; the platform's when not given.
+   */
+  clock?: IClock | undefined;
   /** The last call id it draws before its first again; its side's last when not given. */
   lastCallId?: CallId | undefined;
   /**
    * How much it reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing. They must
    * hold together, or the core is a {@link ProgrammerError}: whole numbers, positive but for the
    * transfers and the detail; an envelope of 64 bytes at least; a chunk from 64 bytes to an
-   * envelope; a window of two chunks at least; a payload within the budget; a timeout a timer can
-   * hold.
+   * envelope; a window of two chunks at least; a payload within the budget; a transfer's
+   * inactivity from 1 to 2³¹ − 1 milliseconds, held rounded to the nearest whole one.
    */
   limits?: RouterLimitsOptions | undefined;
 }
@@ -630,6 +647,8 @@ export interface IRouterCorePort<Handle extends string> {
  * no notification; a client holds notifications, and notifies nobody.
  */
 export interface IRouterLike<Handle extends string = ConnectionHandle> {
+  /** The clock it runs on, its transport's, which what is built on it runs on too. */
+  readonly clock: IClock;
   readonly failures: IRouterFailures;
 
   /** Whether the router holds this notification — this one, not another of its procedure. */
@@ -749,6 +768,12 @@ export interface IDebugFilter {
 /** What one step of a call told whoever listens to `debug`. */
 export interface IDebugEvent {
   direction: DebugDirection;
+  /**
+   * How long the call took once it answered, in whole milliseconds of its router clock's monotonic
+   * reading, a fraction dropped; `undefined` before, and for a notification. A span's duration, as
+   * .NET's `Activity.Duration` and an OpenTelemetry span carry it.
+   */
+  duration: number | undefined;
   options: IResolvedRequestOptions | undefined;
   procedureId: ProcedureId;
   procedureName: string;
@@ -756,8 +781,12 @@ export interface IDebugEvent {
   rx: unknown;
   serviceId: ServiceId;
   serviceRevision: ServiceRevision;
-  /** When the call started, and — once it answered — how long it took, in milliseconds. */
-  timestamp: { duration: number | undefined; event: number };
+  /**
+   * When the call started, in milliseconds since the epoch on its router clock's wall reading; a
+   * notification, one step, starts as it is sent or heard. A span's start, as .NET's
+   * `Activity.StartTimeUtc` and an OpenTelemetry span's start time carry it.
+   */
+  startedAt: number;
   /** What went out, decoded; a copy. */
   tx: unknown;
   type: DebugType;
@@ -983,12 +1012,22 @@ export interface IProcedure extends IProcedureAddress {
 
 export interface IServiceManagerOptions<Handle extends string = ConnectionHandle> {
   /**
+   * The clock its traces read: its router's, which one given must be; the platform's when neither
+   * has one.
+   */
+  clock?: IClock | undefined;
+  /**
    * Closes a connection that let a request naming it — a command — go unanswered, when the call's
    * `closeOnTimeout`, or the manager's default, says so. A server gives it; a client has no
    * connection to name.
    */
   closeConnection?: ((connectionHandle: Handle) => void) | undefined;
-  /** What a call's options leave out: {@link REQUEST_DEFAULTS}' where these do too, and no close. */
+  /**
+   * What a call's options leave out: {@link REQUEST_DEFAULTS}' where these do too, and no close. Its
+   * timeout is held as a call's, as the manager is built: rounded to the nearest whole millisecond,
+   * `Infinity` to wait on, and a {@link ProgrammerError} for any other not from 1 to 2³¹ − 1, 0
+   * among them.
+   */
   defaults?:
     | (Partial<Pick<IResolvedRequestOptions, 'timeout'>> & {
         closeOnTimeout?: boolean | undefined;

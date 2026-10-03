@@ -10,13 +10,13 @@ public sealed record DebugStatisticsOptions
     public int Size { get; init; } = 1_000;
 }
 
-/// <summary>How long the calls recorded took, in milliseconds; each measure none while none is.</summary>
+/// <summary>How long the calls recorded took; each measure none while none is.</summary>
 /// <param name="Count">How many durations were recorded.</param>
 /// <param name="Maximum">The longest.</param>
-/// <param name="Mean">Their mean.</param>
+/// <param name="Mean">Their mean, to the nearest tick.</param>
 /// <param name="Median">The middle one, or the mean of the two middle ones.</param>
 /// <param name="Minimum">The shortest.</param>
-public readonly record struct DurationSummary(int Count, long? Maximum, double? Mean, double? Median, long? Minimum);
+public readonly record struct DurationSummary(int Count, TimeSpan? Maximum, TimeSpan? Mean, TimeSpan? Median, TimeSpan? Minimum);
 
 /// <summary>
 /// The durations of the last calls, from the debug events that carry one: a call's answer on the
@@ -36,7 +36,7 @@ public sealed class DebugStatistics
     private readonly Lock _gate = new();
 
     // the last durations, the next one written over the oldest once full
-    private readonly List<long> _durations = [];
+    private readonly List<TimeSpan> _durations = [];
     private readonly int _size;
     private int _next;
 
@@ -68,7 +68,7 @@ public sealed class DebugStatistics
     /// <summary>The durations recorded, summed up.</summary>
     public DurationSummary Durations()
     {
-        long[] durations;
+        TimeSpan[] durations;
 
         lock (_gate)
         {
@@ -84,16 +84,23 @@ public sealed class DebugStatistics
 
         Array.Sort(durations);
 
-        // the middle one, or the mean of the two middle ones: the same one twice, for an odd count
-        var median = (durations[((count + 1) / 2) - 1] + durations[count / 2]) / 2.0;
+        var total = TimeSpan.Zero;
 
-        return new DurationSummary(count, durations[^1], durations.Average(), median, durations[0]);
+        foreach (var duration in durations)
+        {
+            total += duration;
+        }
+
+        // the middle one, or the mean of the two middle ones: the same one twice, for an odd count
+        var median = (durations[((count + 1) / 2) - 1] + durations[count / 2]) / 2;
+
+        return new DurationSummary(count, durations[^1], total / count, median, durations[0]);
     }
 
     private void Record(Exception? error, DebugEvent debugEvent)
     {
         // a step that has not answered carries none
-        if (debugEvent?.Timestamp.Duration is not { } duration || duration < 0)
+        if (debugEvent?.Duration is not { } duration || duration < TimeSpan.Zero)
         {
             return;
         }

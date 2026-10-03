@@ -72,14 +72,14 @@ const errorOf = (event: unknown): unknown => {
 export const createWSTransportClient = (options?: IWSTransportClientOptions): WSTransportClient => {
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
-    heartbeat = HEARTBEAT,
+    clock,
+    heartbeat: givenHeartbeat = HEARTBEAT,
     WebSocket = globalThis.WebSocket,
   } = {
     ...DEFAULTS(),
     ...options,
   };
-
-  assertHeartbeat(heartbeat);
+  const heartbeat = assertHeartbeat(givenHeartbeat);
 
   return createTransportClient<IWebSocketLike, IWSTransportClientConnectOptions>((client) => {
     // settle the connect or the disconnect in flight, so a socket dropped under either cannot leave
@@ -120,6 +120,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
     };
 
     return {
+      clock,
+
       connect: async (connectOptions) => {
         const {
           host,
@@ -199,7 +201,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
 
               return undefined;
             },
-            { signal, timeout }
+            { clock: client.clock, signal, timeout }
           );
 
           // a close or a dispose between the open and here comes after it: what it left is kept

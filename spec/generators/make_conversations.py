@@ -79,6 +79,15 @@ def answer(call_id, value):
     return {'send': f'A1 11 00 02  {word(call_id, 4)} | {text(value)}'}
 
 
+def armed(milliseconds):
+    """A timer armed on the server's clock, due that many milliseconds from now."""
+    return {'until': {'timer': milliseconds}}
+
+
+def advance(milliseconds):
+    return {'advance': milliseconds}
+
+
 def refusal(call_id, code, scope=PROTOCOL):
     return {'send': f'A1 12 00 02  {word(call_id, 4)} | {word(code, 2)} 00 {scope:02X}'}
 
@@ -201,6 +210,13 @@ conversations = [
     ('an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence', ['9.6.3', '9.6.5'], None, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), raw('A1 11 40 02  00 00 00 02'),
         cancelled(2), failure(1, PROCEDURE_FAILED), report(MALFORMED), answer(2, '"late"')]),
+    # 10.3: a command past its time is cancelled and its call id reserved as long as the command was
+    # given, 10 s; an answer within is late, and dropped in silence, one after is for no call
+    ('a command past its time is cancelled and its call id reserved as long: an answer within is dropped in silence, one after is reported CALL_UNKNOWN',
+     ['9.7', '10.1', '10.3'], None, [
+         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), armed(10_000), advance(10_000),
+         cancelled(2), failure(1, PROCEDURE_FAILED), report('exception'), answer(2, '"late"'),
+         armed(10_000), advance(10_000), answer(2, '"late"'), report(CALL_UNKNOWN)]),
     # 11: subscriptions, one per procedure and connection, on the call id that took it first
     ('a request that opens a subscription to ticks is answered, and each tick notifies it on its call id', ['11.1', '11.2'], None, [
         subscribe(1), result(1, 'null'), tick(3, 1), notification(1, '1'), result(3, 'null')]),
@@ -458,12 +474,14 @@ document = {
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
         'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. session, on an answer, says what it announced: announced for a token, which is random, ended for 16 zero bytes; none, nothing. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
+        'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),
+    'wallClock': '2026-01-01T00:00:00Z',
     'conversations': [
         {'name': name, 'clauses': clauses, **({'limits': limits} if limits else {}),
          **({'pacing': rest[0]} if len(rest) > 1 else {}), 'steps': rest[-1]}

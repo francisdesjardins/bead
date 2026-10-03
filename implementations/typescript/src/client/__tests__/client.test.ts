@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { createEmitter } from '../../transport/shared/emitter';
 import type { Data } from '../../transport/shared/types';
 import { createRouterClient } from '../../router/client/router-client';
@@ -8,9 +9,15 @@ import { createServiceManager } from '../../router/shared/service-manager';
 import {
   createClient,
   DisconnectError,
+  PLATFORM_CLOCK,
+  ProgrammerError,
   SERVER_FAILURES,
   type IClientTransportLike,
+  type IClock,
 } from '../client';
+import { createHTTPClient } from '../http-client';
+import { createWorkerClient } from '../worker-client';
+import { createWSClient } from '../ws-client';
 
 // helpers
 
@@ -132,6 +139,44 @@ test.describe('createClient', () => {
     );
 
     await expect(echo('hello')()).resolves.toBe('hello');
+  });
+
+  test("runs its router on its transport's clock, which a façade is given through its transport's options, and refuses a router on another", async () => {
+    const clock = createTestClock();
+    const worker = { postMessage: () => {} };
+
+    for (const client of [
+      createWSClient({ transport: { clock } }),
+      createHTTPClient({ transport: { clock } }),
+      createWorkerClient({ transport: { clock, worker } }),
+      createClient({ transport: { ...createEchoTransport().transport, clock } }),
+    ]) {
+      expect([client.transport.clock, client.router.clock]).toEqual([clock, clock]);
+      await client[Symbol.asyncDispose]();
+    }
+
+    // a transport with no clock leaves its router its own
+    expect(createClient({ transport: createEchoTransport().transport }).router.clock).toBe(
+      PLATFORM_CLOCK
+    );
+    // a router a builder made on another clock is refused
+    const clocked: IEchoTransport & { clock: IClock } = {
+      ...createEchoTransport().transport,
+      clock,
+    };
+
+    expect(() => {
+      return createClient({
+        router: () => {
+          return createRouterClient({ ...clocked, clock: PLATFORM_CLOCK });
+        },
+        transport: clocked,
+      });
+    }).toThrow(
+      new ProgrammerError(
+        "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's"
+      )
+    );
   });
 
   test('"await using" takes the layers apart in reverse: the router lets go, then the transport closes', async () => {

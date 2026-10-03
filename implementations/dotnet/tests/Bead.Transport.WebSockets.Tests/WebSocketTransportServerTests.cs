@@ -6,6 +6,7 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
+using Bead.Tests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.Time.Testing;
@@ -311,13 +312,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
 
-        await Start(new WebSocketTransportServerOptions { Time = time });
+        await Start(new WebSocketTransportServerOptions { Clock = time });
 
         var (client, _) = await Connect();
 
         using (client)
         {
-            Assert.Null(Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Null(Assert.Single(_server.Clients).LastActivity);
 
             time.Advance(TimeSpan.FromSeconds(1));
             await client.SendAsync("hi"u8.ToArray(), WebSocketMessageType.Text, true, Cancelled);
@@ -325,7 +326,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             var (text, _) = await Next(_messages);
 
             Assert.True(text.IsText);
-            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivity);
 
             // each message stamps it again
             time.Advance(TimeSpan.FromSeconds(1));
@@ -335,7 +336,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.False(binary.IsText);
             Assert.Equal("bytes"u8.ToArray(), binary.Bytes.ToArray());
-            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivity);
         }
     }
 
@@ -411,6 +412,43 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await _server.CloseConnection(connectionHandle).WaitAsync(TimeSpan.FromSeconds(2), Cancelled);
 
             Assert.Equal((false, connectionHandle), await Next(_closes, TimeSpan.FromSeconds(2)));
+        }
+    }
+
+    [Fact]
+    public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_waiting_on_its_peer_without_end()
+    {
+        foreach (var (given, outcome, _, refusal) in Durations.Of("a close timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
+        {
+            if (outcome == DurationOutcome.Refused)
+            {
+                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                {
+                    return new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = given });
+                });
+
+                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.Equal(nameof(WebSocketTransportServerOptions.CloseTimeout), refused.ParamName);
+            }
+            else
+            {
+                await using var taken = new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = given });
+            }
+        }
+
+        // infinite arms no timer: a peer that does not answer its close is waited on without end
+        await Start(new WebSocketTransportServerOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            var closing = _server.CloseConnection(connectionHandle);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+            Assert.False(closing.IsCompleted);
+            Assert.Equal(WebSocketCloseStatus.NormalClosure, await AnswerClose(client));
+            await closing.WaitAsync(Patience, Cancelled);
         }
     }
 
@@ -903,11 +941,30 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             }
         }
 
-        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
+        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>
             {
                 return new WebSocketTransportServer(new WebSocketTransportServerOptions { Heartbeat = heartbeat });
+            });
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_close_timeout_past_the_longest_timer_and_runs_on_the_clock_it_is_given()
+    {
+        var time = new FakeTimeProvider();
+        await using var given = new WebSocketTransportServer(new WebSocketTransportServerOptions { Clock = time });
+        await using var none = new WebSocketTransportServer();
+
+        Assert.Equal((time, TimeProvider.System), (given.Clock, none.Clock));
+
+        // 2³¹ ms, one past what JavaScript's timers hold
+        foreach (var closeTimeout in new[] { TimeSpan.FromMilliseconds(-2), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = closeTimeout });
             });
         }
     }

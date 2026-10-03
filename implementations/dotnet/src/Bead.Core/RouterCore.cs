@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 
 namespace Bead;
@@ -13,7 +14,7 @@ public sealed record RouterCoreOptions
     public uint? LastCallId { get; init; }
 
     /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    public TimeProvider? Clock { get; init; }
 
     /// <summary>
     /// Where resolvers run, and where a call's signal is cancelled: the thread pool when none. A
@@ -42,8 +43,6 @@ public sealed class RouterCore : IDisposable
     // what a failure's envelope holds besides its detail: its header with a session, and its record
     private const int FailureOverheadBytes = 28;
 
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
-
     // a chunk's header: its prefix, then its offset
     private static readonly int ChunkHeaderBytes = EnvelopeCodec.HeaderBytesOf(new ChunkHeader { CallId = 1, IsLast = true, Offset = 0 });
 
@@ -52,7 +51,7 @@ public sealed class RouterCore : IDisposable
     private readonly int _detailBytes;
     private readonly int _wholeBytes;
     private readonly int _payloadBytesPerChunk;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     private readonly TaskScheduler _resolverScheduler;
     private readonly ReceivingTransfers _receivings;
     private readonly SendingTransfers _sendings = new();
@@ -78,7 +77,7 @@ public sealed class RouterCore : IDisposable
         _port = port;
         _side = port.Side;
         Limits = (options?.Limits ?? RouterLimits.Default).Validate();
-        _time = options?.Time ?? TimeProvider.System;
+        _clock = options?.Clock ?? TimeProvider.System;
         Loop = options?.Scheduler ?? new SerialScheduler();
         Loop.OnUnhandled = (exception) =>
         {
@@ -103,7 +102,7 @@ public sealed class RouterCore : IDisposable
                     new Envelope { Header = new CreditHeader { CallId = call.CallId, CreditEnd = creditEnd } },
                     call.ConnectionHandle);
             },
-            Time = _time,
+            Clock = _clock,
         });
 
         // what a call holds leaves with the call, whichever way the call leaves: its timer, and the
@@ -130,7 +129,7 @@ public sealed class RouterCore : IDisposable
                     }
                 },
                 Post = Post,
-                Time = _time,
+                Clock = _clock,
             });
         _answeringCalls = new AnsweringCalls(new AnsweringCallsOptions
         {
@@ -140,12 +139,21 @@ public sealed class RouterCore : IDisposable
                 _receivings.Close(receiving.Transfer);
             },
             Post = Post,
-            Time = _time,
+            Clock = _clock,
         });
     }
 
     /// <summary>What it reads, writes and holds by.</summary>
     public RouterLimits Limits { get; }
+
+    /// <summary>What its timers run on.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
+        }
+    }
 
     /// <summary>Which side it is.</summary>
     public RouterSide Side
@@ -376,7 +384,7 @@ public sealed class RouterCore : IDisposable
 
     // tells the peer a call this side opened is cancelled, once, and reserves its call id in the same
     // step, so nothing drawn meanwhile takes it; a cancel that cannot go out is reported
-    private void SendCancel(CallAddress call, TimeSpan timeout)
+    private void SendCancel(CallAddress call, TimeSpan? timeout)
     {
         // a disposed router sends nothing; a call id reserved already had its cancel
         if (_isDisposed || _pendingCalls.IsReserved(call.CallId, call.ConnectionHandle))
@@ -436,7 +444,7 @@ public sealed class RouterCore : IDisposable
         var generation = pendingRequest.TimerGeneration;
 
         pendingRequest.Timer = IsTimeout(delay)
-            ? _time.CreateTimer(
+            ? _clock.CreateTimer(
                 (_) =>
                 {
                     Post(() =>
@@ -447,7 +455,7 @@ public sealed class RouterCore : IDisposable
                         }
 
                         EndPending(
-                            new TimeoutException($"no answer came in {delay.TotalMilliseconds} milliseconds"),
+                            new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"no answer came in {delay.TotalMilliseconds} milliseconds")),
                             call,
                             pendingRequest);
                     });
@@ -506,12 +514,8 @@ public sealed class RouterCore : IDisposable
                 nameof(request));
         }
 
-        if (options.Timeout != Timeout.InfiniteTimeSpan && options.Timeout > LongestTimer)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(request),
-                $"a call's timeout is {int.MaxValue} milliseconds at most, as a timer holds, not {options.Timeout.TotalMilliseconds}");
-        }
+        // held, which its timer, its reservation and its TimeoutException all take
+        var timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), options.Timeout);
 
         // drawn once the call starts: a cancelled token draws nothing
         token.ThrowIfCancellationRequested();
@@ -554,13 +558,13 @@ public sealed class RouterCore : IDisposable
             MaximumPayloadBytes = maximumPayloadBytes,
             OnSent = request.OnSent,
             ProcedureAddress = procedure.Address,
-            Timeout = options.Timeout,
+            Timeout = timeout,
         };
         var call = new CallAddress(callId, request.ConnectionHandle);
 
         _pendingCalls.Add(call, pendingRequest);
         request.OnCallId?.Invoke(callId);
-        Wait(options.Timeout, call, pendingRequest);
+        Wait(timeout, call, pendingRequest);
 
         // its token ends it: rejected here, on the core's scheduler
         using var registration = token.Register(() =>
@@ -695,7 +699,7 @@ public sealed class RouterCore : IDisposable
         // a request the transport never had leaves nothing at the other end to cancel
         if (pendingRequest is null || pendingRequest.IsSent)
         {
-            SendCancel(call, pendingRequest is null ? timeout ?? TimeSpan.Zero : ReservedFor(pendingRequest, timeout));
+            SendCancel(call, pendingRequest is null ? timeout : ReservedFor(pendingRequest, timeout));
         }
 
         // heard after the cancel went out, so a call made again in its place goes out behind it
@@ -864,7 +868,7 @@ public sealed class RouterCore : IDisposable
 
             var armed = generation;
 
-            timer = _time.CreateTimer(
+            timer = _clock.CreateTimer(
                 (_) =>
                 {
                     Post(() =>
@@ -877,7 +881,7 @@ public sealed class RouterCore : IDisposable
                         // silent too long, it ends, and the peer is told
                         var stalled = ProtocolFailureOf(
                             ProtocolCode.TransferStalled,
-                            $"no credit came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds");
+                            string.Create(CultureInfo.InvariantCulture, $"no credit came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds"));
 
                         Fail(LocalOf(stalled, header));
                         SendReporting(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = stalled }, connectionHandle);
@@ -1285,7 +1289,7 @@ public sealed class RouterCore : IDisposable
                 Refuse(
                     ProtocolFailureOf(
                         ProtocolCode.TransferStalled,
-                        $"nothing came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds"),
+                        string.Create(CultureInfo.InvariantCulture, $"nothing came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds")),
                     dispatched);
             },
             total));
@@ -1689,40 +1693,49 @@ public sealed class RouterCore : IDisposable
     /// Cancels a call this side opened: one still waiting throws an
     /// <see cref="OperationCanceledException"/>, the peer is sent a cancel, and the call id is
     /// reserved for <paramref name="timeout"/> — the call's own when it is waiting and none is given.
-    /// A call id reserved already, or a router disposed, sends nothing.
+    /// A call id reserved already, or a router disposed, sends nothing. A timeout is rounded to the
+    /// nearest whole millisecond; infinite, a call that waited on, reserves it for the default time;
+    /// any other that is not from 1 to <see cref="Clocks.LongestTimer"/>, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/>, and nothing is done.
     /// </summary>
     public void Cancel(CallAddress call, TimeSpan? timeout = null)
     {
+        var held = PendingCalls.AssertReservation(timeout);
+
         if (Loop.IsCurrent)
         {
-            CancelOnLoop(call, timeout);
+            CancelOnLoop(call, held);
 
             return;
         }
 
         Post(() =>
         {
-            CancelOnLoop(call, timeout);
+            CancelOnLoop(call, held);
         });
     }
 
     /// <summary>
-    /// Reserves this side's call id on a connection for <paramref name="timeout"/>, or for the
-    /// default time when it is none a timer can hold: draws skip it, and what comes late on it is
-    /// dropped in silence. Reserved twice, the later end stands.
+    /// Reserves this side's call id on a connection for <paramref name="timeout"/>, rounded to the
+    /// nearest whole millisecond, or for the default time for none or infinite: draws skip it, and
+    /// what comes late on it is dropped in silence. Reserved twice, the later end stands. Any other
+    /// timeout that is not from 1 to <see cref="Clocks.LongestTimer"/>, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/>, as for <see cref="Cancel"/>.
     /// </summary>
     public void Reserve(CallAddress call, TimeSpan? timeout = null)
     {
+        var held = PendingCalls.AssertReservation(timeout);
+
         if (Loop.IsCurrent)
         {
-            _pendingCalls.Reserve(call, timeout ?? TimeSpan.Zero);
+            _pendingCalls.Reserve(call, held);
 
             return;
         }
 
         Post(() =>
         {
-            _pendingCalls.Reserve(call, timeout ?? TimeSpan.Zero);
+            _pendingCalls.Reserve(call, held);
         });
     }
 

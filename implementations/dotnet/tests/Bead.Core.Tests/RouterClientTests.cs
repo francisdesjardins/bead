@@ -231,6 +231,29 @@ public sealed class RouterClientTests
     }
 
     [Fact]
+    public void Runs_on_its_transport_s_clock_and_refuses_another()
+    {
+        var time = new FakeTimeProvider();
+        var transport = new ScriptedTransport { Clock = time };
+
+        using var router = new RouterClient(transport);
+        using var same = new RouterClient(transport, new RouterClientOptions { Clock = time });
+        using var told = new RouterClient(new ScriptedTransport());
+
+        Assert.Equal((time, time), (router.Clock, same.Clock));
+        Assert.Same(TimeProvider.System, told.Clock);
+
+        var refusal = Assert.Throws<ArgumentException>(() =>
+        {
+            return new RouterClient(transport, new RouterClientOptions { Clock = TimeProvider.System });
+        });
+
+        Assert.Equal(
+            "a client's router runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            refusal.Message);
+    }
+
+    [Fact]
     public void Takes_any_transport_of_this_package()
     {
         var transport = new ScriptedTransport();
@@ -276,7 +299,7 @@ public sealed class RouterClientTests
     {
         var time = new FakeTimeProvider();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var given = TimeSpan.FromMilliseconds(10);
 
@@ -480,7 +503,7 @@ public sealed class RouterClientTests
     {
         var time = new FakeTimeProvider();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
         var given = TimeSpan.FromMilliseconds(10);
@@ -548,7 +571,7 @@ public sealed class RouterClientTests
     {
         var time = new FakeTimeProvider();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
         var given = TimeSpan.FromMilliseconds(20);
@@ -577,15 +600,15 @@ public sealed class RouterClientTests
     }
 
     [Fact]
-    public async Task A_subscription_given_no_time_let_go_of_is_cancelled_and_its_call_id_reserved_5_s_or_until_the_connection_closes()
+    public async Task A_subscription_that_waits_without_end_let_go_of_is_cancelled_and_its_call_id_reserved_5_s_or_until_the_connection_closes()
     {
         var time = new RecordingTime();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
 
-        var subscribing = await scripted.Subscribe(notification, Options with { Timeout = TimeSpan.Zero });
+        var subscribing = await scripted.Subscribe(notification, Options with { Timeout = Timeout.InfiniteTimeSpan });
 
         transport.Deliver(ResultOf(1));
         await subscribing.WaitAsync(Patience, Cancelled);
@@ -858,7 +881,7 @@ public sealed class RouterClientTests
     {
         var time = new RecordingTime();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
 
@@ -1266,6 +1289,8 @@ public sealed class RouterClientTests
     // a router that records the resolvers registered on it, and does nothing else
     private sealed class Registrations(RouterSide side) : IRouterLike
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public List<string> Names { get; } = [];
 
         public RouterSide Side
@@ -1337,6 +1362,8 @@ public sealed class RouterClientTests
     {
         private readonly Lock _gate = new();
         private readonly List<ReadOnlyMemory<byte>> _sent = [];
+
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<TransportMessage>? Message;
 
@@ -1450,14 +1477,15 @@ public sealed class RouterClientTests
     }
 
     // a client's router over a scripted transport, its loop and its callbacks on one scheduler a test
-    // settles, and the errors it raised; its clock moves only when a test moves it, so no call times
-    // out and no reservation ends while a test looks
+    // settles, and the errors it raised; its transport's clock, which the router runs on, moves only
+    // when a test moves it, so no call times out and no reservation ends while a test looks
     private sealed class ScriptedRouter : IDisposable
     {
-        public ScriptedRouter(RouterLimits? limits = null, TimeProvider? time = null)
+        public ScriptedRouter(RouterLimits? limits = null, TimeProvider? clock = null)
         {
             var scheduler = new SerialScheduler();
 
+            Transport = new ScriptedTransport { Clock = clock ?? new FakeTimeProvider() };
             Router = new RouterClient(
                 Transport,
                 new RouterClientOptions
@@ -1465,12 +1493,11 @@ public sealed class RouterClientTests
                     Limits = limits,
                     ResolverScheduler = scheduler,
                     Scheduler = scheduler,
-                    Time = time ?? new FakeTimeProvider(),
                 });
             Router.Error += Errors.Add;
         }
 
-        public ScriptedTransport Transport { get; } = new();
+        public ScriptedTransport Transport { get; }
 
         public RouterClient Router { get; }
 
@@ -1741,6 +1768,8 @@ public sealed class RouterClientTests
 
         private sealed class ClientEnd : IRouterClientTransport
         {
+            public TimeProvider Clock { get; init; } = TimeProvider.System;
+
             public event Action<TransportMessage>? Message;
 
             public event Action<bool, bool>? Close;
@@ -1767,6 +1796,8 @@ public sealed class RouterClientTests
 
         private sealed class ServerEnd : IServerTransport
         {
+            public TimeProvider Clock { get; init; } = TimeProvider.System;
+
             public event Action<string>? Connection;
 
             public event Action<TransportMessage, string>? Message;
@@ -1840,6 +1871,8 @@ public sealed class RouterClientTests
     // a client's transport a test delivers to, and whose connection it replaces, as a reconnection does
     private sealed class ReconnectingTransport : IRouterClientTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<TransportMessage>? Message;
 
         public event Action? Reconnect;

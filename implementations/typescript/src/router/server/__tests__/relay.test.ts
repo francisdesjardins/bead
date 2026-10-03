@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { durationsOf } from '../../../transport/shared/__tests__/fixtures';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   CLIENT_FAILURES,
@@ -593,7 +594,7 @@ test.describe('createRelay', () => {
     expect([before.asked.length, after.asked.length]).toEqual([1, 0]);
   });
 
-  test('waits on leg B as long as the destination says, the relay’s timeout at most, or on; a timeout no timer holds is refused', async () => {
+  test('waits on leg B as long as the destination says, the relay’s timeout at most, or on', async () => {
     const { relay } = createTestRelay({
       beforeRoute: () => {
         return true;
@@ -621,14 +622,51 @@ test.describe('createRelay', () => {
         return options.timeout;
       })
     ).toEqual([5_000, 250, Infinity, 250, 5_000]);
+  });
 
-    for (const timeout of [0, -1, 2 ** 31, Number.NaN]) {
-      expect(() => {
-        return relay.register(target, { timeout });
-      }, String(timeout)).toThrow(ProgrammerError);
-      expect(() => {
-        return createTestRelay({ timeout });
-      }, String(timeout)).toThrow(ProgrammerError);
+  test('holds a relay’s timeout, and a destination’s, to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on', async () => {
+    const admitting = (): boolean => {
+      return true;
+    };
+
+    for (const { given, held, outcome, refusal } of durationsOf("a relay's timeout", {
+      never: 'never',
+      zero: 'refused',
+    })) {
+      const label = String(given);
+
+      if (outcome === 'refused') {
+        const { relay } = createTestRelay();
+        const { target } = createTarget();
+
+        expect(() => {
+          return relay.register(target, { timeout: given });
+        }, label).toThrow(new ProgrammerError(refusal));
+        expect(() => {
+          return createTestRelay({ timeout: given });
+        }, label).toThrow(new ProgrammerError(refusal));
+
+        continue;
+      }
+
+      // leg B waits the timeout held, a destination's as the relay's own
+      for (const [relayTimeout, timeout] of [
+        [undefined, given],
+        [given, undefined],
+      ] as const) {
+        const { relay } = createTestRelay({ beforeRoute: admitting, timeout: relayTimeout });
+        const { asked, target } = createTarget();
+
+        relay.register(target, { destinationId: 7, timeout });
+        await relay.handlerOf(7)?.(propsOf(headerOf(1)));
+
+        expect(
+          asked.map(({ options }) => {
+            return options.timeout;
+          }),
+          label
+        ).toEqual([held]);
+      }
     }
   });
 

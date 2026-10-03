@@ -6,18 +6,25 @@ public sealed class DebugStatisticsTests
     // helpers
 
     // a debug event that took a duration, going a direction
-    private static DebugEvent EventOf(long? duration, DebugDirection direction = DebugDirection.Rx)
+    private static DebugEvent EventOf(TimeSpan? duration, DebugDirection direction = DebugDirection.Rx)
     {
         return new DebugEvent
         {
             Direction = direction,
+            Duration = duration,
             ProcedureId = 1,
             ProcedureName = "echo",
             ServiceId = 2,
             ServiceRevision = 1,
-            Timestamp = new DebugTimestamp(duration, 0),
+            StartedAt = DateTimeOffset.UnixEpoch,
             Type = DebugType.Request,
         };
+    }
+
+    // a duration of so many milliseconds
+    private static TimeSpan Milliseconds(long milliseconds)
+    {
+        return TimeSpan.FromMilliseconds(milliseconds);
     }
 
     // definition
@@ -40,16 +47,18 @@ public sealed class DebugStatisticsTests
     {
         var statistics = new DebugStatistics();
 
-        foreach (var duration in new long?[] { 30, null, 10, 20, -5, 40 })
+        foreach (var duration in new TimeSpan?[] { Milliseconds(30), null, Milliseconds(10), Milliseconds(20), Milliseconds(-5), Milliseconds(40) })
         {
             statistics.Listener(null, EventOf(duration));
         }
 
-        Assert.Equal(new DurationSummary(4, 40, 25, 25, 10), statistics.Durations());
+        Assert.Equal(
+            new DurationSummary(4, Milliseconds(40), Milliseconds(25), Milliseconds(25), Milliseconds(10)),
+            statistics.Durations());
 
-        statistics.Listener(null, EventOf(5));
+        statistics.Listener(null, EventOf(Milliseconds(5)));
 
-        Assert.Equal((5, 20.0), (statistics.Durations().Count, statistics.Durations().Median));
+        Assert.Equal((5, (TimeSpan?)Milliseconds(20)), (statistics.Durations().Count, statistics.Durations().Median));
     }
 
     [Fact]
@@ -59,10 +68,12 @@ public sealed class DebugStatisticsTests
 
         foreach (var duration in new long[] { 100, 1, 2, 3, 4 })
         {
-            statistics.Listener(null, EventOf(duration));
+            statistics.Listener(null, EventOf(Milliseconds(duration)));
         }
 
-        Assert.Equal(new DurationSummary(3, 4, 3, 3, 2), statistics.Durations());
+        Assert.Equal(
+            new DurationSummary(3, Milliseconds(4), Milliseconds(3), Milliseconds(3), Milliseconds(2)),
+            statistics.Durations());
     }
 
     [Fact]
@@ -71,12 +82,14 @@ public sealed class DebugStatisticsTests
         var statistics = new DebugStatistics(new DebugStatisticsOptions { Size = 3 });
 
         // cleared part way through, so the next is written at the start again
-        statistics.Listener(null, EventOf(10));
-        statistics.Listener(null, EventOf(20));
+        statistics.Listener(null, EventOf(Milliseconds(10)));
+        statistics.Listener(null, EventOf(Milliseconds(20)));
         statistics.Clear();
-        statistics.Listener(null, EventOf(7));
+        statistics.Listener(null, EventOf(Milliseconds(7)));
 
-        Assert.Equal(new DurationSummary(1, 7, 7, 7, 7), statistics.Durations());
+        Assert.Equal(
+            new DurationSummary(1, Milliseconds(7), Milliseconds(7), Milliseconds(7), Milliseconds(7)),
+            statistics.Durations());
     }
 
     [Fact]
@@ -97,9 +110,11 @@ public sealed class DebugStatisticsTests
         var statistics = new DebugStatistics();
         var listener = DebugFilters.FilterDebug(statistics.Listener, "d(rx)");
 
-        listener(null, EventOf(10, DebugDirection.Rx));
-        listener(null, EventOf(99, DebugDirection.Tx));
+        listener(null, EventOf(Milliseconds(10), DebugDirection.Rx));
+        listener(null, EventOf(Milliseconds(99), DebugDirection.Tx));
 
-        Assert.Equal(new DurationSummary(1, 10, 10, 10, 10), statistics.Durations());
+        Assert.Equal(
+            new DurationSummary(1, Milliseconds(10), Milliseconds(10), Milliseconds(10), Milliseconds(10)),
+            statistics.Durations());
     }
 }
