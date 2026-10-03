@@ -3,12 +3,13 @@
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
     "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port and {token} the token captured; body, its octets in hexadecimal. close drops that socket.",
-    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7).",
+    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
     "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
     "Before each send and close, and at the end, the server reported nothing a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
-    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. limits, where given, are its router's, as in conversations.json.",
+    "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
+    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
@@ -24,6 +25,7 @@
     "maximumWait": 30000,
     "exchangeTimeout": 300000,
     "inactivityTimeout": 300000,
+    "connectionInactivityTimeout": 30000,
     "maximumMessageBytes": 16778240,
     "heartbeat": 30000
   },
@@ -1814,6 +1816,800 @@
       ]
     },
     {
+      "name": "a listen with nothing to bring back is held for its wait, and ends 204",
+      "clauses": [
+        "15.6.3",
+        "15.9"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=1000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "listen"
+        }
+      ]
+    },
+    {
+      "name": "a listen is held no longer than the server's bound, whatever its wait",
+      "clauses": [
+        "15.9",
+        "15.12.7"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumWait": 1000
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "listen"
+        }
+      ]
+    },
+    {
+      "name": "a connection with no exchange under way closes past its inactivity timeout, a listen held holding it off",
+      "clauses": [
+        "15.1",
+        "15.7",
+        "15.12.9"
+      ],
+      "transport": "http",
+      "options": {
+        "inactivityTimeout": 5000
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=10000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 5000
+          }
+        },
+        {
+          "advance": 5000
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a request unanswered past the exchange timeout closes its connection",
+      "clauses": [
+        "15.7",
+        "15.12.8"
+      ],
+      "transport": "http",
+      "options": {
+        "exchangeTimeout": 10000
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 36\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+          },
+          "on": "slow"
+        },
+        {
+          "expect": {
+            "status": 200
+          },
+          "on": "slow"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a connection with no session is closed once silent past the server's own connection timeout, 30 s by default",
+      "clauses": [
+        "13.7",
+        "15.12.10"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "until": {
+            "timer": 30000
+          }
+        },
+        {
+          "advance": 30000
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a listen held keeps a connection with no session from the server's own timeout, which counts anew from the listen's end",
+      "clauses": [
+        "13.7",
+        "15.1",
+        "15.9",
+        "15.12.10"
+      ],
+      "transport": "http",
+      "options": {
+        "connectionInactivityTimeout": 10000
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 4000
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=20000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 20000
+          }
+        },
+        {
+          "advance": 20000
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a listen held keeps a session's connection from its connection timeout, which counts anew from the listen's end",
+      "clauses": [
+        "13.7",
+        "15.1",
+        "15.9"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 52\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 2C 22 63 6F 6E 6E 65 63 74 69 6F 6E 54 69 6D 65 6F 75 74 22 3A 31 30 30 30 30 7D"
+          },
+          "on": "login"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22",
+              "session": "announced"
+            }
+          },
+          "on": "login"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 4000
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=20000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 20000
+          }
+        },
+        {
+          "advance": 20000
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a session's connection outlives the server's own connection timeout, and once its session ends takes it, counted from the end",
+      "clauses": [
+        "13.7",
+        "15.12.10"
+      ],
+      "transport": "http",
+      "options": {
+        "connectionInactivityTimeout": 10000
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 49\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 2C 22 73 65 73 73 69 6F 6E 54 69 6D 65 6F 75 74 22 3A 32 30 30 30 30 7D"
+          },
+          "on": "login"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22",
+              "session": "announced"
+            }
+          },
+          "on": "login"
+        },
+        {
+          "until": {
+            "timer": 20000
+          }
+        },
+        {
+          "advance": 15000
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 78 22"
+          },
+          "on": "echo"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "echo"
+        },
+        {
+          "until": {
+            "timer": 20000
+          }
+        },
+        {
+          "advance": 20000
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 05  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a session's session timeout ends it during a held listen, which brings back its subscriptions' failure",
+      "clauses": [
+        "13.6",
+        "13.7",
+        "15.1"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+          },
+          "on": "subscribe"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "subscribe"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 49\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 2C 22 73 65 73 73 69 6F 6E 54 69 6D 65 6F 75 74 22 3A 31 35 30 30 30 7D"
+          },
+          "on": "login"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 61 64 61 22",
+              "session": "announced"
+            }
+          },
+          "on": "login"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=5000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "until": {
+            "gauge": "listens",
+            "is": 1
+          }
+        },
+        {
+          "until": {
+            "timer": 5000
+          }
+        },
+        {
+          "advance": 5000
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=20000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "gauge": "listens",
+            "is": 1
+          }
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead-batch",
+              "bead-sequence": "1"
+            },
+            "batch": [
+              {
+                "kind": 18,
+                "callId": 1,
+                "failure": {
+                  "code": 32,
+                  "scope": 0,
+                  "relays": 0
+                },
+                "session": "ended"
+              }
+            ]
+          },
+          "on": "listen"
+        }
+      ]
+    },
+    {
       "name": "a binary message is one envelope, and its answer one binary message",
       "clauses": [
         "15.2"
@@ -2177,6 +2973,220 @@
           },
           "on": "socket",
           "within": 2000
+        }
+      ]
+    },
+    {
+      "name": "a session idle past its session timeout ends, its connection staying, its subscriptions with it",
+      "clauses": [
+        "11.7.2",
+        "13.6",
+        "13.7"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 2C 22 73 65 73 73 69 6F 6E 54 69 6D 65 6F 75 74 22 3A 31 30 30 30 30 2C 22 63 6F 6E 6E 65 63 74 69 6F 6E 54 69 6D 65 6F 75 74 22 3A 32 30 30 30 30 7D"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22",
+              "session": "announced"
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 10 03  00 00 00 03  00 01 00 0A | 6E 75 6C 6C"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "6E 75 6C 6C"
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 3,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0
+              },
+              "session": "ended"
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 05  00 01 00 0E | 6E 75 6C 6C"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 5,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
+      "name": "a session's connection, silent past its connection timeout, is closed with 1000, each message starting it anew",
+      "clauses": [
+        "13.7",
+        "15.3"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 2C 22 63 6F 6E 6E 65 63 74 69 6F 6E 54 69 6D 65 6F 75 74 22 3A 31 30 30 30 30 7D"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22",
+              "session": "announced"
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 6000
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 78 22"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 6000
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 05  00 01 00 01 | 22 79 22"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 5,
+              "payload": "22 79 22"
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "socket"
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
         }
       ]
     }

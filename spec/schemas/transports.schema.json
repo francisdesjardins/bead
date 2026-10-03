@@ -22,6 +22,7 @@
         "maximumWait",
         "exchangeTimeout",
         "inactivityTimeout",
+        "connectionInactivityTimeout",
         "maximumMessageBytes",
         "heartbeat"
       ],
@@ -49,11 +50,15 @@
         "bodyBytesBudget": { "type": "integer", "minimum": 1 },
         "maximumBodyBytes": { "type": "integer", "minimum": 1 },
         "maximumOutboxBytes": { "type": "integer", "minimum": 1 },
-        "maximumWait": { "type": "integer", "minimum": 0 },
-        "exchangeTimeout": { "type": "integer", "minimum": 1 },
-        "inactivityTimeout": { "type": "integer", "minimum": 1 },
+        "maximumWait": { "$ref": "common.schema.json#/$defs/duration" },
+        "exchangeTimeout": { "$ref": "common.schema.json#/$defs/duration" },
+        "inactivityTimeout": { "$ref": "common.schema.json#/$defs/duration" },
+        "connectionInactivityTimeout": {
+          "description": "The HTTP server's own connection timeout, its server layer's (spec 13.7), not its transport's.",
+          "$ref": "common.schema.json#/$defs/duration"
+        },
         "maximumMessageBytes": { "type": "integer", "minimum": 1 },
-        "heartbeat": { "type": "integer", "minimum": 1 }
+        "heartbeat": { "$ref": "common.schema.json#/$defs/duration" }
       }
     },
     "options": {

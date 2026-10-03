@@ -129,7 +129,7 @@ SMALL = {'maximumEnvelopeBytes': 64, 'chunkBytes': 64, 'windowBytes': 128}
 # result 32 — its session counted — and a chunk 48
 CHUNKED = {'chunkBytes': 64, 'windowBytes': 128}
 CHUNK, CREDIT = 20, 21
-CHUNK_INVALID, CREDIT_EXCEEDED = 48, 49
+CHUNK_INVALID, CREDIT_EXCEEDED, TRANSFER_STALLED = 48, 49, 51
 
 
 def json_string(length):
@@ -156,6 +156,12 @@ def credited(call_id, end):
 
 def result_opening(call_id, data, total):
     return {'expect': {'kind': RESULT, 'callId': call_id, 'payload': hexadecimal(data), 'total': total}}
+
+
+def result_opening_in(call_id, data, total):
+    # a result the client sends that opens a transfer, as answer to a command: TRANSFER, the total on
+    # 8 bytes, its first bytes
+    return {'send': f'A1 11 04 04  {word(call_id, 4)}  {word(total, 8)} | {hexadecimal(data)}'}
 
 
 def chunk_out(call_id, offset, data, last):
@@ -213,7 +219,7 @@ conversations = [
     # 10.3: a command past its time is cancelled and its call id reserved as long as the command was
     # given, 10 s; an answer within is late, and dropped in silence, one after is for no call
     ('a command past its time is cancelled and its call id reserved as long: an answer within is dropped in silence, one after is reported CALL_UNKNOWN',
-     ['9.7', '10.1', '10.3'], None, [
+     ['9.7', '9.9', '10.1', '10.3'], None, [
          json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), armed(10_000), advance(10_000),
          cancelled(2), failure(1, PROCEDURE_FAILED), report('exception'), answer(2, '"late"'),
          armed(10_000), advance(10_000), answer(2, '"late"'), report(CALL_UNKNOWN)]),
@@ -374,6 +380,32 @@ conversations = [
     ('a cancel ends the transfer of a result, and a credit after it is dropped in silence', ['12.7', '12.9.5'], CHUNKED, [
         json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:32], 100),
         cancel(1), credit_in(1, 100)]),
+    # 12.7 to 12.9: a transfer's inactivity, on the server's clock. A restart shows by an advance past
+    # the first due and short of the second, then a send, before which nothing more went. The first
+    # keeps the 30 s by default; the others set their own, apart from every other timer they arm
+    ('a request whose transfer goes silent is answered TRANSFER_STALLED, each chunk placed setting it going again, its call then held abandoned as long',
+     ['12.2.8', '12.7', '12.8', '12.9', '12.9.4'], CHUNKED, [
+         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
+         armed(30_000), advance(20_000), chunk_in(1, 44, LONG[44:92], False),
+         armed(30_000), advance(10_000), json_request(3, 'echo', '"y"'), result(3, '"y"'),
+         armed(20_000), advance(20_000), failure(1, TRANSFER_STALLED),
+         chunk_in(1, 92, LONG[92:140], False),
+         armed(30_000), advance(30_000), chunk_in(1, 92, LONG[92:140], False), report(CALL_UNKNOWN)]),
+    # the command ask gives 10 s, which the transfer's 20 s takes over from
+    ('a command whose result comes as a transfer waits on the transfer\'s inactivity, not its own time; gone silent it ends as timed out, its call id reserved as long',
+     ['9.9', '10.3', '12.7', '12.8', '12.9', '12.9.1', '12.9.4'], {**CHUNKED, 'transferInactivityTimeout': 20_000}, [
+         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+         result_opening_in(2, LONG[:32], 300), credited(2, 160),
+         armed(20_000), advance(10_000), chunk_in(2, 32, LONG[32:80], False),
+         armed(20_000), advance(20_000), cancelled(2), failure(1, PROCEDURE_FAILED), report('exception'),
+         chunk_in(2, 80, LONG[80:128], False), answer(2, '"late"'),
+         armed(20_000), advance(20_000), chunk_in(2, 80, LONG[80:128], False), report(CALL_UNKNOWN)]),
+    ('a result that gets no credit is ended TRANSFER_STALLED, a credit that grants setting it going again, one that grants nothing not',
+     ['12.7', '12.8'], {**CHUNKED, 'transferInactivityTimeout': 15_000}, [
+         json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:32], 100),
+         armed(15_000), advance(5_000), credit_in(1, 80), chunk_out(1, 32, ECHOED[32:80], False),
+         armed(15_000), advance(12_000), credit_in(1, 60),
+         armed(3_000), advance(3_000), failure(1, TRANSFER_STALLED), report(TRANSFER_STALLED)]),
 ]
 
 # 14: relays, across a conversation's connections: a client, and a device the server relays to, which
@@ -465,6 +497,13 @@ conversations += [
          opened('client'), opened('device'), *logged_in(), *registered(),
          on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
          closed('device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')]),
+    ('leg B past its destination\'s timeout is cancelled, and leg A answered DESTINATION_LOST', ['14.4', '14.5.5'], None, [
+        opened('client'), opened('device'), *logged_in(),
+        on(json_request(1, 'register', '{"destination":%d,"timeout":2000}' % DEVICE), 'device'),
+        on(result(1, str(DEVICE)), 'device'),
+        on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+        armed(2_000), advance(2_000),
+        on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')]),
 ]
 
 document = {
@@ -475,9 +514,9 @@ document = {
         'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. session, on an answer, says what it announced: announced for a token, which is random, ended for 16 zero bytes; none, nothing. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
-        'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.',
+        'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
-        'limits, where given, are the server\'s limits; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.',
+        'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),

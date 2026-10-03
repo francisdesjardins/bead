@@ -119,6 +119,7 @@ interface ICase {
   limits?: RouterLimitsOptions;
   name: string;
   options?: Omit<IHTTPTransportServerOptions, 'createServer'> & {
+    connectionInactivityTimeout?: number;
     heartbeat?: number;
     maximumMessageBytes?: number;
   };
@@ -322,13 +323,13 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
  * A server of the interop service as each side's interop server builds one for its transport, the
  * case's options on the transport and its limits on the router, every layer on the transport's
  * `clock`. Over HTTP, its transport is given them as they are, `maximumBodyBytes` among them, which
- * `createHTTPServer` sets itself.
+ * `createHTTPServer` sets itself; its server layer, its own connection timeout.
  */
 const serverOf = (
   { limits, options = {}, transport }: ICase,
   clock: TestClock
 ): ServerUnderTest => {
-  const { heartbeat, maximumMessageBytes, ...bounds } = options;
+  const { connectionInactivityTimeout, heartbeat, maximumMessageBytes, ...bounds } = options;
 
   if (transport === 'websocket') {
     return createWSServer<string>({
@@ -348,7 +349,7 @@ const serverOf = (
       }),
     },
     {
-      connectionInactivityTimeout: CONNECTION_INACTIVITY_TIMEOUT,
+      connectionInactivityTimeout: connectionInactivityTimeout ?? CONNECTION_INACTIVITY_TIMEOUT,
       limits: wholeEnvelopeLimitsOf(limits),
     }
   );
@@ -470,6 +471,7 @@ test.describe('the transports', () => {
 
     expect({
       bodyBytesBudget: BODY_BYTES_BUDGET,
+      connectionInactivityTimeout: CONNECTION_INACTIVITY_TIMEOUT,
       exchangeTimeout: EXCHANGE_TIMEOUT,
       heartbeat: HEARTBEAT,
       inactivityTimeout: INACTIVITY_TIMEOUT,
@@ -584,11 +586,19 @@ test.describe('the transports', () => {
 
           if (step.until !== undefined && 'timer' in step.until) {
             const { timer } = step.until;
+            // ! the earliest timer live, and the only one so due: one armed before it and not yet
+            // cleared, on the server's threads, would fire first as the clock advances
+            const isEarliest = (): boolean => {
+              const [first, second] = duesOn(clock);
 
-            await pollWithinPatience(() => {
-              return duesOn(clock).includes(timer);
-            });
-            expect(duesOn(clock), `${at}: the timers armed`).toContain(timer);
+              return first === timer && second !== timer;
+            };
+
+            await pollWithinPatience(isEarliest);
+            expect(
+              isEarliest(),
+              `${at}: the earliest timer armed, alone so due, among ${String(duesOn(clock))}`
+            ).toBe(true);
           } else if (step.until !== undefined) {
             const { gauge, is } = step.until;
             const valueOf = (): number | undefined => {

@@ -9,9 +9,10 @@ version spec/spec.md states as its specVersion; no group holds two vectors or co
 name, which a reader looking one up by name would never reach; each group of vectors.json is named
 by a section of the spec, which names no other; every unit an entry cites is one of spec.md's — a
 clause, an item of its numbered list, a row of its table — and spec/uncited.txt lists exactly the
-units no entry cites; an advance follows a timer armed; and each implementation's tests read every
-group, the conversations, the transports' cases, any of which may name the row of docs/support.md
-it crosses, and the clock cases. Exit 1 on any of them.
+units no entry cites; an advance follows a timer armed, and in the transports' cases ends on its due
+at the latest; and each implementation's tests read every group, the conversations, the transports'
+cases, any of which may name the row of docs/support.md it crosses, and the clock cases. Exit 1 on
+any of them.
 
   python spec/check.py --write-uncited
 
@@ -176,22 +177,28 @@ for case in named['transports']:
 
 # an advance follows a timer armed on the side's clock, since the last send, expect or advance, so the
 # timer it steps to is armed before the clock moves (0011)
+# ! over a socket, an advance goes no further than the due its until named: what a timer fired leads
+# to, on the platform's threads, reads the clock, which must not have run past it
 for group in ('conversations', 'transports'):
     for entry in named[group]:
-        armed = False
+        armed = None
 
         for number, step in enumerate(entry['steps'], 1):
-            if 'advance' in step and not armed:
+            if 'advance' in step and armed is None:
                 problems.append(f'{group}: {entry["name"]!r}, step {number}, advances with no timer armed since its '
                                 'last send, expect or advance: an until timer comes first')
+            elif 'advance' in step and group == 'transports' and step['advance'] > armed:
+                problems.append(f'{group}: {entry["name"]!r}, step {number}, advances {step["advance"]} ms, past the '
+                                f'timer its until named, due in {armed}: an advance ends on that due at the latest')
 
             if 'until' in step and 'timer' in step['until']:
-                armed = True
+                armed = step['until']['timer']
             elif {'send', 'expect', 'advance'} & set(step):
-                armed = False
+                armed = None
 
-# a conversation that opens its connections names one, opened already, on every other step; one that
-# opens none plays the one connection opened before its first step, and names none
+# a conversation that opens its connections names one, opened already, on every other step but those
+# that move the server's clock, which are no connection's; one that opens none plays the one connection
+# opened before its first step, and names none
 for conversation in named['conversations']:
     steps = conversation['steps']
     opened = set()
@@ -199,6 +206,10 @@ for conversation in named['conversations']:
     for number, step in enumerate(steps, 1):
         if 'open' in step:
             opened.add(step['open'])
+        elif {'until', 'advance', 'wall'} & set(step):
+            if 'on' in step:
+                problems.append(f'conversations: {conversation["name"]!r}, step {number}, names a connection, '
+                                'where it moves the server\'s clock')
         elif any('open' in other for other in steps) and step.get('on') not in opened:
             problems.append(f'conversations: {conversation["name"]!r}, step {number}, names no connection opened '
                             f'before it: {step.get("on")!r}')

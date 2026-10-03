@@ -131,6 +131,34 @@ internal sealed class SteppingClock : TimeProvider
     }
 
     /// <summary>
+    /// Waits, on the real clock and for <paramref name="patience"/> at most, for the earliest timer
+    /// live to be due exactly <paramref name="due"/> from now, and the only one so due; gives the dues
+    /// it saw last.
+    /// </summary>
+    public async Task<IReadOnlyList<TimeSpan>> UntilEarliest(TimeSpan due, TimeSpan patience)
+    {
+        var watch = Stopwatch.StartNew();
+        var dues = Dues();
+
+        while (!IsEarliest(dues, due) && watch.Elapsed < patience)
+        {
+            await Task.Delay(Polling, TestContext.Current.CancellationToken);
+            dues = Dues();
+        }
+
+        return dues;
+    }
+
+    /// <summary>Whether <paramref name="due"/> is the earliest of <paramref name="dues"/>, and the only one so due.</summary>
+    public static bool IsEarliest(IReadOnlyList<TimeSpan> dues, TimeSpan due)
+    {
+        return dues.Count > 0 && dues.Min() == due && dues.Count((other) =>
+        {
+            return other == due;
+        }) == 1;
+    }
+
+    /// <summary>
     /// Steps both readings <paramref name="by"/>, from due to due: each timer due within fires at
     /// its own, the side settled before it and after it. A callback that throws stops none of the
     /// others; the first thrown is thrown again once the advance is done. One advance at a time.

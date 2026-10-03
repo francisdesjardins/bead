@@ -14,7 +14,7 @@ PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure
 MAXIMUM_ENVELOPE_BYTES = 16_778_240
 REQUEST, RESULT, FAILURE, NOTIFICATION = 16, 17, 18, 19
 PROTOCOL = 0
-SUBSCRIPTION_UNSUPPORTED, PAYLOAD_TOO_LARGE, PROCEDURE_FAILED = 22, 34, 64
+SUBSCRIPTION_UNSUPPORTED, SESSION_REQUIRED, PAYLOAD_TOO_LARGE, PROCEDURE_FAILED = 22, 32, 34, 64
 
 BEAD = 'application/prs.bead'
 BATCH = 'application/prs.bead-batch'
@@ -50,12 +50,13 @@ def cancel(call_id):
     return f'A1 16 00 02  {word(call_id, 4)}'
 
 
-def result(call_id, value):
-    return {'kind': RESULT, 'callId': call_id, 'payload': text(value)}
+def result(call_id, value, session=None):
+    return {'kind': RESULT, 'callId': call_id, 'payload': text(value), **({'session': session} if session else {})}
 
 
-def failure(call_id, code, scope=PROTOCOL):
-    return {'kind': FAILURE, 'callId': call_id, 'failure': {'code': code, 'scope': scope, 'relays': 0}}
+def failure(call_id, code, scope=PROTOCOL, session=None):
+    return {'kind': FAILURE, 'callId': call_id, 'failure': {'code': code, 'scope': scope, 'relays': 0},
+            **({'session': session} if session else {})}
 
 
 def notification(call_id, value):
@@ -250,6 +251,59 @@ cases = [
     ('to a client that does not listen, a request of the server\'s own fails before it goes', ['15.8'], None, [
         *drawn(), post('ask', request(1, 'ask', 'null')), answered('ask', failure(1, PROCEDURE_FAILED)),
         {'report': 'exception'}]),
+    # 13.7, 15.7 and 15.9: what times a connection out, and a listen held, on the clock the server is
+    # given. Each close is told by the connections gone, before the exchange that finds it gone
+    ('a listen with nothing to bring back is held for its wait, and ends 204', ['15.6.3', '15.9'], None, [
+        *drawn(listening=True), listen('listen', 0, 1000), armed(1000), advance(1000), expect('listen', 204, body='')]),
+    ('a listen is held no longer than the server\'s bound, whatever its wait', ['15.9', '15.12.7'], {'maximumWait': 1000}, [
+        *drawn(listening=True), listen('listen', 0, 60000), armed(1000), advance(1000), expect('listen', 204, body='')]),
+    ('a connection with no exchange under way closes past its inactivity timeout, a listen held holding it off',
+     ['15.1', '15.7', '15.12.9'], {'inactivityTimeout': 5000}, [
+         *drawn(listening=True), listen('listen', 0, 10000), armed(10_000), advance(10_000), expect('listen', 204, body=''),
+         armed(5000), advance(5000), until('connections', 0),
+         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
+    # the 200 head goes as the request is handed on; the 404 after the close stands for the cut that
+    # follows it
+    ('a request unanswered past the exchange timeout closes its connection', ['15.7', '15.12.8'], {'exchangeTimeout': 10_000}, [
+        *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
+        armed(10_000), advance(10_000), until('connections', 0),
+        post('after', request(3, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
+    ('a connection with no session is closed once silent past the server\'s own connection timeout, 30 s by default',
+     ['13.7', '15.12.10'], None, [
+         *drawn(), armed(30_000), advance(30_000), until('connections', 0),
+         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
+    ('a listen held keeps a connection with no session from the server\'s own timeout, which counts anew from the listen\'s end',
+     ['13.7', '15.1', '15.9', '15.12.10'], {'connectionInactivityTimeout': 10_000}, [
+         *drawn(listening=True), armed(10_000), advance(4000),
+         listen('listen', 0, 20000), armed(20_000), advance(20_000), expect('listen', 204, body=''),
+         armed(10_000), advance(10_000), until('connections', 0),
+         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
+    ('a listen held keeps a session\'s connection from its connection timeout, which counts anew from the listen\'s end',
+     ['13.7', '15.1', '15.9'], None, [
+         *drawn(listening=True), post('login', request(1, 'login', '{"name":"ada","connectionTimeout":10000}')),
+         answered('login', result(1, '"ada"', 'announced')), armed(10_000), advance(4000),
+         listen('listen', 0, 20000), armed(20_000), advance(20_000), expect('listen', 204, body=''),
+         armed(10_000), advance(10_000), until('connections', 0),
+         post('after', request(3, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
+    ('a session\'s connection outlives the server\'s own connection timeout, and once its session ends takes it, counted from the end',
+     ['13.7', '15.12.10'], {'connectionInactivityTimeout': 10_000}, [
+         *drawn(), post('login', request(1, 'login', '{"name":"ada","sessionTimeout":20000}')),
+         answered('login', result(1, '"ada"', 'announced')),
+         armed(20_000), advance(15_000),
+         post('echo', request(3, 'echo', '"x"')), answered('echo', result(3, '"x"')),
+         armed(20_000), advance(20_000), armed(10_000), advance(10_000), until('connections', 0),
+         post('after', request(5, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
+    # ! each listen held first, as listens tells: the session's timer, armed at login, would meet the
+    # until before the listen came; the first listen, ended, shows the session timeout restarted by none
+    ('a session\'s session timeout ends it during a held listen, which brings back its subscriptions\' failure',
+     ['13.6', '13.7', '15.1'], None, [
+         *drawn(listening=True), post('subscribe', SUBSCRIBE), answered('subscribe', result(1, 'null')),
+         post('login', request(3, 'login', '{"name":"ada","sessionTimeout":15000}')),
+         answered('login', result(3, '"ada"', 'announced')),
+         listen('first', 0, 5000), until('listens', 1), armed(5000), advance(5000), expect('first', 204, body=''),
+         listen('listen', 0, 20000), until('listens', 1), armed(10_000), advance(10_000),
+         expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'},
+                batch=[failure(1, SESSION_REQUIRED, session='ended')])]),
 ]
 
 # ── WebSocket ───────────────────────────────────────────────────────────────────────────────────
@@ -303,6 +357,25 @@ websocket = [
     ('a peer that leaves a ping unanswered is dropped', ['15.3'],
      {'options': {'heartbeat': 200}, 'realTime': True, 'answersPings': False}, [
          *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=2000, end=True)]),
+    # 13.7: a session's timeouts, which login gives, on the clock the server is given
+    ('a session idle past its session timeout ends, its connection staying, its subscriptions with it',
+     ['11.7.2', '13.6', '13.7'], {}, [
+         *upgrade(),
+         message('socket', binary=request(1, 'login', '{"name":"ada","sessionTimeout":10000,"connectionTimeout":20000}')),
+         heard('socket', envelope=result(1, '"ada"', 'announced')),
+         message('socket', binary=request(3, 'ticks', 'null', flags=0x10)), heard('socket', envelope=result(3, 'null')),
+         armed(10_000), advance(10_000), heard('socket', envelope=failure(3, SESSION_REQUIRED, session='ended')),
+         message('socket', binary=request(5, 'whoami', 'null')), heard('socket', envelope=failure(5, SESSION_REQUIRED))]),
+    ('a session\'s connection, silent past its connection timeout, is closed with 1000, each message starting it anew',
+     ['13.7', '15.3'], {}, [
+         *upgrade(),
+         message('socket', binary=request(1, 'login', '{"name":"ada","connectionTimeout":10000}')),
+         heard('socket', envelope=result(1, '"ada"', 'announced')),
+         armed(10_000), advance(6000),
+         message('socket', binary=request(3, 'echo', '"x"')), heard('socket', envelope=result(3, '"x"')),
+         armed(10_000), advance(6000),
+         message('socket', binary=request(5, 'echo', '"y"')), heard('socket', envelope=result(5, '"y"')),
+         armed(10_000), advance(10_000), heard('socket', close=NORMAL), until('connections', 0)]),
 ]
 
 # responses as a server may cut them, which every side's reader reads alike
@@ -323,12 +396,13 @@ document = {
     '$comment': [
         "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
         'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port and {token} the token captured; body, its octets in hexadecimal. close drops that socket.',
-        'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7).',
+        'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
         'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
         'Before each send and close, and at the end, the server reported nothing a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
-        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. limits, where given, are its router\'s, as in conversations.json.',
+        'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
+        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
@@ -344,6 +418,7 @@ document = {
         'maximumWait': 30_000,
         'exchangeTimeout': 300_000,
         'inactivityTimeout': 300_000,
+        'connectionInactivityTimeout': 30_000,
         'maximumMessageBytes': MAXIMUM_ENVELOPE_BYTES,
         'heartbeat': 30_000,
     },
