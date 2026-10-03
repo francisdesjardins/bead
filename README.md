@@ -233,6 +233,12 @@ required check.
 - [`docs/decisions/`](docs/decisions/README.md) holds why Bead is shaped as it is, one record a
   decision, changed rather than appended to; the CHANGELOG says what changed, a record says why
   ([0009](docs/decisions/0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+- A comment a reader must not miss opens with its tag, after its marker (`//`, `#`), as the
+  [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments)
+  extension shows them: `!` an alert, a trap or an invariant that breaks something when changed;
+  `?` an open question; `TODO` work to do beside the code; `*` the key point of a block. Every other
+  comment stays plain, and doc comments carry no tag. In an editor without the extension, the tags
+  read as they are.
 
 ## Licence
 
