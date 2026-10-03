@@ -121,9 +121,9 @@ already asks, and the reported instants are `lastActivity`. A timeout past the c
 places read as never and one as 5 seconds, is refused everywhere.
 
 **The TypeScript side's tests take a development dependency**, `@sinonjs/fake-timers`, through its
-own lockfile ([0005](0005-a-toolchain-per-language.md)); `spyTimers`, `timersOf`, `timersWhile`,
-`spyIntervals`, `clockOf`, the swaps made inline in six files, and the swaps of `Math.random`, give
-way to it wherever they stand for Bead's timers.
+own lockfile ([0005](0005-a-toolchain-per-language.md)); `spyTimers`, `timersOf`, `timersWhile`, a
+test's own clock, the swaps made inline in six files, and the swaps of `Math.random`, give way to it
+wherever they stand for Bead's timers; `spyIntervals` stays for the ping, the platform's.
 
 **Advancing a clock is deterministic for Bead's timers alone.** A platform's timer still runs on the
 real clock, and a case that waits on one is marked, played in real time, and bounded generously.
