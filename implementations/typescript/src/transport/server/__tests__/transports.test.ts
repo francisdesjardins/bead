@@ -1,8 +1,9 @@
 // ── Transports ────────────────────────────────────────────────────────────────
 
 // Bead's transports' cases, `spec/transports.json`, played against Bead's TypeScript server of the
-// interop service over HTTP: a peer of the test's own writes each exchange's octets on a socket of
-// its own, and reads what the server answers and reports. The C# server plays the same file.
+// interop service over HTTP and WebSocket: a peer of the test's own writes octets, then frames, on a
+// socket per exchange, and reads what the server sends and reports. The C# server plays the same
+// file.
 
 // dependencies
 
@@ -10,7 +11,8 @@ import { readFileSync } from 'node:fs';
 import { createServer as createNodeServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { offerInterop } from '../../../../interop/offer';
+import { WebSocketServer } from 'ws';
+import { type InteropServer, offerInterop } from '../../../../interop/offer';
 import {
   expectedOf,
   hexadecimalOf,
@@ -18,10 +20,12 @@ import {
 } from '../../../router/server/__tests__/expected-envelope';
 import { FailureError } from '../../../router/server/router-server';
 import { fromHexadecimal } from '../../../router/shared/__tests__/vectors';
+import type { RouterLimitsOptions } from '../../../router/shared/types';
 import { wholeEnvelopeLimitsOf } from '../../../router/shared/whole-envelope-limits';
 import { CONNECTION_INACTIVITY_TIMEOUT } from '../../../server/http-server';
 import { createServer } from '../../../server/server';
 import { createWSServer } from '../../../server/ws-server';
+import { TRANSPORT_WS } from '../../shared/constants';
 import {
   BODY_BYTES_BUDGET,
   createHTTPTransportServer,
@@ -36,12 +40,18 @@ import {
   type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
+import { generateHandle } from '../transport-server';
+import type { ITransportServer, TransportServerConnectionHandle } from '../types';
 import { HEARTBEAT } from '../ws-transport-server';
 import { createFakeWebSocketServer } from './fake-websocket-server';
 import {
+  closeFrameOf,
   createResponseReader,
+  OPCODES,
   openExchange,
+  type Heard,
   type IExchange,
+  type IFrame,
   type IResponse,
   type IResponseHead,
 } from './http-peer';
@@ -63,21 +73,51 @@ interface IExpectation {
   status: number;
 }
 
+/** What a case expects the server to send next on a WebSocket. */
+interface IHeardExpectation {
+  binary?: string;
+  close?: number;
+  end?: true;
+  envelope?: IExpected | string;
+  ping?: true;
+}
+
+/** A request of HTTP/1.1, an opening handshake among them. */
+interface IRequest {
+  body?: string;
+  head: string;
+}
+
+/** What the peer writes on a WebSocket. */
+interface IMessage {
+  binary?: string;
+  close?: number;
+  frames?: { fin: boolean; opcode: number; payload: string }[];
+  text?: string;
+}
+
 /** One step of a case: what the test does, or what the server does next, on the exchange it names. */
 interface IStep {
   close?: true;
-  expect?: IExpectation;
+  expect?: IExpectation | IHeardExpectation;
   on?: string;
   report?: number | 'exception';
-  send?: { body?: string; head: string };
+  send?: IMessage | IRequest;
   stop?: true;
   until?: { gauge: string; is: number };
+  within?: number;
 }
 
 interface ICase {
+  answersPings?: false;
   differs?: { language: string; row: string }[];
+  limits?: RouterLimitsOptions;
   name: string;
-  options?: Omit<IHTTPTransportServerOptions, 'createServer'>;
+  options?: Omit<IHTTPTransportServerOptions, 'createServer'> & {
+    heartbeat?: number;
+    maximumMessageBytes?: number;
+  };
+  realTime?: true;
   steps: IStep[];
   transport: string;
 }
@@ -91,6 +131,18 @@ interface IResponseCase {
   status: number;
 }
 
+/** What the server reported to its application, and the connection it came with. */
+interface IReport {
+  code: number | 'exception';
+  connectionHandle: TransportServerConnectionHandle;
+}
+
+// types
+
+/** A server of the interop service, whichever its transport, as a case plays it. */
+type ServerUnderTest = AsyncDisposable &
+  InteropServer & { transport: Pick<ITransportServer, 'gauges' | 'start'> };
+
 // constants
 
 const TRANSPORTS = JSON.parse(
@@ -103,7 +155,10 @@ const TRANSPORTS = JSON.parse(
 
 const HOST = '127.0.0.1';
 
-// how long a step waits on the real clock for its bytes, a gauge or a report
+// the transports this harness plays a case over
+const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['http', 'websocket']);
+
+// how long a step waits on the real clock for its bytes, a gauge or a report, unless it says
 const PATIENCE = 3_000;
 const POLL = 10;
 
@@ -114,6 +169,8 @@ const SHAPES = Object.freeze({
     /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-9]{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT$/u,
   token: /^[A-Za-z0-9_-]{21}[AQgw]$/u,
 });
+
+const encoder = new TextEncoder();
 
 // helpers
 
@@ -149,7 +206,7 @@ const batchOf = (bytes: Uint8Array): (IExpected | string)[] => {
 
 /** The request `send` writes, its head's `{name}` each replaced by the value it names. */
 const requestOf = (
-  { body = '', head }: NonNullable<IStep['send']>,
+  { body = '', head }: IRequest,
   values: ReadonlyMap<string, string>
 ): Uint8Array => {
   const filled = head.replaceAll(/\{(\w+)\}/gu, (_match, name: string) => {
@@ -163,6 +220,25 @@ const requestOf = (
   });
 
   return Buffer.concat([Buffer.from(filled, 'latin1'), fromHexadecimal(body)]);
+};
+
+/** The frames a message is written in: one, but those a case gives itself. */
+const framesOf = ({ binary, close, frames = [], text }: IMessage): IFrame[] => {
+  if (binary !== undefined) {
+    return [{ fin: true, opcode: OPCODES.BINARY, payload: fromHexadecimal(binary) }];
+  }
+
+  if (text !== undefined) {
+    return [{ fin: true, opcode: OPCODES.TEXT, payload: encoder.encode(text) }];
+  }
+
+  if (close !== undefined) {
+    return [closeFrameOf(close)];
+  }
+
+  return frames.map(({ fin, opcode, payload }) => {
+    return { fin, opcode, payload: fromHexadecimal(payload) };
+  });
 };
 
 /**
@@ -196,12 +272,29 @@ const seenOf = (
   };
 };
 
-/** Settles as `promise` does, or rejects once the patience is over. */
-const withinPatience = async <T>(promise: Promise<T>, what: string): Promise<T> => {
+/** What the server sent on a WebSocket, in the terms `expectation` names it by. */
+const heardOf = (
+  heard: Heard,
+  expectation: IHeardExpectation
+): IHeardExpectation | { text: string } => {
+  if ('binary' in heard) {
+    return expectation.envelope === undefined
+      ? { binary: hexadecimalOf(heard.binary) }
+      : { envelope: envelopeOf(heard.binary) };
+  }
+
+  return 'ping' in heard ? { ping: true } : heard;
+};
+
+/** Settles as `promise` does, or rejects once `milliseconds` are over. */
+const within = async <T>(
+  promise: Promise<T>,
+  { milliseconds, what }: { milliseconds: number; what: string }
+): Promise<T> => {
   const timeout = Promise.withResolvers<never>();
   const timer = setTimeout(() => {
-    timeout.reject(new Error(`${what} did not come within ${String(PATIENCE)} ms`));
-  }, PATIENCE);
+    timeout.reject(new Error(`${what} did not come within ${String(milliseconds)} ms`));
+  }, milliseconds);
 
   try {
     return await Promise.race([promise, timeout.promise]);
@@ -220,15 +313,24 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
 };
 
 /**
- * A server of the interop service over HTTP on a free port, as `createHTTPServer` builds one, its
- * transport given the case's options as they are, `maximumBodyBytes` among them, and what it
- * reports, as the conversations record it.
+ * A server of the interop service as each side's interop server builds one for its transport, the
+ * case's options on the transport and its limits on the router. Over HTTP, its transport is given
+ * them as they are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself.
  */
-const startServer = async (options: ICase['options']) => {
-  const server = createServer<HTTPTransportServer, string>(
+const serverOf = ({ limits, options = {}, transport }: ICase): ServerUnderTest => {
+  const { heartbeat, maximumMessageBytes, ...bounds } = options;
+
+  if (transport === 'websocket') {
+    return createWSServer<string>({
+      limits,
+      transport: { heartbeat, maxPayload: maximumMessageBytes, WebSocketServer },
+    });
+  }
+
+  return createServer<HTTPTransportServer, string>(
     {
       transport: createHTTPTransportServer({
-        ...options,
+        ...bounds,
         createServer: (listener) => {
           return createNodeServer(listener);
         },
@@ -236,24 +338,31 @@ const startServer = async (options: ICase['options']) => {
     },
     {
       connectionInactivityTimeout: CONNECTION_INACTIVITY_TIMEOUT,
-      limits: wholeEnvelopeLimitsOf(undefined),
+      limits: wholeEnvelopeLimitsOf(limits),
     }
   );
-  const reports: (number | 'exception')[] = [];
+};
 
-  server.router.on('error', (error) => {
-    reports.push(error instanceof FailureError ? error.code : 'exception');
+/** Offers the interop service on `server`, starts it on a free port, and records what it reports. */
+const serve = async (server: ServerUnderTest) => {
+  const reports: IReport[] = [];
+
+  server.router.on('error', (error, connectionHandle) => {
+    reports.push({
+      code: error instanceof FailureError ? error.code : 'exception',
+      connectionHandle,
+    });
   });
   offerInterop(server);
 
   const { port } = await server.transport.start({ address: HOST, findOpenPort: true });
 
-  return { port, reports, server };
+  return { port, reports };
 };
 
 /** Checks the response of `exchange` against `expectation`, and keeps what its fields capture. */
 const expectResponse = async (
-  { at, exchange }: { at: string; exchange: IExchange },
+  { at, exchange, milliseconds }: { at: string; exchange: IExchange; milliseconds: number },
   { expectation, values }: { expectation: IExpectation; values: Map<string, string> }
 ): Promise<void> => {
   const hasBody =
@@ -261,8 +370,8 @@ const expectResponse = async (
     expectation.envelope !== undefined ||
     expectation.batch !== undefined;
   const response = hasBody
-    ? await withinPatience(exchange.reader.response, `${at}: the response`)
-    : await withinPatience(exchange.reader.head, `${at}: the response's head`);
+    ? await within(exchange.reader.response, { milliseconds, what: `${at}: the response` })
+    : await within(exchange.reader.head, { milliseconds, what: `${at}: the response's head` });
 
   expect(seenOf(response, expectation), at).toEqual({
     ...expectation,
@@ -276,6 +385,22 @@ const expectResponse = async (
       values.set(expected.capture, value);
     }
   }
+};
+
+/** Checks the next thing the server sends on the WebSocket of `exchange` against `expectation`. */
+const expectHeard = async (
+  { at, exchange, milliseconds }: { at: string; exchange: IExchange; milliseconds: number },
+  expectation: IHeardExpectation
+): Promise<void> => {
+  const heard = await exchange.next(milliseconds);
+
+  expect(
+    heard === undefined ? `nothing within ${String(milliseconds)} ms` : heardOf(heard, expectation),
+    at
+  ).toEqual({
+    ...expectation,
+    ...(expectation.binary === undefined ? {} : { binary: canonicalOf(expectation.binary) }),
+  });
 };
 
 // a case a row of the support matrix excuses this side from, which it does not play
@@ -331,7 +456,10 @@ test.describe('the transports', () => {
         reader.feed(fromHexadecimal(piece));
       }
 
-      const response = await withinPatience(reader.response, 'the response');
+      const response = await within(reader.response, {
+        milliseconds: PATIENCE,
+        what: 'the response',
+      });
 
       expect({
         body: hexadecimalOf(response.body),
@@ -346,16 +474,17 @@ test.describe('the transports', () => {
   }
 
   for (const testCase of TRANSPORTS.cases) {
-    const { name, options, steps, transport } = testCase;
+    const { answersPings, name, steps, transport } = testCase;
 
-    if (transport !== 'http' || isExcused(testCase)) {
+    if (!PLAYED_TRANSPORTS.has(transport) || isExcused(testCase)) {
       continue;
     }
 
     played.push(name);
 
     test(name, async () => {
-      const { port, reports, server } = await startServer(options);
+      const server = serverOf(testCase);
+      const { port, reports } = await serve(server);
       const exchanges = new Map<string, IExchange>();
       const values = new Map([['host', `${HOST}:${String(port)}`]]);
       let isStopped = false;
@@ -368,6 +497,16 @@ test.describe('the transports', () => {
 
         return exchange;
       };
+      // the handle a WebSocket's connection has on the server: the address and port it came from
+      const handleOf = (on: string, at: string): TransportServerConnectionHandle => {
+        const { localPort } = exchangeOf(on, at);
+
+        if (transport !== 'websocket' || localPort === undefined) {
+          throw new Error(`${at}: the exchange ${on} names no connection of its own`);
+        }
+
+        return generateHandle({ ip: HOST, port: localPort, type: TRANSPORT_WS });
+      };
       // what the server reported that its case did not expect: nothing, between steps
       const expectNothingReported = (when: string): void => {
         expect(reports, when).toEqual([]);
@@ -376,28 +515,33 @@ test.describe('the transports', () => {
       try {
         for (const [index, step] of steps.entries()) {
           const at = `step ${String(index + 1)}`;
+          const milliseconds = step.within ?? PATIENCE;
 
           if (step.send !== undefined || step.close === true) {
             expectNothingReported(`before ${at}`);
           }
 
-          if (step.send !== undefined) {
+          if (step.send !== undefined && 'head' in step.send) {
             exchanges.get(step.on ?? '')?.destroy();
             exchanges.set(
               step.on ?? '',
-              openExchange({ host: HOST, port }, requestOf(step.send, values))
+              openExchange({ answersPings, host: HOST, port }, requestOf(step.send, values))
             );
+          } else if (step.send !== undefined) {
+            exchangeOf(step.on, at).send(framesOf(step.send));
           }
 
           if (step.close === true) {
             exchangeOf(step.on, at).destroy();
           }
 
-          if (step.expect !== undefined) {
+          if (step.expect !== undefined && 'status' in step.expect) {
             await expectResponse(
-              { at, exchange: exchangeOf(step.on, at) },
+              { at, exchange: exchangeOf(step.on, at), milliseconds },
               { expectation: step.expect, values }
             );
+          } else if (step.expect !== undefined) {
+            await expectHeard({ at, exchange: exchangeOf(step.on, at), milliseconds }, step.expect);
           }
 
           if (step.until !== undefined) {
@@ -416,7 +560,16 @@ test.describe('the transports', () => {
             await pollWithinPatience(() => {
               return reports.length > 0;
             });
-            expect(reports.shift(), `${at}: the report`).toBe(step.report);
+
+            const report = reports.shift();
+
+            expect(report?.code, `${at}: the report`).toBe(step.report);
+
+            if (step.on !== undefined) {
+              expect(report?.connectionHandle, `${at}: the report's connection`).toBe(
+                handleOf(step.on, at)
+              );
+            }
           }
 
           if (step.stop === true) {

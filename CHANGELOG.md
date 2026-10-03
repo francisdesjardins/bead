@@ -28,6 +28,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its HTTP transport's edge, which each side's tests play against their own server with a peer that
   writes HTTP/1.1 in exact octets, the bounds' defaults each side checks, and responses cut across
   reads that each side's reader reads alike.
+- The WebSocket's cases in `spec/transports.json`, played with frames the peer writes itself: a
+  message whole or in fragments, a text message reported, a message past its limit closed 1009, a
+  clean close and a stop, and, on the real clock, the ping and the peer that leaves it unanswered.
 
 ### Changed
 

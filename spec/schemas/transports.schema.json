@@ -96,7 +96,16 @@
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
         "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
-        "transport": { "enum": ["http"] },
+        "transport": { "enum": ["http", "websocket"] },
+        "limits": { "$ref": "conversations.schema.json#/$defs/limits" },
+        "answersPings": {
+          "description": "false for a peer that leaves the server's pings unanswered; its pings are answered otherwise.",
+          "const": false
+        },
+        "realTime": {
+          "description": "A case played on the real clock, as what no clock given reaches is.",
+          "const": true
+        },
         "options": { "$ref": "#/$defs/options" },
         "differs": {
           "description": "The rows of docs/support.md a case crosses, each naming the case, and the language each excuses from it.",
@@ -138,20 +147,13 @@
       ],
       "properties": {
         "on": { "$ref": "#/$defs/exchange" },
-        "send": {
-          "type": "object",
-          "required": ["head"],
-          "additionalProperties": false,
-          "properties": {
-            "head": {
-              "description": "The request's line and fields, as text, CRLF after each and one more after the last; {host} and a captured value's {name} put in.",
-              "type": "string",
-              "pattern": "^[A-Z]+ \\S+ HTTP/1\\.1\\r\\n(?:[a-z0-9-]+: [^\\r\\n]*\\r\\n)*\\r\\n$"
-            },
-            "body": { "$ref": "common.schema.json#/$defs/bytes" }
-          }
+        "within": {
+          "description": "How long an expect waits, in milliseconds, where not a patience of its own.",
+          "type": "integer",
+          "minimum": 1
         },
-        "expect": { "$ref": "#/$defs/expectation" },
+        "send": { "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/message" }] },
+        "expect": { "oneOf": [{ "$ref": "#/$defs/expectation" }, { "$ref": "#/$defs/heard" }] },
         "close": { "const": true },
         "until": {
           "description": "A gauge of the transport, which both sides name alike, and the value it waits for.",
@@ -183,6 +185,61 @@
         "stop": { "const": true }
       }
     },
+    "request": {
+      "description": "A request of HTTP/1.1, an opening handshake among them.",
+      "type": "object",
+      "required": ["head"],
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "description": "The request's line and fields, as text, CRLF after each and one more after the last; {host} and a captured value's {name} put in.",
+          "type": "string",
+          "pattern": "^[A-Z]+ \\S+ HTTP/1\\.1\\r\\n(?:[a-z0-9-]+: [^\\r\\n]*\\r\\n)*\\r\\n$"
+        },
+        "body": { "$ref": "common.schema.json#/$defs/bytes" }
+      }
+    },
+    "message": {
+      "description": "What the peer writes on a WebSocket: a binary message, a text one, frames of its own, or a close.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "binary": { "$ref": "common.schema.json#/$defs/bytes" },
+        "text": { "type": "string" },
+        "frames": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["opcode", "fin", "payload"],
+            "additionalProperties": false,
+            "properties": {
+              "opcode": { "type": "integer", "minimum": 0, "maximum": 15 },
+              "fin": { "type": "boolean" },
+              "payload": { "$ref": "common.schema.json#/$defs/bytes" }
+            }
+          }
+        },
+        "close": { "$ref": "#/$defs/closeCode" }
+      }
+    },
+    "heard": {
+      "description": "What the server sends next on a WebSocket: a binary message holding an envelope, or its bytes, a close and its code, a ping, or the socket's end.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "envelope": { "$ref": "conversations.schema.json#/$defs/expect" },
+        "binary": { "$ref": "common.schema.json#/$defs/bytes" },
+        "close": { "$ref": "#/$defs/closeCode" },
+        "ping": { "const": true },
+        "end": { "const": true }
+      }
+    },
+    "closeCode": { "type": "integer", "minimum": 1000, "maximum": 4999 },
     "expectation": {
       "description": "A response: its status, its fields, and its body exactly, or the one envelope it holds, or the envelopes of its batch.",
       "type": "object",

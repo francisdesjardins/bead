@@ -239,6 +239,59 @@ cases = [
         {'report': 'exception'}]),
 ]
 
+# ── WebSocket ───────────────────────────────────────────────────────────────────────────────────
+
+# RFC 6455 §1.3's own key, and the accept it gives
+KEY, ACCEPT = 'dGhlIHNhbXBsZSBub25jZQ==', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='
+SMALL = {'maximumEnvelopeBytes': 64, 'chunkBytes': 64, 'windowBytes': 128}
+CONTINUATION, BINARY = 0x0, 0x2
+NORMAL, GOING_AWAY, TOO_BIG = 1000, 1001, 1009
+
+
+def upgrade(on='socket'):
+    """An opening handshake, on a socket the exchange keeps as its WebSocket once answered 101."""
+    head = (f'GET / HTTP/1.1\r\nhost: {{host}}\r\nupgrade: websocket\r\nconnection: Upgrade\r\n'
+            f'sec-websocket-key: {KEY}\r\nsec-websocket-version: 13\r\n\r\n')
+    return [{'send': {'head': head}, 'on': on},
+            expect(on, 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT})]
+
+
+def message(on, **sent):
+    return {'send': sent, 'on': on}
+
+
+def heard(on, within=None, **received):
+    return {'expect': received, 'on': on, **({'within': within} if within else {})}
+
+
+ECHO_HEADER, ECHO_PAYLOAD = ECHO.split(' | ')
+
+websocket = [
+    ('a binary message is one envelope, and its answer one binary message', ['15.2'], {}, [
+        *upgrade(), message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
+    ('a message in fragments is one envelope', ['15.2'], {}, [
+        *upgrade(), message('socket', frames=[
+            {'opcode': BINARY, 'fin': False, 'payload': ECHO_HEADER},
+            {'opcode': CONTINUATION, 'fin': True, 'payload': ECHO_PAYLOAD}]),
+        heard('socket', envelope=result(1, '"x"'))]),
+    ('a text message is no envelope: it is reported ENVELOPE_MALFORMED, and answered nothing', ['15.2'], {}, [
+        *upgrade(), message('socket', text='x'), {'report': 1, 'on': 'socket'},
+        message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
+    ('a message past the side\'s own limit closes its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
+        *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
+    ('a peer that closes with 1000 is answered 1000, the clean close', ['15.3'], {}, [
+        *upgrade(), message('socket', close=NORMAL), heard('socket', close=NORMAL)]),
+    ('a server that stops closes its connections with 1001', ['15.3'], {}, [
+        *upgrade('first'), *upgrade('second'), {'stop': True},
+        heard('first', close=GOING_AWAY), heard('second', close=GOING_AWAY)]),
+    # played on the real clock: no clock given reaches the ping the C# side's platform times
+    ('a side pings its peer every heartbeat', ['15.3'], {'options': {'heartbeat': 200}, 'realTime': True}, [
+        *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=1000, ping=True)]),
+    ('a peer that leaves a ping unanswered is dropped', ['15.3'],
+     {'options': {'heartbeat': 200}, 'realTime': True, 'answersPings': False}, [
+         *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=2000, end=True)]),
+]
+
 # responses as a server may cut them, which every side's reader reads alike
 responses = [
     ('a body by its length', ['48 54 54 50 2F 31 2E 31 20 32 30 30 20 4F 4B 0D 0A',
@@ -255,12 +308,13 @@ responses = [
 document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
-        "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
+        "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
         'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port and {token} the token captured; body, its octets in hexadecimal. close drops that socket.',
         'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader.',
+        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
         'Before each send and close, and at the end, the server reported nothing a case does not expect.',
-        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time.',
+        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
@@ -285,6 +339,9 @@ document = {
     'cases': [
         {'name': name, 'clauses': clauses, 'transport': 'http', **({'options': options} if options else {}), 'steps': steps}
         for name, clauses, options, steps in cases
+    ] + [
+        {'name': name, 'clauses': clauses, 'transport': 'websocket', **fields, 'steps': steps}
+        for name, clauses, fields, steps in websocket
     ],
 }
 
@@ -292,4 +349,4 @@ with open(ROOT + 'transports.json', 'w', encoding='utf-8', newline='\n') as file
     json.dump(document, file, ensure_ascii=False, indent=2)
     file.write('\n')
 
-print(len(cases), 'cases', len(responses), 'responses')
+print(len(cases), 'cases over HTTP,', len(websocket), 'over WebSocket,', len(responses), 'responses')

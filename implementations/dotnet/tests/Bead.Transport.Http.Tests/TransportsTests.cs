@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Channels;
 using Bead.Interop;
 using Bead.Transport.WebSockets;
 using Xunit.Sdk;
@@ -15,10 +16,11 @@ using Xunit.Sdk;
 namespace Bead.Transport.Http.Tests;
 
 /// <summary>
-/// Bead's transports' cases, <c>spec/transports.json</c>, played against the C# server of the
-/// interop service over HTTP: a peer of the test's own writes each exchange's octets on a socket of
-/// its own and reads what the server answers on it, what it reports, and what its transport's
-/// gauges say. The TypeScript server plays the same file.
+/// Bead's transports' cases, <c>spec/transports.json</c>, played against the C# servers of the
+/// interop service, over HTTP and over WebSocket: a peer of the test's own writes each exchange's
+/// octets on a socket of its own — a WebSocket's frames among them, once its handshake is answered
+/// — and reads what the server sends back on it, what it reports, and what its transport's gauges
+/// say. The TypeScript servers play the same file.
 /// </summary>
 public sealed class TransportsTests
 {
@@ -31,9 +33,22 @@ public sealed class TransportsTests
 
     private const int ReadBytes = 4_096;
 
+    // a WebSocket's opcodes (RFC 6455, section 5.2)
+    private const int Continuation = 0x0;
+    private const int Text = 0x1;
+    private const int Binary = 0x2;
+    private const int Closing = 0x8;
+    private const int Ping = 0x9;
+    private const int Pong = 0xA;
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static readonly HttpTransportStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
+
+    private static readonly WebSocketTransportStartOptions WebSocketLoopback = new() { Address = Host, FindOpenPort = true };
+
+    // what masks each frame the peer writes, as a client's must be: RFC 6455's own example (section 5.7)
+    private static readonly byte[] MaskingKey = [0x37, 0xFA, 0x21, 0x3D];
 
     // each shape a value drawn takes, in ASCII classes alone: a token, 16 bytes in base64url without
     // padding; a delay, in seconds; an IMF-fixdate
@@ -144,6 +159,215 @@ public sealed class TransportsTests
         }
 
         return options;
+    }
+
+    // a WebSocket transport's options, the case's where it gives them, by the names section 15.3 gives
+    private static WebSocketTransportServerOptions WebSocketOptionsOf(JsonElement entry)
+    {
+        var options = new WebSocketTransportServerOptions();
+
+        if (!entry.TryGetProperty("options", out var given))
+        {
+            return options;
+        }
+
+        foreach (var option in given.EnumerateObject())
+        {
+            options = option.Name switch
+            {
+                "maximumMessageBytes" => options with { MaximumMessageBytes = option.Value.GetInt32() },
+                "heartbeat" => options with { Heartbeat = TimeOf(option.Value) },
+                _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
+            };
+        }
+
+        return options;
+    }
+
+    // the router's limits, the case's where it gives them, as conversations.json gives them
+    private static RouterLimits LimitsOf(JsonElement entry)
+    {
+        var limits = RouterLimits.Default;
+
+        if (!entry.TryGetProperty("limits", out var given))
+        {
+            return limits;
+        }
+
+        foreach (var limit in given.EnumerateObject())
+        {
+            var value = limit.Value.GetInt32();
+
+            limits = limit.Name switch
+            {
+                "maximumEnvelopeBytes" => limits with { MaximumEnvelopeBytes = value },
+                "chunkBytes" => limits with { ChunkBytes = value },
+                "windowBytes" => limits with { WindowBytes = value },
+                "maximumTransfers" => limits with { MaximumTransfers = value },
+                "maximumPayloadBytes" => limits with { MaximumPayloadBytes = value },
+                "bufferedBytesBudget" => limits with { BufferedBytesBudget = value },
+                "maximumChunkRuns" => limits with { MaximumChunkRuns = value },
+                "maximumDetailBytes" => limits with { MaximumDetailBytes = value },
+                "transferInactivityTimeout" => limits with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(value) },
+                _ => throw new ArgumentException($"a case sets a limit no test reads: {limit.Name}", nameof(entry)),
+            };
+        }
+
+        return limits;
+    }
+
+    // the server under test, of the case's transport, the interop service offered on it
+    private static Served ServedOf(JsonElement entry)
+    {
+        return entry.GetProperty("transport").GetString() switch
+        {
+            "http" => OverHttp(entry),
+            "websocket" => OverWebSocket(entry),
+            var other => throw new ArgumentException($"a case of a transport no test plays: {other}", nameof(entry)),
+        };
+    }
+
+    // the server layer as HttpServer composes it, built by hand: HttpServer sizes its transport's
+    // body on its router's envelope, where a case bounds the body on its own, as the TypeScript
+    // side's harness does; all else as HttpServer sets it
+    private static Served OverHttp(JsonElement entry)
+    {
+        var transport = new HttpTransportServer(OptionsOf(entry));
+        var server = new Server<string>(transport, new ServerOptions
+        {
+            ConnectionInactivityTimeout = HttpServerOptions.ConnectionInactivityTimeoutDefault,
+            Limits = RouterLimits.WholeEnvelopeOf(LimitsOf(entry)),
+        });
+
+        InteropService.Offer(server);
+
+        return new Served
+        {
+            Clients = () =>
+            {
+                return transport.Clients;
+            },
+            Gauges = transport.Gauges,
+            Router = server.Router,
+            Server = server,
+            Start = async () =>
+            {
+                return (await transport.Start(Loopback, Cancelled)).Port;
+            },
+            Stop = transport.Stop,
+        };
+    }
+
+    // the WebSocket server as the interop server serves it: the case's options on its transport,
+    // its limits on its router
+    private static Served OverWebSocket(JsonElement entry)
+    {
+        var server = new WebSocketServer<string>(new WebSocketServerOptions
+        {
+            Server = new ServerOptions { Limits = LimitsOf(entry) },
+            Transport = WebSocketOptionsOf(entry),
+        });
+        var transport = server.Transport;
+
+        InteropService.Offer(server.Services, (server.Sessions, server.RequireSession, server.Router));
+
+        return new Served
+        {
+            Clients = () =>
+            {
+                return transport.Clients;
+            },
+            Gauges = transport.Gauges,
+            Router = server.Router,
+            Server = server,
+            Start = async () =>
+            {
+                return (await transport.Start(WebSocketLoopback, Cancelled)).Port;
+            },
+            Stop = transport.Stop,
+        };
+    }
+
+    // a frame of the peer's, masked as a client's must be, its payload's length in 7, 16 or 64 bits
+    // as its size needs (RFC 6455, section 5.2)
+    private static byte[] FrameOf((int Opcode, bool IsFinal, byte[] Payload) frame)
+    {
+        var (opcode, isFinal, payload) = frame;
+        var bytes = new List<byte> { (byte)((isFinal ? 0x80 : 0) | opcode) };
+
+        if (payload.Length < 126)
+        {
+            bytes.Add((byte)(0x80 | payload.Length));
+        }
+        else if (payload.Length <= ushort.MaxValue)
+        {
+            var length = new byte[2];
+
+            BinaryPrimitives.WriteUInt16BigEndian(length, (ushort)payload.Length);
+            bytes.Add(0x80 | 126);
+            bytes.AddRange(length);
+        }
+        else
+        {
+            var length = new byte[8];
+
+            BinaryPrimitives.WriteUInt64BigEndian(length, (ulong)payload.Length);
+            bytes.Add(0x80 | 127);
+            bytes.AddRange(length);
+        }
+
+        bytes.AddRange(MaskingKey);
+        bytes.AddRange(payload.Select((octet, index) =>
+        {
+            return (byte)(octet ^ MaskingKey[index % MaskingKey.Length]);
+        }));
+
+        return [.. bytes];
+    }
+
+    // a frame of the server's: its opcode, whether it ends its message, and its payload, unmasked
+    private static async Task<(int Opcode, bool IsFinal, byte[] Payload)> FrameFrom(Reader reader)
+    {
+        var head = await reader.ReadExactly(2);
+        var length = (long)(head[1] & 0x7F);
+
+        if (length == 126)
+        {
+            length = BinaryPrimitives.ReadUInt16BigEndian(await reader.ReadExactly(2));
+        }
+        else if (length == 127)
+        {
+            length = (long)BinaryPrimitives.ReadUInt64BigEndian(await reader.ReadExactly(8));
+        }
+
+        var key = (head[1] & 0x80) == 0 ? null : await reader.ReadExactly(4);
+        var payload = await reader.ReadExactly((int)length);
+
+        for (var index = 0; key is not null && index < payload.Length; index += 1)
+        {
+            payload[index] ^= key[index % key.Length];
+        }
+
+        return (head[0] & 0x0F, (head[0] & 0x80) != 0, payload);
+    }
+
+    // what the server sent on a WebSocket, written as a case writes what it expects: a binary
+    // message as the envelope it holds, where one is expected
+    private static string HeardOf((Heard Heard, string Expected) came)
+    {
+        var (heard, expected) = came;
+
+        return heard.Kind switch
+        {
+            Binary when expected == "envelope" => $"envelope {OutOf(heard.Bytes)}",
+            Binary => $"binary {Convert.ToHexString(heard.Bytes)}",
+            Text => $"text {Encoding.UTF8.GetString(heard.Bytes)}",
+            Closing when heard.Bytes.Length >= 2 => $"close {BinaryPrimitives.ReadUInt16BigEndian(heard.Bytes)}",
+            Closing => "close with no code",
+            Ping => "ping",
+            Pong => "pong",
+            _ => "end",
+        };
     }
 
     // this side's default of a bound the file names, in milliseconds for a time
@@ -329,21 +553,10 @@ public sealed class TransportsTests
         var entry = EntryOf(("cases", name));
         var steps = entry.GetProperty("steps").EnumerateArray().ToList();
 
-        // the server layer as HttpServer composes it, built by hand: HttpServer sizes its transport's
-        // body on its router's envelope, where a case bounds the body on its own, as the TypeScript
-        // side's harness does; all else as HttpServer sets it
-        var transport = new HttpTransportServer(OptionsOf(entry));
-
-        await using var server = new Server<string>(transport, new ServerOptions
-        {
-            ConnectionInactivityTimeout = HttpServerOptions.ConnectionInactivityTimeoutDefault,
-            Limits = RouterLimits.WholeEnvelopeOf(null),
-        });
-
-        InteropService.Offer(server);
+        await using var served = ServedOf(entry);
 
         // dropped before the server stops: the sockets its exchanges went on
-        using var peer = new Peer((server, transport));
+        using var peer = new Peer(served, !entry.TryGetProperty("answersPings", out var answersPings) || answersPings.GetBoolean());
 
         await peer.Start();
 
@@ -423,24 +636,49 @@ public sealed class TransportsTests
         });
     }
 
+    // the server under test, over either transport: its router, how its transport starts — giving
+    // its port — and stops, its gauges and its clients, and the server it lets go of
+    private sealed class Served : IAsyncDisposable
+    {
+        public required Func<IReadOnlyList<TransportServerClient>> Clients { get; init; }
+
+        public required Func<Gauges> Gauges { get; init; }
+
+        public required RouterServer Router { get; init; }
+
+        public required IAsyncDisposable Server { get; init; }
+
+        public required Func<Task<int>> Start { get; init; }
+
+        public required Func<Task> Stop { get; init; }
+
+        public ValueTask DisposeAsync()
+        {
+            return Server.DisposeAsync();
+        }
+    }
+
     // a case played: the server under test, the exchanges a peer of the test's own opened by name,
-    // the values it captured, and what the server reported that no step took yet
+    // the values it captured, and what the server reported that no step took yet, each with the
+    // connection it came with
     private sealed class Peer : IDisposable
     {
-        private readonly HttpTransportServer _transport;
+        private readonly Served _served;
+        private readonly bool _isAnsweringPings;
         private readonly Dictionary<string, Exchange> _exchanges = [];
         private readonly Dictionary<string, string> _captured = [];
-        private readonly ConcurrentQueue<string> _reports = new();
+        private readonly ConcurrentQueue<(string Report, string ConnectionHandle)> _reports = new();
         private int _port;
 
-        public Peer((Server<string> Server, HttpTransportServer Transport) served)
+        public Peer(Served served, bool isAnsweringPings)
         {
-            _transport = served.Transport;
+            _served = served;
+            _isAnsweringPings = isAnsweringPings;
 
             // what the server reports: a failure's code, or an exception, which carries none
-            served.Server.Router.Error += (reason, _) =>
+            served.Router.Error += (reason, connectionHandle) =>
             {
-                _reports.Enqueue(reason is FailureException failure ? failure.Code.ToString(CultureInfo.InvariantCulture) : "exception");
+                _reports.Enqueue((reason is FailureException failure ? failure.Code.ToString(CultureInfo.InvariantCulture) : "exception", connectionHandle));
             };
         }
 
@@ -449,7 +687,7 @@ public sealed class TransportsTests
         {
             var kind = step.EnumerateObject().First((property) =>
             {
-                return property.Name != "on";
+                return property.Name is not "on" and not "within";
             }).Name;
 
             return step.TryGetProperty("on", out var on) ? $"{kind} on {on.GetString()}" : kind;
@@ -457,21 +695,22 @@ public sealed class TransportsTests
 
         public async Task Start()
         {
-            _port = (await _transport.Start(Loopback, Cancelled)).Port;
+            _port = await _served.Start();
         }
 
         public async Task Take(JsonElement step)
         {
             var on = step.TryGetProperty("on", out var named) ? named.GetString()! : "";
+            var wait = step.TryGetProperty("within", out var within) ? TimeOf(within) : Patience;
 
             if (step.TryGetProperty("send", out var send))
             {
                 NothingMore();
-                await Send((send, on));
+                await (send.TryGetProperty("head", out _) ? Send((send, on)) : Write((send, on)));
             }
             else if (step.TryGetProperty("expect", out var expected))
             {
-                await Expect((expected, on));
+                await (expected.TryGetProperty("status", out _) ? Expect((expected, on, wait)) : Hear((expected, on, wait)));
             }
             else if (step.TryGetProperty("close", out _))
             {
@@ -485,7 +724,11 @@ public sealed class TransportsTests
             }
             else if (step.TryGetProperty("report", out var report))
             {
-                await Report(report);
+                await Report((report, on));
+            }
+            else if (step.TryGetProperty("stop", out _))
+            {
+                await _served.Stop().WaitAsync(Patience, Cancelled);
             }
             else
             {
@@ -527,22 +770,53 @@ public sealed class TransportsTests
                 before.Dispose();
             }
 
-            _exchanges[step.On] = await Exchange.Send((_port, [.. Encoding.ASCII.GetBytes(head), .. body]));
+            _exchanges[step.On] = await Exchange.Send((_port, [.. Encoding.ASCII.GetBytes(head), .. body], _isAnsweringPings));
         }
 
-        // the response on an exchange: its head within a patience, then, when the case expects
+        // a message on an exchange that is a WebSocket: binary or text, in one final frame; frames
+        // as given; or a close and its code
+        private async Task Write((JsonElement Message, string On) step)
+        {
+            var (message, on) = step;
+            var exchange = _exchanges[on];
+
+            if (message.TryGetProperty("binary", out var binary))
+            {
+                await exchange.Write((Binary, true, BytesOf(binary.GetString()!)));
+            }
+            else if (message.TryGetProperty("text", out var text))
+            {
+                await exchange.Write((Text, true, Encoding.UTF8.GetBytes(text.GetString()!)));
+            }
+            else if (message.TryGetProperty("frames", out var frames))
+            {
+                foreach (var frame in frames.EnumerateArray())
+                {
+                    await exchange.Write((frame.GetProperty("opcode").GetInt32(), frame.GetProperty("fin").GetBoolean(), BytesOf(frame.GetProperty("payload").GetString()!)));
+                }
+            }
+            else
+            {
+                var code = new byte[2];
+
+                BinaryPrimitives.WriteUInt16BigEndian(code, (ushort)message.GetProperty("close").GetInt32());
+                await exchange.Write((Closing, true, code));
+            }
+        }
+
+        // the response on an exchange: its head within its wait, then, when the case expects
         // anything of it, its body, or that its socket was cut first; each written alike as expected
         // and as it came
-        private async Task Expect((JsonElement Response, string On) step)
+        private async Task Expect((JsonElement Response, string On, TimeSpan Wait) step)
         {
-            var (response, on) = step;
+            var (response, on, wait) = step;
             var exchange = _exchanges[on];
             var expected = new List<string> { $"status {response.GetProperty("status").GetInt32()}" };
             Head head;
 
             try
             {
-                head = await exchange.Head.WaitAsync(Patience, Cancelled);
+                head = await exchange.Head.WaitAsync(wait, Cancelled);
             }
             catch (IOException reason)
             {
@@ -570,19 +844,19 @@ public sealed class TransportsTests
             if (response.TryGetProperty("body", out var body))
             {
                 expected.Add(BodyOf(BytesOf(body.GetString()!)));
-                came.Add(await exchange.BodyWithin() is { } bytes ? BodyOf(bytes) : "body: cut");
+                came.Add(await exchange.BodyWithin(wait) is { } bytes ? BodyOf(bytes) : "body: cut");
             }
 
             if (response.TryGetProperty("envelope", out var envelope))
             {
                 expected.Add(ExpectedOf(envelope));
-                came.Add(await exchange.BodyWithin() is { } bytes ? OutOf(bytes) : "body: cut");
+                came.Add(await exchange.BodyWithin(wait) is { } bytes ? OutOf(bytes) : "body: cut");
             }
 
             if (response.TryGetProperty("batch", out var batch))
             {
                 expected.AddRange(batch.EnumerateArray().Select(ExpectedOf));
-                came.AddRange(await exchange.BodyWithin() is { } bytes ? BatchOf(bytes) : ["body: cut"]);
+                came.AddRange(await exchange.BodyWithin(wait) is { } bytes ? BatchOf(bytes) : ["body: cut"]);
             }
 
             var (wanted, got) = (string.Join("; ", expected), string.Join("; ", came));
@@ -591,6 +865,23 @@ public sealed class TransportsTests
             {
                 Assert.Fail($"expected {wanted}\n    came {got}");
             }
+        }
+
+        // what the server sends next on an exchange that is a WebSocket, within its wait
+        private async Task Hear((JsonElement Heard, string On, TimeSpan Wait) step)
+        {
+            var (heard, on, wait) = step;
+            var expected = heard.EnumerateObject().Single();
+            var wanted = expected.Name switch
+            {
+                "envelope" => $"envelope {ExpectedOf(expected.Value)}",
+                "binary" => $"binary {Convert.ToHexString(BytesOf(expected.Value.GetString()!))}",
+                "close" => $"close {expected.Value.GetInt32()}",
+                _ => expected.Name,
+            };
+            var came = await _exchanges[on].NextWithin(wait);
+
+            Assert.Equal(wanted, came is null ? $"nothing within {wait.TotalMilliseconds} ms" : HeardOf((came, expected.Name)));
         }
 
         // a gauge of the transport, read until it has its value, within a patience
@@ -610,12 +901,13 @@ public sealed class TransportsTests
 
         private long CountOf(string gauge)
         {
-            return _transport.Gauges().Counts[gauge];
+            return _served.Gauges().Counts[gauge];
         }
 
-        // the next report, within a patience
-        private async Task Report(JsonElement report)
+        // the next report, within a patience; on an exchange named, with that exchange's connection
+        private async Task Report((JsonElement Report, string On) step)
         {
+            var (report, on) = step;
             var expected = report.ValueKind == JsonValueKind.Number ? report.GetInt32().ToString(CultureInfo.InvariantCulture) : report.GetString();
             var watch = Stopwatch.StartNew();
 
@@ -624,31 +916,73 @@ public sealed class TransportsTests
                 await Task.Delay(5, Cancelled);
             }
 
-            Assert.Equal($"report {expected}", _reports.TryDequeue(out var came) ? $"report {came}" : "no report");
+            Assert.True(_reports.TryDequeue(out var came), $"expected report {expected}, and nothing was reported");
+            Assert.Equal(
+                on.Length == 0 ? $"report {expected}" : $"report {expected} on {on}",
+                on.Length == 0 ? $"report {came.Report}" : $"report {came.Report} on {ExchangeOf(came.ConnectionHandle)}");
+        }
+
+        // the exchange whose socket a connection came by, as its port says; its handle when none did
+        private string ExchangeOf(string connectionHandle)
+        {
+            var port = _served.Clients().FirstOrDefault((client) =>
+            {
+                return client.ConnectionHandle == connectionHandle;
+            })?.Port;
+
+            return _exchanges.FirstOrDefault((exchange) =>
+            {
+                return exchange.Value.Port == port;
+            }).Key ?? connectionHandle;
         }
     }
 
     /// <summary>A response's head: its status, and its fields by their names in lower case.</summary>
     private sealed record Head(int Status, IReadOnlyDictionary<string, string> Fields);
 
+    /// <summary>What the server sent on a WebSocket: a message whole, a close, a ping or a pong, by its opcode; or its socket's end.</summary>
+    private sealed record Heard(int Kind, byte[] Bytes);
+
     // an exchange: the socket of its own a request went on, and its response, read as it comes —
-    // its head at once, its body after it
+    // its head at once, its body after it; answered 101, a WebSocket, whose frames the peer writes
+    // and hears itself
     private sealed class Exchange : IDisposable
     {
-        private readonly TcpClient _tcp;
+        // a socket's end, which no opcode names
+        private const int Ended = -1;
 
-        private Exchange(TcpClient tcp)
+        private readonly TcpClient _tcp;
+        private readonly NetworkStream _stream;
+        private readonly bool _isAnsweringPings;
+
+        // what the peer writes on it, a frame at a time: its own, and its pongs
+        private readonly SemaphoreSlim _writing = new(1, 1);
+
+        // what the server sent on it once a WebSocket, in the order it came
+        private readonly Channel<Heard> _heard = Channel.CreateUnbounded<Heard>();
+
+        // whether the peer sent its close, which the server's close answers
+        private volatile bool _isClosing;
+
+        private Exchange((TcpClient Tcp, bool IsAnsweringPings) socket)
         {
-            var stream = tcp.GetStream();
+            _tcp = socket.Tcp;
+            _stream = socket.Tcp.GetStream();
+            _isAnsweringPings = socket.IsAnsweringPings;
+            Port = ((IPEndPoint)socket.Tcp.Client.LocalEndPoint!).Port;
+
             var reader = new Reader((buffer) =>
             {
-                return stream.ReadAsync(buffer, Cancelled);
+                return _stream.ReadAsync(buffer, Cancelled);
             });
 
-            _tcp = tcp;
             Head = reader.ReadHead();
             Body = BodyAfter((reader, Head));
+            _ = HearAfter(reader);
         }
+
+        // its own port, which the server sees as its peer's
+        public int Port { get; }
 
         public Task<Head> Head { get; }
 
@@ -656,7 +990,7 @@ public sealed class TransportsTests
 
         // the request's octets written whole, its response read from before they go: a refusal on
         // the head alone comes before the server lets go of the socket
-        public static async Task<Exchange> Send((int Port, byte[] Octets) request)
+        public static async Task<Exchange> Send((int Port, byte[] Octets, bool IsAnsweringPings) request)
         {
             var tcp = new TcpClient();
 
@@ -664,7 +998,7 @@ public sealed class TransportsTests
             {
                 await tcp.ConnectAsync(IPAddress.Loopback, request.Port, Cancelled);
 
-                var exchange = new Exchange(tcp);
+                var exchange = new Exchange((tcp, request.IsAnsweringPings));
 
                 await tcp.GetStream().WriteAsync(request.Octets, Cancelled);
 
@@ -678,14 +1012,51 @@ public sealed class TransportsTests
             }
         }
 
-        // its body within a patience; none when its socket was cut before it came whole
-        public async Task<byte[]?> BodyWithin()
+        // its body within a wait; none when its socket was cut before it came whole
+        public async Task<byte[]?> BodyWithin(TimeSpan wait)
         {
             try
             {
-                return await Body.WaitAsync(Patience, Cancelled);
+                return await Body.WaitAsync(wait, Cancelled);
             }
             catch (IOException)
+            {
+                return null;
+            }
+        }
+
+        // a frame of the peer's, whole, after any other it writes
+        public async Task Write((int Opcode, bool IsFinal, byte[] Payload) frame)
+        {
+            if (frame.Opcode == Closing)
+            {
+                _isClosing = true;
+            }
+
+            await _writing.WaitAsync(Cancelled);
+
+            try
+            {
+                await _stream.WriteAsync(FrameOf(frame), Cancelled);
+            }
+            finally
+            {
+                _writing.Release();
+            }
+        }
+
+        // what the server sent next once a WebSocket, within a wait; none when nothing came
+        public async Task<Heard?> NextWithin(TimeSpan wait)
+        {
+            using var waiting = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+
+            waiting.CancelAfter(wait);
+
+            try
+            {
+                return await _heard.Reader.ReadAsync(waiting.Token);
+            }
+            catch (OperationCanceledException) when (!Cancelled.IsCancellationRequested)
             {
                 return null;
             }
@@ -694,11 +1065,64 @@ public sealed class TransportsTests
         public void Dispose()
         {
             _tcp.Dispose();
+            _writing.Dispose();
         }
 
         private static async Task<byte[]> BodyAfter((Reader Reader, Task<Head> Head) response)
         {
             return await response.Reader.ReadBody(await response.Head);
+        }
+
+        // once answered 101, what the server sends, frame by frame: a message whole, its fragments
+        // put together; a ping, answered with a pong of its payload unless the case leaves it
+        // unanswered; a pong; a close, answered with its code unless the peer closed first; then the
+        // socket's end
+        private async Task HearAfter(Reader reader)
+        {
+            try
+            {
+                if ((await Head).Status != 101)
+                {
+                    return;
+                }
+
+                var message = new List<byte>();
+                var kind = Binary;
+
+                while (true)
+                {
+                    var (opcode, isFinal, payload) = await FrameFrom(reader);
+
+                    if (opcode is Ping or Pong or Closing)
+                    {
+                        _heard.Writer.TryWrite(new Heard(opcode, payload));
+                    }
+
+                    if (opcode == Ping && _isAnsweringPings)
+                    {
+                        await Write((Pong, true, payload));
+                    }
+                    else if (opcode == Closing && !_isClosing)
+                    {
+                        await Write((Closing, true, payload.Length >= 2 ? payload[..2] : []));
+                    }
+                    else if (opcode is Continuation or Text or Binary)
+                    {
+                        kind = opcode == Continuation ? kind : opcode;
+                        message.AddRange(payload);
+
+                        if (isFinal)
+                        {
+                            _heard.Writer.TryWrite(new Heard(kind, [.. message]));
+                            message.Clear();
+                        }
+                    }
+                }
+            }
+            catch (Exception reason) when (reason is IOException or ObjectDisposedException or OperationCanceledException)
+            {
+                _heard.Writer.TryWrite(new Heard(Ended, []));
+            }
         }
     }
 
@@ -799,7 +1223,7 @@ public sealed class TransportsTests
             return bytes;
         }
 
-        private async Task<byte[]> ReadExactly(int count)
+        public async Task<byte[]> ReadExactly(int count)
         {
             while (_came.Count < count)
             {
