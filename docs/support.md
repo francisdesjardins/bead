@@ -49,12 +49,24 @@ The cases are the same on both sides: a payload echoed, a string of the length a
 
 ### The conformance files
 
-| File                      | What it holds                                                                                                                                                      | TypeScript                                                                                           | C#                                                                                                       |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `spec/vectors.json`       | 123 vectors in 9 groups: headers 24, reads 5, prefixes 1, prefix refusals 6, header refusals 53, envelopes 11, envelope refusals 7, failures 9, failure refusals 7 | every group: `router/shared/__tests__/header.test.ts`, `envelope.test.ts`, read through `vectors.ts` | every group: `Bead.Core.Tests/EnvelopeCodecHeaderTests`, `EnvelopeCodecTests`, read through `Vectors.cs` |
-| `spec/conversations.json` | 72 conversations: what a server of the interop service answers, reports, or keeps silent on                                                                        | all 72: `router/server/__tests__/conversations.test.ts` (`the conversations`, a test each)           | all 72: `Bead.Core.Tests/ConversationsTests.Plays`, a case each                                          |
+| File                      | What it holds                                                                                                                                                              | TypeScript                                                                                                          | C#                                                                                                       |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `spec/vectors.json`       | 123 vectors in 9 groups: headers 24, reads 5, prefixes 1, prefix refusals 6, header refusals 53, envelopes 11, envelope refusals 7, failures 9, failure refusals 7         | every group: `router/shared/__tests__/header.test.ts`, `envelope.test.ts`, read through `vectors.ts`                | every group: `Bead.Core.Tests/EnvelopeCodecHeaderTests`, `EnvelopeCodecTests`, read through `Vectors.cs` |
+| `spec/conversations.json` | 84 conversations: what a server of the interop service answers, reports, or keeps silent on, over one connection or several, the relays among them                         | all 84: `router/server/__tests__/conversations.test.ts` (`the conversations`, a test each)                          | all 84: `Bead.Core.Tests/ConversationsTests.Plays`, a case each                                          |
+| `spec/transports.json`    | 38 cases, 30 over HTTP and 8 over WebSocket, two of them on the real clock: what a transport's server does at its edge; the bounds' defaults; 3 responses cut across reads | all 38: `transport/server/__tests__/transports.test.ts` (`the transports`, a test each), its peer in `http-peer.ts` | all 38: `Bead.Transport.Http.Tests/TransportsTests.Plays`, a case each                                   |
 
-The conversations hold a server to them. A client's behaviour is held to the other side by the interop alone.
+The conversations and the transports' cases hold a server to them. A client's behaviour is held to the
+other side by the interop alone, until the transports' file has a client part, by a decision of its own.
+
+What no entry plays stays with each side's twin tests:
+
+- a destination that is a router the relay calls through, with its two legs' limits and the session
+  every requester shares behind it (spec 14.3 and 14.7): `router/server/__tests__/relay.test.ts` and
+  `Bead.Core.Tests/RelayTests`, until a relay across languages comes with the federation of nodes;
+- HTTP/2 and TLS, which both servers serve: open, as the transports' cases play HTTP/1.1 in clear;
+- keep-alive, pipelining and a connection used again, which one socket per exchange leaves out;
+- the transport's contract with its router, its events, its handles and its gauges, which each side's
+  transport tests hold.
 
 ## Differences
 
