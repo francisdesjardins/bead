@@ -382,17 +382,23 @@ test.describe('createTransportClient #reconnect', () => {
     expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
   });
 
-  test('refuses a delay under a millisecond or past the longest a timer waits, ending CLOSED without another attempt, and waits one of a millisecond', async () => {
-    for (const delay of [0.5, 2 ** 31]) {
+  test('refuses a delay under a millisecond or past the longest a timer waits, before "tap" hears it, ending CLOSED without another attempt, and waits one of a millisecond', async () => {
+    for (const [delay, refusal] of [
+      [0.5, 'a delay is a millisecond at least, not 0.5'],
+      [2 ** 31, 'a delay is 2147483647 milliseconds at most, as a timer holds, not 2147483648'],
+    ] as const) {
       const { calls, client } = createStubClient({ failures: 2 });
+      const taps: number[] = [];
+      const tap = (nextDelay: number) => {
+        taps.push(nextDelay);
+      };
 
       await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
-      await expect(client.reconnect({ delay }), String(delay)).rejects.toBeInstanceOf(
-        ProgrammerError
+      await expect(client.reconnect({ delay, tap }), String(delay)).rejects.toThrow(
+        new ProgrammerError(refusal)
       );
 
-      expect(calls).toEqual(['connect:1', 'connect:1']);
-      expect(client.isClosed()).toBe(true);
+      expect([calls, taps, client.isClosed()]).toEqual([['connect:1', 'connect:1'], [], true]);
     }
 
     const clock = createTestClock();

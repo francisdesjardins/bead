@@ -2,11 +2,17 @@
 
 // dependencies
 
-import { type IClock, PLATFORM_CLOCK } from '../shared/clock';
+import { assertHeld, type IClock, LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
 import { RECONNECT_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
-import { ProgrammerError, ReconnectError, toCancelError, wrapReason } from '../shared/errors';
+import {
+  ProgrammerError,
+  ReconnectError,
+  toCancelError,
+  toError,
+  wrapReason,
+} from '../shared/errors';
 import { createEventMethods, createReadyStateMethods } from '../shared/lifecycle';
 import { noop } from '../shared/noop';
 import {
@@ -104,6 +110,20 @@ export const RECONNECT_DEFAULTS = Object.freeze({
 
 // helpers
 
+// a connect's timeout, or a reconnection's delay, as a timer holds it: one of 0 or less, or
+// `Infinity`, never times out, or waits none; any other is one a timer holds, a millisecond at least
+const assertTimer = (name: string, given: number): void => {
+  if (Number.isFinite(given) && given > LONGEST_TIMER) {
+    throw new ProgrammerError(
+      `${name} is ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds, not ${String(given)}`
+    );
+  }
+
+  if (Number.isNaN(given) || given > 0) {
+    assertHeld(name, given);
+  }
+};
+
 const sleep = (
   delay: number,
   { clock, signal }: { clock: IClock; signal: AbortSignal | undefined }
@@ -178,6 +198,13 @@ export const createTransportClient = <
     },
 
     connect: (options) => {
+      // refused here, so by every transport, before anything moves or is kept for a reconnection
+      try {
+        assertTimer("a connect's timeout", options.timeout ?? 0);
+      } catch (reason) {
+        return Promise.reject(toError(reason));
+      }
+
       if (!isAttempting && !client.isUninitialized() && !client.isClosed()) {
         return Promise.reject(
           new ProgrammerError(
@@ -301,6 +328,8 @@ export const createTransportClient = <
             throw wrapReason(ProgrammerError, reason);
           }
 
+          // refused before "tap" hears it
+          assertTimer('a delay', nextDelay);
           tap?.(nextDelay, attempt);
 
           previousDelay = nextDelay;

@@ -58,7 +58,10 @@ public sealed record RouterLimits
     /// <summary>The transfers a connection receives at once; 0 sends and takes none.</summary>
     public int MaximumTransfers { get; init; } = 4;
 
-    /// <summary>How long a transfer waits for its next chunk or credit before it stalls.</summary>
+    /// <summary>
+    /// How long a transfer waits for its next chunk or credit before it stalls, a millisecond at
+    /// least and 2³¹ − 1 ms at most, as a timer holds.
+    /// </summary>
     public TimeSpan TransferInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>How far past the bytes it received, contiguous, a receiver lets its sender send.</summary>
@@ -67,8 +70,9 @@ public sealed record RouterLimits
     /// <summary>
     /// These limits, checked: whole numbers, positive but for the transfers and the detail; an
     /// envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a window of two chunks
-    /// at least; a payload within the budget; a timeout a timer can hold. Throws an
-    /// <see cref="ArgumentException"/> for the first that does not hold.
+    /// at least; a payload within the budget; a transfer's inactivity a timer holds. Throws an
+    /// <see cref="ArgumentException"/> for the first that does not hold, an
+    /// <see cref="ArgumentOutOfRangeException"/> for an inactivity under a millisecond.
     /// </summary>
     public RouterLimits Validate()
     {
@@ -77,17 +81,16 @@ public sealed record RouterLimits
             ("every limit is above 0, but for the transfers and the detail",
                 BufferedBytesBudget > 0 && ChunkBytes > 0 && MaximumChunkRuns > 0
                 && MaximumEnvelopeBytes > 0 && MaximumPayloadBytes > 0 && WindowBytes > 0
-                && MaximumDetailBytes >= 0 && MaximumTransfers >= 0
-                && TransferInactivityTimeout > TimeSpan.Zero),
+                && MaximumDetailBytes >= 0 && MaximumTransfers >= 0),
             ("an envelope is 64 bytes at least", MaximumEnvelopeBytes >= 64),
             ("a chunk's envelope is 64 bytes at least, and an envelope at most",
                 ChunkBytes >= 64 && ChunkBytes <= MaximumEnvelopeBytes),
             ("a window holds two chunks at least, so a sender waits for no credit it is owed",
                 (long)WindowBytes >= 2L * ChunkBytes),
             ("a payload fits in the budget of the transfers received", MaximumPayloadBytes <= BufferedBytesBudget),
-            ("a transfer's inactivity is a millisecond at least", TransferInactivityTimeout >= TimeSpan.FromMilliseconds(1)),
+            // the infinite TimeSpan among them, which no transfer takes
             ($"a transfer's inactivity is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds",
-                TransferInactivityTimeout <= Clocks.LongestTimer),
+                TransferInactivityTimeout <= Clocks.LongestTimer && TransferInactivityTimeout != Timeout.InfiniteTimeSpan),
         ];
 
         foreach (var (rule, holds) in rules)
@@ -97,6 +100,8 @@ public sealed record RouterLimits
                 throw new ArgumentException($"the router's limits do not hold together: {rule}");
             }
         }
+
+        Clocks.AssertHeld("a transfer's inactivity", TransferInactivityTimeout);
 
         return this;
     }

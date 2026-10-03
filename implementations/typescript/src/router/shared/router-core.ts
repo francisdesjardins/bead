@@ -132,8 +132,11 @@ const LIMIT_RULES: readonly { holds: (limits: IRouterLimits) => boolean; rule: s
       rule: 'a payload fits in the budget of the transfers received',
     },
     {
+      // Infinity among them, which no transfer takes; NaN is the floor's to refuse
       holds: ({ transferInactivityTimeout }) => {
-        return transferInactivityTimeout <= LONGEST_TIMER;
+        return (
+          Number.isNaN(transferInactivityTimeout) || transferInactivityTimeout <= LONGEST_TIMER
+        );
       },
       rule: `a transfer's inactivity is ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds`,
     },
@@ -164,8 +167,8 @@ const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMal
 
 /**
  * `given` over {@link LIMIT_DEFAULTS}, where it says nothing. A {@link ProgrammerError} for a limit
- * that is not a whole number — positive, but for the transfers and the detail — or for limits that
- * do not hold together.
+ * that is not a whole number — positive, but for the transfers and the detail — for a transfer's
+ * inactivity under a millisecond, or for limits that do not hold together.
  */
 const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
   const keys = Object.keys(LIMIT_DEFAULTS) as (keyof IRouterLimits)[];
@@ -178,7 +181,11 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
   for (const key of keys) {
     const value = limits[key];
 
-    if (!Number.isSafeInteger(value) || value < (MAY_BE_NONE.has(key) ? 0 : 1)) {
+    // a transfer's inactivity is a timeout, which takes a fraction as every other does: held below
+    if (
+      key !== 'transferInactivityTimeout' &&
+      (!Number.isSafeInteger(value) || value < (MAY_BE_NONE.has(key) ? 0 : 1))
+    ) {
       throw new ProgrammerError(
         `${key} is a whole number${MAY_BE_NONE.has(key) ? '' : ' above 0'}, not ${String(value)}`
       );
@@ -190,6 +197,8 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
       throw new ProgrammerError(`the router's limits do not hold together: ${rule}`);
     }
   }
+
+  assertHeld("a transfer's inactivity", limits.transferInactivityTimeout);
 
   return Object.freeze(limits);
 };

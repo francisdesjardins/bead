@@ -1870,15 +1870,24 @@ public sealed class HttpTransportClientTests
         await using var none = new HttpTransportClient();
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        foreach (var timeout in new[] { TimeSpan.FromMilliseconds(0.5), Clocks.LongestTimer + Millisecond })
+        foreach (var (timeout, refusal) in new[]
         {
-            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            (TimeSpan.FromMilliseconds(0.5), "a connect's timeout is a millisecond at least, not 0.5"),
+            (Clocks.LongestTimer + Millisecond, "a connect's timeout is 2147483647 milliseconds at most, as a timer holds, not 2147483648"),
+        })
+        {
+            Assert.StartsWith(refusal, (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             {
                 return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = timeout }, Cancelled);
-            });
+            })).Message, StringComparison.Ordinal);
         }
 
+        // nothing kept for a reconnection either
         Assert.Equal((ReadyState.Uninitialized, 0), (client.ReadyState, fetch.Count));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        });
         Assert.Equal((time, TimeProvider.System), (client.Clock, none.Clock));
 
         var connecting = client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = Millisecond }, Cancelled);

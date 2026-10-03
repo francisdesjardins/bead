@@ -759,14 +759,22 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     const { FakeWebSocket, sockets: opened } = createFakeWebSocket();
     const client = createWSTransportClient({ clock, WebSocket: FakeWebSocket });
 
-    for (const timeout of [0.5, 2 ** 31]) {
+    for (const [timeout, refusal] of [
+      [0.5, "a connect's timeout is a millisecond at least, not 0.5"],
+      [
+        2 ** 31,
+        "a connect's timeout is 2147483647 milliseconds at most, as a timer holds, not 2147483648",
+      ],
+    ] as const) {
       await expect(
         client.connect({ host: 'h', port: 1, timeout }),
         String(timeout)
-      ).rejects.toBeInstanceOf(ProgrammerError);
+      ).rejects.toThrow(new ProgrammerError(refusal));
     }
 
-    expect([opened, client.isClosed(), client.clock]).toEqual([[], true, clock]);
+    // nothing kept for a reconnection either
+    expect([opened, client.isUninitialized(), client.clock]).toEqual([[], true, clock]);
+    await expect(client.reconnect()).rejects.toThrow('transport was never connected');
 
     for (const timeout of [250, 1]) {
       const connecting = client.connect({ host: 'h', port: 1, timeout });

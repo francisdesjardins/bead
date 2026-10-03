@@ -11,14 +11,13 @@ public sealed class RouterLimitsTests
         { "a window of 0", RouterLimits.Default with { WindowBytes = 0 } },
         { "transfers below 0", RouterLimits.Default with { MaximumTransfers = -1 } },
         { "a detail below 0", RouterLimits.Default with { MaximumDetailBytes = -1 } },
-        { "no inactivity", RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.Zero } },
         { "an envelope of 63 bytes", RouterLimits.Default with { MaximumEnvelopeBytes = 63, ChunkBytes = 63 } },
         { "a chunk of 63 bytes", RouterLimits.Default with { ChunkBytes = 63 } },
         { "a chunk past an envelope", RouterLimits.Default with { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_023 } },
         { "a window of less than two chunks", RouterLimits.Default with { WindowBytes = (2 * LimitDefaults.ChunkBytes) - 1 } },
         { "a payload past the budget", RouterLimits.Default with { BufferedBytesBudget = LimitDefaults.MaximumPayloadBytes - 1 } },
-        { "an inactivity under a millisecond", RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(0.5) } },
         { "an inactivity no timer holds", RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(int.MaxValue + 1L) } },
+        { "an inactivity of never", RouterLimits.Default with { TransferInactivityTimeout = Timeout.InfiniteTimeSpan } },
     };
 
     // definition
@@ -67,6 +66,33 @@ public sealed class RouterLimitsTests
 
         Assert.Same(edges, edges.Validate());
         Assert.Same(shortest, shortest.Validate());
+    }
+
+    // a fraction from a millisecond is taken, as every timeout takes one; -1 ms is .NET's infinite,
+    // so -2 ms stands for a negative
+    [Fact]
+    public void Takes_an_inactivity_with_a_fraction_of_a_millisecond_and_refuses_one_under_a_millisecond_by_the_floor_every_timeout_holds_to()
+    {
+        var fraction = RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(1.5) };
+
+        Assert.Same(fraction, fraction.Validate());
+
+        foreach (var (timeout, written) in new[] { (TimeSpan.FromMilliseconds(0.5), "0.5"), (TimeSpan.Zero, "0"), (TimeSpan.FromMilliseconds(-2), "-2") })
+        {
+            Assert.StartsWith($"a transfer's inactivity is a millisecond at least, not {written}", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return (RouterLimits.Default with { TransferInactivityTimeout = timeout }).Validate();
+            }).Message, StringComparison.Ordinal);
+        }
+
+        // past the longest a timer waits, never among them, it breaks the rule that holds it
+        foreach (var timeout in new[] { Clocks.LongestTimer + TimeSpan.FromMilliseconds(1), Timeout.InfiniteTimeSpan })
+        {
+            Assert.Equal("the router's limits do not hold together: a transfer's inactivity is 2147483647 milliseconds at most, as a timer holds", Assert.Throws<ArgumentException>(() =>
+            {
+                return (RouterLimits.Default with { TransferInactivityTimeout = timeout }).Validate();
+            }).Message);
+        }
     }
 
     [Fact]

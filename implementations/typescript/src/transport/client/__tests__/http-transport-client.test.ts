@@ -530,19 +530,26 @@ test.describe('createHTTPTransportClient', () => {
     expect([client.isClosed(), armed]).toEqual([true, []]);
   });
 
-  test('refuses a connect timeout under a millisecond or past the longest a timer waits, fetching nothing, and times one of a millisecond', async () => {
+  test('refuses a connect timeout under a millisecond or past the longest a timer waits, moving nothing, and times one of a millisecond', async () => {
     const clock = createTestClock();
     const fake = createFakeFetch();
     const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
 
-    for (const timeout of [0.5, 2 ** 31]) {
-      await expect(
-        client.connect({ host, port: 8_080, timeout }),
-        String(timeout)
-      ).rejects.toBeInstanceOf(ProgrammerError);
+    for (const [timeout, refusal] of [
+      [0.5, "a connect's timeout is a millisecond at least, not 0.5"],
+      [
+        2 ** 31,
+        "a connect's timeout is 2147483647 milliseconds at most, as a timer holds, not 2147483648",
+      ],
+    ] as const) {
+      await expect(client.connect({ host, port: 8_080, timeout }), String(timeout)).rejects.toThrow(
+        new ProgrammerError(refusal)
+      );
     }
 
-    expect([fake.calls, client.isClosed()]).toEqual([[], true]);
+    // nothing kept for a reconnection either
+    expect([fake.calls, client.isUninitialized()]).toEqual([[], true]);
+    await expect(client.reconnect()).rejects.toThrow('transport was never connected');
 
     const connecting = client.connect({ host, port: 8_080, timeout: 1 });
 

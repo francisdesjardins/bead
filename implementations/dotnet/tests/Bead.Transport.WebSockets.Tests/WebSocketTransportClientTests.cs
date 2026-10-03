@@ -804,15 +804,24 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        foreach (var timeout in new[] { TimeSpan.FromMilliseconds(0.5), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
+        foreach (var (timeout, refusal) in new[]
         {
-            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            (TimeSpan.FromMilliseconds(0.5), "a connect's timeout is a millisecond at least, not 0.5"),
+            (Clocks.LongestTimer + TimeSpan.FromMilliseconds(1), "a connect's timeout is 2147483647 milliseconds at most, as a timer holds, not 2147483648"),
+        })
+        {
+            Assert.StartsWith(refusal, (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             {
                 return client.Connect(new WebSocketConnectOptions { Host = Host, Port = 1, Timeout = timeout }, Cancelled);
-            });
+            })).Message, StringComparison.Ordinal);
         }
 
+        // nothing kept for a reconnection either
         Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        });
         Assert.Same(time, client.Clock);
         Assert.Same(TimeProvider.System, _client.Clock);
 
@@ -1178,25 +1187,41 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Refuses_a_delay_under_a_millisecond_or_past_the_longest_timer_ending_closed_without_another_attempt_and_waits_one_of_a_millisecond()
+    public async Task Refuses_a_delay_under_a_millisecond_or_past_the_longest_timer_before_its_tap_hears_it_ending_closed_without_another_attempt_and_waits_one_of_a_millisecond()
     {
         var time = new FakeTimeProvider();
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
 
         // 2³¹ ms, one past what JavaScript's timers hold
-        foreach (var delay in new[] { TimeSpan.FromMilliseconds(0.5), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
+        foreach (var (delay, refusal) in new[]
         {
+            (TimeSpan.FromMilliseconds(0.5), "a delay is a millisecond at least, not 0.5"),
+            (Clocks.LongestTimer + TimeSpan.FromMilliseconds(1), "a delay is 2147483647 milliseconds at most, as a timer holds, not 2147483648"),
+        })
+        {
+            var heard = new List<TimeSpan>();
+
             await ConnectRefused(client, listener);
 
-            var refusing = client.Reconnect(new TransportReconnectOptions { Delay = DelayOf(delay) });
+            var refusing = client.Reconnect(new TransportReconnectOptions
+            {
+                Delay = DelayOf(delay),
+                Tap = (tapped, _) =>
+                {
+                    heard.Add(tapped);
+                },
+            });
             var (refused, _) = await listener.Next();
 
             await Listener.Refuse(refused, 503);
-            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            Assert.StartsWith(refusal, (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             {
                 return refusing.WaitAsync(Patience, Cancelled);
-            });
+            })).Message, StringComparison.Ordinal);
+
+            // refused before its tap heard it
+            Assert.Empty(heard);
             Assert.Equal(ReadyState.Closed, client.ReadyState);
             Assert.False(listener.IsPending);
         }

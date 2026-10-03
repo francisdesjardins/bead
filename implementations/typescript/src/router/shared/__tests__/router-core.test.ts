@@ -2637,10 +2637,6 @@ test.describe('createRouterCore', () => {
 
       for (const [limits, named] of [
         [{ chunkBytes: 1_024.5 }, /^chunkBytes is a whole number above 0/],
-        [
-          { transferInactivityTimeout: 0.5 },
-          /^transferInactivityTimeout is a whole number above 0/,
-        ],
         [{ windowBytes: 0 }, /^windowBytes is a whole number above 0/],
         [{ maximumPayloadBytes: Number.NaN }, /^maximumPayloadBytes is a whole number above 0/],
         [{ maximumTransfers: -1 }, /^maximumTransfers is a whole number, not -1/],
@@ -2662,6 +2658,7 @@ test.describe('createRouterCore', () => {
         [{ windowBytes: 2 * 1_048_576 - 1 }, /a window holds two chunks at least/],
         [{ maximumPayloadBytes: 268_435_457 }, /a payload fits in the budget/],
         [{ transferInactivityTimeout: 2 ** 31 }, /2147483647 milliseconds at most/],
+        [{ transferInactivityTimeout: Infinity }, /2147483647 milliseconds at most/],
       ] as const) {
         expect(() => {
           return createRouterCore(port, { limits });
@@ -2681,6 +2678,24 @@ test.describe('createRouterCore', () => {
         });
         using _shortest = createRouterCore(port, { limits: { transferInactivityTimeout: 1 } });
       }).not.toThrow();
+    });
+
+    test("take a transfer's inactivity with a fraction of a millisecond, and refuse one under a millisecond by the floor every timeout holds to", () => {
+      const { port } = createPort();
+
+      expect(() => {
+        using _fraction = createRouterCore(port, { limits: { transferInactivityTimeout: 1.5 } });
+      }).not.toThrow();
+
+      for (const timeout of [0.5, 0, -2, Number.NaN]) {
+        expect(() => {
+          return createRouterCore(port, { limits: { transferInactivityTimeout: timeout } });
+        }, String(timeout)).toThrow(
+          new ProgrammerError(
+            `a transfer's inactivity is a millisecond at least, not ${String(timeout)}`
+          )
+        );
+      }
     });
 
     test('refuse a payload past its own limit, and an envelope past its own', async () => {

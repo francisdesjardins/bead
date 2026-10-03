@@ -183,9 +183,10 @@ export interface IRouterLimits {
    */
   maximumTransfers: number;
   /**
-   * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls; and
-   * how long, at least, a call that received one keeps its call id once it ends — abandoned by the
-   * side that answers, reserved by the requester.
+   * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls, a
+   * millisecond at least and 2³¹ − 1 at most, as a timer holds; and how long, at least, a call that
+   * received one keeps its call id once it ends — abandoned by the side that answers, reserved by
+   * the requester.
    */
   transferInactivityTimeout: number;
   /** How far past the bytes it received, contiguous, a receiver lets its sender send. */
