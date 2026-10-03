@@ -10,6 +10,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Badges in the README: CI on `main`, and the license.
+- The conformance files' steps for time (decision 0011): `advance`, which steps the clock a side is
+  given from due to due, `until` a timer armed on it, `wall`, which moves the wall clock alone, and
+  each file's `wallClock`, where it starts; `spec/check.py` refuses an `advance` that no timer armed
+  precedes.
 - `specVersion` in each conformance file, repeating the version `spec/spec.md` now states, `0.1.0`,
   and when it moves, in decision 0008.
 - JSON Schemas for the conformance files, in `spec/schemas/`.

@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bead's transports' cases, spec/transports.json",
   "type": "object",
-  "required": ["$comment", "specVersion", "defaults", "responses", "cases"],
+  "required": ["$comment", "specVersion", "wallClock", "defaults", "responses", "cases"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "const": "schemas/transports.schema.json" },
     "$comment": { "$ref": "common.schema.json#/$defs/comment" },
     "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
+    "wallClock": { "$ref": "common.schema.json#/$defs/wallClock" },
     "defaults": {
       "description": "The bounds' defaults, as sections 15.3 and 15.12 state them, in milliseconds for a time: each side checks its own against them.",
       "$ref": "#/$defs/bounds",
@@ -143,7 +144,9 @@
         { "required": ["close", "on"] },
         { "required": ["until"] },
         { "required": ["report"] },
-        { "required": ["stop"] }
+        { "required": ["stop"] },
+        { "required": ["advance"] },
+        { "required": ["wall"] }
       ],
       "properties": {
         "on": { "$ref": "#/$defs/exchange" },
@@ -155,12 +158,15 @@
         "send": { "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/message" }] },
         "expect": { "oneOf": [{ "$ref": "#/$defs/expectation" }, { "$ref": "#/$defs/heard" }] },
         "close": { "const": true },
+        "advance": { "$ref": "common.schema.json#/$defs/advance" },
+        "wall": { "$ref": "common.schema.json#/$defs/wall" },
         "until": {
-          "description": "A gauge of the transport, which both sides name alike, and the value it waits for.",
+          "description": "A gauge of the transport, which both sides name alike, and the value it waits for; or a timer armed on the side's given clock.",
           "type": "object",
-          "required": ["gauge", "is"],
+          "oneOf": [{ "required": ["gauge", "is"] }, { "required": ["timer"] }],
           "additionalProperties": false,
           "properties": {
+            "timer": { "$ref": "common.schema.json#/$defs/timer" },
             "gauge": {
               "enum": [
                 "connections",

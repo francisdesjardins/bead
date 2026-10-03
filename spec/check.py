@@ -172,6 +172,22 @@ for case in named['transports']:
         elif case['name'] not in row:
             problems.append(f'transports: {case["name"]!r} crosses the row {crossed["row"]!r}, which does not name it')
 
+# an advance follows a timer armed on the side's clock, since the last send, expect or advance, so the
+# timer it steps to is armed before the clock moves (0011)
+for group in ('conversations', 'transports'):
+    for entry in named[group]:
+        armed = False
+
+        for number, step in enumerate(entry['steps'], 1):
+            if 'advance' in step and not armed:
+                problems.append(f'{group}: {entry["name"]!r}, step {number}, advances with no timer armed since its '
+                                'last send, expect or advance: an until timer comes first')
+
+            if 'until' in step and 'timer' in step['until']:
+                armed = True
+            elif {'send', 'expect', 'advance'} & set(step):
+                armed = False
+
 # a conversation that opens its connections names one, opened already, on every other step; one that
 # opens none plays the one connection opened before its first step, and names none
 for conversation in named['conversations']:

@@ -7,11 +7,13 @@
     "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
     "Before each send and close, and at the end, the server reported nothing a case does not expect.",
+    "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due — it settles the side, takes the earliest timer due within them, sets both readings to its due, fires it, settles, and so on, then sets the readings to their end — and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. limits, where given, are its router's, as in conversations.json.",
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
   "specVersion": "0.1.0",
+  "wallClock": "2026-01-01T00:00:00Z",
   "defaults": {
     "maximumConnections": 10000,
     "maximumConnectionsPerAddress": 64,
