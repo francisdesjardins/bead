@@ -24,10 +24,11 @@ envelopes and what they say, and what a reader refuses with which code; `spec/co
 holds what a server of the interop service, `spec/interop-service.json`, does with what its clients
 send, over one connection or several: the envelopes it answers, what it reports, and the silence it
 keeps; `spec/transports.json` holds what a transport's server does at its edge, over HTTP and over a
-WebSocket: the exchanges and the messages it takes, and what it gives back. Every implementation's
-tests read them from `spec/`, never a copy: an entry one side does not read is one nobody checks.
-Three generators write them, `spec/generators/make_vectors.py`, `make_conversations.py` and
-`make_transports.py`, and regenerating gives the same bytes: nothing drawn at random is in them.
+WebSocket: the exchanges and the messages it takes, and what it gives back; `spec/clocks.json` holds
+what every side's test clock does when a case advances it. Every implementation's tests read them
+from `spec/`, never a copy: an entry one side does not read is one nobody checks. Four generators
+write them, `spec/generators/make_vectors.py`, `make_conversations.py`, `make_transports.py` and
+`make_clocks.py`, and regenerating gives the same bytes: nothing drawn at random is in them.
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
 interop service over WebSocket and over HTTP, and each implementation's client calls every other's
@@ -157,20 +158,22 @@ take it:
 its bytes within a patience. What sends no byte — a listen held, a call id buried, a request waiting
 — is waited on with `until` and one of the gauges both servers name alike: `connections`,
 `addresses`, `bodyBytes`, `listens`, `waitingExchanges`, `buriedCallIds`, `outboxEnvelopes`. Silence
-is asserted only after an `until`, never after a sleep, and `spec/check.py` refuses an `advance`, or
-a send whose outcome turns on an earlier one, that no `expect` or `until` follows since the last
-send. A race a case sets on purpose is one whose outcome is the same in either order, or whose order
-an `until` fixes. A gauge is read, and a refusal is never scripted, because a gauge shows what the
-wire does not — a listen held sends nothing — where a scripted refusal stands in for what the wire
-can show.
+is asserted only after an `until`, never after a sleep, and a send whose outcome turns on an earlier
+one comes after an `expect` or an `until`. A race a case sets on purpose is one whose outcome is the
+same in either order, or whose order an `until` fixes. A gauge is read, and a refusal is never
+scripted, because a gauge shows what the wire does not — a listen held sends nothing — where a
+scripted refusal stands in for what the wire can show.
 
 **A WebSocket's ping plays on the real clock.** Both sides ping and drop a peer that leaves a ping
 unanswered (section 15.3); the C# side's platform times it, which no clock given reaches. A few
 cases are marked as played in real time, at a heartbeat of 200 ms: a ping seen within its bounds,
 and a peer that never answers dropped within its own.
 
-**Time is a step, once every side takes its time from a clock it is given**, by a decision of its
-own. Until it lands, no case depends on `advance`.
+**Time is a step, on the clock every side is given**
+([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). `advance` steps it from due to
+due, and `spec/check.py` refuses one that no `until` a timer armed on it precedes since the last
+send, expect or advance; `wall` moves its wall clock alone, which starts where each file says; and
+`spec/clocks.json` holds both sides' test clocks to that one meaning.
 
 **Each entry cites its units, and a list holds what none cites.** A unit is a clause of
 `spec/spec.md`, `"15.5"`, an item of its numbered list, `"9.2.5"`, or a row of its table counted
@@ -204,8 +207,8 @@ Y, or comes back to it, and Z comes to all of them at once, by a decision that m
 ## Consequences
 
 **Each behaviour is written and tested once per language.** The conformance files take most of that
-cost off the wire: 123 vectors in 9 groups, 84 conversations and 38 transports' cases, which both
-sides play, written once.
+cost off the wire: 123 vectors in 9 groups, 85 conversations, 39 transports' cases and 7 clock
+cases, which both sides play, written once.
 CI's `spec` job regenerates them and fails on any byte that differs, or on any file a generator
 writes that is not committed.
 
@@ -292,7 +295,7 @@ The transports' conformance met the Tenth Man too. Its objections, each with its
 
 | Objection                                                                                                                                             | Answer                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The 409 example is a race, and nothing says when a step over a socket is done or an `advance` may run                                                 | Accepted: the example waits for the first request's head and asks an hour of `slow`; a step is done when its bytes come or a gauge says so, and the check refuses an `advance` or a dependent send that nothing settles.                                                                       |
+| The 409 example is a race, and nothing says when a step over a socket is done or an `advance` may run                                                 | Accepted: the example waits for the first request's head and asks an hour of `slow`; a step is done when its bytes come or a gauge says so, a dependent send comes after what settles it, and the check refuses an `advance` that no timer armed precedes.                                     |
 | The relay example cannot be expected: the schema refuses its relay count, the harnesses disagree, and its client never logs in                        | Accepted: every expected failure gives its relays, 0 on the conversations as they are; `hops` becomes `relays` on both sides; the interop's relay asks for a session, and the example logs in.                                                                                                 |
 | An injected clock on every timer of both sides is an architecture decision, made in a paragraph, and the reach it states is false                     | Accepted: the clock is a decision of its own, with its alternatives and every timer it reaches or leaves; no case depends on `advance` until it lands.                                                                                                                                         |
 | Destinations registered through the harness and a scripted refusal test the router against each harness, and contradict the typed credential's design | Accepted: destinations are registered on the wire, a connection may carry nothing back, `refuse` is dropped, the rows that turn on a transport play in the transports' file, as the typed credential's design now says.                                                                        |

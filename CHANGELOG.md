@@ -36,8 +36,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The WebSocket's cases in `spec/transports.json`, played with frames the peer writes itself: a
   message whole or in fragments, a text message reported, a message past its limit closed 1009, a
   clean close and a stop, and, on the real clock, the ping and the peer that leaves it unanswered.
+- `spec/clocks.json`, its schema and its generator: what every side's test clock does when a case
+  advances it — timers chained in one advance, a periodic timer across its periods, timers due at
+  once, the wall clock moved alone — which both sides play, so that `advance` means one thing in
+  every file (decision 0011).
+- The first cases that advance the clock a server is given: in the transports' file, a call id
+  buried 5 seconds, then handed on; in the conversations, a command past its 10 seconds, its call id
+  reserved as long, an answer within dropped and one after reported `CALL_UNKNOWN`.
+- The `spec` job regenerates `spec/transports.json` and `spec/clocks.json` too.
 
 ### Changed
+
+- Every layer of both sides takes its time from a clock it is given, exposes it, and refuses one
+  that differs from the clock of the layer beneath it (decision 0011): `Clock`, a `TimeProvider`,
+  where the C# side's options said `Time`; `clock`, the part of the globals Bead calls, on the
+  TypeScript side, the platform's by default. What bounds a platform's own close or stop, and a
+  WebSocket's ping, stay on the real clock.
+- A timeout past 2³¹ − 1 milliseconds is refused wherever one is taken, as `LONGEST_TIMER` and
+  `Clocks.LongestTimer` state; never is `Infinity` and `Timeout.InfiniteTimeSpan`, which arm nothing.
+  The TypeScript session manager's `isArmable` goes.
+- A transport server client's last activity is `lastActivity`, milliseconds since the epoch, and
+  `LastActivity`, a `DateTimeOffset`, each read from its clock; its event is `lastActivityChanged`
+  and `LastActivityChanged`, and a session manager's update `updateLastActivity` and
+  `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
+- The banned-API analyzer (RS0030) on the C# side, and oxlint's `no-restricted-globals` and
+  `no-restricted-properties` on the TypeScript side, refuse the platform's clocks and timers; an
+  exception is suppressed where it stands, with its reason.
+- The TypeScript side's tests run on `@sinonjs/fake-timers`' `createClock()`, never installed on the
+  globals, a development dependency; the C# side's harnesses on a clock of their own, which keeps
+  its timers and fires them from due to due over a `FakeTimeProvider`'s readings.
+- Section 15.10 says that a listen's inactivity timeout never reads the wall clock.
 
 - The Tenth Man meets every change to what every language's tests answer to: the spec, its
   conformance files, their shape and their tooling, and the gates the implementations share.

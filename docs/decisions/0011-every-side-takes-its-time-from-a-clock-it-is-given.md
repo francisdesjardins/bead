@@ -71,16 +71,20 @@ session manager's reset and a server's connection timeout among them — and _ne
 **`advance` steps.** It settles the side; takes the earliest timer due by now plus its milliseconds;
 sets both readings to that due; fires it; settles; and so on, then sets the readings to now plus its
 milliseconds. A callback reads its own due, a timer it arms counts from there, and a periodic timer
-fires once for each period crossed, each at its own due. The C# harness steps its `FakeTimeProvider`
-from due to due, from the timers it records; the TypeScript side's test clock is
-`@sinonjs/fake-timers`' `createClock()`, never installed on the globals, and its `tickAsync` steps.
-Both pass one shared table of clock cases: two timers chained in one advance, a periodic timer
-across three periods, a timer armed at its own due.
+fires once for each period crossed, each at its own due. The C# harnesses' test clock keeps the
+timers armed on it and fires them from due to due, a `FakeTimeProvider` giving its readings alone:
+the fake fires a timer due within an advance with its readings at the end already, and timers due at
+once in no order of its own. The TypeScript side's test clock is `@sinonjs/fake-timers`'
+`createClock()`, never installed on the globals, and its `tickAsync` steps. Both pass one shared
+table of clock cases, `spec/clocks.json`: two timers chained in one advance, a periodic timer across
+three periods, timers due at once, the wall clock moved alone. A timer armed for no time is not
+among them: `fake-timers` gives one armed by a callback a millisecond, and Bead arms none on the
+clock it is given.
 
 **An `advance` follows a timer armed.** Each side's test clock counts the timers armed and their
 dues, and `until` waits for "a timer armed, due its milliseconds from now" before an advance:
-`spec/check.py` refuses an `advance` that no such `until` precedes since the last send or expect.
-Bytes and gauges prove what crossed the wire; this proves what the side means to fire.
+`spec/check.py` refuses an `advance` that no such `until` precedes since the last send, expect or
+advance. Bytes and gauges prove what crossed the wire; this proves what the side means to fire.
 
 **The wall clock starts where a file says.** Each conformance file states its start as an RFC 3339
 instant, and both sides' test clocks start there; `advance` moves both readings together, and a step

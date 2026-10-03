@@ -651,8 +651,8 @@ envelopes' worth by default — closes its connection, its client having fallen 
 listen again at once once a listen ends. A listen lost is listened again from where it was: at once,
 then after 1, 2, 4 seconds and on to 30, each wait drawn between half of it and all of it. Its
 inactivity timeout runs from its first loss, on a timer of the client's, never on a reading of its
-clock: when it ends, it ends the wait under way, and the listen after it is the last — lost too, the
-client counts the connection lost. A listen heard ends the count.
+wall clock: when it ends, it ends the wait under way, and the listen after it is the last — lost too,
+the client counts the connection lost. A listen heard ends the count.
 
 15.11. HTTP carries no transfer: a request's body is in before its answer goes, so no credit could
 come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a payload is what one

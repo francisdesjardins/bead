@@ -82,26 +82,30 @@ share, above all `spec/`, which both read in their tests.
 [`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each of
 its sections names the vector groups that check it. Beside it:
 
-| File                                                | What it holds                                                                                                                   |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                 | 123 named vectors in 9 groups: headers and envelopes read and written back to their bytes, and the refusals, each with its code |
-| [`conversations.json`](spec/conversations.json)     | 72 conversations: envelopes in and out of a server, step by step, under the limits and pacing each one sets                     |
-| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, and its procedures                                                                   |
+| File                                                | What it holds                                                                                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`vectors.json`](spec/vectors.json)                 | 123 named vectors in 9 groups: headers and envelopes read and written back to their bytes, and the refusals, each with its code             |
+| [`conversations.json`](spec/conversations.json)     | 85 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets |
+| [`transports.json`](spec/transports.json)           | 39 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                    |
+| [`clocks.json`](spec/clocks.json)                   | 7 clock cases: what every side's test clock does when a case advances it                                                                    |
+| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, and its procedures                                                                               |
 
-Both implementations read these files from `spec/` in their tests; neither keeps a copy. The two
+Both implementations read these files from `spec/` in their tests; neither keeps a copy. Four
 generators write them, and regenerating must give the same bytes:
 
 ```sh
 python spec/generators/make_vectors.py
 python spec/generators/make_conversations.py
+python spec/generators/make_transports.py
+python spec/generators/make_clocks.py
 git diff --exit-code -- spec
 ```
 
 Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repeats the version
-`spec.md` states as its `specVersion`. `spec/check.py` holds both, and that the spec's sections and
-the groups of vectors name each other; then it reports which groups each side's tests read, and
-fails on one a side does not. It runs on Python 3.14, with `jsonschema`, which
-`spec/requirements.txt` locks with every hash:
+`spec.md` states as its `specVersion`. `spec/check.py` holds both, that the spec's sections and the
+groups of vectors name each other, and that every unit an entry cites is the spec's; then it reports
+which groups and files each side's tests read, and fails on one a side does not. It runs on Python
+3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
 
 ```sh
 python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts\Activate.ps1
