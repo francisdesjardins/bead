@@ -942,6 +942,36 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task A_received_call_starts_as_it_arrives_its_admission_and_its_decoding_count_in_its_duration()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+
+        // its admission takes 20 ms, and its callback 10 more
+        var resolver = manager.GetRequestResolver(Echo, Answered(new BeforeRequest((_) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(20));
+
+            return true;
+        })))((request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, DateTimeOffset, TimeSpan?)>(
+            [(DebugDirection.Rx, Started, null), (DebugDirection.Tx, Started, TimeSpan.FromMilliseconds(30))],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
     public async Task A_command_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_manager_says_nothing_else_does()
     {
         var router = new RecordingRouter();

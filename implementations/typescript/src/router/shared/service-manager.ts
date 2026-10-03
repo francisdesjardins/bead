@@ -467,6 +467,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
     const resolver = nameAfter(async (props: IRequestResolverProps<Handle>): Promise<void> => {
       const { connectionHandle, header, signal } = props;
+      // the call starts as it arrives: its admission and its decoding count in its duration
       const started = startedNow();
       const target = { connectionHandle, header };
       // a request is answered once: by its callback, by a refusal, or as failed; the answer sets it,

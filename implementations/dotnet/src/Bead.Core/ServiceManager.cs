@@ -867,6 +867,8 @@ public sealed class ServiceManager
         {
             ArgumentNullException.ThrowIfNull(props);
 
+            // the call starts as it arrives: its admission and its decoding count in its duration
+            var started = manager.StartedNow();
             var target = new AnswerTarget(props.ConnectionHandle, props.Header);
             TRequest payload;
 
@@ -905,8 +907,6 @@ public sealed class ServiceManager
 
                 return;
             }
-
-            var started = manager.StartedNow();
 
             manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { Rx = payload, Started = started });
 

@@ -1047,6 +1047,38 @@ test.describe('createServiceManager', () => {
       ]);
       expect(seen[1]?.info.duration).toBeLessThan(1_000);
     });
+
+    test('a received call starts as it arrives: its admission and its decoding count in its duration', async () => {
+      const start = Date.UTC(2026, 0, 1);
+      const clock = createTestClock(start);
+      const manager = createServiceManager(createFakeRouter('server', clock).router);
+      const seen = recordDebug(manager);
+
+      // its admission takes 20 ms, and its callback 10 more
+      const resolver = manager.getRequestResolver(echo, {
+        beforeRequest: () => {
+          clock.tick(20);
+
+          return true;
+        },
+        serializer: serverSerializer,
+      })(async (request, response) => {
+        await clock.tickAsync(10);
+
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(
+        seen.map(({ info: { direction, duration, startedAt } }) => {
+          return [direction, startedAt, duration];
+        })
+      ).toEqual([
+        ['rx', start, undefined],
+        ['tx', start, 30],
+      ]);
+    });
   });
 
   test.describe('commands', () => {
