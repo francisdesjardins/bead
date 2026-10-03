@@ -24,6 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   own: twelve of them, for section 14. The interop service's `register` and `unregister` register a
   caller's connection as a destination on the wire, and `interop-service.json` states what its
   relay admits.
+- `spec/transports.json`, its schema and its generator: what a server of the interop service does at
+  its HTTP transport's edge, which each side's tests play against their own server with a peer that
+  writes HTTP/1.1 in exact octets, the bounds' defaults each side checks, and responses cut across
+  reads that each side's reader reads alike.
 
 ### Changed
 
@@ -35,6 +39,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A failure's `hops` is `relays` on both sides, the spec's word, and its message says "through N
   relays".
 - Both sides play the conformance files without retry.
+- Section 15.12 names the HTTP transport's bounds in a table, and states the address a server takes
+  from a proxy on its machine it trusts; section 15.3 names `maximumMessageBytes` and `heartbeat`.
+- Section 15.4 says that a connect is of Bead's type, as both servers take it.
 
 ### Fixed
 

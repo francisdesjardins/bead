@@ -558,7 +558,7 @@ where each requester's rights are checked.
 
 ## 15. Transports
 
-_No vector nor conversation: each implementation's transport tests check this section._
+_Transports: `spec/transports.json`._
 
 15.1. A transport carries envelopes between two sides, whole and in order on each connection, and
 tells when a connection opens and when it closes. It reads nothing of an envelope but what this
@@ -571,15 +571,17 @@ that closes ends what was under way on it (sections 9.4, 12.10, 13.7).
 each binary message one envelope. A text message is no envelope: the receiver reports it as
 `ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required.
 
-15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit, it
-closes the connection with 1009. A side SHOULD ping its peer — every 30 seconds by default — and
-close a connection that left a ping unanswered, so a peer gone without a word ends in a close. A
+15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
+`maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
+side SHOULD ping its peer every `heartbeat` — 30 seconds by default — and close a connection that
+left a ping unanswered, so a peer gone without a word ends in a close. A
 side that closes says 1000; a server that stops, 1001. A close with 1000 is the clean one.
 
 ### HTTP
 
-15.4. HTTP's exchanges keep no connection, so the transport draws one. A `POST /bead` with no body
-connects: the server draws 16 bytes from a cryptographic source and answers 201, the token in
+15.4. HTTP's exchanges keep no connection, so the transport draws one. A `POST /bead` with no body,
+of type `application/prs.bead` as every `POST /bead` is, and no token, connects: the server draws 16
+bytes from a cryptographic source and answers 201, the token in
 `bead-connection-token`, in base64url without padding. Each exchange after presents that token in
 the same header, and a `DELETE /bead` ends the connection. The router, the sessions and the relays
 see a connection, as over a socket: a client never presents its session, only its connection's
@@ -654,8 +656,22 @@ client counts the connection lost. A listen heard ends the count.
 come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a payload is what one
 envelope holds.
 
-15.12. A server bounds what its clients hold: its connections, all — 10,000 by default — and per
-address — 64; the requests waiting on one connection — 64 —, and the exchanges under way on it, twice
-that; the bytes of body it reads at once across them all — 256 MiB. Past them it answers 429 or 503,
-as the table says. It takes the hosts a request may name, against a page that rebinds its name to
-the server's address, and the origins a browser's exchange may come from besides its own.
+15.12. A server bounds what its clients hold, and both sides time what is under way, by these names:
+
+| Bound                          | By default                   | Bounds                                                                            |
+| ------------------------------ | ---------------------------- | --------------------------------------------------------------------------------- |
+| `maximumConnections`           | 10,000                       | the connections a server holds, all of them                                       |
+| `maximumConnectionsPerAddress` | 64                           | the connections one address holds                                                 |
+| `maximumWaitingExchanges`      | 64                           | the requests waiting on one connection; the exchanges under way on it, twice that |
+| `bodyBytesBudget`              | 268,435,456                  | the bytes of body a server reads at once, across its exchanges                    |
+| `maximumBodyBytes`             | `maximumEnvelopeBytes`       | a body                                                                            |
+| `maximumOutboxBytes`           | twice `maximumEnvelopeBytes` | what one connection's outbox holds                                                |
+| `maximumWait`                  | 30 s                         | the longest a server holds a listen                                               |
+| `exchangeTimeout`              | 5 min                        | how long an exchange handed on waits for its answer, at both ends                 |
+| `inactivityTimeout`            | 5 min                        | how long a connection with no exchange under way stays                            |
+
+Past the first four it answers 429 or 503, as section 15.6's table says. It takes the hosts a request
+may name, `hosts`, against a page that rebinds its name to the server's address, and the origins a
+browser's exchange may come from besides its own, `origins`. A client's address is its socket's;
+behind a proxy on the same machine, which the server is told to trust, `isProxyTrusted`, it is the
+last entry of the proxy's `X-Forwarded-For`, when that entry is an address.

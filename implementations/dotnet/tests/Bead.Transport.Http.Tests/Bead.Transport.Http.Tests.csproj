@@ -24,4 +24,9 @@
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- the transports' cases: the file both implementations' tests read -->
+    <Content Include="../../../../spec/transports.json" Link="transports.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
