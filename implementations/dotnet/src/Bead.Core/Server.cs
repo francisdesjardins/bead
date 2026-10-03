@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace Bead;
 
 /// <summary>What a server needs of its transport, beyond its router's needs: closing a connection, and stopping.</summary>
@@ -32,8 +30,9 @@ public sealed record ServerOptions
 
     /// <summary>
     /// How long a connection without a session may stay silent before it is closed; infinite when
-    /// none, unless a facade says otherwise. One under a millisecond, or one longer than
-    /// <see cref="Clocks.LongestTimer"/>, is an <see cref="ArgumentOutOfRangeException"/>.
+    /// none, unless a facade says otherwise. One neither infinite nor a whole number of milliseconds
+    /// from 1 to <see cref="Clocks.LongestTimer"/>, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public TimeSpan? ConnectionInactivityTimeout { get; init; }
 
@@ -108,14 +107,7 @@ public sealed class Server<TData> : IAsyncDisposable
 
         // refused here rather than as the first connection opens, where its timer would throw, or
         // close it at once
-        if (_connectionInactivityTimeout <= TimeSpan.Zero && _connectionInactivityTimeout != Timeout.InfiniteTimeSpan)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(options),
-                string.Create(CultureInfo.InvariantCulture, $"a connection's inactivity timeout is above 0, or infinite for never, not {_connectionInactivityTimeout.TotalMilliseconds}"));
-        }
-
-        Clocks.AssertHeld("a connection's inactivity timeout", _connectionInactivityTimeout);
+        Clocks.AssertHeld(("a connection's inactivity timeout", nameof(ServerOptions.ConnectionInactivityTimeout)), _connectionInactivityTimeout);
 
         _clock = Clocks.Of((options?.Clock, transport.Clock), ("a server", "its transport"));
 

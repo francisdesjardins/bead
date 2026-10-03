@@ -13,15 +13,9 @@ import {
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
 } from '../shared/constants';
-import { LONGEST_TIMER, type TimeoutId } from '../shared/clock';
+import { assertHeld, assertHeldFinite, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import {
-  ConnectError,
-  GenericError,
-  ProgrammerError,
-  ReadyStateError,
-  wrapReason,
-} from '../shared/errors';
+import { ConnectError, GenericError, ReadyStateError, wrapReason } from '../shared/errors';
 import { noop } from '../shared/noop';
 import {
   getReadyState,
@@ -183,7 +177,8 @@ const rethrow = (reason: unknown): void => {
 };
 
 // how long to wait before listening again after `losses` listens lost in a row, drawn apart so the
-// clients one restart dropped together come back apart, as EventSource's do
+// clients one restart dropped together come back apart, as EventSource's do; in whole
+// milliseconds, as every wait of Bead's
 const retryDelayOf = (losses: number): number => {
   if (losses === 1) {
     return 0;
@@ -191,20 +186,23 @@ const retryDelayOf = (losses: number): number => {
 
   const delay = Math.min(RETRY_DELAYS.ceiling, RETRY_DELAYS.first * 2 ** (losses - 2));
 
-  return delay / 2 + (Math.random() * delay) / 2;
+  return Math.floor(delay / 2 + (Math.random() * delay) / 2);
 };
 
-// a whole number from 0 a timer holds; or, when it may be, Infinity
+// a bound of the listens, which 0 gives a meaning of its own: lost, listened again or answered at
+// once; `Infinity`, only where it may be
 const assertDelay = (
   name: string,
   { isUnbounded = false, value }: { isUnbounded?: boolean; value: number }
 ): void => {
-  const isHeld = Number.isInteger(value) && value >= 0 && value <= LONGEST_TIMER;
+  if (value === 0) {
+    return;
+  }
 
-  if (!isHeld && !(isUnbounded && value === Infinity)) {
-    throw new ProgrammerError(
-      `${name} is a whole number from 0 a timer holds${isUnbounded ? ', or Infinity' : ''}, not ${String(value)}`
-    );
+  if (isUnbounded) {
+    assertHeld(name, value);
+  } else {
+    assertHeldFinite(name, value);
   }
 };
 

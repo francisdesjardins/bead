@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createPromise } from '../create-promise';
 import { CancelError, ConnectError, GenericError, ProgrammerError, TimeoutError } from '../errors';
-import { createTestClock } from './fixtures';
+import { createTestClock, delaysOn, durationsOf } from './fixtures';
 
 const activeTimeouts = () => {
   return process.getActiveResourcesInfo().filter((resource) => {
@@ -78,22 +78,29 @@ test.describe('createPromise', () => {
     await expect(pending).rejects.toHaveProperty('timeout', 50);
   });
 
-  test('refuses a delay, or a timeout and its delay together, past the longest a timer waits, never running the executor', async () => {
+  test('refuses a delay or a timeout past the longest a timer waits, or the two together, never running the executor', async () => {
     const clock = createTestClock();
     let ran = false;
     const run = () => {
       ran = true;
     };
 
-    for (const options of [
-      { delay: 2 ** 31 },
-      { timeout: 2 ** 31 },
-      { delay: 2 ** 30, timeout: 2 ** 30 },
-    ]) {
+    for (const [options, refusal] of [
+      [
+        { delay: 2 ** 31 },
+        'a delay is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648',
+      ],
+      [
+        { timeout: 2 ** 31 },
+        'a timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648',
+      ],
+      [
+        { delay: 2 ** 30, timeout: 2 ** 30 },
+        'a timer waits 2147483647 milliseconds at most, a timeout and its delay together, not 2147483648',
+      ],
+    ] as const) {
       await expect(createPromise(run, { clock, ...options })).rejects.toThrow(
-        new ProgrammerError(
-          'a timer waits 2147483647 milliseconds at most, a timeout and its delay together, not 2147483648'
-        )
+        new ProgrammerError(refusal)
       );
     }
 
@@ -106,36 +113,33 @@ test.describe('createPromise', () => {
     expect(ran).toBe(true);
   });
 
-  test('refuses a delay or a timeout under a millisecond, or not a number, never running the executor, and arms one of a millisecond', async () => {
-    const clock = createTestClock();
-    let ran = false;
-    const run = () => {
-      ran = true;
-    };
+  test('holds a delay and a timeout to a whole number of milliseconds, 0 and Infinity none, never running the executor for one refused', async () => {
+    for (const name of ['delay', 'timeout'] as const) {
+      for (const { given, outcome, refusal } of durationsOf(`a ${name}`, {
+        never: 'own',
+        zero: 'own',
+      })) {
+        const clock = createTestClock();
+        let ran = false;
+        const pending = createPromise(
+          () => {
+            ran = true;
+          },
+          { clock, [name]: given }
+        );
+        const label = `${name} ${String(given)}`;
 
-    for (const [name, value] of [
-      ['delay', 0.5],
-      ['delay', Number.NaN],
-      ['timeout', 0.5],
-      ['timeout', Number.NaN],
-    ] as const) {
-      await expect(createPromise(run, { clock, [name]: value })).rejects.toThrow(
-        new ProgrammerError(`a ${name} is a millisecond at least, not ${String(value)}`)
-      );
+        if (outcome === 'refused') {
+          await expect(pending, label).rejects.toThrow(new ProgrammerError(refusal));
+          expect([ran, clock.armed], label).toEqual([false, []]);
+        } else {
+          // a delay held waits before it runs the executor; a timeout held, and none, run it at once
+          expect([ran, delaysOn(clock)], label).toEqual(
+            outcome === 'taken' ? [name === 'timeout', [given]] : [true, []]
+          );
+        }
+      }
     }
-
-    expect([ran, clock.armed]).toEqual([false, []]);
-
-    // a millisecond is armed, and 0 or less is none
-    void createPromise(run, { clock, delay: 1, timeout: 1 });
-    void createPromise(run, { clock, delay: -1, timeout: 0 });
-
-    expect([
-      ran,
-      clock.armed.map(({ delay }) => {
-        return delay;
-      }),
-    ]).toEqual([true, [2, 1]]);
   });
 
   test('rejects with a TimeoutError that names its timeout', async () => {

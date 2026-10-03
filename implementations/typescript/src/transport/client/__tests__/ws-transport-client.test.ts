@@ -7,6 +7,7 @@ import {
   dispose,
   type ITransportClient,
   type ITransportClientInternal,
+  LONGEST_TIMER,
   ProgrammerError,
   ReadyState,
   ReadyStateError,
@@ -20,6 +21,7 @@ import {
   allClosed,
   closedPort,
   createTestClock,
+  durationsOf,
   host,
   IMPLEMENTATIONS,
   portOf,
@@ -754,39 +756,55 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     expect(closes).toEqual([[false, false]]);
   });
 
-  test('times its connect on its clock, a millisecond at least, and refuses a timeout under a millisecond or past the longest a timer waits, opening nothing', async () => {
-    const clock = createTestClock();
-    const { FakeWebSocket, sockets: opened } = createFakeWebSocket();
-    const client = createWSTransportClient({ clock, WebSocket: FakeWebSocket });
+  test('holds its connect’s timeout to a whole number of milliseconds on its clock, 0 and Infinity never timing out, refusing any other and opening nothing', async () => {
+    for (const { given, outcome, refusal } of durationsOf("a connect's timeout", {
+      never: 'taken',
+      zero: 'own',
+    })) {
+      const clock = createTestClock();
+      const { FakeWebSocket, sockets: opened } = createFakeWebSocket();
+      const client = createWSTransportClient({ clock, WebSocket: FakeWebSocket });
+      const controller = new AbortController();
+      const label = String(given);
+      let isSettled = false;
+      const connecting = client
+        .connect({ host: 'h', port: 1, signal: controller.signal, timeout: given })
+        .catch((reason: unknown) => {
+          return reason;
+        })
+        .finally(() => {
+          isSettled = true;
+        });
 
-    for (const [timeout, refusal] of [
-      [0.5, "a connect's timeout is a millisecond at least, not 0.5"],
-      [
-        2 ** 31,
-        "a connect's timeout is 2147483647 milliseconds at most, as a timer holds, not 2147483648",
-      ],
-    ] as const) {
-      await expect(
-        client.connect({ host: 'h', port: 1, timeout }),
-        String(timeout)
-      ).rejects.toThrow(new ProgrammerError(refusal));
-    }
+      if (outcome === 'refused') {
+        expect(await connecting, label).toEqual(new ProgrammerError(refusal));
+        // nothing moved, and nothing is kept for a reconnection
+        expect([opened, client.isUninitialized()], label).toEqual([[], true]);
+        await expect(client.reconnect(), label).rejects.toThrow('transport was never connected');
 
-    // nothing kept for a reconnection either
-    expect([opened, client.isUninitialized(), client.clock]).toEqual([[], true, clock]);
-    await expect(client.reconnect()).rejects.toThrow('transport was never connected');
+        continue;
+      }
 
-    for (const timeout of [250, 1]) {
-      const connecting = client.connect({ host: 'h', port: 1, timeout });
+      // a duration held times the connect out once it passed; 0 and Infinity wait on past the longest
+      if (Number.isFinite(given) && given > 0) {
+        await clock.tickAsync(given - 1);
 
-      clock.tick(timeout - 1);
+        expect(client.isConnecting(), label).toBe(true);
 
-      expect(client.isConnecting()).toBe(true);
+        await clock.tickAsync(1);
 
-      clock.tick(1);
+        expect(await connecting, label).toBeInstanceOf(TimeoutError);
+      } else {
+        await clock.tickAsync(LONGEST_TIMER);
 
-      await expect(connecting).rejects.toBeInstanceOf(TimeoutError);
-      expect(client.isClosed()).toBe(true);
+        expect([isSettled, client.isConnecting()], label).toEqual([false, true]);
+
+        controller.abort();
+
+        expect(await connecting, label).toBeInstanceOf(CancelError);
+      }
+
+      expect(client.isClosed(), label).toBe(true);
     }
   });
 

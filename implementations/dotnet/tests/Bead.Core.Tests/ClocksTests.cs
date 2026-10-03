@@ -148,27 +148,55 @@ public sealed class ClocksTests
 
     // -1 ms is .NET's infinite, so -2 ms stands for a negative; a TimeSpan holds no NaN
     [Fact]
-    public void Its_ceiling_is_2_31_minus_1_milliseconds_and_its_floor_a_millisecond_beyond_which_a_timeout_is_refused_and_never_is_infinite()
+    public void Holds_a_duration_to_a_whole_number_of_milliseconds_from_1_to_2_31_minus_1_or_never_where_never_has_a_meaning_refusing_any_other_in_one_message()
     {
         Assert.Equal(TimeSpan.FromMilliseconds(2_147_483_647), Clocks.LongestTimer);
 
-        foreach (var timeout in new[] { TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1.5), Clocks.LongestTimer, Timeout.InfiniteTimeSpan })
+        var holds = new (Action<TimeSpan> Hold, DurationOutcome Never)[]
         {
-            Clocks.AssertHeld("a timeout", timeout);
-        }
-
-        Assert.StartsWith("a timeout is 2147483647 milliseconds at most, or infinite for never, not 2147483648", Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            Clocks.AssertHeld("a timeout", Clocks.LongestTimer + TimeSpan.FromMilliseconds(1));
-        }).Message, StringComparison.Ordinal);
-
-        foreach (var (timeout, written) in new[] { (TimeSpan.FromMilliseconds(0.5), "0.5"), (TimeSpan.Zero, "0"), (TimeSpan.FromMilliseconds(-2), "-2") })
-        {
-            Assert.StartsWith($"a timeout is a millisecond at least, not {written}", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ((duration) =>
             {
-                Clocks.AssertHeld("a timeout", timeout);
-            }).Message, StringComparison.Ordinal);
+                Clocks.AssertHeld(("a timeout", "Timeout"), duration);
+            }, DurationOutcome.Taken),
+            ((duration) =>
+            {
+                Clocks.AssertHeldFinite(("a timeout", "Timeout"), duration);
+            }, DurationOutcome.Refused),
+        };
+
+        foreach (var (hold, never) in holds)
+        {
+            foreach (var (given, outcome, refusal) in Durations.Of("a timeout", (DurationOutcome.Refused, never)))
+            {
+                if (outcome == DurationOutcome.Refused)
+                {
+                    var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        hold(given);
+                    });
+
+                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.Equal("Timeout", refused.ParamName);
+                }
+                else
+                {
+                    hold(given);
+                }
+            }
         }
+    }
+
+    // a platform's difference: -1 ms is .NET's infinite, Timeout.InfiniteTimeSpan, where the
+    // TypeScript side's twin reads -1 as a number under a millisecond, and refuses it
+    [Fact]
+    public void A_duration_of_minus_1_ms_is_refused_on_the_TypeScript_side_and_never_on_the_CSharp_side()
+    {
+        Assert.Equal(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(-1));
+        Clocks.AssertHeld(("a timeout", "Timeout"), TimeSpan.FromMilliseconds(-1));
+        Assert.StartsWith("a timeout is a whole number of milliseconds from 1 to 2147483647, not infinite", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            Clocks.AssertHeldFinite(("a timeout", "Timeout"), TimeSpan.FromMilliseconds(-1));
+        }).Message, StringComparison.Ordinal);
     }
 
     // the test clock: what Bead never arms fails a test, on the TypeScript side's test clock as on

@@ -15,7 +15,7 @@ import { createServiceManager } from '../router/shared/service-manager';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import { assertHeld, clockOf, type TimeoutId } from '../transport/shared/clock';
 import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT } from '../transport/shared/constants';
-import { ProgrammerError, toError } from '../transport/shared/errors';
+import { toError } from '../transport/shared/errors';
 import { gaugesOf } from '../transport/shared/gauges';
 import type { Data as TransportData } from '../transport/shared/types';
 import { healthOf, layerGaugesOf, type ServerGauges } from './health';
@@ -121,12 +121,6 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
 
   // refused as it is built, as a transfer's inactivity is, rather than a timer armed for no time,
   // which the platforms do not wait alike
-  if (!(connectionInactivityTimeout > 0)) {
-    throw new ProgrammerError(
-      `a connection's inactivity timeout is above 0, or Infinity for never, not ${String(connectionInactivityTimeout)}`
-    );
-  }
-
   assertHeld("a connection's inactivity timeout", connectionInactivityTimeout);
 
   const sessions = createSessions({ clock });

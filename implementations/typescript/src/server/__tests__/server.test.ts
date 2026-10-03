@@ -9,7 +9,8 @@ import { createServiceManager } from '../../router/shared/service-manager';
 import type { IRouterServerOptions } from '../../router/server/types';
 import type { Envelope, IProcedure, IServiceManagerOptions } from '../../router/shared/types';
 import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
-import { createTestClock, delaysOn } from '../../transport/shared/__tests__/fixtures';
+import { createTestClock, delaysOn, durationsOf } from '../../transport/shared/__tests__/fixtures';
+import { LONGEST_TIMER } from '../../transport/shared/clock';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
@@ -794,61 +795,51 @@ test.describe('createServer', () => {
     ).toEqual([0, 0, 0]);
   });
 
-  test('an inactivity timeout not above 0 refuses the server, which leaves nothing on its transport', () => {
-    for (const timeout of [-2_000, 0]) {
-      const { emitter, transport } = createScriptedTransport();
+  test('holds an inactivity timeout to a whole number of milliseconds as it is built, refusing 0, leaving nothing on its transport for one refused', async () => {
+    for (const { given, outcome, refusal } of durationsOf("a connection's inactivity timeout", {
+      never: 'taken',
+      zero: 'refused',
+    })) {
+      const clock = createTestClock();
+      const { emitter, transport, ...silent } = createScriptedTransport();
+      const label = String(given);
 
-      expect(() => {
-        return createServer({ transport }, { connectionInactivityTimeout: timeout });
-      }).toThrow(
-        new ProgrammerError(
-          `a connection's inactivity timeout is above 0, or Infinity for never, not ${String(timeout)}`
-        )
+      if (outcome === 'refused') {
+        expect(() => {
+          return createServer({ transport }, { connectionInactivityTimeout: given });
+        }, label).toThrow(new ProgrammerError(refusal));
+        expect(
+          (['close', 'connection', 'message'] as const).map((event) => {
+            return emitter.listenerCount(event);
+          }),
+          label
+        ).toEqual([0, 0, 0]);
+
+        continue;
+      }
+
+      await using _server = createServer(
+        { transport },
+        { clock, connectionInactivityTimeout: given }
       );
-      expect(
-        (['close', 'connection', 'message'] as const).map((event) => {
-          return emitter.listenerCount(event);
-        })
-      ).toEqual([0, 0, 0]);
+
+      silent.open(first);
+
+      // a silent connection closes at its due; never, at none
+      if (Number.isFinite(given)) {
+        clock.tick(given - 1);
+
+        expect(silent.closed, label).toEqual([]);
+
+        clock.tick(1);
+
+        expect(silent.closed, label).toEqual([first]);
+      } else {
+        clock.tick(LONGEST_TIMER);
+
+        expect(silent.closed, label).toEqual([]);
+      }
     }
-  });
-
-  test('an inactivity timeout under a millisecond or past the longest a timer waits refuses the server, which leaves nothing on its transport; one of a millisecond closes at its due', async () => {
-    const { emitter, transport } = createScriptedTransport();
-
-    for (const [timeout, refusal] of [
-      [
-        2 ** 31,
-        "a connection's inactivity timeout is 2147483647 milliseconds at most, or Infinity for never, not 2147483648",
-      ],
-      [0.5, "a connection's inactivity timeout is a millisecond at least, not 0.5"],
-    ] as const) {
-      expect(() => {
-        return createServer({ transport }, { connectionInactivityTimeout: timeout });
-      }).toThrow(new ProgrammerError(refusal));
-    }
-
-    expect(
-      (['close', 'connection', 'message'] as const).map((event) => {
-        return emitter.listenerCount(event);
-      })
-    ).toEqual([0, 0, 0]);
-
-    const clock = createTestClock();
-    const silent = createScriptedTransport();
-
-    await using _server = createServer(
-      { transport: silent.transport },
-      { clock, connectionInactivityTimeout: 1 }
-    );
-
-    silent.open(first);
-
-    expect(delaysArmed(clock)).toEqual([1]);
-
-    clock.tick(1);
-
-    expect(silent.closed).toEqual([first]);
   });
 
   test("runs every layer on its transport's clock: the sessions are built with it, and a layer on another is refused, leaving nothing on its transport", async () => {

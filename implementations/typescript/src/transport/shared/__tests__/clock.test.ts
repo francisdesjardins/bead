@@ -1,7 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
-import { assertHeld, clockOf, type IClock, LONGEST_TIMER, PLATFORM_CLOCK } from '../clock';
+import {
+  assertHeld,
+  assertHeldFinite,
+  clockOf,
+  type IClock,
+  LONGEST_TIMER,
+  PLATFORM_CLOCK,
+} from '../clock';
 import { ProgrammerError } from '../errors';
+import { durationsOf } from './fixtures';
 
 test.describe('the clock', () => {
   test("the platform's is the globals themselves", () => {
@@ -31,30 +39,64 @@ test.describe('the clock', () => {
     expect(Date.now).toBe(now);
   });
 
-  test('its ceiling is 2³¹ − 1 milliseconds and its floor a millisecond, beyond which a timeout is refused, and never is Infinity', () => {
+  test('holds a duration to a whole number of milliseconds from 1 to 2³¹ − 1, or never where never has a meaning, refusing any other in one message', () => {
     expect(LONGEST_TIMER).toBe(2_147_483_647);
 
-    expect(() => {
-      assertHeld('a timeout', 1);
-      assertHeld('a timeout', 1.5);
-      assertHeld('a timeout', LONGEST_TIMER);
-      assertHeld('a timeout', Infinity);
-    }).not.toThrow();
-    expect(() => {
-      assertHeld('a timeout', LONGEST_TIMER + 1);
-    }).toThrow(
-      new ProgrammerError(
-        'a timeout is 2147483647 milliseconds at most, or Infinity for never, not 2147483648'
-      )
-    );
+    for (const [hold, never] of [
+      [assertHeld, 'taken'],
+      [assertHeldFinite, 'refused'],
+    ] as const) {
+      for (const { given, outcome, refusal } of durationsOf('a timeout', {
+        never,
+        zero: 'refused',
+      })) {
+        const holding = (): void => {
+          hold('a timeout', given);
+        };
 
-    for (const timeout of [0.5, 0, -1, Number.NaN]) {
+        if (outcome === 'refused') {
+          expect(holding, `${hold.name} ${String(given)}`).toThrow(new ProgrammerError(refusal));
+        } else {
+          expect(holding, `${hold.name} ${String(given)}`).not.toThrow();
+        }
+      }
+    }
+  });
+
+  test('refuses what is not a number at all, as a limit read from JSON may be, a string written in its quotes', () => {
+    for (const [given, written] of [
+      ['1000', '"1000"'],
+      [true, 'true'],
+      [null, 'null'],
+      [{}, '[object Object]'],
+    ] as const) {
       expect(() => {
-        assertHeld('a timeout', timeout);
-      }).toThrow(
-        new ProgrammerError(`a timeout is a millisecond at least, not ${String(timeout)}`)
+        assertHeld('a timeout', given);
+      }, written).toThrow(
+        new ProgrammerError(
+          `a timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not ${written}`
+        )
       );
     }
+  });
+
+  // a platform's difference: -1 here is a number under a millisecond, where .NET's -1 ms is its
+  // infinite, `Timeout.InfiniteTimeSpan`, which the C# side's twin takes as never
+  test('a duration of -1 ms is refused on the TypeScript side, and never on the C# side', () => {
+    expect(() => {
+      assertHeld('a timeout', -1);
+    }).toThrow(
+      new ProgrammerError(
+        'a timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not -1'
+      )
+    );
+    expect(() => {
+      assertHeldFinite('a timeout', -1);
+    }).toThrow(
+      new ProgrammerError(
+        'a timeout is a whole number of milliseconds from 1 to 2147483647, not -1'
+      )
+    );
   });
 
   test('a layer runs on the clock of the one beneath it, unless given one, and refuses one that differs, naming both', () => {

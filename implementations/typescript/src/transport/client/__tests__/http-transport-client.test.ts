@@ -7,13 +7,20 @@ import {
 } from '../../server/http-transport-server';
 import type { TransportServerConnectionHandle } from '../../server/types';
 import {
+  CancelError,
   ConnectError,
   GenericError,
   ProgrammerError,
   ReadyStateError,
   TimeoutError,
 } from '../../shared/errors';
-import { createTestClock, tcpSocketsClosed, timersUntil } from '../../shared/__tests__/fixtures';
+import { LONGEST_TIMER } from '../../shared/clock';
+import {
+  createTestClock,
+  durationsOf,
+  tcpSocketsClosed,
+  timersUntil,
+} from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -530,33 +537,56 @@ test.describe('createHTTPTransportClient', () => {
     expect([client.isClosed(), armed]).toEqual([true, []]);
   });
 
-  test('refuses a connect timeout under a millisecond or past the longest a timer waits, moving nothing, and times one of a millisecond', async () => {
-    const clock = createTestClock();
-    const fake = createFakeFetch();
-    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+  test('holds its connect’s timeout to a whole number of milliseconds on its clock, 0 and Infinity never timing out, refusing any other and moving nothing', async () => {
+    for (const { given, outcome, refusal } of durationsOf("a connect's timeout", {
+      never: 'taken',
+      zero: 'own',
+    })) {
+      const clock = createTestClock();
+      const fake = createFakeFetch();
+      const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+      const controller = new AbortController();
+      const label = String(given);
+      let isSettled = false;
+      const connecting = client
+        .connect({ host, port: 8_080, signal: controller.signal, timeout: given })
+        .catch((reason: unknown) => {
+          return reason;
+        })
+        .finally(() => {
+          isSettled = true;
+        });
 
-    for (const [timeout, refusal] of [
-      [0.5, "a connect's timeout is a millisecond at least, not 0.5"],
-      [
-        2 ** 31,
-        "a connect's timeout is 2147483647 milliseconds at most, as a timer holds, not 2147483648",
-      ],
-    ] as const) {
-      await expect(client.connect({ host, port: 8_080, timeout }), String(timeout)).rejects.toThrow(
-        new ProgrammerError(refusal)
-      );
+      if (outcome === 'refused') {
+        expect(await connecting, label).toEqual(new ProgrammerError(refusal));
+        // nothing moved, and nothing is kept for a reconnection
+        expect([fake.calls, client.isUninitialized()], label).toEqual([[], true]);
+        await expect(client.reconnect(), label).rejects.toThrow('transport was never connected');
+
+        continue;
+      }
+
+      // a duration held times the connect out once it passed; 0 and Infinity wait on past the longest
+      if (Number.isFinite(given) && given > 0) {
+        await clock.tickAsync(given - 1);
+
+        expect(client.isConnecting(), label).toBe(true);
+
+        await clock.tickAsync(1);
+
+        expect(await connecting, label).toBeInstanceOf(TimeoutError);
+      } else {
+        await clock.tickAsync(LONGEST_TIMER);
+
+        expect([isSettled, client.isConnecting()], label).toEqual([false, true]);
+
+        controller.abort();
+
+        expect(await connecting, label).toBeInstanceOf(CancelError);
+      }
+
+      expect(client.isClosed(), label).toBe(true);
     }
-
-    // nothing kept for a reconnection either
-    expect([fake.calls, client.isUninitialized()]).toEqual([[], true]);
-    await expect(client.reconnect()).rejects.toThrow('transport was never connected');
-
-    const connecting = client.connect({ host, port: 8_080, timeout: 1 });
-
-    clock.tick(1);
-
-    await expect(connecting).rejects.toBeInstanceOf(TimeoutError);
-    expect(client.isClosed()).toBe(true);
   });
 
   test('settles its send on the head of the answer, before its body is in, and hears the answer once it is', async () => {
@@ -1283,28 +1313,24 @@ test.describe('createHTTPTransportClient, listening', () => {
     await client.disconnect({ isQuick: true });
   });
 
-  test('refuses a wait, a pause or an inactivity timeout no timer holds', () => {
-    for (const option of ['inactivityTimeout', 'pause', 'wait'] as const) {
-      for (const value of [-1, 0.5, 1.5, 2 ** 31, Number.NaN]) {
-        expect(
-          () => {
-            return createHTTPTransportClient({ [option]: value });
-          },
-          `${option} ${String(value)}`
-        ).toThrow(ProgrammerError);
+  test('holds a wait, a pause and an inactivity timeout to a whole number of milliseconds, 0 its own for each, Infinity for the inactivity timeout alone', () => {
+    for (const [option, never] of [
+      ['inactivityTimeout', 'taken'],
+      ['pause', 'refused'],
+      ['wait', 'refused'],
+    ] as const) {
+      for (const { given, outcome, refusal } of durationsOf(option, { never, zero: 'own' })) {
+        const building = () => {
+          return createHTTPTransportClient({ [option]: given });
+        };
+
+        if (outcome === 'refused') {
+          expect(building, `${option} ${String(given)}`).toThrow(new ProgrammerError(refusal));
+        } else {
+          expect(building, `${option} ${String(given)}`).not.toThrow();
+        }
       }
     }
-
-    expect(() => {
-      createHTTPTransportClient({ inactivityTimeout: Infinity, pause: 0, wait: 0 });
-      createHTTPTransportClient({ inactivityTimeout: 1, pause: 1, wait: 1 });
-    }).not.toThrow();
-    expect(() => {
-      return createHTTPTransportClient({ wait: Infinity });
-    }).toThrow('wait is a whole number from 0 a timer holds, not Infinity');
-    expect(() => {
-      return createHTTPTransportClient({ pause: 0.5 });
-    }).toThrow('pause is a whole number from 0 a timer holds, not 0.5');
   });
 
   test('says nothing of listening, and never listens, when told not to', async () => {

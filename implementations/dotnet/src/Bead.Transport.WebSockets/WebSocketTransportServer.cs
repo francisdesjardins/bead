@@ -31,10 +31,11 @@ public sealed record WebSocketTransportServerOptions
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// How long a close handshake may take: a peer that never answers is dropped after it. From 0 to
-    /// 2³¹ − 1 milliseconds, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport
-    /// refuses any other with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
-    /// the platform's close, on the real clock.
+    /// How long a close handshake may take: a peer that never answers is dropped after it. A whole
+    /// number of milliseconds from 1 to 2³¹ − 1, zero to drop it without waiting, or
+    /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other
+    /// with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds the platform's
+    /// close, on the real clock.
     /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -85,8 +86,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
         _options = options ?? new WebSocketTransportServerOptions();
-        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(options));
-        WebSocketConnection.AssertCloseTimeout(_options.CloseTimeout, nameof(options));
+        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat));
+        WebSocketConnection.AssertCloseTimeout(_options.CloseTimeout, nameof(WebSocketTransportServerOptions.CloseTimeout));
         _clock = _options.Clock ?? TimeProvider.System;
     }
 

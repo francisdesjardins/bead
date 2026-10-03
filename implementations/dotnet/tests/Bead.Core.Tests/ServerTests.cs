@@ -669,17 +669,51 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(subscribers, _transport.Subscribers);
     }
 
-    // 2³¹ ms, one past what JavaScript's timers hold
-    [Theory]
-    [InlineData(0.5, "a connection's inactivity timeout is a millisecond at least, not 0.5")]
-    [InlineData(2_147_483_648, "a connection's inactivity timeout is 2147483647 milliseconds at most, or infinite for never, not 2147483648")]
-    public void Refuses_an_inactivity_timeout_under_a_millisecond_or_past_the_longest_timer_as_it_is_built_which_leaves_nothing_on_its_transport(double milliseconds, string refusal)
+    [Fact]
+    public async Task Holds_an_inactivity_timeout_to_a_whole_number_of_milliseconds_as_it_is_built_refusing_zero_leaving_nothing_on_its_transport_for_one_refused()
     {
-        Assert.StartsWith(refusal, Assert.Throws<ArgumentOutOfRangeException>(() =>
+        foreach (var (given, outcome, refusal) in Durations.Of("a connection's inactivity timeout", (DurationOutcome.Refused, DurationOutcome.Taken)))
         {
-            return new Server<string>(_transport, new ServerOptions { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(milliseconds) });
-        }).Message, StringComparison.Ordinal);
-        Assert.Equal(0, _transport.Subscribers);
+            var time = new FakeTimeProvider();
+            var transport = new ScriptedTransport { Clock = time };
+
+            if (outcome == DurationOutcome.Refused)
+            {
+                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                {
+                    return new Server<string>(transport, new ServerOptions { ConnectionInactivityTimeout = given });
+                });
+
+                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.Equal(nameof(ServerOptions.ConnectionInactivityTimeout), refused.ParamName);
+                Assert.Equal(0, transport.Subscribers);
+
+                continue;
+            }
+
+            await using var server = new Server<string>(
+                transport,
+                new ServerOptions { ConnectionInactivityTimeout = given, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+
+            transport.Open(Handle);
+
+            // a silent connection closes at its due; infinite, at none
+            if (given > TimeSpan.Zero)
+            {
+                time.Advance(given - TimeSpan.FromMilliseconds(1));
+                await _scheduler.WhenIdle();
+                Assert.Empty(transport.Closed);
+                time.Advance(TimeSpan.FromMilliseconds(1));
+                await _scheduler.WhenIdle();
+                Assert.Equal([Handle], transport.Closed);
+            }
+            else
+            {
+                time.Advance(Clocks.LongestTimer);
+                await _scheduler.WhenIdle();
+                Assert.Empty(transport.Closed);
+            }
+        }
     }
 
     [Fact]
@@ -709,19 +743,6 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Empty(_transport.Closed);
         await Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal([Handle], _transport.Closed);
-    }
-
-    // a timeout is above zero, or infinite for never; not -1 ms, which is .NET's infinite timeout
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-2_000)]
-    public void Refuses_an_inactivity_timeout_not_above_zero_as_it_is_built_which_leaves_nothing_on_its_transport(long milliseconds)
-    {
-        Assert.StartsWith($"a connection's inactivity timeout is above 0, or infinite for never, not {milliseconds}", Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return new Server<string>(_transport, new ServerOptions { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(milliseconds) });
-        }).Message, StringComparison.Ordinal);
-        Assert.Equal(0, _transport.Subscribers);
     }
 
     [Fact]

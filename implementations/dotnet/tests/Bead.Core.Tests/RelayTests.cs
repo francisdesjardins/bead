@@ -587,7 +587,7 @@ public sealed class RelayTests
 
     // -1 ms is .NET's infinite, so -2 ms stands for a negative; a timeout is never NaN here
     [Fact]
-    public async Task Waits_on_leg_B_as_long_as_the_destination_says_the_relay_s_timeout_at_most_or_on_a_timeout_no_timer_holds_is_refused()
+    public async Task Waits_on_leg_B_as_long_as_the_destination_says_the_relay_s_timeout_at_most_or_on()
     {
         var relay = new TestRelay(Admitting with { Timeout = TimeSpan.FromSeconds(5) }).Relay;
         var unbounded = new TestRelay().Relay;
@@ -613,29 +613,47 @@ public sealed class RelayTests
             {
                 return asked.Options.Timeout;
             }));
+    }
 
-        foreach (var timeout in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(-2), TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(2_147_483_648) })
+    [Fact]
+    public async Task Holds_a_relay_s_timeout_and_a_destination_s_to_a_whole_number_of_milliseconds_refusing_zero_infinite_waiting_on()
+    {
+        foreach (var (given, outcome, refusal) in Durations.Of("a relay's timeout", (DurationOutcome.Refused, DurationOutcome.Taken)))
         {
-            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            var relay = new TestRelay().Relay;
+            var target = new RecordingTarget();
+
+            if (outcome == DurationOutcome.Refused)
             {
-                return relay.Register(target, new DestinationOptions { Timeout = timeout });
-            });
-            Assert.Throws<ArgumentOutOfRangeException>(() =>
-            {
-                return new TestRelay(new RelayOptions { Timeout = timeout });
-            });
+                foreach (var refused in new[]
+                {
+                    Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return relay.Register(target, new DestinationOptions { Timeout = given });
+                    }),
+                    Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return new TestRelay(new RelayOptions { Timeout = given });
+                    }),
+                })
+                {
+                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.Equal(nameof(RelayOptions.Timeout), refused.ParamName);
+                }
+
+                continue;
+            }
+
+            relay.Register(target, Seven with { Timeout = given });
+            await Handled(relay.HandlerOf(7), PropsOf(HeaderOf(1)));
+            Assert.Equal(
+                [given],
+                target.Asked.Select((asked) =>
+                {
+                    return asked.Options.Timeout;
+                }));
+            _ = new TestRelay(new RelayOptions { Timeout = given });
         }
-
-        Assert.StartsWith("a relay's timeout is a millisecond at least, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return relay.Register(target, new DestinationOptions { Timeout = TimeSpan.FromMilliseconds(0.5) });
-        }).Message, StringComparison.Ordinal);
-
-        // a millisecond is taken
-        relay.Register(target, new DestinationOptions { DestinationId = 10, Timeout = TimeSpan.FromMilliseconds(1) });
-        await Handled(relay.HandlerOf(10), PropsOf(HeaderOf(7, 10)));
-        Assert.Equal(TimeSpan.FromMilliseconds(1), target.Asked[^1].Options.Timeout);
-        _ = new TestRelay(new RelayOptions { Timeout = TimeSpan.FromMilliseconds(1) });
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.WebSockets;
 
 namespace Bead.Transport.WebSockets;
@@ -21,10 +22,11 @@ public sealed record WebSocketTransportClientOptions
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// How long a close handshake may take: a server that never answers is dropped after it. From 0
-    /// to 2³¹ − 1 milliseconds, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport
-    /// refuses any other with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
-    /// the platform's close, on the real clock.
+    /// How long a close handshake may take: a server that never answers is dropped after it. A whole
+    /// number of milliseconds from 1 to 2³¹ − 1, zero to drop it without waiting, or
+    /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other
+    /// with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds the platform's
+    /// close, on the real clock.
     /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -58,7 +60,8 @@ public sealed record WebSocketConnectOptions
 
     /// <summary>
     /// How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds
-    /// unless told, a millisecond to <see cref="Clocks.LongestTimer"/>; zero never times out.
+    /// unless told, a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/>; zero
+    /// never times out, as <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> does.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 }
@@ -97,8 +100,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     {
         _options = options ?? new WebSocketTransportClientOptions();
         _clock = _options.Clock ?? TimeProvider.System;
-        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(options));
-        WebSocketConnection.AssertCloseTimeout(_options.CloseTimeout, nameof(options));
+        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(WebSocketTransportClientOptions.Heartbeat));
+        WebSocketConnection.AssertCloseTimeout(_options.CloseTimeout, nameof(WebSocketTransportClientOptions.CloseTimeout));
     }
 
     /// <inheritdoc/>
@@ -165,9 +168,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     /// <summary>
     /// Connects to the server; settles once the connection is open. Refused with an
-    /// <see cref="ArgumentOutOfRangeException"/> for a timeout under a millisecond or longer than
-    /// <see cref="Clocks.LongestTimer"/>, with an <see cref="InvalidOperationException"/> unless
-    /// Uninitialized or Closed, and with an <see cref="OperationCanceledException"/>, nothing
+    /// <see cref="ArgumentOutOfRangeException"/> for a timeout neither zero nor a duration
+    /// <see cref="WebSocketConnectOptions.Timeout"/> takes, which leaves the state, and the target a
+    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
+    /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and the
     /// <see cref="WebSocketException"/> its socket throws, a dispose under way included, ending
@@ -413,17 +417,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (options.Timeout > Clocks.LongestTimer)
+        // zero never times out, as infinite does
+        if (options.Timeout != TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(options),
-                $"a connect's timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, not {options.Timeout.TotalMilliseconds}");
-        }
-
-        // one not above zero never times out; any other is one a timer holds, a millisecond at least
-        if (options.Timeout > TimeSpan.Zero)
-        {
-            Clocks.AssertHeld("a connect's timeout", options.Timeout);
+            Clocks.AssertHeld(("a connect's timeout", nameof(WebSocketConnectOptions.Timeout)), options.Timeout);
         }
 
         var (token, isAttempt) = call;
@@ -470,7 +467,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {
-                throw new TimeoutException($"timed out after {options.Timeout.TotalMilliseconds}ms", reason);
+                throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
             }
 
             lock (_gate)

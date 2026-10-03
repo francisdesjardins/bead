@@ -2,8 +2,7 @@
 
 // dependencies
 
-import { LONGEST_TIMER } from './clock';
-import { ProgrammerError } from './errors';
+import { assertHeld } from './clock';
 
 // interfaces
 
@@ -24,16 +23,12 @@ export const HEARTBEAT = 30_000;
 
 // helpers
 
-/** Throws a {@link ProgrammerError} unless `heartbeat` is a whole number of milliseconds a timer holds, or `Infinity`. */
+/**
+ * Throws a {@link ProgrammerError} unless `heartbeat` is a whole number of milliseconds from 1 to
+ * 2³¹ − 1, or `Infinity` for none.
+ */
 export const assertHeartbeat = (heartbeat: number): void => {
-  if (
-    heartbeat !== Infinity &&
-    !(Number.isInteger(heartbeat) && heartbeat > 0 && heartbeat <= LONGEST_TIMER)
-  ) {
-    throw new ProgrammerError(
-      `a heartbeat is a whole number of milliseconds from 1 to ${String(LONGEST_TIMER)}, or Infinity for none, not ${String(heartbeat)}`
-    );
-  }
+  assertHeld('a heartbeat', heartbeat);
 };
 
 // definition

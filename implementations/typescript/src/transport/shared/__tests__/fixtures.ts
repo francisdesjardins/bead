@@ -281,3 +281,65 @@ export const tcpSocketsClosed = async () => {
     })
     .toBe(0);
 };
+
+/**
+ * What a place makes of a duration it is given: takes it, refuses it, or reads it as its own — 0's
+ * meaning, or never's.
+ */
+export type DurationOutcome = 'own' | 'refused' | 'taken';
+
+/** A duration a place is given, what the place makes of it, and, refused, the exact refusal. */
+export interface IDurationRow {
+  given: number;
+  outcome: DurationOutcome;
+  refusal: string | undefined;
+}
+
+// the durations every place is held to (spec 1.4), the C# side's `Durations` as numbers: NaN
+// besides, which a TimeSpan cannot hold, and -1 aside, which the C# side reads as never
+const DURATIONS = Object.freeze([
+  { given: 0, outcome: 'zero', written: '0' },
+  { given: 0.5, outcome: 'refused', written: '0.5' },
+  { given: 1, outcome: 'taken', written: '1' },
+  { given: 1.5, outcome: 'refused', written: '1.5' },
+  { given: 2_147_483_647, outcome: 'taken', written: '2147483647' },
+  { given: 2_147_483_647.5, outcome: 'refused', written: '2147483647.5' },
+  { given: 2_147_483_648, outcome: 'refused', written: '2147483648' },
+  { given: Infinity, outcome: 'never', written: 'Infinity' },
+  { given: -2, outcome: 'refused', written: '-2' },
+  { given: Number.NaN, outcome: 'refused', written: 'NaN' },
+] as const);
+
+/**
+ * The durations as the place that names its duration `name` meets them: 1 and the ceiling taken; a
+ * fraction, a negative, `NaN` and past the ceiling refused; 0 and never as `zero` and `never` say.
+ * Each refusal is the one message every place words alike, which offers `Infinity` for never only
+ * where never is not refused.
+ */
+export const durationsOf = (
+  name: string,
+  { never, zero }: { never: DurationOutcome; zero: Exclude<DurationOutcome, 'taken'> }
+): IDurationRow[] => {
+  const offered = never === 'refused' ? '' : ', or Infinity for never';
+
+  const metOf = (outcome: (typeof DURATIONS)[number]['outcome']): DurationOutcome => {
+    if (outcome === 'zero') {
+      return zero;
+    }
+
+    return outcome === 'never' ? never : outcome;
+  };
+
+  return DURATIONS.map(({ given, outcome, written }) => {
+    const met = metOf(outcome);
+
+    return {
+      given,
+      outcome: met,
+      refusal:
+        met === 'refused'
+          ? `${name} is a whole number of milliseconds from 1 to 2147483647${offered}, not ${written}`
+          : undefined,
+    };
+  });
+};

@@ -184,9 +184,9 @@ export interface IRouterLimits {
   maximumTransfers: number;
   /**
    * How long, in milliseconds, a transfer waits for its next chunk or credit before it stalls, a
-   * millisecond at least and 2³¹ − 1 at most, as a timer holds; and how long, at least, a call that
-   * received one keeps its call id once it ends — abandoned by the side that answers, reserved by
-   * the requester.
+   * whole number from 1 to 2³¹ − 1, never `Infinity`; and how long, at least, a call that received
+   * one keeps its call id once it ends — abandoned by the side that answers, reserved by the
+   * requester.
    */
   transferInactivityTimeout: number;
   /** How far past the bytes it received, contiguous, a receiver lets its sender send. */
@@ -343,7 +343,8 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
   /**
    * Milliseconds to wait for the answer; 5 s. While the payload, or its result, goes as a transfer,
    * the transfer's inactivity counts instead, and the timeout counts anew once the payload went. A
-   * millisecond at least and 2³¹ − 1 at most, as a timer holds; `Infinity` waits on.
+   * whole number from 1 to 2³¹ − 1; `0` waits on, as `Infinity` does. Any other rejects with a
+   * {@link ProgrammerError}, and the call draws nothing.
    */
   timeout?: number | undefined;
 }
@@ -414,8 +415,9 @@ export interface IRouterCore<Handle extends string> {
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
    * waiting and none is given — or, once its result came in part, for as long as the peer keeps the
    * call abandoned, should that be longer. A call id reserved already, or a router disposed, sends
-   * nothing. A timeout above 0 that no timer holds — under a millisecond, or past
-   * {@link LONGEST_TIMER} — or `NaN`, is a {@link ProgrammerError}, and nothing is done.
+   * nothing. `0`, or `Infinity`, reserves it for the default time; any other timeout that is not a
+   * whole number of milliseconds from 1 to {@link LONGEST_TIMER} is a {@link ProgrammerError}, and
+   * nothing is done.
    */
   cancel(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -483,10 +485,11 @@ export interface IRouterCore<Handle extends string> {
     }
   ): Promise<IRouterResult>;
   /**
-   * Reserves this side's `callId` on `connectionHandle` for `timeout`, or for the default time when
-   * it gives none: the sequence skips it, and what comes late on it is dropped in silence. Reserved
-   * twice, the later end stands. A timeout above 0 that no timer holds, or `NaN`, is a
-   * {@link ProgrammerError}, as for {@link IRouterCore.cancel}, and nothing is reserved.
+   * Reserves this side's `callId` on `connectionHandle` for `timeout`, or for the default time for
+   * none, `0` or `Infinity`: the sequence skips it, and what comes late on it is dropped in silence.
+   * Reserved twice, the later end stands. Any other timeout that is not a whole number of
+   * milliseconds from 1 to {@link LONGEST_TIMER} is a {@link ProgrammerError}, as for
+   * {@link IRouterCore.cancel}, and nothing is reserved.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -530,8 +533,8 @@ export interface IRouterCoreOptions {
    * How much it reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing. They must
    * hold together, or the core is a {@link ProgrammerError}: whole numbers, positive but for the
    * transfers and the detail; an envelope of 64 bytes at least; a chunk from 64 bytes to an
-   * envelope; a window of two chunks at least; a payload within the budget; a timeout a timer can
-   * hold.
+   * envelope; a window of two chunks at least; a payload within the budget; a transfer's
+   * inactivity a whole number of milliseconds from 1 to 2³¹ − 1.
    */
   limits?: RouterLimitsOptions | undefined;
 }

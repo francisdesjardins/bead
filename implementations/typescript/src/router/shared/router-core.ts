@@ -4,7 +4,7 @@
 
 import {
   assertHeld,
-  LONGEST_TIMER,
+  assertHeldFinite,
   PLATFORM_CLOCK,
   type TimeoutId,
 } from '../../transport/shared/clock';
@@ -131,15 +131,6 @@ const LIMIT_RULES: readonly { holds: (limits: IRouterLimits) => boolean; rule: s
       },
       rule: 'a payload fits in the budget of the transfers received',
     },
-    {
-      // Infinity among them, which no transfer takes; NaN is the floor's to refuse
-      holds: ({ transferInactivityTimeout }) => {
-        return (
-          Number.isNaN(transferInactivityTimeout) || transferInactivityTimeout <= LONGEST_TIMER
-        );
-      },
-      rule: `a transfer's inactivity is ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds`,
-    },
   ]);
 
 // the limits that may be 0: no transfer taken, and no detail told
@@ -167,8 +158,9 @@ const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMal
 
 /**
  * `given` over {@link LIMIT_DEFAULTS}, where it says nothing. A {@link ProgrammerError} for a limit
- * that is not a whole number — positive, but for the transfers and the detail — for a transfer's
- * inactivity under a millisecond, or for limits that do not hold together.
+ * that is not a whole number — positive, but for the transfers and the detail — for limits that do
+ * not hold together, or for a transfer's inactivity that is not a whole number of milliseconds from
+ * 1 to 2³¹ − 1, `Infinity` among them.
  */
 const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
   const keys = Object.keys(LIMIT_DEFAULTS) as (keyof IRouterLimits)[];
@@ -181,7 +173,7 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
   for (const key of keys) {
     const value = limits[key];
 
-    // a transfer's inactivity is a timeout, which takes a fraction as every other does: held below
+    // a transfer's inactivity is a duration, held below as every other is
     if (
       key !== 'transferInactivityTimeout' &&
       (!Number.isSafeInteger(value) || value < (MAY_BE_NONE.has(key) ? 0 : 1))
@@ -198,7 +190,8 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
     }
   }
 
-  assertHeld("a transfer's inactivity", limits.transferInactivityTimeout);
+  // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free
+  assertHeldFinite("a transfer's inactivity", limits.transferInactivityTimeout);
 
   return Object.freeze(limits);
 };
@@ -208,7 +201,7 @@ const isPayloadLimit = (value: unknown): boolean => {
   return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 1);
 };
 
-/** Whether a call waits `timeout` at most: any positive finite number; anything else waits on. */
+/** Whether a call waits `timeout` at most: a duration held; 0 and `Infinity` wait on. */
 const isTimeout = (timeout: number | undefined): timeout is number => {
   return timeout !== undefined && Number.isFinite(timeout) && timeout > 0;
 };
@@ -1550,16 +1543,8 @@ export const createRouterCore = <Handle extends string>(
             return (reject(refused), undefined);
           }
 
-          if (Number.isFinite(timeout) && timeout > LONGEST_TIMER) {
-            const refused = new ProgrammerError(
-              `a call's timeout is ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds, not ${String(timeout)}`
-            );
-
-            return (reject(refused), undefined);
-          }
-
-          // one not above 0 waits on; any other is one a timer holds, a millisecond at least
-          if (Number.isNaN(timeout) || timeout > 0) {
+          // 0 waits on, as `Infinity` does
+          if (timeout !== 0) {
             assertHeld("a call's timeout", timeout);
           }
 

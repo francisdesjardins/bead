@@ -14,6 +14,7 @@ import { CancelError, ConnectError } from '../../shared/errors';
 import {
   allClosed,
   createTestClock,
+  durationsOf,
   host,
   IMPLEMENTATIONS,
   spyIntervals,
@@ -566,6 +567,50 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     expect(silent.closeCodes).toEqual([1001]);
     expect(silent.wasTerminated).toBe(true);
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  test('holds its close timeout to a whole number of milliseconds, 0 dropping a connection at once, Infinity waiting on its peer without end', async () => {
+    const fake = createFakeWebSocketServer();
+
+    for (const { given, outcome, refusal } of durationsOf('a close timeout', {
+      never: 'taken',
+      zero: 'own',
+    })) {
+      const building = () => {
+        return createWSTransportServer({
+          closeTimeout: given,
+          WebSocketServer: fake.FakeWebSocketServer,
+        });
+      };
+
+      if (outcome === 'refused') {
+        expect(building, String(given)).toThrow(new ProgrammerError(refusal));
+      } else {
+        expect(building, String(given)).not.toThrow();
+      }
+    }
+
+    // Infinity arms no timer, where Node's would take it for 1 ms and drop the peer at once
+    const server = createWSTransportServer({
+      closeTimeout: Infinity,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start();
+
+    fake.instances.at(-1)?.emit('listening');
+    await starting;
+
+    const silent = createFakeSocket({ onClose: 'ignore' });
+    const closing = server.close(fake.connect(silent));
+
+    await sleep(50);
+
+    expect(silent.wasTerminated).toBe(false);
+
+    silent.hear('close', 1000);
+
+    await expect(closing).resolves.toBe(true);
+    await server.stop();
   });
 
   test('stamps the activity on its clock, and bounds a close on the real one, which the clock given never times', async () => {

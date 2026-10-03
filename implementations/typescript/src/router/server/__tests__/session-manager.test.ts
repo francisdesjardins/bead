@@ -3,7 +3,11 @@ import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { DisconnectError } from '../../shared/errors';
 import { isSessionToken, toSessionToken } from '../../shared/identifiers';
-import { createTestClock, delaysOn } from '../../../transport/shared/__tests__/fixtures';
+import {
+  createTestClock,
+  delaysOn,
+  durationsOf,
+} from '../../../transport/shared/__tests__/fixtures';
 import {
   createSessionManager,
   createTimers,
@@ -646,7 +650,7 @@ test.describe('createSessionManager', () => {
       expect(() => {
         sessions.resetSessionInactivityTimeout(session, past);
       }).toThrow(
-        'a session inactivity timeout is 2147483647 milliseconds at most, or Infinity for never, not 2147483648'
+        'a session inactivity timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483648'
       );
       // the timer running is left as it was, and nothing was stored
       expect(delaysOn(clock)).toEqual([1_000]);
@@ -663,59 +667,95 @@ test.describe('createSessionManager', () => {
       expect(delaysOn(clock)).toEqual([2 ** 31 - 1]);
     });
 
-    test('a timeout under a millisecond is refused, by a reset, a store, an update and a default, and nothing changes; a millisecond is armed', () => {
-      const clock = createTestClock();
-      using sessions = createSessionManager<IUser>({ clock });
-      const session = sessions.set({ ...sessions.create(first), sessionInactivityTimeout: 1_000 });
-      const under = 0.5;
-
-      for (const refused of [
-        () => {
-          sessions.resetConnectionInactivityTimeout(session, under);
-        },
-        () => {
-          sessions.resetSessionInactivityTimeout(session, 0);
-        },
-        () => {
-          sessions.set({ ...sessions.create(second), connectionInactivityTimeout: under });
-        },
-        () => {
-          sessions.set({ ...sessions.create(second), sessionInactivityTimeout: Number.NaN });
-        },
-        () => {
-          sessions.updateConnectionInactivityTimeout({
+    test('holds a timeout stored, updated or defaulted to a whole number of milliseconds, 0 the default where one is stored and refused as a default, nothing changing for one refused', () => {
+      for (const { given, outcome, refusal } of durationsOf('an inactivity timeout', {
+        never: 'taken',
+        zero: 'own',
+      })) {
+        const clock = createTestClock();
+        using sessions = createSessionManager<IUser>({ clock });
+        const session = sessions.set(sessions.create(first));
+        const armed = delaysOn(clock);
+        const label = String(given);
+        const storing = () => {
+          return sessions.set({ ...sessions.create(second), connectionInactivityTimeout: given });
+        };
+        const updating = () => {
+          return sessions.updateSessionInactivityTimeout({
             ...session,
-            connectionInactivityTimeout: under,
+            sessionInactivityTimeout: given,
           });
-        },
-        () => {
-          sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: under });
-        },
-        () => {
-          createSessionManager({ connectionInactivityTimeout: under });
-        },
-        () => {
-          createSessionManager({ sessionInactivityTimeout: under });
-        },
-      ]) {
-        expect(refused).toThrow(ProgrammerError);
+        };
+
+        if (outcome === 'refused') {
+          expect(storing, label).toThrow(new ProgrammerError(refusal));
+          expect(updating, label).toThrow(new ProgrammerError(refusal));
+          expect([sessions.has(second), sessions.get(first), delaysOn(clock)], label).toEqual([
+            false,
+            session,
+            armed,
+          ]);
+
+          continue;
+        }
+
+        // stored as given, or as the manager's default for 0
+        expect(
+          [storing().connectionInactivityTimeout, updating()?.sessionInactivityTimeout],
+          label
+        ).toEqual(outcome === 'own' ? [600, 30_000] : [given, given]);
       }
 
-      expect(() => {
-        sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: under });
-      }).toThrow('an inactivity timeout is a millisecond at least, not 0.5');
-      // the timer running is left as it was, and nothing was stored
-      expect(delaysOn(clock)).toEqual([1_000]);
-      expect(sessions.has(second)).toBe(false);
-      expect(sessions.get(first)).toMatchObject({
-        connectionInactivityTimeout: Infinity,
-        sessionInactivityTimeout: 1_000,
-      });
+      // a default is what 0 stands for, so 0 is no default
+      for (const name of ['connectionInactivityTimeout', 'sessionInactivityTimeout'] as const) {
+        for (const { given, outcome, refusal } of durationsOf(name, {
+          never: 'taken',
+          zero: 'refused',
+        })) {
+          const building = (): void => {
+            using _sessions = createSessionManager({ [name]: given });
+          };
 
-      // a millisecond is stored and armed
-      sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 1 });
+          if (outcome === 'refused') {
+            expect(building, `${name} ${String(given)}`).toThrow(new ProgrammerError(refusal));
+          } else {
+            expect(building, `${name} ${String(given)}`).not.toThrow();
+          }
+        }
+      }
+    });
 
-      expect(delaysOn(clock)).toEqual([1, 1_000]);
+    // a reset, which the C# side has none of: 0 has no meaning of its own there
+    test('holds a reset to a whole number of milliseconds, leaving the timer as it was for one refused', () => {
+      for (const { given, outcome, refusal } of durationsOf('a connection inactivity timeout', {
+        never: 'taken',
+        zero: 'refused',
+      })) {
+        const clock = createTestClock();
+        using sessions = createSessionManager<IUser>({ clock });
+        const session = sessions.set({
+          ...sessions.create(first),
+          sessionInactivityTimeout: 1_000,
+        });
+        const resetting = () => {
+          sessions.resetConnectionInactivityTimeout(session, given);
+        };
+
+        if (outcome === 'refused') {
+          expect(resetting, String(given)).toThrow(new ProgrammerError(refusal));
+          expect(delaysOn(clock), String(given)).toEqual([1_000]);
+        } else {
+          resetting();
+
+          expect(delaysOn(clock), String(given)).toEqual(
+            Number.isFinite(given)
+              ? [given, 1_000].toSorted((a, b) => {
+                  return a - b;
+                })
+              : [1_000]
+          );
+        }
+      }
     });
 
     test('removing every listener does not unhook the timers', async () => {

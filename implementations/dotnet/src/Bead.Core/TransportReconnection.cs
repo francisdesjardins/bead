@@ -18,9 +18,10 @@ internal static class TransportReconnection
     /// Attempts until one opens: the first at once, each next one after its delay. Attempts that run
     /// out are a <see cref="ReconnectException"/>, the last one's exception inside; a cancel is an
     /// <see cref="OperationCanceledException"/>; a delay that throws, an
-    /// <see cref="InvalidOperationException"/>; one above zero that no timer holds, an
-    /// <see cref="ArgumentOutOfRangeException"/>, no attempt made after it. What the tap throws
-    /// passes through.
+    /// <see cref="InvalidOperationException"/>; one neither zero nor a whole number of milliseconds
+    /// from 1 to <see cref="Clocks.LongestTimer"/>, infinite among them, an
+    /// <see cref="ArgumentOutOfRangeException"/> before the tap hears it, no attempt made after it.
+    /// What the tap throws passes through.
     /// </summary>
     public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Clock) reconnection)
     {
@@ -62,21 +63,14 @@ internal static class TransportReconnection
                 throw new InvalidOperationException(reason.Message, reason);
             }
 
-            if (nextDelay > Clocks.LongestTimer)
+            // zero waits none; never, refused, would wait for ever between two attempts
+            if (nextDelay != TimeSpan.Zero)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(reconnection),
-                    $"a delay is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, not {nextDelay.TotalMilliseconds}");
-            }
-
-            // one not above zero waits none; any other is one a timer holds, a millisecond at least
-            if (nextDelay > TimeSpan.Zero)
-            {
-                Clocks.AssertHeld("a delay", nextDelay);
+                Clocks.AssertHeldFinite(("a delay", nameof(TransportReconnectOptions.Delay)), nextDelay);
             }
 
             using var pausing = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var waiting = Task.Delay(nextDelay > TimeSpan.Zero ? nextDelay : TimeSpan.Zero, clock, pausing.Token);
+            var waiting = Task.Delay(nextDelay, clock, pausing.Token);
 
             try
             {

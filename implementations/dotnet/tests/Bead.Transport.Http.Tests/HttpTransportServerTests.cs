@@ -10,6 +10,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -1107,6 +1108,47 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             MaximumWait = TimeSpan.FromMilliseconds(1),
         });
         Assert.Equal(TimeSpan.FromMinutes(5), new HttpTransportServerOptions().ExchangeTimeout);
+    }
+
+    [Fact]
+    public void Holds_its_timeouts_and_its_longest_wait_to_a_whole_number_of_milliseconds_refusing_zero_infinite_for_the_timeouts_alone()
+    {
+        var options = new (string Option, DurationOutcome Never, Func<TimeSpan, HttpTransportServerOptions> Of)[]
+        {
+            (nameof(HttpTransportServerOptions.ExchangeTimeout), DurationOutcome.Taken, (given) =>
+            {
+                return new HttpTransportServerOptions { ExchangeTimeout = given };
+            }),
+            (nameof(HttpTransportServerOptions.InactivityTimeout), DurationOutcome.Taken, (given) =>
+            {
+                return new HttpTransportServerOptions { InactivityTimeout = given };
+            }),
+            (nameof(HttpTransportServerOptions.MaximumWait), DurationOutcome.Refused, (given) =>
+            {
+                return new HttpTransportServerOptions { MaximumWait = given };
+            }),
+        };
+
+        foreach (var (option, never, of) in options)
+        {
+            foreach (var (given, outcome, refusal) in Durations.Of(option, (DurationOutcome.Refused, never)))
+            {
+                if (outcome == DurationOutcome.Refused)
+                {
+                    var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return new HttpTransportServer(of(given));
+                    });
+
+                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.Equal(option, refused.ParamName);
+                }
+                else
+                {
+                    _ = new HttpTransportServer(of(given));
+                }
+            }
+        }
     }
 
     // createHTTPTransportServer, over HTTP/2

@@ -8,7 +8,6 @@ import {
   LONGEST_TIMER,
   type TimeoutId,
 } from '../../transport/shared/clock';
-import { ProgrammerError } from '../../transport/shared/errors';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { CALL_ID_RANGES, RESERVATION_MILLISECONDS } from './constants';
@@ -93,31 +92,22 @@ export interface IPendingCalls<Handle extends string> {
 // helpers
 
 /**
- * Throws a {@link ProgrammerError} for a reservation no timer holds: past {@link LONGEST_TIMER},
- * which a timer would end at once, or under a millisecond, `NaN` among them. None, one not above 0,
- * or `Infinity`, takes the default.
+ * Throws a {@link ProgrammerError} for a reservation that is not a whole number of milliseconds from
+ * 1 to {@link LONGEST_TIMER}. None, 0, and `Infinity`, which reserves nothing for ever, take the
+ * default.
  */
 export const assertReservation = (timeout: number | undefined): void => {
-  if (timeout === undefined || timeout <= 0) {
-    return;
+  if (timeout !== undefined && timeout !== 0) {
+    assertHeld("a call id's reservation", timeout);
   }
-
-  if (Number.isFinite(timeout) && timeout > LONGEST_TIMER) {
-    throw new ProgrammerError(
-      `a call id is reserved ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds, not ${String(timeout)}`
-    );
-  }
-
-  assertHeld("a call id's reservation", timeout);
 };
 
-/** How long a call id stays reserved: its call's timeout, or the default one when it had none. */
+/** How long a call id stays reserved: its call's timeout, or the default one for none, 0 or `Infinity`. */
 export const reservationOf = (timeout: number | undefined): number => {
-  return timeout !== undefined &&
-    Number.isFinite(timeout) &&
-    timeout > 0 &&
-    timeout <= LONGEST_TIMER
-    ? timeout
+  return Number.isInteger(timeout) &&
+    (timeout as number) >= 1 &&
+    (timeout as number) <= LONGEST_TIMER
+    ? (timeout as number)
     : RESERVATION_MILLISECONDS;
 };
 

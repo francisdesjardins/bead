@@ -26,42 +26,29 @@ internal sealed class WebSocketConnection
     public WebSocket Socket { get; }
 
     /// <summary>
-    /// Throws an <see cref="ArgumentOutOfRangeException"/> unless <paramref name="heartbeat"/> is a
-    /// whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/>, or
+    /// Throws an <see cref="ArgumentOutOfRangeException"/>, naming the option
+    /// <paramref name="option"/>, unless <paramref name="heartbeat"/> is a whole number of
+    /// milliseconds from 1 to <see cref="Clocks.LongestTimer"/>, or
     /// <see cref="Timeout.InfiniteTimeSpan"/> for none.
     /// </summary>
-    public static void AssertHeartbeat(TimeSpan heartbeat, string parameterName)
+    public static void AssertHeartbeat(TimeSpan heartbeat, string option)
     {
-        if (heartbeat == Timeout.InfiniteTimeSpan
-            || (heartbeat > TimeSpan.Zero
-                && heartbeat <= Clocks.LongestTimer
-                && heartbeat.Ticks % TimeSpan.TicksPerMillisecond == 0))
-        {
-            return;
-        }
-
-        throw new ArgumentOutOfRangeException(
-            parameterName,
-            heartbeat,
-            $"a heartbeat is a whole number of milliseconds from 1 to {Clocks.LongestTimer.TotalMilliseconds}, or Timeout.InfiniteTimeSpan for none");
+        Clocks.AssertHeld(("a heartbeat", option), heartbeat);
     }
 
     /// <summary>
-    /// Throws an <see cref="ArgumentOutOfRangeException"/> unless <paramref name="closeTimeout"/> is
-    /// from 0 to <see cref="Clocks.LongestTimer"/>, or <see cref="Timeout.InfiniteTimeSpan"/> to wait
-    /// on the peer without end.
+    /// Throws an <see cref="ArgumentOutOfRangeException"/>, naming the option
+    /// <paramref name="option"/>, unless <paramref name="closeTimeout"/> is zero, which drops the
+    /// connection without waiting on its close, a whole number of milliseconds from 1 to
+    /// <see cref="Clocks.LongestTimer"/>, or <see cref="Timeout.InfiniteTimeSpan"/> to wait on the
+    /// peer without end.
     /// </summary>
-    public static void AssertCloseTimeout(TimeSpan closeTimeout, string parameterName)
+    public static void AssertCloseTimeout(TimeSpan closeTimeout, string option)
     {
-        if (closeTimeout == Timeout.InfiniteTimeSpan || (closeTimeout >= TimeSpan.Zero && closeTimeout <= Clocks.LongestTimer))
+        if (closeTimeout != TimeSpan.Zero)
         {
-            return;
+            Clocks.AssertHeld(("a close timeout", option), closeTimeout);
         }
-
-        throw new ArgumentOutOfRangeException(
-            parameterName,
-            closeTimeout,
-            $"a close timeout is from 0 to {Clocks.LongestTimer.TotalMilliseconds} milliseconds, or Timeout.InfiniteTimeSpan for none");
     }
 
     // what goes out once the socket is not open goes nowhere, as a send to a socket closing does

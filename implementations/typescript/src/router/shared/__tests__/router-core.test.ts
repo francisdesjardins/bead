@@ -2,10 +2,12 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import {
   createTestClock,
+  durationsOf,
   hasRef,
   timersBy,
   timersUntil,
 } from '../../../transport/shared/__tests__/fixtures';
+import { LONGEST_TIMER } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   CLIENT_FAILURES,
@@ -13,6 +15,7 @@ import {
   FailureScope,
   LIMIT_DEFAULTS,
   ProtocolCode,
+  RESERVATION_MILLISECONDS,
   SERVER_FAILURES,
 } from '../constants';
 import { readEnvelope } from '../envelope';
@@ -2187,48 +2190,47 @@ test.describe('createRouterCore', () => {
       expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([true, false]);
     });
 
-    test('refuse to reserve a call id, or to cancel a call, for longer than a timer holds or under a millisecond, before anything is done', async () => {
-      const { port, sent } = createPort();
-      const clock = createTestClock();
-      using core = createRouterCore(port, { clock });
-      const waiting = core.request(new Uint8Array(0), {
-        connectionHandle: 'a',
-        options,
-        procedure: echo,
-      });
+    test('hold a reservation, and a cancel’s, to a whole number of milliseconds, 0 and Infinity taking the default time, doing nothing for one refused', async () => {
+      for (const { given, outcome, refusal } of durationsOf("a call id's reservation", {
+        never: 'own',
+        zero: 'own',
+      })) {
+        const { port, sent } = createPort();
+        const clock = createTestClock();
+        using core = createRouterCore(port, { clock });
+        const label = String(given);
+        const reserved = () => {
+          return [core.isReserved(1, 'a'), core.isReserved(3, 'a')];
+        };
 
-      await sleep(0);
+        if (outcome === 'refused') {
+          expect(() => {
+            core.reserve({ callId: 1, connectionHandle: 'a', timeout: given });
+          }, label).toThrow(new ProgrammerError(refusal));
+          expect(() => {
+            core.cancel({ callId: 3, connectionHandle: 'a', timeout: given });
+          }, label).toThrow(new ProgrammerError(refusal));
 
-      for (const [timeout, refusal] of [
-        [
-          2 ** 31,
-          'a call id is reserved 2147483647 milliseconds at most, as a timer holds, not 2147483648',
-        ],
-        [0.5, "a call id's reservation is a millisecond at least, not 0.5"],
-        [Number.NaN, "a call id's reservation is a millisecond at least, not NaN"],
-      ] as const) {
-        expect(() => {
-          core.reserve({ callId: 4, connectionHandle: 'a', timeout });
-        }).toThrow(new ProgrammerError(refusal));
-        expect(() => {
-          core.cancel({ callId: 2, connectionHandle: 'a', timeout });
-        }).toThrow(new ProgrammerError(refusal));
+          await sleep(0);
+
+          expect([reserved(), sent], label).toEqual([[false, false], []]);
+
+          continue;
+        }
+
+        // reserved for the duration held, or for the default time
+        const lasts = outcome === 'taken' ? given : RESERVATION_MILLISECONDS;
+
+        core.reserve({ callId: 1, connectionHandle: 'a', timeout: given });
+        core.cancel({ callId: 3, connectionHandle: 'a', timeout: given });
+        await clock.tickAsync(lasts - 1);
+
+        expect(reserved(), label).toEqual([true, true]);
+
+        await clock.tickAsync(1);
+
+        expect(reserved(), label).toEqual([false, false]);
       }
-
-      // the call still waits, and nothing went out but its request
-      expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([false, false]);
-      expect(answersOf(sent)).toEqual([['a', EnvelopeKind.REQUEST, 2]]);
-
-      // a millisecond is taken
-      core.reserve({ callId: 4, connectionHandle: 'a', timeout: 1 });
-      core.cancel({ callId: 2, connectionHandle: 'a' });
-
-      await expect(waiting).rejects.toBeInstanceOf(CancelError);
-      expect(core.isReserved(4, 'a')).toBe(true);
-
-      await clock.tickAsync(1);
-
-      expect(core.isReserved(4, 'a')).toBe(false);
     });
 
     test('reserve a call id with a timer that keeps no process alive: nothing waits on it', () => {
@@ -2571,7 +2573,7 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([]);
     });
 
-    test('refuse a procedure’s limit that is not a whole number above 0, and a timeout no timer holds, drawing nothing', async () => {
+    test('refuse a procedure’s limit that is not a whole number above 0, drawing nothing', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
       const drawn: number[] = [];
@@ -2601,25 +2603,69 @@ test.describe('createRouterCore', () => {
         );
       }
 
-      expect(await ask(echo, 2 ** 31)).toBeInstanceOf(ProgrammerError);
-
-      for (const timeout of [0.5, Number.NaN]) {
-        expect(await ask(echo, timeout), String(timeout)).toEqual(
-          new ProgrammerError(`a call's timeout is a millisecond at least, not ${String(timeout)}`)
-        );
-      }
-
       expect(drawn).toEqual([]);
       expect(sent).toEqual([]);
 
-      // at their edges, they are taken: a limit of 1, the shortest and the longest timeouts, and none
+      // at its edge, a limit of 1 is taken
       core.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 1 }));
+      void ask(echo);
 
-      for (const timeout of [1, 2 ** 31 - 1, Number.POSITIVE_INFINITY]) {
-        void ask(echo, timeout);
+      expect(drawn).toEqual([2]);
+    });
+
+    test("hold a call's timeout to a whole number of milliseconds, 0 and Infinity waiting on, drawing nothing for one refused", async () => {
+      for (const { given, outcome, refusal } of durationsOf("a call's timeout", {
+        never: 'taken',
+        zero: 'own',
+      })) {
+        const { port, sent } = createPort();
+        const clock = createTestClock();
+        using core = createRouterCore(port, { clock });
+        const drawn: number[] = [];
+        const label = String(given);
+        let isSettled = false;
+        const asking = core
+          .request(new Uint8Array(0), {
+            connectionHandle: 'a',
+            onCallId: (callId) => {
+              drawn.push(callId);
+            },
+            options: { timeout: given },
+            procedure: echo,
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          })
+          .finally(() => {
+            isSettled = true;
+          });
+
+        if (outcome === 'refused') {
+          expect(await asking, label).toEqual(new ProgrammerError(refusal));
+          expect([drawn, sent], label).toEqual([[], []]);
+
+          continue;
+        }
+
+        await sleep(0);
+
+        expect(drawn, label).toEqual([2]);
+
+        // a duration held ends the call once it passed; 0 and Infinity wait on past the longest
+        if (Number.isFinite(given) && given > 0) {
+          await clock.tickAsync(given - 1);
+
+          expect(isSettled, label).toBe(false);
+
+          await clock.tickAsync(1);
+
+          expect(await asking, label).toBeInstanceOf(TimeoutError);
+        } else {
+          await clock.tickAsync(LONGEST_TIMER);
+
+          expect(isSettled, label).toBe(false);
+        }
       }
-
-      expect(drawn).toEqual([2, 4, 6]);
     });
 
     test('take the defaults where they say nothing, and let the transfers and the detail be none', () => {
@@ -2657,8 +2703,6 @@ test.describe('createRouterCore', () => {
         [{ chunkBytes: 2_049, maximumEnvelopeBytes: 2_048 }, /and an envelope at most/],
         [{ windowBytes: 2 * 1_048_576 - 1 }, /a window holds two chunks at least/],
         [{ maximumPayloadBytes: 268_435_457 }, /a payload fits in the budget/],
-        [{ transferInactivityTimeout: 2 ** 31 }, /2147483647 milliseconds at most/],
-        [{ transferInactivityTimeout: Infinity }, /2147483647 milliseconds at most/],
       ] as const) {
         expect(() => {
           return createRouterCore(port, { limits });
@@ -2680,22 +2724,34 @@ test.describe('createRouterCore', () => {
       }).not.toThrow();
     });
 
-    test("take a transfer's inactivity with a fraction of a millisecond, and refuse one under a millisecond by the floor every timeout holds to", () => {
+    test("hold a transfer's inactivity to a whole number of milliseconds, refusing 0 and Infinity", () => {
       const { port } = createPort();
 
-      expect(() => {
-        using _fraction = createRouterCore(port, { limits: { transferInactivityTimeout: 1.5 } });
-      }).not.toThrow();
+      for (const { given, outcome, refusal } of durationsOf("a transfer's inactivity", {
+        never: 'refused',
+        zero: 'refused',
+      })) {
+        const building = (): void => {
+          using _core = createRouterCore(port, { limits: { transferInactivityTimeout: given } });
+        };
 
-      for (const timeout of [0.5, 0, -2, Number.NaN]) {
-        expect(() => {
-          return createRouterCore(port, { limits: { transferInactivityTimeout: timeout } });
-        }, String(timeout)).toThrow(
-          new ProgrammerError(
-            `a transfer's inactivity is a millisecond at least, not ${String(timeout)}`
-          )
-        );
+        if (outcome === 'refused') {
+          expect(building, String(given)).toThrow(new ProgrammerError(refusal));
+        } else {
+          expect(building, String(given)).not.toThrow();
+        }
       }
+
+      // a limit read from JSON, which a TimeSpan on the C# side never is
+      expect(() => {
+        return createRouterCore(port, {
+          limits: { transferInactivityTimeout: '1000' as unknown as number },
+        });
+      }).toThrow(
+        new ProgrammerError(
+          'a transfer\'s inactivity is a whole number of milliseconds from 1 to 2147483647, not "1000"'
+        )
+      );
     });
 
     test('refuse a payload past its own limit, and an envelope past its own', async () => {

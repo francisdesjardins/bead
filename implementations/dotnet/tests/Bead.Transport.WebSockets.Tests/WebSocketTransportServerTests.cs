@@ -6,6 +6,7 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
+using Bead.Tests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.Time.Testing;
@@ -411,6 +412,43 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await _server.CloseConnection(connectionHandle).WaitAsync(TimeSpan.FromSeconds(2), Cancelled);
 
             Assert.Equal((false, connectionHandle), await Next(_closes, TimeSpan.FromSeconds(2)));
+        }
+    }
+
+    [Fact]
+    public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_zero_dropping_a_connection_at_once_infinite_waiting_on_its_peer_without_end()
+    {
+        foreach (var (given, outcome, refusal) in Durations.Of("a close timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        {
+            if (outcome == DurationOutcome.Refused)
+            {
+                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                {
+                    return new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = given });
+                });
+
+                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.Equal(nameof(WebSocketTransportServerOptions.CloseTimeout), refused.ParamName);
+            }
+            else
+            {
+                await using var taken = new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = given });
+            }
+        }
+
+        // infinite arms no timer: a peer that does not answer its close is waited on without end
+        await Start(new WebSocketTransportServerOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            var closing = _server.CloseConnection(connectionHandle);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+            Assert.False(closing.IsCompleted);
+            Assert.Equal(WebSocketCloseStatus.NormalClosure, await AnswerClose(client));
+            await closing.WaitAsync(Patience, Cancelled);
         }
     }
 

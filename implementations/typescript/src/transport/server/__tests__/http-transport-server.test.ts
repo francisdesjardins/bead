@@ -13,7 +13,12 @@ import {
   RESERVATION_MILLISECONDS,
 } from '../../../router/shared/constants';
 import { CancelError, ProgrammerError } from '../../shared/errors';
-import { createTestClock, tcpSocketsClosed, timersBy } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  durationsOf,
+  tcpSocketsClosed,
+  timersBy,
+} from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -761,6 +766,31 @@ test.describe('createHTTPTransportServer', () => {
     }
 
     expect(EXCHANGE_TIMEOUT).toBe(300_000);
+  });
+
+  test('holds its timeouts and its longest wait to a whole number of milliseconds, refusing 0, Infinity for the timeouts alone', () => {
+    for (const [option, never] of [
+      ['exchangeTimeout', 'taken'],
+      ['inactivityTimeout', 'taken'],
+      ['maximumWait', 'refused'],
+    ] as const) {
+      for (const { given, outcome, refusal } of durationsOf(option, { never, zero: 'refused' })) {
+        const building = () => {
+          return createHTTPTransportServer({
+            createServer: (listener) => {
+              return createServer(listener);
+            },
+            [option]: given,
+          });
+        };
+
+        if (outcome === 'refused') {
+          expect(building, `${option} ${String(given)}`).toThrow(new ProgrammerError(refusal));
+        } else {
+          expect(building, `${option} ${String(given)}`).not.toThrow();
+        }
+      }
+    }
   });
 });
 

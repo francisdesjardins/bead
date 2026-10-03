@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { assertHeld, type IClock, LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
+import { assertHeld, assertHeldFinite, type IClock, PLATFORM_CLOCK } from '../shared/clock';
 import { RECONNECT_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
@@ -110,20 +110,6 @@ export const RECONNECT_DEFAULTS = Object.freeze({
 
 // helpers
 
-// a connect's timeout, or a reconnection's delay, as a timer holds it: one of 0 or less, or
-// `Infinity`, never times out, or waits none; any other is one a timer holds, a millisecond at least
-const assertTimer = (name: string, given: number): void => {
-  if (Number.isFinite(given) && given > LONGEST_TIMER) {
-    throw new ProgrammerError(
-      `${name} is ${String(LONGEST_TIMER)} milliseconds at most, as a timer holds, not ${String(given)}`
-    );
-  }
-
-  if (Number.isNaN(given) || given > 0) {
-    assertHeld(name, given);
-  }
-};
-
 const sleep = (
   delay: number,
   { clock, signal }: { clock: IClock; signal: AbortSignal | undefined }
@@ -198,9 +184,14 @@ export const createTransportClient = <
     },
 
     connect: (options) => {
-      // refused here, so by every transport, before anything moves or is kept for a reconnection
+      // refused here, so by every transport, before anything moves or is kept for a reconnection;
+      // 0 never times out, as `Infinity` does
       try {
-        assertTimer("a connect's timeout", options.timeout ?? 0);
+        const { timeout = 0 } = options;
+
+        if (timeout !== 0) {
+          assertHeld("a connect's timeout", timeout);
+        }
       } catch (reason) {
         return Promise.reject(toError(reason));
       }
@@ -328,13 +319,31 @@ export const createTransportClient = <
             throw wrapReason(ProgrammerError, reason);
           }
 
-          // refused before "tap" hears it
-          assertTimer('a delay', nextDelay);
-          tap?.(nextDelay, attempt);
+          // refused before "tap" hears it: 0 waits none, and never would wait for ever
+          if (nextDelay !== 0) {
+            assertHeldFinite('a delay', nextDelay);
+          }
+
+          // armed before "tap" is told, so whoever moves the clock once told moves it past the wait
+          const pausing = new AbortController();
+          const waiting = sleep(nextDelay, {
+            clock: client.clock,
+            signal:
+              signal === undefined ? pausing.signal : AbortSignal.any([signal, pausing.signal]),
+          });
+
+          try {
+            tap?.(nextDelay, attempt);
+          } catch (reason) {
+            pausing.abort();
+            await waiting.catch(noop);
+
+            throw reason;
+          }
 
           previousDelay = nextDelay;
 
-          await sleep(nextDelay, { clock: client.clock, signal });
+          await waiting;
         }
 
         if (signal?.aborted) {

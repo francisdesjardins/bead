@@ -77,29 +77,10 @@ export const DEFAULTS = Object.freeze({
 // helpers
 
 /**
- * A default the manager falls back on is a timeout itself: a millisecond to the longest a timer
- * waits, or `Infinity` for never. Anything else would let `0` through as a timer that fires at once.
- */
-const assertDefaultTimeout = (name: string, timeout: number): void => {
-  if (Number.isNaN(timeout) || timeout <= 0) {
-    throw new ProgrammerError(
-      `${name} is a positive number of milliseconds, got ${String(timeout)}`
-    );
-  }
-
-  assertHeld(name, timeout);
-};
-
-/**
- * An inactivity timeout as the manager stores it: `0` takes `fallback`. A negative one, `NaN`, or one
- * no timer holds — under a millisecond, or past the longest a timer waits — is a
- * {@link ProgrammerError}.
+ * An inactivity timeout as the manager stores it: `0` takes `fallback`. One neither `Infinity` nor a
+ * whole number of milliseconds from 1 to the longest a timer waits is a {@link ProgrammerError}.
  */
 const resolveTimeout = (timeout: number, fallback: number): number => {
-  if (timeout < 0) {
-    throw new ProgrammerError(`an inactivity timeout cannot be negative, got ${String(timeout)}`);
-  }
-
   if (timeout === 0) {
     return fallback;
   }
@@ -196,8 +177,9 @@ export const createTimers = (clock: IClock): ISessionManagerTimers => {
  * to drop it.
  *
  * Nothing handed in or out is shared with what is stored: `data` must be structured-cloneable. Its
- * timers run on its `clock`, which reads its activity too: a timeout past the longest a timer waits
- * is a {@link ProgrammerError}, and never is `Infinity`.
+ * timers run on its `clock`, which reads its activity too: a timeout that is not a whole number of
+ * milliseconds from 1 to the longest a timer waits is a {@link ProgrammerError}, and never is
+ * `Infinity`.
  *
  * @example
  * import { createSessionManager } from '@francisdesjardins/bead/session-manager';
@@ -226,8 +208,9 @@ export const createSessionManager = <Data>(
     sessionInactivityTimeout: defaultSessionInactivityTimeout = DEFAULTS.sessionInactivityTimeout,
   } = options ?? {};
 
-  assertDefaultTimeout('connectionInactivityTimeout', defaultConnectionInactivityTimeout);
-  assertDefaultTimeout('sessionInactivityTimeout', defaultSessionInactivityTimeout);
+  // a default is what 0 stands for, so 0 is no default
+  assertHeld('connectionInactivityTimeout', defaultConnectionInactivityTimeout);
+  assertHeld('sessionInactivityTimeout', defaultSessionInactivityTimeout);
 
   const emitter = createEmitter<SessionManagerEventMap<Data>>();
   // by token, so a draw or a check costs nothing however many sessions there are, and by

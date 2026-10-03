@@ -14,12 +14,19 @@ import {
   setReadyStateClosing,
   setReadyStateConnecting,
   setReadyStateOpen,
+  TimeoutError,
 } from '../transport-client';
 import * as clocks from '../../shared/clock';
 import * as constants from '../../shared/constants';
 import { createPromise } from '../../shared/create-promise';
-import { createTestClock, delaysOn, type TestClock } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  delaysOn,
+  durationsOf,
+  type TestClock,
+} from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
+import { createWorkerTransportClient } from '../worker-transport-client';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
 
@@ -199,6 +206,86 @@ test.describe('createTransportClient', () => {
     expect(fresh.calls).toEqual(['dispose']);
   });
 
+  // the worker's transport, which no test of its own times a connect for: a worker that never answers
+  test('holds a connect’s timeout to a whole number of milliseconds, 0 and Infinity never timing out, refusing any other before anything moves, the worker’s transport as every one', async () => {
+    for (const { given, outcome, refusal } of durationsOf("a connect's timeout", {
+      never: 'taken',
+      zero: 'own',
+    })) {
+      const clock = createTestClock();
+      const held: MessagePort[] = [];
+      const client = createWorkerTransportClient({
+        clock,
+        worker: {
+          postMessage: (_, transfer) => {
+            held.push(transfer[0] as MessagePort);
+          },
+        },
+      });
+      const controller = new AbortController();
+      const label = String(given);
+      let isSettled = false;
+      const connecting = client
+        .connect({ signal: controller.signal, timeout: given })
+        .catch((reason: unknown) => {
+          return reason;
+        })
+        .finally(() => {
+          isSettled = true;
+        });
+
+      if (outcome === 'refused') {
+        expect(await connecting, label).toEqual(new ProgrammerError(refusal));
+        // no port handed to the worker, and nothing kept for a reconnection
+        expect([held, client.isUninitialized()], label).toEqual([[], true]);
+        await expect(client.reconnect(), label).rejects.toThrow('transport was never connected');
+
+        continue;
+      }
+
+      // a duration held times the connect out once it passed; 0 and Infinity wait on past the longest
+      if (Number.isFinite(given) && given > 0) {
+        await clock.tickAsync(given - 1);
+
+        expect(isSettled, label).toBe(false);
+
+        await clock.tickAsync(1);
+
+        expect(await connecting, label).toBeInstanceOf(TimeoutError);
+      } else {
+        await clock.tickAsync(clocks.LONGEST_TIMER);
+
+        expect(isSettled, label).toBe(false);
+
+        controller.abort();
+
+        expect(await connecting, label).toBeInstanceOf(CancelError);
+      }
+
+      for (const port of held) {
+        port.close();
+      }
+    }
+  });
+
+  test('a connect refused after a close keeps the target before it, which a reconnection replays', async () => {
+    const { calls, client } = createStubClient();
+
+    await client.connect({ host: 'h', port: 7 });
+    await client.disconnect();
+    await expect(client.connect({ host: 'h', port: 8, timeout: 0.5 })).rejects.toThrow(
+      new ProgrammerError(
+        "a connect's timeout is a whole number of milliseconds from 1 to 2147483647, or Infinity for never, not 0.5"
+      )
+    );
+
+    expect(client.isClosed()).toBe(true);
+
+    await client.reconnect({ delay: 0 });
+
+    expect([calls, client.isOpen()]).toEqual([['connect:7', 'disconnect', 'connect:7'], true]);
+  });
+
   test('the drop leaves an open client CLOSED', async () => {
     const { calls, client } = createStubClient();
 
@@ -295,8 +382,9 @@ test.describe('createTransportClient #reconnect', () => {
     await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
   });
 
-  test('passes on what "tap" throws, ending CLOSED, with no attempt after it', async () => {
-    const { calls, client } = createStubClient({ failures: 2 });
+  test('passes on what "tap" throws, ending CLOSED, with no attempt after it and no wait left armed', async () => {
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 2 });
     const failure = new Error('tap_error');
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
@@ -309,7 +397,7 @@ test.describe('createTransportClient #reconnect', () => {
       })
     ).rejects.toBe(failure);
     expect(client.isClosed()).toBe(true);
-    expect(calls).toEqual(['connect:1', 'connect:1']);
+    expect([calls, delaysOn(clock)]).toEqual([['connect:1', 'connect:1'], []]);
   });
 
   test('rejects with a ProgrammerError, ending CLOSED, when "delay" throws', async () => {
@@ -382,41 +470,70 @@ test.describe('createTransportClient #reconnect', () => {
     expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
   });
 
-  test('refuses a delay under a millisecond or past the longest a timer waits, before "tap" hears it, ending CLOSED without another attempt, and waits one of a millisecond', async () => {
-    for (const [delay, refusal] of [
-      [0.5, 'a delay is a millisecond at least, not 0.5'],
-      [2 ** 31, 'a delay is 2147483647 milliseconds at most, as a timer holds, not 2147483648'],
-    ] as const) {
-      const { calls, client } = createStubClient({ failures: 2 });
+  test('holds a delay to a whole number of milliseconds, 0 waiting none, refusing Infinity and any other before "tap" hears it, ending CLOSED without another attempt', async () => {
+    for (const { given, outcome, refusal } of durationsOf('a delay', {
+      never: 'refused',
+      zero: 'own',
+    })) {
+      const clock = createTestClock();
+      const { calls, client } = createStubClient({ clock, failures: 2 });
       const taps: number[] = [];
-      const tap = (nextDelay: number) => {
-        taps.push(nextDelay);
-      };
+      const label = String(given);
 
       await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
-      await expect(client.reconnect({ delay, tap }), String(delay)).rejects.toThrow(
-        new ProgrammerError(refusal)
-      );
 
-      expect([calls, taps, client.isClosed()]).toEqual([['connect:1', 'connect:1'], [], true]);
+      const reconnecting = client.reconnect({
+        delay: given,
+        tap: (nextDelay) => {
+          taps.push(nextDelay);
+        },
+      });
+
+      if (outcome === 'refused') {
+        await expect(reconnecting, label).rejects.toThrow(new ProgrammerError(refusal));
+
+        expect([calls, taps, client.isClosed()], label).toEqual([
+          ['connect:1', 'connect:1'],
+          [],
+          true,
+        ]);
+
+        continue;
+      }
+
+      // a duration held is waited on the clock; 0, none
+      if (outcome === 'taken') {
+        await expect
+          .poll(() => {
+            return delaysOn(clock);
+          }, label)
+          .toEqual([given]);
+        await clock.tickAsync(given - 1);
+
+        expect(calls, label).toEqual(['connect:1', 'connect:1']);
+
+        await clock.tickAsync(1);
+      }
+
+      await reconnecting;
+
+      expect([calls, taps], label).toEqual([['connect:1', 'connect:1', 'connect:1'], [given]]);
     }
+  });
 
+  test('arms its wait before "tap" hears it, so a tap that moves the clock by the wait lets the next attempt follow with no other move', async () => {
     const clock = createTestClock();
     const { calls, client } = createStubClient({ clock, failures: 2 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+    await client.reconnect({
+      delay: 60,
+      tap: (nextDelay) => {
+        clock.tick(nextDelay);
+      },
+    });
 
-    const reconnecting = client.reconnect({ delay: 1 });
-
-    await expect
-      .poll(() => {
-        return delaysOn(clock);
-      })
-      .toEqual([1]);
-    await clock.tickAsync(1);
-    await reconnecting;
-
-    expect(calls).toEqual(['connect:1', 'connect:1', 'connect:1']);
+    expect([calls, client.isOpen()]).toEqual([['connect:1', 'connect:1', 'connect:1'], true]);
   });
 
   test('tells "tap" the wait and the attempt that failed, and nothing when the first one succeeds', async () => {

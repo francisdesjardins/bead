@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
 using System.Threading.Channels;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -1862,82 +1863,110 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public async Task Refuses_a_connect_s_timeout_under_a_millisecond_or_past_the_longest_timer_moving_nothing_and_times_one_of_a_millisecond()
+    public async Task Holds_its_connect_s_timeout_to_a_whole_number_of_milliseconds_on_its_clock_zero_and_infinite_never_timing_out_refusing_any_other_and_moving_nothing()
     {
-        using var fetch = new Fetch();
-        var time = new FakeTimeProvider();
-        await using var client = new HttpTransportClient(NotListening with { Handler = fetch, Clock = time });
-        await using var none = new HttpTransportClient();
+        foreach (var (given, outcome, refusal) in Durations.Of("a connect's timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
+        {
+            using var fetch = new Fetch();
+            var time = new FakeTimeProvider();
+            await using var client = new HttpTransportClient(NotListening with { Handler = fetch, Clock = time });
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
 
-        // 2³¹ ms, one past what JavaScript's timers hold
-        foreach (var (timeout, refusal) in new[]
-        {
-            (TimeSpan.FromMilliseconds(0.5), "a connect's timeout is a millisecond at least, not 0.5"),
-            (Clocks.LongestTimer + Millisecond, "a connect's timeout is 2147483647 milliseconds at most, as a timer holds, not 2147483648"),
-        })
-        {
-            Assert.StartsWith(refusal, (await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            Task Connecting()
             {
-                return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = timeout }, Cancelled);
-            })).Message, StringComparison.Ordinal);
-        }
+                return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = given }, cancelling.Token);
+            }
 
-        // nothing kept for a reconnection either
-        Assert.Equal((ReadyState.Uninitialized, 0), (client.ReadyState, fetch.Count));
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-        {
-            return client.Reconnect();
-        });
-        Assert.Equal((time, TimeProvider.System), (client.Clock, none.Clock));
-
-        var connecting = client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = Millisecond }, Cancelled);
-
-        await fetch.CallOf(0);
-        time.Advance(Millisecond);
-
-        await Assert.ThrowsAsync<TimeoutException>(() =>
-        {
-            return connecting.WaitAsync(Patience, Cancelled);
-        });
-        Assert.Equal(ReadyState.Closed, client.ReadyState);
-    }
-
-    // -1 ms is the infinite TimeSpan, which an inactivity timeout takes, and a TimeSpan holds no NaN
-    [Fact]
-    public void Refuses_a_wait_a_pause_or_an_inactivity_timeout_no_timer_holds()
-    {
-        foreach (var value in new[] { TimeSpan.FromMilliseconds(-2), TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L) })
-        {
-            foreach (var options in new[]
+            if (outcome == DurationOutcome.Refused)
             {
-                new HttpTransportClientOptions { InactivityTimeout = value },
-                new HttpTransportClientOptions { Pause = value },
-                new HttpTransportClientOptions { Wait = value },
-            })
-            {
-                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(Connecting);
+
+                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.Equal("Timeout", refused.ParamName);
+
+                // nothing moved, and nothing is kept for a reconnection
+                Assert.Equal((ReadyState.Uninitialized, 0, time), (client.ReadyState, fetch.Count, client.Clock));
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 {
-                    return new HttpTransportClient(options);
+                    return client.Reconnect();
+                });
+
+                continue;
+            }
+
+            var connecting = Connecting();
+
+            // the connect reached a server that never answers it
+            await fetch.CallOf(0);
+
+            // a duration held times the connect out once it passed; zero and infinite wait on past the longest
+            if (given > TimeSpan.Zero)
+            {
+                time.Advance(given - TimeSpan.FromMilliseconds(1));
+                Assert.Equal(ReadyState.Connecting, client.ReadyState);
+                time.Advance(TimeSpan.FromMilliseconds(1));
+                await Assert.ThrowsAsync<TimeoutException>(() =>
+                {
+                    return connecting.WaitAsync(Patience, Cancelled);
                 });
             }
-        }
+            else
+            {
+                time.Advance(Clocks.LongestTimer);
+                Assert.Equal(ReadyState.Connecting, client.ReadyState);
+                await cancelling.CancelAsync();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                {
+                    return connecting.WaitAsync(Patience, Cancelled);
+                });
+            }
 
-        Assert.Null(Record.Exception(() =>
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    [Fact]
+    public void Holds_a_wait_a_pause_and_an_inactivity_timeout_to_a_whole_number_of_milliseconds_zero_its_own_for_each_infinite_for_the_inactivity_timeout_alone()
+    {
+        var options = new (string Option, DurationOutcome Never, Func<TimeSpan, HttpTransportClientOptions> Of)[]
         {
-            return new HttpTransportClient(new HttpTransportClientOptions { InactivityTimeout = Timeout.InfiniteTimeSpan, Pause = TimeSpan.Zero, Wait = TimeSpan.Zero });
-        }));
-        Assert.Null(Record.Exception(() =>
+            (nameof(HttpTransportClientOptions.InactivityTimeout), DurationOutcome.Taken, (given) =>
+            {
+                return new HttpTransportClientOptions { InactivityTimeout = given };
+            }),
+            (nameof(HttpTransportClientOptions.Pause), DurationOutcome.Refused, (given) =>
+            {
+                return new HttpTransportClientOptions { Pause = given };
+            }),
+            (nameof(HttpTransportClientOptions.Wait), DurationOutcome.Refused, (given) =>
+            {
+                return new HttpTransportClientOptions { Wait = given };
+            }),
+        };
+
+        foreach (var (option, never, of) in options)
         {
-            return new HttpTransportClient(new HttpTransportClientOptions { InactivityTimeout = Millisecond, Pause = Millisecond, Wait = Millisecond });
-        }));
-        Assert.StartsWith("Wait is a whole number of milliseconds from 0 a timer holds, not -1", Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return new HttpTransportClient(new HttpTransportClientOptions { Wait = Timeout.InfiniteTimeSpan });
-        }).Message, StringComparison.Ordinal);
-        Assert.StartsWith("Pause is a whole number of milliseconds from 0 a timer holds, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return new HttpTransportClient(new HttpTransportClientOptions { Pause = TimeSpan.FromMilliseconds(0.5) });
-        }).Message, StringComparison.Ordinal);
+            foreach (var (given, outcome, refusal) in Durations.Of(option, (DurationOutcome.Own, never)))
+            {
+                if (outcome == DurationOutcome.Refused)
+                {
+                    var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return new HttpTransportClient(of(given));
+                    });
+
+                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.Equal(option, refused.ParamName);
+                }
+                else
+                {
+                    Assert.Null(Record.Exception(() =>
+                    {
+                        return new HttpTransportClient(of(given));
+                    }));
+                }
+            }
+        }
     }
 
     [Fact]

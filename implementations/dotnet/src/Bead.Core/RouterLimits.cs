@@ -59,8 +59,8 @@ public sealed record RouterLimits
     public int MaximumTransfers { get; init; } = 4;
 
     /// <summary>
-    /// How long a transfer waits for its next chunk or credit before it stalls, a millisecond at
-    /// least and 2³¹ − 1 ms at most, as a timer holds.
+    /// How long a transfer waits for its next chunk or credit before it stalls: a whole number of
+    /// milliseconds from 1 to 2³¹ − 1, never infinite.
     /// </summary>
     public TimeSpan TransferInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
@@ -70,9 +70,9 @@ public sealed record RouterLimits
     /// <summary>
     /// These limits, checked: whole numbers, positive but for the transfers and the detail; an
     /// envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a window of two chunks
-    /// at least; a payload within the budget; a transfer's inactivity a timer holds. Throws an
-    /// <see cref="ArgumentException"/> for the first that does not hold, an
-    /// <see cref="ArgumentOutOfRangeException"/> for an inactivity under a millisecond.
+    /// at least; a payload within the budget; a transfer's inactivity a whole number of milliseconds
+    /// from 1 to 2³¹ − 1. Throws an <see cref="ArgumentException"/> for the first that does not hold,
+    /// an <see cref="ArgumentOutOfRangeException"/> for the inactivity.
     /// </summary>
     public RouterLimits Validate()
     {
@@ -88,9 +88,6 @@ public sealed record RouterLimits
             ("a window holds two chunks at least, so a sender waits for no credit it is owed",
                 (long)WindowBytes >= 2L * ChunkBytes),
             ("a payload fits in the budget of the transfers received", MaximumPayloadBytes <= BufferedBytesBudget),
-            // the infinite TimeSpan among them, which no transfer takes
-            ($"a transfer's inactivity is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds",
-                TransferInactivityTimeout <= Clocks.LongestTimer && TransferInactivityTimeout != Timeout.InfiniteTimeSpan),
         ];
 
         foreach (var (rule, holds) in rules)
@@ -101,7 +98,8 @@ public sealed record RouterLimits
             }
         }
 
-        Clocks.AssertHeld("a transfer's inactivity", TransferInactivityTimeout);
+        // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free
+        Clocks.AssertHeldFinite(("a transfer's inactivity", nameof(TransferInactivityTimeout)), TransferInactivityTimeout);
 
         return this;
     }

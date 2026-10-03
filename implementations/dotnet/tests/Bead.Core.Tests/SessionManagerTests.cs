@@ -719,49 +719,78 @@ public sealed class SessionManagerTests
 
     // a session manager has no reset of its own on this side: a store, an update and a default
     [Fact]
-    public void A_timeout_under_a_millisecond_is_refused_by_a_store_an_update_and_a_default_and_nothing_changes_a_millisecond_is_armed()
+    public void Holds_a_timeout_stored_updated_or_defaulted_to_a_whole_number_of_milliseconds_zero_the_default_where_one_is_stored_and_refused_as_a_default_nothing_changing_for_one_refused()
     {
-        var time = new FakeTimeProvider();
-
-        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
-
-        var reached = 0;
-
-        sessions.ConnectionInactivityTimeoutReached += (_) =>
+        foreach (var (given, outcome, refusal) in Durations.Of("an inactivity timeout", (DurationOutcome.Own, DurationOutcome.Taken)))
         {
-            reached += 1;
+            using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = new FakeTimeProvider() });
+
+            var session = sessions.Set(sessions.Create(Handle));
+
+            if (outcome == DurationOutcome.Refused)
+            {
+                foreach (var (refused, option) in new[]
+                {
+                    (Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return sessions.Set(sessions.Create(Other) with { ConnectionInactivityTimeout = given });
+                    }), nameof(Session<string>.ConnectionInactivityTimeout)),
+                    (Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = given });
+                    }), nameof(Session<string>.SessionInactivityTimeout)),
+                })
+                {
+                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.Equal(option, refused.ParamName);
+                }
+
+                Assert.False(sessions.Has(Other));
+                Assert.Equal(session, sessions.Get(Handle));
+
+                continue;
+            }
+
+            // stored as given, or as the manager's default for zero
+            Assert.Equal(
+                outcome == DurationOutcome.Own ? (TimeSpan.FromMilliseconds(600), TimeSpan.FromSeconds(30)) : (given, given),
+                (sessions.Set(sessions.Create(Other) with { ConnectionInactivityTimeout = given }).ConnectionInactivityTimeout,
+                    sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = given })!.SessionInactivityTimeout));
+        }
+
+        // a default is what zero stands for, so zero is no default
+        var defaults = new (string Option, Func<TimeSpan, SessionManagerOptions> Of)[]
+        {
+            (nameof(SessionManagerOptions.ConnectionInactivityTimeout), (timeout) =>
+            {
+                return new SessionManagerOptions { ConnectionInactivityTimeout = timeout };
+            }),
+            (nameof(SessionManagerOptions.SessionInactivityTimeout), (timeout) =>
+            {
+                return new SessionManagerOptions { SessionInactivityTimeout = timeout };
+            }),
         };
 
-        var session = sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromSeconds(1) });
-        var under = TimeSpan.FromMilliseconds(0.5);
+        foreach (var (option, of) in defaults)
+        {
+            foreach (var (given, outcome, refusal) in Durations.Of(option, (DurationOutcome.Refused, DurationOutcome.Taken)))
+            {
+                if (outcome == DurationOutcome.Refused)
+                {
+                    var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                    {
+                        return new SessionManager<string>(of(given));
+                    });
 
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return sessions.Set(sessions.Create(Other) with { ConnectionInactivityTimeout = under });
-        });
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = under });
-        });
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return new SessionManager<string>(new SessionManagerOptions { ConnectionInactivityTimeout = under });
-        });
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return new SessionManager<string>(new SessionManagerOptions { SessionInactivityTimeout = under });
-        });
-        Assert.StartsWith("an inactivity timeout is a millisecond at least, not 0.5", Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = under });
-        }).Message, StringComparison.Ordinal);
-        Assert.False(sessions.Has(Other));
-        Assert.Equal(session, sessions.Get(Handle));
-
-        // a millisecond is stored and armed
-        sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(1) });
-        time.Advance(TimeSpan.FromMilliseconds(1));
-        Assert.Equal(1, reached);
+                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.Equal(option, refused.ParamName);
+                }
+                else
+                {
+                    using var taken = new SessionManager<string>(of(given));
+                }
+            }
+        }
     }
 
     [Fact]

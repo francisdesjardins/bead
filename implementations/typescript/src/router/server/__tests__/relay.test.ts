@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { durationsOf } from '../../../transport/shared/__tests__/fixtures';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   CLIENT_FAILURES,
@@ -593,7 +594,7 @@ test.describe('createRelay', () => {
     expect([before.asked.length, after.asked.length]).toEqual([1, 0]);
   });
 
-  test('waits on leg B as long as the destination says, the relay’s timeout at most, or on; a timeout no timer holds is refused', async () => {
+  test('waits on leg B as long as the destination says, the relay’s timeout at most, or on', async () => {
     const { relay } = createTestRelay({
       beforeRoute: () => {
         return true;
@@ -621,28 +622,41 @@ test.describe('createRelay', () => {
         return options.timeout;
       })
     ).toEqual([5_000, 250, Infinity, 250, 5_000]);
+  });
 
-    for (const timeout of [0, -1, 0.5, 2 ** 31, Number.NaN]) {
+  test('holds a relay’s timeout, and a destination’s, to a whole number of milliseconds, refusing 0, Infinity waiting on', async () => {
+    for (const { given, outcome, refusal } of durationsOf("a relay's timeout", {
+      never: 'taken',
+      zero: 'refused',
+    })) {
+      const { relay } = createTestRelay();
+      const { asked, target } = createTarget();
+      const label = String(given);
+
+      if (outcome === 'refused') {
+        expect(() => {
+          return relay.register(target, { timeout: given });
+        }, label).toThrow(new ProgrammerError(refusal));
+        expect(() => {
+          return createTestRelay({ timeout: given });
+        }, label).toThrow(new ProgrammerError(refusal));
+
+        continue;
+      }
+
+      relay.register(target, { destinationId: 7, timeout: given });
+      await relay.handlerOf(7)?.(propsOf(headerOf(1)));
+
+      expect(
+        asked.map(({ options }) => {
+          return options.timeout;
+        }),
+        label
+      ).toEqual([given]);
       expect(() => {
-        return relay.register(target, { timeout });
-      }, String(timeout)).toThrow(ProgrammerError);
-      expect(() => {
-        return createTestRelay({ timeout });
-      }, String(timeout)).toThrow(ProgrammerError);
+        return createTestRelay({ timeout: given });
+      }, label).not.toThrow();
     }
-
-    expect(() => {
-      return relay.register(target, { timeout: 0.5 });
-    }).toThrow("a relay's timeout is a millisecond at least, not 0.5");
-
-    // a millisecond is taken
-    relay.register(target, { destinationId: 10, timeout: 1 });
-    await relay.handlerOf(10)?.(propsOf(headerOf(7, { destinationId: 10 })));
-
-    expect(asked.at(-1)?.options.timeout).toBe(1);
-    expect(() => {
-      return createTestRelay({ timeout: 1 });
-    }).not.toThrow();
   });
 
   test('passes nothing on to a connection of its own that takes no request of the relay’s', async () => {

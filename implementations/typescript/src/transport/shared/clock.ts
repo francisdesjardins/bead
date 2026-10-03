@@ -38,7 +38,7 @@ export type TimeoutId = number | object;
 
 /**
  * The longest a timer waits, in milliseconds: 2³¹ − 1, JavaScript's, past which `setTimeout` fires
- * at once. Every timeout Bead takes is refused past it, and under a millisecond; never is
+ * at once. Every duration Bead is given is a whole number of milliseconds from 1 to it; never is
  * `Infinity`, which arms nothing.
  */
 export const LONGEST_TIMER = 2 ** 31 - 1;
@@ -47,6 +47,18 @@ export const LONGEST_TIMER = 2 ** 31 - 1;
 export const PLATFORM_CLOCK: IClock = globalThis;
 
 // helpers
+
+// whether every platform's timers hold `duration` alike: whole milliseconds, from 1 to the ceiling
+const isHeld = (duration: unknown): boolean => {
+  return (
+    Number.isInteger(duration) && (duration as number) >= 1 && (duration as number) <= LONGEST_TIMER
+  );
+};
+
+// a duration as a refusal writes it: a string quoted, so `'1000'` reads apart from 1000
+const writtenOf = (duration: unknown): string => {
+  return typeof duration === 'string' ? JSON.stringify(duration) : String(duration);
+};
 
 // a clock as a refusal names it: the platform's, or one of its own, since a test's clock tells its
 // reading rather than its name
@@ -74,19 +86,26 @@ export const clockOf = (
 };
 
 /**
- * Throws a {@link ProgrammerError}, naming the timeout `name`, unless a timer holds it: past
- * {@link LONGEST_TIMER}, a timer would fire at once; under a millisecond, `NaN` among them, Node
- * waits a millisecond and .NET none. `Infinity`, never, arms nothing and passes. A place where 0 has
- * a meaning of its own takes it before.
+ * Throws a {@link ProgrammerError}, naming the duration `name`, unless every platform's timers hold
+ * it alike: a whole number of milliseconds from 1 to {@link LONGEST_TIMER} — past it, a timer fires
+ * at once; under a millisecond, Node waits one and .NET none — or `Infinity`, never, which arms
+ * nothing. A fraction, `NaN`, a negative, or what is not a number at all — a limit read from JSON
+ * — is refused. A place where 0 has a meaning of its own takes it before; one where never has none
+ * holds to {@link assertHeldFinite}.
  */
-export const assertHeld = (name: string, timeout: number): void => {
-  if (Number.isFinite(timeout) && timeout > LONGEST_TIMER) {
+export const assertHeld = (name: string, duration: unknown): void => {
+  if (duration !== Infinity && !isHeld(duration)) {
     throw new ProgrammerError(
-      `${name} is ${String(LONGEST_TIMER)} milliseconds at most, or Infinity for never, not ${String(timeout)}`
+      `${name} is a whole number of milliseconds from 1 to ${String(LONGEST_TIMER)}, or Infinity for never, not ${writtenOf(duration)}`
     );
   }
+};
 
-  if (!(timeout >= 1)) {
-    throw new ProgrammerError(`${name} is a millisecond at least, not ${String(timeout)}`);
+/** As {@link assertHeld}, where never has no meaning: `Infinity` is refused too. */
+export const assertHeldFinite = (name: string, duration: unknown): void => {
+  if (!isHeld(duration)) {
+    throw new ProgrammerError(
+      `${name} is a whole number of milliseconds from 1 to ${String(LONGEST_TIMER)}, not ${writtenOf(duration)}`
+    );
   }
 };

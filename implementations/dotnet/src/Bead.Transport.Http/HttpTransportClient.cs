@@ -16,7 +16,9 @@ public sealed record HttpTransportClientOptions
 
     /// <summary>
     /// How long it goes on listening again, its listens lost, before it counts its connection lost: 5
-    /// minutes by default, a server's own inactivity timeout; infinite for ever.
+    /// minutes by default, a server's own inactivity timeout; infinite for ever, and zero not at all,
+    /// its first listen lost losing it. A whole number of milliseconds from 1 to
+    /// <see cref="Clocks.LongestTimer"/> otherwise.
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
@@ -26,10 +28,17 @@ public sealed record HttpTransportClientOptions
     /// <summary>The largest answer, and the largest envelope a batch brings, it reads: an envelope's limit by default.</summary>
     public int? MaximumBodyBytes { get; init; }
 
-    /// <summary>How long it waits before it listens again after a listen that brought nothing: none by default.</summary>
+    /// <summary>
+    /// How long it waits before it listens again after a listen that brought nothing: none, zero, by
+    /// default; a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> otherwise.
+    /// </summary>
     public TimeSpan Pause { get; init; } = TimeSpan.Zero;
 
-    /// <summary>How long each listen asks the server to wait: 25 seconds by default, under a server's 30 and an intermediary's 60.</summary>
+    /// <summary>
+    /// How long each listen asks the server to wait: 25 seconds by default, under a server's 30 and
+    /// an intermediary's 60; zero asks it to answer at once, which polls. A whole number of
+    /// milliseconds from 1 to <see cref="Clocks.LongestTimer"/> otherwise.
+    /// </summary>
     public TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(25);
 
     /// <summary>
@@ -56,7 +65,8 @@ public sealed record HttpConnectOptions
 
     /// <summary>
     /// How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds
-    /// unless told, a millisecond to <see cref="Clocks.LongestTimer"/>; zero never times out.
+    /// unless told, a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/>; zero
+    /// never times out, as <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> does.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 }
@@ -114,8 +124,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private Action? _reconnect;
 
     /// <summary>
-    /// A transport client, not yet connected. A wait, a pause or an inactivity timeout no timer holds
-    /// is an <see cref="ArgumentOutOfRangeException"/>.
+    /// A transport client, not yet connected. A wait, a pause or an inactivity timeout neither zero nor
+    /// a whole number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> — infinite aside, for
+    /// the inactivity timeout alone — is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public HttpTransportClient(HttpTransportClientOptions? options = null)
     {
@@ -189,9 +200,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
-    /// an <see cref="ArgumentOutOfRangeException"/> for a timeout under a millisecond or longer than
-    /// <see cref="Clocks.LongestTimer"/>, with an <see cref="InvalidOperationException"/> unless
-    /// Uninitialized or Closed, and with an <see cref="OperationCanceledException"/>, nothing
+    /// an <see cref="ArgumentOutOfRangeException"/> for a timeout neither zero nor a duration
+    /// <see cref="HttpConnectOptions.Timeout"/> takes, which leaves the state, and the target a
+    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
+    /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already.
     /// Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and an
@@ -421,16 +433,22 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         http?.Dispose();
     }
 
-    // a whole number of milliseconds from 0 a timer holds; or, when it may be, infinite
+    // a bound of the listens, which zero gives a meaning of its own: lost, listened again or answered
+    // at once; infinite, only where it may be
     private static void AssertDelay((string Name, TimeSpan Value) delay, bool mayBeInfinite)
     {
-        var isHeld = delay.Value >= TimeSpan.Zero && delay.Value <= Clocks.LongestTimer && delay.Value.Ticks % TimeSpan.TicksPerMillisecond == 0;
-
-        if (!isHeld && !(mayBeInfinite && delay.Value == Timeout.InfiniteTimeSpan))
+        if (delay.Value == TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(
-                delay.Name,
-                $"{delay.Name} is a whole number of milliseconds from 0 a timer holds{(mayBeInfinite ? ", or infinite" : "")}, not {delay.Value.TotalMilliseconds}");
+            return;
+        }
+
+        if (mayBeInfinite)
+        {
+            Clocks.AssertHeld((delay.Name, delay.Name), delay.Value);
+        }
+        else
+        {
+            Clocks.AssertHeldFinite((delay.Name, delay.Name), delay.Value);
         }
     }
 
@@ -462,7 +480,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     // how long to wait before listening again after `losses` listens lost in a row, drawn apart so
-    // the clients one restart dropped together come back apart, as EventSource's do
+    // the clients one restart dropped together come back apart, as EventSource's do; in whole
+    // milliseconds, as every wait of Bead's
     private static TimeSpan RetryDelayOf(int losses)
     {
         if (losses == 1)
@@ -471,8 +490,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
 
         var delay = TimeSpan.FromTicks(Math.Min(LastRetry.Ticks, FirstRetry.Ticks * (1L << Math.Min(losses - 2, 30))));
+        var drawn = (delay / 2) + (delay / 2 * Random.Shared.NextDouble());
 
-        return (delay / 2) + (delay / 2 * Random.Shared.NextDouble());
+        return TimeSpan.FromMilliseconds(Math.Floor(drawn.TotalMilliseconds));
     }
 
     // the HTTP client its exchanges go through, built as a connect needs it
@@ -580,17 +600,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (options.Timeout > Clocks.LongestTimer)
+        // zero never times out, as infinite does
+        if (options.Timeout != TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(options),
-                $"a connect's timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, not {options.Timeout.TotalMilliseconds}");
-        }
-
-        // one not above zero never times out; any other is one a timer holds, a millisecond at least
-        if (options.Timeout > TimeSpan.Zero)
-        {
-            Clocks.AssertHeld("a connect's timeout", options.Timeout);
+            Clocks.AssertHeld(("a connect's timeout", nameof(HttpConnectOptions.Timeout)), options.Timeout);
         }
 
         var (token, isAttempt) = call;
@@ -640,7 +653,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {
-                throw new TimeoutException($"timed out after {options.Timeout.TotalMilliseconds}ms", reason);
+                throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
             }
             catch (OperationCanceledException reason) when (connecting.IsCancellationRequested && !token.IsCancellationRequested)
             {

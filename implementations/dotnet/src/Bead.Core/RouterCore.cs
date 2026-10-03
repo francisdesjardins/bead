@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 
 namespace Bead;
@@ -454,7 +455,7 @@ public sealed class RouterCore : IDisposable
                         }
 
                         EndPending(
-                            new TimeoutException($"no answer came in {delay.TotalMilliseconds} milliseconds"),
+                            new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"no answer came in {delay.TotalMilliseconds} milliseconds")),
                             call,
                             pendingRequest);
                     });
@@ -513,17 +514,10 @@ public sealed class RouterCore : IDisposable
                 nameof(request));
         }
 
-        if (options.Timeout != Timeout.InfiniteTimeSpan && options.Timeout > Clocks.LongestTimer)
+        // zero waits on, as infinite does
+        if (options.Timeout != TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(request),
-                $"a call's timeout is {Clocks.LongestTimer.TotalMilliseconds} milliseconds at most, as a timer holds, not {options.Timeout.TotalMilliseconds}");
-        }
-
-        // one not above zero waits on; any other is one a timer holds, a millisecond at least
-        if (options.Timeout > TimeSpan.Zero)
-        {
-            Clocks.AssertHeld("a call's timeout", options.Timeout);
+            Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), options.Timeout);
         }
 
         // drawn once the call starts: a cancelled token draws nothing
@@ -890,7 +884,7 @@ public sealed class RouterCore : IDisposable
                         // silent too long, it ends, and the peer is told
                         var stalled = ProtocolFailureOf(
                             ProtocolCode.TransferStalled,
-                            $"no credit came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds");
+                            string.Create(CultureInfo.InvariantCulture, $"no credit came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds"));
 
                         Fail(LocalOf(stalled, header));
                         SendReporting(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = stalled }, connectionHandle);
@@ -1298,7 +1292,7 @@ public sealed class RouterCore : IDisposable
                 Refuse(
                     ProtocolFailureOf(
                         ProtocolCode.TransferStalled,
-                        $"nothing came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds"),
+                        string.Create(CultureInfo.InvariantCulture, $"nothing came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds")),
                     dispatched);
             },
             total));
@@ -1702,9 +1696,10 @@ public sealed class RouterCore : IDisposable
     /// Cancels a call this side opened: one still waiting throws an
     /// <see cref="OperationCanceledException"/>, the peer is sent a cancel, and the call id is
     /// reserved for <paramref name="timeout"/> — the call's own when it is waiting and none is given.
-    /// A call id reserved already, or a router disposed, sends nothing. A timeout above zero that no
-    /// timer holds — under a millisecond, or longer than <see cref="Clocks.LongestTimer"/> — is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// A call id reserved already, or a router disposed, sends nothing. Zero, or infinite, reserves it
+    /// for the default time; any other timeout that is not a whole number of milliseconds from 1 to
+    /// <see cref="Clocks.LongestTimer"/> is an <see cref="ArgumentOutOfRangeException"/>, and nothing
+    /// is done.
     /// </summary>
     public void Cancel(CallAddress call, TimeSpan? timeout = null)
     {
@@ -1725,9 +1720,10 @@ public sealed class RouterCore : IDisposable
 
     /// <summary>
     /// Reserves this side's call id on a connection for <paramref name="timeout"/>, or for the
-    /// default time for none, or one not above zero: draws skip it, and what comes late on it is
-    /// dropped in silence. Reserved twice, the later end stands. A timeout above zero that no timer
-    /// holds is an <see cref="ArgumentOutOfRangeException"/>, as for <see cref="Cancel"/>.
+    /// default time for none, zero or infinite: draws skip it, and what comes late on it is dropped in
+    /// silence. Reserved twice, the later end stands. Any other timeout that is not a whole number of
+    /// milliseconds from 1 to <see cref="Clocks.LongestTimer"/> is an
+    /// <see cref="ArgumentOutOfRangeException"/>, as for <see cref="Cancel"/>.
     /// </summary>
     public void Reserve(CallAddress call, TimeSpan? timeout = null)
     {

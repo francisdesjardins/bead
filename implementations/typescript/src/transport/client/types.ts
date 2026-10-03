@@ -21,8 +21,8 @@ export interface ITransportClientConnectOptions {
    */
   signal?: AbortSignal | undefined;
   /**
-   * Milliseconds before `connect` rejects with a {@link TimeoutError}; `0` never times out. One a
-   * timer does not hold — under a millisecond, or past 2³¹ − 1 — rejects with a
+   * Milliseconds before `connect` rejects with a {@link TimeoutError}: a whole number from 1 to
+   * 2³¹ − 1; `0` never times out, as `Infinity` does. Any other rejects with a
    * {@link ProgrammerError}.
    */
   timeout?: number | undefined;
@@ -55,9 +55,9 @@ export interface ITransportClientOptions {
 export interface ITransportClientReconnectOptions {
   /**
    * Milliseconds to wait after a failed attempt before the next one, or a function of the previous
-   * wait and the number of the attempt that failed. The first attempt goes at once; one of 0 or less
-   * waits none, and one a timer does not hold — under a millisecond, or past 2³¹ − 1 — rejects with
-   * a {@link ProgrammerError}.
+   * wait and the number of the attempt that failed. The first attempt goes at once; one of 0 waits
+   * none, and one that is not a whole number from 1 to 2³¹ − 1 — `Infinity` among them — rejects
+   * with a {@link ProgrammerError}, before `tap` hears it.
    */
   delay?: TransportClientReconnectDelayOrDelayResolver | undefined;
   /** Attempts before giving up with a {@link ReconnectError}; there is always at least one. */
@@ -82,7 +82,10 @@ export interface ITransportClient<
   socket: Socket | null;
 
   /**
-   * Opens the connection. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, a
+   * Opens the connection. Refused with a {@link ProgrammerError} for a timeout neither 0 nor a
+   * duration `timeout` takes, which leaves the state, and the target a reconnection replays, as they
+   * were; with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED; and with a
+   * {@link CancelError}, nothing changed, when its signal is aborted already. Then it rejects with a
    * {@link ConnectError} when it cannot open, a {@link TimeoutError}, or a {@link CancelError}.
    */
   connect(options: ConnectOptions): Promise<void>;
@@ -330,7 +333,8 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
   /**
    * Milliseconds the client goes on listening again, its listens lost, before it counts its
    * connection lost: the server's own inactivity timeout by default, past which the server would
-   * have closed it; `Infinity` for as long as the server does not say it is gone. Defaults to
+   * have closed it; `Infinity` for as long as the server does not say it is gone, and `0` not at
+   * all, its first listen lost losing it. A whole number from 1 to 2³¹ − 1 otherwise. Defaults to
    * {@link INACTIVITY_TIMEOUT}.
    */
   inactivityTimeout?: number | undefined;
@@ -347,13 +351,15 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
    */
   maximumBodyBytes?: number | undefined;
   /**
-   * Milliseconds between a listen that brought nothing back and the next: `0` listens again at once.
-   * A pause past the server's inactivity timeout loses the connection. Defaults to `0`.
+   * Milliseconds between a listen that brought nothing back and the next: `0` listens again at once,
+   * and a whole number from 1 to 2³¹ − 1 waits. A pause past the server's inactivity timeout loses
+   * the connection. Defaults to `0`.
    */
   pause?: number | undefined;
   /**
    * Milliseconds each listen asks the server to wait for something to bring back, which the server
-   * caps; `0` asks it to answer at once, which polls. Defaults to {@link WAIT}.
+   * caps; `0` asks it to answer at once, which polls, and a whole number from 1 to 2³¹ − 1 to wait.
+   * Defaults to {@link WAIT}.
    */
   wait?: number | undefined;
 }

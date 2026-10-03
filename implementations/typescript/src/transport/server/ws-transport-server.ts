@@ -10,6 +10,7 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   TRANSPORT_WS,
 } from '../shared/constants';
+import { assertHeld } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
@@ -77,6 +78,11 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
   assertHeartbeat(heartbeat);
 
+  // 0 drops a connection once its close went, without waiting on the peer's
+  if (closeTimeout !== 0) {
+    assertHeld('a close timeout', closeTimeout);
+  }
+
   const decoder = new TextDecoder();
 
   return createTransportServer<IServerSocketLike, IIncomingMessageLike>((server, connections) => {
@@ -90,8 +96,12 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         const terminate = (): void => {
           socket.terminate();
         };
-        // oxlint-disable-next-line no-restricted-properties -- a close handshake's bound is the platform's
-        const timeoutId = globalThis.setTimeout(terminate, closeTimeout);
+        // `Infinity` waits on the peer without end, where Node's timer would take it for 1 ms
+        const timeoutId =
+          closeTimeout === Infinity
+            ? undefined
+            : // oxlint-disable-next-line no-restricted-properties -- a close handshake's bound is the platform's
+              globalThis.setTimeout(terminate, closeTimeout);
 
         socket.once(CLOSE_EVENT, () => {
           // oxlint-disable-next-line no-restricted-properties -- as its bound above

@@ -17,7 +17,7 @@ import {
   SEQUENCE_HEADER,
   TRANSPORT_HTTP,
 } from '../shared/constants';
-import { LONGEST_TIMER, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
+import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
@@ -337,23 +337,10 @@ const drawToken = (): string => {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(TOKEN_BYTES))).toString('base64url');
 };
 
-// a whole number above 0; a timer's no more than a timer holds, or, when it may be, Infinity
-const assertOption = (
-  name: string,
-  { timer, value }: { timer?: 'bounded' | 'unbounded'; value: number }
-) => {
-  const isWhole = Number.isInteger(value) && value > 0;
-  const isHeld = isWhole && value <= LONGEST_TIMER;
-  const isValid =
-    timer === undefined ? isWhole : isHeld || (timer === 'unbounded' && value === Infinity);
-  const holds = {
-    bounded: ' a timer holds',
-    none: '',
-    unbounded: ' a timer holds, or Infinity',
-  }[timer ?? 'none'];
-
-  if (!isValid) {
-    throw new ProgrammerError(`${name} is a whole number above 0${holds}, not ${String(value)}`);
+// a whole number above 0
+const assertOption = (name: string, { value }: { value: number }) => {
+  if (!(Number.isInteger(value) && value > 0)) {
+    throw new ProgrammerError(`${name} is a whole number above 0, not ${String(value)}`);
   }
 };
 
@@ -438,13 +425,13 @@ export const createHTTPTransportServer = (
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
-  assertOption('exchangeTimeout', { timer: 'unbounded', value: exchangeTimeout });
-  assertOption('inactivityTimeout', { timer: 'unbounded', value: inactivityTimeout });
+  assertHeld('exchangeTimeout', exchangeTimeout);
+  assertHeld('inactivityTimeout', inactivityTimeout);
   assertOption('maximumBodyBytes', { value: maximumBodyBytes });
   assertOption('maximumConnections', { value: maximumConnections });
   assertOption('maximumConnectionsPerAddress', { value: maximumConnectionsPerAddress });
   assertOption('maximumOutboxBytes', { value: maximumOutboxBytes });
-  assertOption('maximumWait', { timer: 'bounded', value: maximumWait });
+  assertHeldFinite('maximumWait', maximumWait);
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
 
   // what the transport keeps of each connection, by handle

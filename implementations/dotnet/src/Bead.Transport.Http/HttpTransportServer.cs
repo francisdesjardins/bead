@@ -145,20 +145,21 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private WebApplication? _application;
 
     /// <summary>
-    /// A transport server, not yet listening. A bound not above 0, or a timeout no timer holds, is an
-    /// <see cref="ArgumentOutOfRangeException"/> naming it.
+    /// A transport server, not yet listening. A bound not above 0, or a timeout that is not a whole
+    /// number of milliseconds from 1 to <see cref="Clocks.LongestTimer"/> — infinite aside, but for
+    /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
         _options = options ?? new HttpTransportServerOptions();
         AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), _options.BodyBytesBudget));
-        AssertTimer((nameof(HttpTransportServerOptions.ExchangeTimeout), _options.ExchangeTimeout), true);
-        AssertTimer((nameof(HttpTransportServerOptions.InactivityTimeout), _options.InactivityTimeout), true);
+        Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), _options.ExchangeTimeout);
+        Clocks.AssertHeld((nameof(HttpTransportServerOptions.InactivityTimeout), nameof(HttpTransportServerOptions.InactivityTimeout)), _options.InactivityTimeout);
         AssertWhole((nameof(HttpTransportServerOptions.MaximumBodyBytes), _options.MaximumBodyBytes));
         AssertWhole((nameof(HttpTransportServerOptions.MaximumConnections), _options.MaximumConnections));
         AssertWhole((nameof(HttpTransportServerOptions.MaximumConnectionsPerAddress), _options.MaximumConnectionsPerAddress));
         AssertWhole((nameof(HttpTransportServerOptions.MaximumOutboxBytes), _options.MaximumOutboxBytes));
-        AssertTimer((nameof(HttpTransportServerOptions.MaximumWait), _options.MaximumWait), false);
+        Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.MaximumWait), nameof(HttpTransportServerOptions.MaximumWait)), _options.MaximumWait);
         AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), _options.MaximumWaitingExchanges));
         _clock = _options.Clock ?? TimeProvider.System;
     }
@@ -474,19 +475,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         if (bound.Value < 1)
         {
             throw new ArgumentOutOfRangeException(bound.Name, $"{bound.Name} is a whole number above 0, not {bound.Value}");
-        }
-    }
-
-    // a whole number of milliseconds above 0 a timer holds, or, when it may be, infinite
-    private static void AssertTimer((string Name, TimeSpan Value) timer, bool mayBeInfinite)
-    {
-        var isHeld = timer.Value > TimeSpan.Zero && timer.Value <= Clocks.LongestTimer && timer.Value.Ticks % TimeSpan.TicksPerMillisecond == 0;
-
-        if (!isHeld && !(mayBeInfinite && timer.Value == Timeout.InfiniteTimeSpan))
-        {
-            throw new ArgumentOutOfRangeException(
-                timer.Name,
-                $"{timer.Name} is a whole number of milliseconds above 0 a timer holds{(mayBeInfinite ? ", or infinite" : "")}, not {timer.Value.TotalMilliseconds}");
         }
     }
 

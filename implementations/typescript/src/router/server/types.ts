@@ -168,7 +168,10 @@ export type PacingLimitsOptions = { [Key in keyof IPacingLimits]?: IPacingLimits
  */
 export interface ISession<Data> {
   connectionHandle: TransportServerConnectionHandle;
-  /** Milliseconds without activity before `connectionInactivityTimeoutReached`; `Infinity` is never. */
+  /**
+   * Milliseconds without activity before `connectionInactivityTimeoutReached`: a whole number from 1 to
+   * 2³¹ − 1; `Infinity` is never, and `0`, as it is stored, the manager's default.
+   */
   connectionInactivityTimeout: number;
   /** What the router keeps about the session; structured-cloneable, since it is stored as a copy. */
   data: Data | undefined;
@@ -177,7 +180,10 @@ export interface ISession<Data> {
    * the wall clock.
    */
   lastActivity: number;
-  /** Milliseconds without activity before `sessionInactivityTimeoutReached`; `Infinity` is never. */
+  /**
+   * Milliseconds without activity before `sessionInactivityTimeoutReached`: a whole number from 1 to
+   * 2³¹ − 1; `Infinity` is never, and `0`, as it is stored, the manager's default.
+   */
   sessionInactivityTimeout: number;
   /** What the router announces to the connection; `undefined` until `set` draws one. */
   sessionToken: SessionToken | undefined;
@@ -231,8 +237,8 @@ export interface ISessionManager<Data> {
   removeAllListeners(event?: SESSION_MANAGER_EVENTS): this;
   /**
    * Restarts the connection timer of a stored session: `connectionInactivityTimeoutReached` in
-   * `timeout` milliseconds. `Infinity` only stops it; under a millisecond or past
-   * {@link LONGEST_TIMER}, it is a {@link ProgrammerError}, and the timer is left as it was.
+   * `timeout` milliseconds. `Infinity` only stops it; one that is not a whole number from 1 to
+   * {@link LONGEST_TIMER} is a {@link ProgrammerError}, and the timer is left as it was.
    */
   resetConnectionInactivityTimeout(session: ISession<Data>, timeout: number): void;
   /** As {@link ISessionManager.resetConnectionInactivityTimeout}, for the session timer. */
@@ -241,15 +247,15 @@ export interface ISessionManager<Data> {
    * Stores a session, drawing its token when it has none; emits `created`, or `updated` when it
    * replaces a different one. A new session's timers start over, and a timeout that changed
    * restarts its timer; a timeout of `0` is the manager's default, as for the `update*` methods.
-   * Throws a {@link ProgrammerError} for a timeout negative, under a millisecond, past
-   * {@link LONGEST_TIMER} or not a number, or a token that is not one or that another connection
-   * holds — before anything is stored.
+   * Throws a {@link ProgrammerError} for a timeout neither `0`, `Infinity` nor a whole number of
+   * milliseconds from 1 to {@link LONGEST_TIMER}, or a token that is not one or that another
+   * connection holds — before anything is stored.
    */
   set(session: ISession<Data>): ISession<Data>;
   /**
    * Stores `session.connectionInactivityTimeout` — the manager's default when `0`, a
-   * {@link ProgrammerError} when negative, under a millisecond, past {@link LONGEST_TIMER} or not a
-   * number. When it changed, restarts the timer with it and emits
+   * {@link ProgrammerError} when neither `Infinity` nor a whole number of milliseconds from 1 to
+   * {@link LONGEST_TIMER}. When it changed, restarts the timer with it and emits
    * `connectionInactivityTimeoutChanged`; the same timeout restarts nothing, since activity is what
    * restarts a timer. `undefined` when the connection has no session.
    */
@@ -284,8 +290,9 @@ export interface ISessionManagerOptions {
   /** The clock its timers run on, and its activity is read on; the platform's when not given. */
   clock?: IClock | undefined;
   /**
-   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. A millisecond to
-   * {@link LONGEST_TIMER}, or `Infinity` for never: anything else is a {@link ProgrammerError}.
+   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. A whole number of
+   * milliseconds from 1 to {@link LONGEST_TIMER}, or `Infinity` for never: anything else, `0`
+   * among them, is a {@link ProgrammerError}.
    */
   connectionInactivityTimeout?: number | undefined;
   /** As `connectionInactivityTimeout`, for the session timeout; 30 s. */
@@ -515,7 +522,10 @@ export interface IDestinationOptions {
   destinationId?: DestinationId | undefined;
   /** What the application calls it, for a list of its own. */
   label?: string | undefined;
-  /** The milliseconds leg B waits for its answer, the relay's at most; the relay's if not given. */
+  /**
+   * The milliseconds leg B waits for its answer, the relay's at most; the relay's if not given. A
+   * whole number from 1 to 2³¹ − 1, or `Infinity`; any other is a {@link ProgrammerError}.
+   */
   timeout?: number | undefined;
 }
 
@@ -537,8 +547,9 @@ export interface IRelayOptions {
    */
   beforeRoute?: IBeforeRequest<TransportServerConnectionHandle> | undefined;
   /**
-   * The milliseconds leg B waits for its answer at most, whatever a destination says; none by
-   * default: the requester's own timeout governs, end to end, by the cancel it sends.
+   * The milliseconds leg B waits for its answer at most, whatever a destination says; none,
+   * `Infinity`, by default: the requester's own timeout governs, end to end, by the cancel it sends.
+   * A whole number from 1 to 2³¹ − 1 otherwise; any other is a {@link ProgrammerError}.
    */
   timeout?: number | undefined;
 }

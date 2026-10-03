@@ -270,8 +270,9 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
    * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close` and
-   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake.
-   * Defaults to {@link CLOSE_TIMEOUT}.
+   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake. A
+   * whole number from 1 to 2³¹ − 1, `0` to drop it without waiting, or `Infinity` to wait without
+   * end; any other is a {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
    */
   closeTimeout?: number | undefined;
   /**
