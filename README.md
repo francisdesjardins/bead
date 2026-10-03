@@ -85,8 +85,8 @@ its sections names the vector groups that check it. Beside it:
 | File                                                | What it holds                                                                                                                               |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                 | 123 named vectors in 9 groups: headers and envelopes read and written back to their bytes, and the refusals, each with its code             |
-| [`conversations.json`](spec/conversations.json)     | 85 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets |
-| [`transports.json`](spec/transports.json)           | 39 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                    |
+| [`conversations.json`](spec/conversations.json)     | 89 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets |
+| [`transports.json`](spec/transports.json)           | 50 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                    |
 | [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                    |
 | [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, and its procedures                                                                               |
 
