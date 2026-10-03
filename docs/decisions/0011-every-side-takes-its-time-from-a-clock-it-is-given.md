@@ -44,9 +44,10 @@ timers: `node:http`'s, `undici`'s, `ws`'s, Kestrel's, `SocketsHttpHandler`'s.
 
 **Time has three uses.** A duration runs on a timer. A deadline of Bead's own, a call id's
 reservation, is compared on the monotonic reading. An instant from outside, a token's `exp` or
-`nbf`, is compared against the wall clock, with its leeway; a session that ends at `exp` is a timer
-armed for `exp` less the wall clock's reading as its credential resolves, and armed again when a
-renewal moves it. Section 15.10's "never on a reading of its clock" reads "of its wall clock".
+`nbf`, is compared against the wall clock, with its leeway; a credential's session is a timer armed
+for its credential's end less the wall clock's reading as its credential resolves, at each step's
+due, and again when a renewal moves it. Section 15.10's "never on a reading of its clock" reads "of
+its wall clock".
 
 **A stack has one clock, set where it starts and read upward.** The transports, the session manager
 and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side — and
