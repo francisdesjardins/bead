@@ -9,6 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Badges in the README: CI on `main`, and the license.
 - `specVersion` in each conformance file, repeating the version `spec/spec.md` now states, `0.1.0`,
   and when it moves, in decision 0008.
 - JSON Schemas for the conformance files, in `spec/schemas/`.
