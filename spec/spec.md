@@ -24,10 +24,12 @@ implementation whose numbers are IEEE 754 doubles then reads every value exactly
 1.3. An envelope carries no length of its own. Its transport delimits it, as WebSocket does a
 message.
 
-1.4. A duration a side is given — a call's timeout, a limit, a session's or a transport's bound — is
-a whole number of milliseconds from 1 to 2³¹ − 1, or without end, as every platform's timers hold
-one alike: a side MUST refuse one with a fraction, under a millisecond or past 2³¹ − 1. Where 0
-means something of its own — no timeout, or the default — the place that takes it says so.
+1.4. A duration an application gives a side, as an option or an argument — a call's timeout, a
+limit, a session's or a transport's bound, a delay — is held as a whole number of milliseconds from
+1 to 2³¹ − 1, as every platform's timers hold one alike, a fraction rounded to the nearest, a half
+up. A side MUST refuse one that, as given, is under a millisecond or past 2³¹ − 1, a delay's 0
+aside. A timeout or a bound is never 0, and may be without end but where its place says it may not;
+one not given is its default. A delay takes 0 as at once.
 
 ## 2. The prefix
 
@@ -265,8 +267,8 @@ one for a subscription it does not hold in silence, since it crossed that subscr
 credit of bytes for no transfer the side sends is dropped in silence too.
 
 9.9. A requester waits for its answer as long as its call was given: 5 s by default, a duration
-section 1.4 allows, or without end, as a call given 0 waits too. While a payload or its result goes
-as a transfer, the transfer's inactivity counts instead. Past it, the call ends, and is cancelled.
+section 1.4 allows, or without end. While a payload or its result goes as a transfer, the transfer's
+inactivity counts instead. Past it, the call ends, and is cancelled.
 
 9.10. A connection that closes ends every call on it: each call waiting fails, and each call to
 answer is ended as cancelled — its resolver told — and answered by nothing.
@@ -285,13 +287,13 @@ prefix alone, and is never answered.
 tells the resolver, so nothing more goes out on that call id. A cancel for no call has crossed its
 answer, and is dropped in silence.
 
-10.3. A requester MUST reserve a call id in three cases: when it sends a cancel on it; when the
-last chunk of a result that came as a transfer completes it; and when a failure ends a call whose
-result was coming as a transfer. The reservation lasts as long as the call was given, 5 s when it
-was given no time; once a result came in part as a transfer, at least as long as the transfer's
-inactivity, while the other end keeps the call abandoned. A call id reserved twice is reserved
-until the later end. A requester's draws skip a call id reserved, and an answer, a chunk or a
-notification on one is dropped in silence.
+10.3. A requester MUST reserve a call id in three cases: when it sends a cancel on it; when the last
+chunk of a result that came as a transfer completes it; and when a failure ends a call whose result
+was coming as a transfer. The reservation lasts as long as the call was given, 5 s when it was given
+no time or waited without end; once a result came in part as a transfer, at least as long as the
+transfer's inactivity, while the other end keeps the call abandoned. A call id reserved twice is
+reserved until the later end. A requester's draws skip a call id reserved, and an answer, a chunk or
+a notification on one is dropped in silence.
 
 10.4. The reservation is made in the same step as the cancel is sent, so no call drawn meanwhile
 takes the call id; and before the caller hears that its call ended, so a call made again in its
@@ -386,7 +388,7 @@ result with `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
-budget; a timeout section 1.4 allows.
+budget; a timeout section 1.4 allows, never without end, so a transfer's call id comes free.
 
 12.3. The opening is the request or the result itself, with the TRANSFER block: the payload's total
 on 8 bytes, and its first bytes, as many as fill the envelope to `chunkBytes`, sent without
@@ -499,8 +501,9 @@ stays, to open another session.
 13.7. A session has two inactivity timeouts, which every message of its connection starts anew: past
 its session timeout, the session ends, and the connection stays; past its connection timeout, the
 connection is closed, and takes its session. A connection without a session is closed once silent
-past the server's own connection timeout, when it has one. A connection that closes takes its
-session; a session opened for a connection already closed ends at once.
+past the server's own connection timeout, when it has one. Each of these timeouts may be without
+end. A connection that closes takes its session; a session opened for a connection already closed
+ends at once.
 
 ## 14. Relays
 
@@ -578,9 +581,9 @@ each binary message one envelope. A text message is no envelope: the receiver re
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
-side SHOULD ping its peer every `heartbeat` — 30 seconds by default — and close a connection that
-left a ping unanswered, so a peer gone without a word ends in a close. A
-side that closes says 1000; a server that stops, 1001. A close with 1000 is the clean one.
+side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
+connection that left a ping unanswered, so a peer gone without a word ends in a close. A side that
+closes says 1000; a server that stops, 1001. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -644,13 +647,15 @@ request of the server's fails before it goes, and a relay passes it no request (
 
 15.9. The server numbers each such envelope into the connection's outbox, from 1. A listen,
 `GET /bead?after=&wait=`, acknowledges every envelope up to `after`, which leave the outbox, and
-brings back all that is left in a batch of type `application/prs.bead-batch`: each envelope after its
-length on 4 bytes, big-endian, the number of the first in `bead-sequence`, the others following one
-by one. With nothing left, the server holds the listen up to `wait` milliseconds — 30 seconds at most
-by default — and ends it 204; a second listen takes the first's place. A client reads a batch as it
-comes, and hears each envelope as it comes whole; what a listen lost carried past what was heard
-comes again to the next, so nothing is lost and nothing heard twice. An outbox past its bound — two
-envelopes' worth by default — closes its connection, its client having fallen behind.
+brings back all that is left in a batch of type `application/prs.bead-batch`: each envelope after
+its length on 4 bytes, big-endian, the number of the first in `bead-sequence`, the others following
+one by one. With nothing left, the server holds the listen up to `wait` milliseconds — 30 seconds at
+most by default — and ends it 204; a second listen takes the first's place. A `wait` is a peer's,
+not an application's (section 1.4): fifteen digits at most, a `wait` left out being 0, which answers
+at once, and one past the server's bound held to it. A client reads a batch as it comes, and hears
+each envelope as it comes whole; what a listen lost carried past what was heard comes again to the
+next, so nothing is lost and nothing heard twice. An outbox past its bound — two envelopes' worth by
+default — closes its connection, its client having fallen behind.
 
 15.10. A client SHOULD listen from its connect on, asking a `wait` under the server's bound, and
 listen again at once once a listen ends. A listen lost is listened again from where it was: at once,
@@ -676,6 +681,8 @@ envelope holds.
 | `maximumWait`                  | 30 s                         | the longest a server holds a listen                                               |
 | `exchangeTimeout`              | 5 min                        | how long an exchange handed on waits for its answer, at both ends                 |
 | `inactivityTimeout`            | 5 min                        | how long a connection with no exchange under way stays                            |
+
+`exchangeTimeout` and `inactivityTimeout` may be without end; `maximumWait` may not.
 
 Past the first four it answers 429 or 503, as section 15.6's table says. It takes the hosts a request
 may name, `hosts`, against a page that rebinds its name to the server's address, and the origins a
