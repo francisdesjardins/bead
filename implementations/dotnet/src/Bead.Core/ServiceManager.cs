@@ -285,16 +285,18 @@ public enum DebugType
     Request,
 }
 
-/// <summary>When a step of a call came, and — once the call answered — how long it took, in milliseconds.</summary>
-/// <param name="Duration">How long the call took, once it answered; none before.</param>
-/// <param name="Event">When the call started, in milliseconds since 1970.</param>
-public readonly record struct DebugTimestamp(long? Duration, long Event);
-
 /// <summary>What one step of a call tells whoever hears a manager's <c>Debug</c>.</summary>
 public sealed record DebugEvent
 {
     /// <summary>Whether it went out or came in.</summary>
     public required DebugDirection Direction { get; init; }
+
+    /// <summary>
+    /// How long the call took once it answered, in whole milliseconds of its router clock's
+    /// monotonic reading, a fraction dropped; none before, and for a notification. A span's duration,
+    /// as <see cref="System.Diagnostics.Activity.Duration"/> and an OpenTelemetry span carry it.
+    /// </summary>
+    public TimeSpan? Duration { get; init; }
 
     /// <summary>The call's options, its defaults applied; none for a step that has none.</summary>
     public ResolvedRequestOptions? Options { get; init; }
@@ -314,8 +316,12 @@ public sealed record DebugEvent
     /// <summary>The revision of the procedure's service.</summary>
     public required int ServiceRevision { get; init; }
 
-    /// <summary>When the call started, and how long it took once it answered.</summary>
-    public required DebugTimestamp Timestamp { get; init; }
+    /// <summary>
+    /// When the call started, on its router clock's wall reading; a notification, one step, starts
+    /// as it is sent or heard. A span's start, as <see cref="System.Diagnostics.Activity.StartTimeUtc"/>
+    /// and an OpenTelemetry span's start time carry it.
+    /// </summary>
+    public required DateTimeOffset StartedAt { get; init; }
 
     /// <summary>What went out, decoded.</summary>
     public object? Tx { get; init; }
@@ -447,7 +453,7 @@ public sealed class ServiceManager
                 },
                 (error, notification) =>
                 {
-                    Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification });
+                    Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification, Started = StartedNow() });
                 }
             ));
 
@@ -565,21 +571,26 @@ public sealed class ServiceManager
             return;
         }
 
-        var started = step.Started ?? StartedNow();
-
         debug(step.Error, new DebugEvent
         {
             Direction = step.Direction,
+            Duration = step.IsAnswered ? WholeMillisecondsOf(_clock.GetElapsedTime(step.Started.Timestamp)) : null,
             Options = step.Options,
             ProcedureId = procedure.ProcedureId,
             ProcedureName = procedure.ProcedureName,
             Rx = step.Rx,
             ServiceId = procedure.ServiceId,
             ServiceRevision = procedure.ServiceRevision,
-            Timestamp = new DebugTimestamp(step.IsAnswered ? (long)_clock.GetElapsedTime(started.Timestamp).TotalMilliseconds : null, started.Event.ToUnixTimeMilliseconds()),
+            StartedAt = step.Started.Instant,
             Tx = step.Tx,
             Type = step.Type,
         });
+    }
+
+    // a time in whole milliseconds, a fraction dropped
+    private static TimeSpan WholeMillisecondsOf(TimeSpan time)
+    {
+        return TimeSpan.FromTicks(time.Ticks - (time.Ticks % TimeSpan.TicksPerMillisecond));
     }
 
     // a requester: given a payload, then options, one call
@@ -741,13 +752,14 @@ public sealed class ServiceManager
 
         public object? Rx { get; init; }
 
-        public Started? Started { get; init; }
+        // when its call started: every step of one call carries the same
+        public required Started Started { get; init; }
 
         public object? Tx { get; init; }
     }
 
     // when a call started: its instant on the wall clock, and the monotonic reading its duration counts from
-    private readonly record struct Started(DateTimeOffset Event, long Timestamp);
+    private readonly record struct Started(DateTimeOffset Instant, long Timestamp);
 
     // what a resolver is made of: its procedure, its serializer, its admission, its callback, and
     // what its calls are
@@ -801,12 +813,12 @@ public sealed class ServiceManager
                     return connectionHandle != exclude && (filter is null || filter(connectionHandle));
                 };
 
-            var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Tx = notification };
+            var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.StartedNow(), Tx = notification };
 
             manager.Trace(Procedure, step);
 
-            // what keeps it from going out is the router's to report, and the trace's to tell:
-            // notifying never fails its caller
+            // what keeps it from going out is the router's to report, and the trace's to tell, at the
+            // start it was sent with: notifying never fails its caller
             try
             {
                 await manager._router.Notify(made.Serializer.EncodeNotification(notification), new NotifyRequest(Procedure.Address, filtered, options?.Key));

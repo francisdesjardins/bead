@@ -141,10 +141,12 @@ test ran. CI's `dotnet` job runs both, then the interop
   side's application may give an HTTP/2 server without TLS. Kestrel shows no HTTP/2 session, which
   the TypeScript side counts.
 - A transport server's `Clients` lists a `TransportServerClient` each, in the order the connections
-  came; its `LastActivity` is a `DateTimeOffset` its clock's wall reading gives, where the
-  TypeScript side's `lastActivity` is the milliseconds since the epoch its clock's `Date.now()`
-  gives. A connection that takes a handle still held is listed at its own arrival, where a
+  came. A connection that takes a handle still held is listed at its own arrival, where a
   JavaScript `Map` keeps the older one's place.
+- An instant a side reports — a transport server client's and a session's `LastActivity`, a trace's
+  `StartedAt` — is a `DateTimeOffset` its clock's wall reading gives, and a trace's `Duration` a
+  `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
+  for an instant.
 - A stop over HTTP lets the exchanges under way write their end, and Kestrel put it on the wire, a
   second at most, before it cuts what it holds: Node writes a 404 into its socket as the stop ends
   the exchange, where Kestrel's handler writes it a moment later, and a cut that comes first loses

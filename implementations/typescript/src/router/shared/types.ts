@@ -760,6 +760,12 @@ export interface IDebugFilter {
 /** What one step of a call told whoever listens to `debug`. */
 export interface IDebugEvent {
   direction: DebugDirection;
+  /**
+   * How long the call took once it answered, in whole milliseconds of its router clock's monotonic
+   * reading, a fraction dropped; `undefined` before, and for a notification. A span's duration, as
+   * .NET's `Activity.Duration` and an OpenTelemetry span carry it.
+   */
+  duration: number | undefined;
   options: IResolvedRequestOptions | undefined;
   procedureId: ProcedureId;
   procedureName: string;
@@ -768,10 +774,11 @@ export interface IDebugEvent {
   serviceId: ServiceId;
   serviceRevision: ServiceRevision;
   /**
-   * When the call started, in milliseconds since the epoch on its router's clock, and — once it
-   * answered — how long it took, in whole milliseconds of that clock's monotonic reading.
+   * When the call started, in milliseconds since the epoch on its router clock's wall reading; a
+   * notification, one step, starts as it is sent or heard. A span's start, as .NET's
+   * `Activity.StartTimeUtc` and an OpenTelemetry span's start time carry it.
    */
-  timestamp: { duration: number | undefined; event: number };
+  startedAt: number;
   /** What went out, decoded; a copy. */
   tx: unknown;
   type: DebugType;

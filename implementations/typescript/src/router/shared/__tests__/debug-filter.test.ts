@@ -13,13 +13,14 @@ const eventOf = (
 ): IDebugEvent => {
   return {
     direction,
+    duration: undefined,
     options: undefined,
     procedureId: 1,
     procedureName,
     rx: undefined,
     serviceId: 2,
     serviceRevision: 1,
-    timestamp: { duration: undefined, event: 0 },
+    startedAt: 0,
     tx: undefined,
     type,
   };

@@ -63,6 +63,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `LastActivity`, a `DateTimeOffset`, each read from its clock; its event is `lastActivityChanged`
   and `LastActivityChanged`, and a session manager's update `updateLastActivity` and
   `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
+- A trace tells `startedAt` and `duration`, flat on its event, where it told `timestamp: { event,
+  duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
+  whole milliseconds, its statistics' `DurationSummary` in `TimeSpan`, and `DebugTimestamp` goes. A
+  notification's one step starts as it is sent or heard, and a failed notify tells its failure at
+  that same start.
 - The banned-API analyzer (RS0030) on the C# side, and oxlint's `no-restricted-globals` and
   `no-restricted-properties` on the TypeScript side, refuse the platform's clocks and timers; an
   exception is suppressed where it stands, with its reason.

@@ -113,7 +113,7 @@ export const createDebugStatistics = (options?: IDebugStatisticsOptions): IDebug
 
       return { count, maximum, mean: total / count, median, minimum };
     },
-    listener: (_error, { timestamp: { duration } }) => {
+    listener: (_error, { duration }) => {
       // a step that has not answered carries none
       if (duration === undefined || !Number.isFinite(duration) || duration < 0) {
         return;

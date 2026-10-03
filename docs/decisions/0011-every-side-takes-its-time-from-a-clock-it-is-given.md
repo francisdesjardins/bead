@@ -61,7 +61,9 @@ side it is the part of the globals Bead calls — `setTimeout`, `clearTimeout`, 
 keep the platform's handle, `unref` included where it has one. The pair is a row of each side's list
 of terms ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). The word is _clock_
 ([0003](0003-one-word-one-meaning.md)): `clock`, `Clock`, `IClock`; a _timestamp_ is the monotonic
-reading alone, and the instants a side reports are `lastActivity`, `LastActivity`.
+reading alone, and the instants a side reports are `lastActivity`, `LastActivity`, and a trace's
+`startedAt`, `StartedAt`, beside its `duration`, `Duration` — the shape of an OpenTelemetry span: a
+start on the wall clock, a duration on the monotonic one.
 
 **One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# side keeps for parity, though its
 timers reach twice as far. Every option and method that takes a timeout refuses a longer one — a
@@ -123,8 +125,12 @@ overrules an analyzer.
 **The surface changes on both sides.** The C# options' `Time` becomes `Clock`; the TypeScript
 transports, session manager and router take `clock`; each layer exposes its own; a layer refuses a
 clock that differs from the one beneath it. `timestamp()`'s `{ ms, sec, usec }` goes, as 0003
-already asks, and the reported instants are `lastActivity`. A timeout past the ceiling, which some
-places read as never and one as 5 seconds, is refused everywhere.
+already asks, and the reported instants are `lastActivity`. A trace's
+`timestamp: { event, duration }` becomes `startedAt` and `duration`, flat on its event — on the C#
+side a `DateTimeOffset` and a `TimeSpan?` in whole milliseconds, its statistics in `TimeSpan` — and
+a notification's one step starts as it is sent or heard, its failure told at that same start. A
+timeout past the ceiling, which some places read as never and one as 5 seconds, is refused
+everywhere.
 
 **The TypeScript side's tests take a development dependency**, `@sinonjs/fake-timers`, through its
 own lockfile ([0005](0005-a-toolchain-per-language.md)); `spyTimers`, `timersOf`, `timersWhile`, a
@@ -179,3 +185,12 @@ side's on `fake-timers` where the cases said nothing:
 | The ceiling is a gate on the C# test clock alone, where `fake-timers` fires a timer past it a millisecond later, as Node would                                       | Accepted: both test clocks refuse a timer past the ceiling, and an advance within another; a session that ends at an `exp` past the ceiling is decided with 0010.                                                                     |
 | Fractional dues diverge: `fake-timers` and .NET truncate to whole milliseconds, the C# test clock kept ticks                                                         | Accepted: a due is counted in whole milliseconds, a fraction dropped, on both test clocks.                                                                                                                                            |
 | The record changes without this round's objections, and the other files restate a part of `advance`                                                                  | Accepted: this table; the conversations' and the transports' files refer to `spec/clocks.json` for what `advance` means.                                                                                                              |
+
+The trace's renaming, from `timestamp` to a word of its own, met the Tenth Man as well:
+
+| Objection                                                                                                                                                           | Answer                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Timing" already means a policy of the application's, the pace of notifications (0002), and the W3C standard it borrows from reads its start on the monotonic clock | Accepted: no wrapper and no word for one; `startedAt` and `duration` sit flat on the event, as every other member, in the shape of an OpenTelemetry span.               |
+| "When the call started" is false of a notification, whose steps each took a start of their own, a failed notify two                                                 | Accepted: one meaning for every step — a notification's is when it is sent or heard — and a failed notify tells its failure at its sent step's start, with a twin test. |
+| On the C# side, 0007 decides the types: a `DateTimeOffset` and a `TimeSpan`, the statistics with them, the truncation to whole milliseconds kept                    | Accepted: `StartedAt`, `Duration` and `DurationSummary` in the platform's types, the truncation explicit, a twin test advancing 30.6 ms and telling 30.                 |
+| The renaming leaves 0011, the changelog, the demo, an internal `event` and the matrix behind                                                                        | Accepted: they change with it; the internal wall reading is `instant`, and the matrix's row names every instant a side reports.                                         |

@@ -50,7 +50,7 @@ public sealed class ServiceManagerTests
         return Task.CompletedTask;
     };
 
-    // when a test's clock starts: a trace's timestamps are read from it
+    // where a test's wall clock starts: a call traced at once starts there
     private static readonly DateTimeOffset Started = DateTimeOffset.FromUnixTimeMilliseconds(1_000);
 
     // helpers
@@ -388,13 +388,13 @@ public sealed class ServiceManagerTests
             ProcedureName = "echo",
             ServiceId = 2,
             ServiceRevision = 3,
-            Timestamp = new DebugTimestamp(null, 1_000),
+            StartedAt = Started,
             Tx = new Text("hello"),
             Type = DebugType.Request,
         };
 
         Assert.Equal(
-            [sent, sent with { Direction = DebugDirection.Rx, Rx = new Text("hello"), Timestamp = new DebugTimestamp(30, 1_000) }],
+            [sent, sent with { Direction = DebugDirection.Rx, Duration = TimeSpan.FromMilliseconds(30), Rx = new Text("hello") }],
             seen.Select((told) =>
             {
                 return told.Event;
@@ -408,7 +408,7 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public async Task Reads_its_router_s_clock_a_step_s_instant_on_the_wall_clock_its_duration_on_the_monotonic_reading()
+    public async Task Reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_on_the_monotonic_reading()
     {
         var clock = new SteppingClock(Started);
         var router = new RecordingRouter { Clock = clock };
@@ -425,11 +425,84 @@ public sealed class ServiceManagerTests
         };
         await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
 
-        Assert.Equal(
-            [new DebugTimestamp(null, 1_000), new DebugTimestamp(250, 1_000)],
+        Assert.Equal<(DateTimeOffset, TimeSpan?)>(
+            [(Started, null), (Started, TimeSpan.FromMilliseconds(250))],
             seen.Select((told) =>
             {
-                return told.Event.Timestamp;
+                return (told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_a_duration_in_whole_milliseconds_its_fraction_dropped()
+    {
+        var clock = new SteppingClock(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var before = clock.GetTimestamp();
+
+        router.Answer = async (payload) =>
+        {
+            await clock.Advance(TimeSpan.FromMicroseconds(30_600));
+
+            return await EchoOf(payload);
+        };
+        await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
+
+        // the call took 30.6 ms of the monotonic reading, and is told as 30
+        Assert.Equal(TimeSpan.FromMicroseconds(30_600), clock.GetElapsedTime(before));
+        Assert.Equal<TimeSpan?>(
+            [null, TimeSpan.FromMilliseconds(30)],
+            seen.Select((told) =>
+            {
+                return told.Event.Duration;
+            }));
+    }
+
+    [Fact]
+    public async Task A_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_its_failure_at_that_same_start()
+    {
+        var time = new FakeTimeProvider(Started);
+        var client = new RecordingRouter(RouterSide.Client) { Clock = time };
+        var server = new RecordingRouter { Clock = time };
+        var hearing = new ServiceManager(client);
+        var notifying = new ServiceManager(server);
+        var notification = hearing.GetNotification(Echo, Notified());
+        var resolver = notifying.GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
+        var failure = new IOException("gone");
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
+
+        var heard = RecordDebug(hearing);
+        var sent = RecordDebug(notifying);
+
+        time.Advance(TimeSpan.FromMilliseconds(10));
+        await client.Deliver(Echo.Address, new Text("news")).WaitAsync(Patience, Cancelled);
+        time.Advance(TimeSpan.FromMilliseconds(10));
+
+        // the router fails the notify 30 ms after it was sent
+        server.NotifyError = failure;
+        server.NotifyGate = gate.Task;
+
+        var failing = resolver.Notify(new Text("late"));
+
+        time.Advance(TimeSpan.FromMilliseconds(30));
+        gate.SetResult();
+        await failing.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, DateTimeOffset, TimeSpan?)>(
+            [(DebugDirection.Rx, Started.AddMilliseconds(10), null)],
+            heard.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.StartedAt, told.Event.Duration);
+            }));
+        Assert.Equal<(Exception?, DateTimeOffset, TimeSpan?)>(
+            [(null, Started.AddMilliseconds(20), null), (failure, Started.AddMilliseconds(20), null)],
+            sent.Select((told) =>
+            {
+                return (told.Error, told.Event.StartedAt, told.Event.Duration);
             }));
     }
 
@@ -856,12 +929,12 @@ public sealed class ServiceManagerTests
             Rx = new Text("hi"),
             ServiceId = 2,
             ServiceRevision = 3,
-            Timestamp = new DebugTimestamp(null, 1_000),
+            StartedAt = Started,
             Type = DebugType.Request,
         };
 
         Assert.Equal(
-            [received, received with { Direction = DebugDirection.Tx, Timestamp = new DebugTimestamp(30, 1_000), Tx = new Text("hi!") }],
+            [received, received with { Direction = DebugDirection.Tx, Duration = TimeSpan.FromMilliseconds(30), Tx = new Text("hi!") }],
             seen.Select((told) =>
             {
                 return told.Event;
@@ -1938,6 +2011,9 @@ public sealed class ServiceManagerTests
             return null;
         };
 
+        // what a notify waits on once recorded, before it settles, and what it then fails with
+        public Task NotifyGate { get; set; } = Task.CompletedTask;
+
         public Exception? NotifyError { get; set; }
 
         // what a registration waits on once the router holds it, as a subscription would, and what
@@ -1987,14 +2063,19 @@ public sealed class ServiceManagerTests
             return Answer(payload);
         }
 
-        public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
+        public async Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
         {
             lock (_gate)
             {
                 Notified.Add((Json.Decode(payload), request));
             }
 
-            return NotifyError is { } error ? Task.FromException(error) : Task.CompletedTask;
+            await NotifyGate;
+
+            if (NotifyError is { } error)
+            {
+                throw error;
+            }
         }
 
         public Task<uint> Subscribe(AnswerTarget target)

@@ -135,6 +135,8 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
       return Promise.resolve(answerOf(payload));
     },
     notifyError: undefined as Error | undefined,
+    /** What a notify waits on once recorded, before it settles: with `notifyError`, when set. */
+    notifyGate: Promise.resolve(),
     /** What `respond` rejects with, once it recorded the answer; none unless set. */
     respondError: undefined as Error | undefined,
     /** What a registration waits on once the router holds it, as a subscription would. */
@@ -151,12 +153,13 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
     hasNotification: (notification) => {
       return notifications.get(keyOf(notification)) === notification;
     },
-    notify: (payload, { filter, key, procedure }) => {
+    notify: async (payload, { filter, key, procedure }) => {
       calls.notify.push({ filter, key, payload: decode(payload) as IText, procedure });
+      await control.notifyGate;
 
-      return control.notifyError === undefined
-        ? Promise.resolve()
-        : Promise.reject(control.notifyError);
+      if (control.notifyError !== undefined) {
+        throw control.notifyError;
+      }
     },
     registerNotification: async (notification) => {
       calls.registerNotification.push(notification.procedureName);
@@ -430,9 +433,9 @@ test.describe('createServiceManager', () => {
         ['tx', 'request', { text: 'hello' }, undefined],
         ['rx', 'request', { text: 'hello' }, { text: 'hello' }],
       ]);
-      expect(seen[0]?.info.timestamp.duration).toBeUndefined();
-      expect(seen[1]?.info.timestamp.duration).toBeGreaterThanOrEqual(0);
-      expect(seen[1]?.info.timestamp.duration).toBeLessThan(1_000);
+      expect(seen[0]?.info.duration).toBeUndefined();
+      expect(seen[1]?.info.duration).toBeGreaterThanOrEqual(0);
+      expect(seen[1]?.info.duration).toBeLessThan(1_000);
       expect(seen[1]?.info).toMatchObject({
         procedureId: 1,
         procedureName: 'echo',
@@ -441,7 +444,7 @@ test.describe('createServiceManager', () => {
       });
     });
 
-    test("reads its router's clock: a step's instant on the wall clock, its duration on the monotonic reading", async () => {
+    test("reads its router's clock: a call's start on the wall clock, its duration on the monotonic reading", async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       const { control, router } = createFakeRouter('server', clock);
       const manager = createServiceManager(router);
@@ -463,12 +466,90 @@ test.describe('createServiceManager', () => {
       await answering;
 
       expect(
-        seen.map(({ info }) => {
-          return info.timestamp;
+        seen.map(({ info: { duration, startedAt } }) => {
+          return { duration, startedAt };
         })
       ).toEqual([
-        { duration: undefined, event: Date.UTC(2026, 0, 1) },
-        { duration: 250, event: Date.UTC(2026, 0, 1) },
+        { duration: undefined, startedAt: Date.UTC(2026, 0, 1) },
+        { duration: 250, startedAt: Date.UTC(2026, 0, 1) },
+      ]);
+    });
+
+    test('tells a duration in whole milliseconds, its fraction dropped', async () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const { control, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      // the readings, as Bead reads them
+      const given: IClock = clock;
+      const before = given.performance.now();
+
+      control.answer = async (payload) => {
+        await clock.tickAsync(30.6);
+
+        return answerOf(payload);
+      };
+
+      await manager.getRequest(echo, { serializer })({ text: 'hello' })();
+
+      // the call took 30.6 ms of the monotonic reading, and is told as 30
+      expect(given.performance.now() - before).toBeCloseTo(30.6);
+      expect(
+        seen.map(({ info }) => {
+          return info.duration;
+        })
+      ).toEqual([undefined, 30]);
+    });
+
+    test('a notification starts as it is heard or sent, and a failed notify tells its failure at that same start', async () => {
+      const start = Date.UTC(2026, 0, 1);
+      const clock = createTestClock(start);
+      const client = createFakeRouter('client', clock);
+      const server = createFakeRouter('server', clock);
+      const hearing = createServiceManager(client.router);
+      const notifying = createServiceManager(server.router);
+      const notification = hearing.getNotification(echo, { serializer });
+      const resolver = notifying.getNotificationResolver(echo, { serializer: serverSerializer })(
+        () => {
+          return Promise.resolve();
+        }
+      );
+      const failure = new Error('gone');
+      const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+
+      await notification({ text: 's' }, () => {
+        return undefined;
+      })();
+
+      const heard = recordDebug(hearing);
+      const sent = recordDebug(notifying);
+
+      await clock.tickAsync(10);
+      client.deliver(echo, { text: 'news' });
+      await clock.tickAsync(10);
+
+      // the router fails the notify 30 ms after it was sent
+      server.control.notifyError = failure;
+      server.control.notifyGate = gate;
+
+      const failing = resolver.notify({ text: 'late' });
+
+      await clock.tickAsync(30);
+      open();
+      await failing;
+
+      expect(
+        heard.map(({ info: { direction, duration, startedAt } }) => {
+          return [direction, startedAt, duration];
+        })
+      ).toEqual([['rx', start + 10, undefined]]);
+      expect(
+        sent.map(({ error, info: { duration, startedAt } }) => {
+          return [error, startedAt, duration];
+        })
+      ).toEqual([
+        [null, start + 20, undefined],
+        [failure, start + 20, undefined],
       ]);
     });
 
@@ -958,13 +1039,13 @@ test.describe('createServiceManager', () => {
 
       expect(
         seen.map(({ info }) => {
-          return [info.direction, info.rx, info.tx, info.timestamp.duration === undefined];
+          return [info.direction, info.rx, info.tx, info.duration === undefined];
         })
       ).toEqual([
         ['rx', { text: 'hi' }, undefined, true],
         ['tx', { text: 'hi' }, { text: 'hi!' }, false],
       ]);
-      expect(seen[1]?.info.timestamp.duration).toBeLessThan(1_000);
+      expect(seen[1]?.info.duration).toBeLessThan(1_000);
     });
   });
 

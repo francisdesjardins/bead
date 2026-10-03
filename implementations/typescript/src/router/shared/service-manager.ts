@@ -53,7 +53,7 @@ import type {
  * monotonic reading its duration counts from.
  */
 interface IStarted {
-  event: number;
+  instant: number;
   timestamp: number;
 }
 
@@ -65,7 +65,8 @@ interface ITraceStep {
   isAnswered?: boolean | undefined;
   options?: IResolvedRequestOptions | undefined;
   rx?: unknown;
-  started?: IStarted | undefined;
+  /** When its call started: every step of one call carries the same. */
+  started: IStarted;
   tx?: unknown;
   type: DebugType;
 }
@@ -253,7 +254,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
   // now, for a call starting
   const startedNow = (): IStarted => {
-    return { event: clock.Date.now(), timestamp: clock.performance.now() };
+    return { instant: clock.Date.now(), timestamp: clock.performance.now() };
   };
 
   // tells `debug` about one step of a call; nothing is built when nobody listens
@@ -262,29 +263,18 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       return;
     }
 
-    const {
-      direction,
-      error = null,
-      isAnswered = false,
-      options,
-      rx,
-      started = startedNow(),
-      tx,
-      type,
-    } = step;
+    const { direction, error = null, isAnswered = false, options, rx, started, tx, type } = step;
 
     emitter.emit(DEBUG_EVENT, error, {
       direction,
+      duration: isAnswered ? Math.trunc(clock.performance.now() - started.timestamp) : undefined,
       options: options === undefined ? undefined : { ...options },
       procedureId: procedure.procedureId,
       procedureName: procedure.procedureName,
       rx: snapshot(rx),
       serviceId: procedure.serviceId,
       serviceRevision: procedure.serviceRevision,
-      timestamp: {
-        duration: isAnswered ? Math.trunc(clock.performance.now() - started.timestamp) : undefined,
-        event: started.event,
-      },
+      startedAt: started.instant,
       tx: snapshot(tx),
       type,
     });
@@ -440,7 +430,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       },
       router,
       trace: (step) => {
-        trace(procedure, { ...step, type: 'notification' });
+        trace(procedure, { ...step, started: startedNow(), type: 'notification' });
       },
     });
 
@@ -660,8 +650,16 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
           notification: NotificationPayload,
           notifyOptions?: INotifyOptions<Handle>
         ): Promise<void> => {
-          trace(procedure, { direction: 'tx', tx: notification, type: 'notification' });
+          const step = {
+            direction: 'tx',
+            started: startedNow(),
+            tx: notification,
+            type: 'notification',
+          } as const;
 
+          trace(procedure, step);
+
+          // what keeps it from going out is told at the start it was sent with
           await router
             .notify(serializer.encodeNotification(notification), {
               filter: filterOf(notifyOptions),
@@ -669,12 +667,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
               procedure: procedureOf(resolver),
             })
             .catch((reason: unknown) => {
-              trace(procedure, {
-                direction: 'tx',
-                error: reason,
-                tx: notification,
-                type: 'notification',
-              });
+              trace(procedure, { ...step, error: reason });
             });
         },
       });
