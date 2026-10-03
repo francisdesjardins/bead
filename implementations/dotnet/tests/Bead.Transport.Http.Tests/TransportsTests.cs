@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Bead.Interop;
+using Bead.Tests;
 using Bead.Transport.WebSockets;
 using Xunit.Sdk;
 
@@ -20,7 +21,7 @@ namespace Bead.Transport.Http.Tests;
 /// interop service, over HTTP and over WebSocket: a peer of the test's own writes each exchange's
 /// octets on a socket of its own — a WebSocket's frames among them, once its handshake is answered
 /// — and reads what the server sends back on it, what it reports, and what its transport's gauges
-/// say. The TypeScript servers play the same file.
+/// say, on a clock the case alone advances. The TypeScript servers play the same file.
 /// </summary>
 public sealed class TransportsTests
 {
@@ -62,6 +63,9 @@ public sealed class TransportsTests
     };
 
     private static readonly JsonElement Root = Load();
+
+    // where every case's wall clock starts
+    private static readonly DateTimeOffset WallClock = DateTimeOffset.Parse(Root.GetProperty("wallClock").GetString()!, CultureInfo.InvariantCulture);
 
     // helpers
 
@@ -216,27 +220,33 @@ public sealed class TransportsTests
         return limits;
     }
 
-    // the server under test, of the case's transport, the interop service offered on it
+    // the server under test, of the case's transport, the interop service offered on it: on a clock
+    // that settles once its router and its resolvers, which share one scheduler, are idle
     private static Served ServedOf(JsonElement entry)
     {
+        var scheduler = new SerialScheduler();
+        var runsOn = (new SteppingClock(WallClock) { Settle = scheduler.WhenIdle }, scheduler);
+
         return entry.GetProperty("transport").GetString() switch
         {
-            "http" => OverHttp(entry),
-            "websocket" => OverWebSocket(entry),
+            "http" => OverHttp(entry, runsOn),
+            "websocket" => OverWebSocket(entry, runsOn),
             var other => throw new ArgumentException($"a case of a transport no test plays: {other}", nameof(entry)),
         };
     }
 
     // the server layer as HttpServer composes it, built by hand: HttpServer sizes its transport's
     // body on its router's envelope, where a case bounds the body on its own, as the TypeScript
-    // side's harness does; all else as HttpServer sets it
-    private static Served OverHttp(JsonElement entry)
+    // side's harness does; its clock and scheduler the harness's; all else as HttpServer sets it
+    private static Served OverHttp(JsonElement entry, (SteppingClock Clock, SerialScheduler Scheduler) runsOn)
     {
-        var transport = new HttpTransportServer(OptionsOf(entry));
+        var transport = new HttpTransportServer(OptionsOf(entry) with { Clock = runsOn.Clock });
         var server = new Server<string>(transport, new ServerOptions
         {
             ConnectionInactivityTimeout = HttpServerOptions.ConnectionInactivityTimeoutDefault,
             Limits = RouterLimits.WholeEnvelopeOf(LimitsOf(entry)),
+            ResolverScheduler = runsOn.Scheduler,
+            Scheduler = runsOn.Scheduler,
         });
 
         InteropService.Offer(server);
@@ -247,6 +257,7 @@ public sealed class TransportsTests
             {
                 return transport.Clients;
             },
+            Clock = runsOn.Clock,
             Gauges = transport.Gauges,
             Router = server.Router,
             Server = server,
@@ -260,12 +271,12 @@ public sealed class TransportsTests
 
     // the WebSocket server as the interop server serves it: the case's options on its transport,
     // its limits on its router
-    private static Served OverWebSocket(JsonElement entry)
+    private static Served OverWebSocket(JsonElement entry, (SteppingClock Clock, SerialScheduler Scheduler) runsOn)
     {
         var server = new WebSocketServer<string>(new WebSocketServerOptions
         {
-            Server = new ServerOptions { Limits = LimitsOf(entry) },
-            Transport = WebSocketOptionsOf(entry),
+            Server = new ServerOptions { Limits = LimitsOf(entry), ResolverScheduler = runsOn.Scheduler, Scheduler = runsOn.Scheduler },
+            Transport = WebSocketOptionsOf(entry) with { Clock = runsOn.Clock },
         });
         var transport = server.Transport;
 
@@ -277,6 +288,7 @@ public sealed class TransportsTests
             {
                 return transport.Clients;
             },
+            Clock = runsOn.Clock,
             Gauges = transport.Gauges,
             Router = server.Router,
             Server = server,
@@ -637,10 +649,12 @@ public sealed class TransportsTests
     }
 
     // the server under test, over either transport: its router, how its transport starts — giving
-    // its port — and stops, its gauges and its clients, and the server it lets go of
+    // its port — and stops, its gauges and its clients, its clock, and the server it lets go of
     private sealed class Served : IAsyncDisposable
     {
         public required Func<IReadOnlyList<TransportServerClient>> Clients { get; init; }
+
+        public required SteppingClock Clock { get; init; }
 
         public required Func<Gauges> Gauges { get; init; }
 
@@ -720,7 +734,15 @@ public sealed class TransportsTests
             }
             else if (step.TryGetProperty("until", out var until))
             {
-                await Until(until);
+                await (until.TryGetProperty("timer", out var timer) ? UntilArmed(timer) : Until(until));
+            }
+            else if (step.TryGetProperty("advance", out var advance))
+            {
+                await _served.Clock.Advance(TimeOf(advance));
+            }
+            else if (step.TryGetProperty("wall", out var wall))
+            {
+                _served.Clock.Wall(TimeOf(wall));
             }
             else if (step.TryGetProperty("report", out var report))
             {
@@ -903,6 +925,14 @@ public sealed class TransportsTests
             }
 
             Assert.Equal($"{gauge} {value}", $"{gauge} {CountOf(gauge)}");
+        }
+
+        // a timer armed on the server's clock, due that many milliseconds from now, within a patience
+        private async Task UntilArmed(JsonElement milliseconds)
+        {
+            var due = TimeOf(milliseconds);
+
+            Assert.Contains(due, await _served.Clock.UntilArmed(due, Patience));
         }
 
         private long CountOf(string gauge)

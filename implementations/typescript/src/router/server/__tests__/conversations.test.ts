@@ -17,7 +17,7 @@ import {
   procedureOf,
 } from '../../../../interop/offer';
 import { createServer } from '../../../server/server';
-import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
+import { createTestClock, duesOn } from '../../../transport/shared/__tests__/fixtures';
 import type { IServerTransportLike } from '../../../server/types';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
@@ -46,6 +46,7 @@ import { expectedOf, type IExpected } from './expected-envelope';
 
 /** One step of a conversation: what the test does, or what the server does next, on its connection. */
 interface IStep {
+  advance?: number;
   close?: true;
   expect?: IExpected;
   on?: string;
@@ -53,6 +54,8 @@ interface IStep {
   report?: number | 'exception';
   send?: string;
   twoWay?: false;
+  until?: { timer: number };
+  wall?: number;
 }
 
 /** What the server reported to its application, and the connection it came with. */
@@ -70,14 +73,15 @@ interface IConversation {
 
 // constants
 
-const CONVERSATIONS = (
-  JSON.parse(
-    readFileSync(new URL('../../../../../../spec/conversations.json', import.meta.url), 'utf8')
-  ) as { conversations: IConversation[] }
-).conversations;
+const { conversations: CONVERSATIONS, wallClock: WALL_CLOCK } = JSON.parse(
+  readFileSync(new URL('../../../../../../spec/conversations.json', import.meta.url), 'utf8')
+) as { conversations: IConversation[]; wallClock: string };
 
 // the connection a conversation that opens none plays, opened before its first step
 const ONLY_CONNECTION = 'client';
+
+// how long an until waits on the real clock for its timer
+const PATIENCE = 3_000;
 
 // helpers
 
@@ -308,10 +312,12 @@ test.describe('the conversations', () => {
 
   for (const { limits, name, pacing, steps } of CONVERSATIONS) {
     test(name, async () => {
+      // the clock every layer runs on: only a step that moves time moves it
+      const clock = createTestClock(Date.parse(WALL_CLOCK));
       const connections = createConnections();
       const server = createServer<IServerTransportLike, string>(
         { transport: connections.transport },
-        { limits, pacing }
+        { clock, limits, pacing }
       );
       const { router } = server;
       const reports: IReport[] = [];
@@ -375,6 +381,26 @@ test.describe('the conversations', () => {
             if (step.on !== undefined) {
               expect(report?.connectionHandle, at).toBe(connections.handleOf(step.on));
             }
+          }
+
+          if (step.until !== undefined) {
+            await expect
+              .poll(
+                () => {
+                  return duesOn(clock);
+                },
+                { message: `${at}: the timers armed`, timeout: PATIENCE }
+              )
+              .toContain(step.until.timer);
+          }
+
+          if (step.advance !== undefined) {
+            await clock.tickAsync(step.advance);
+            await settle(count);
+          }
+
+          if (step.wall !== undefined) {
+            clock.setSystemTime(clock.Date.now() + step.wall);
           }
         }
 

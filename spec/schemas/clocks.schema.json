@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's clock cases, spec/clocks.json",
+  "type": "object",
+  "required": ["$comment", "specVersion", "wallClock", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/clocks.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
+    "wallClock": { "$ref": "common.schema.json#/$defs/wallClock" },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "case": {
+      "description": "What a side's test clock does with the timers a case arms, as the case advances it.",
+      "type": "object",
+      "required": ["name", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+    "step": {
+      "description": "What the case does — arm, advance, wall — or what the clock did — fired, readings: one of them.",
+      "type": "object",
+      "oneOf": [
+        { "required": ["arm"] },
+        { "required": ["advance"] },
+        { "required": ["wall"] },
+        { "required": ["fired"] },
+        { "required": ["readings"] }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "arm": { "$ref": "#/$defs/arm" },
+        "advance": { "$ref": "common.schema.json#/$defs/advance" },
+        "wall": { "$ref": "common.schema.json#/$defs/wall" },
+        "fired": {
+          "description": "The timers that fired since the case began or since the last fired, in their order, each with the monotonic reading its callback read.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["timer", "at"],
+            "additionalProperties": false,
+            "properties": {
+              "timer": { "$ref": "#/$defs/timer" },
+              "at": {
+                "description": "Milliseconds since the case began.",
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "readings": {
+          "description": "The clock's readings now: the monotonic one, in milliseconds since the case began, and the wall one, an RFC 3339 instant in UTC to the millisecond.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "monotonic": { "type": "integer", "minimum": 0 },
+            "wall": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+            }
+          }
+        }
+      }
+    },
+    "arm": {
+      "description": "A timer armed now, due in due milliseconds, every period after that when given; then is the timer its callback arms, once it noted its firing, counted from the reading the callback read.",
+      "type": "object",
+      "required": ["timer", "due"],
+      "additionalProperties": false,
+      "properties": {
+        "timer": { "$ref": "#/$defs/timer" },
+        "due": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "period": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "then": { "$ref": "#/$defs/arm" }
+      }
+    },
+    "timer": {
+      "description": "A timer's name, which the case gives it.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

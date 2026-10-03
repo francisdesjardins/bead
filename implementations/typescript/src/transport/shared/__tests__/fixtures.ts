@@ -153,6 +153,20 @@ export const delaysOn = (clock: TestClock): number[] => {
     });
 };
 
+/**
+ * When the timers armed on `clock` and neither fired nor cleared are due, in milliseconds from its
+ * reading, soonest first: a periodic timer's next due, which `until` waits for before an advance.
+ */
+export const duesOn = (clock: TestClock): number[] => {
+  return [...(clock.timers?.values() ?? [])]
+    .map(({ callAt = clock.now }) => {
+      return callAt - clock.now;
+    })
+    .toSorted((a, b) => {
+      return a - b;
+    });
+};
+
 /** The timers `run` arms on `clock`, and the handles it clears there, as it runs. */
 export const timersBy = (clock: TestClock, run: () => void) => {
   const [armedFrom, clearedFrom] = [clock.armed.length, clock.cleared.length];

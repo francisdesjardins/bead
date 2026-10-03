@@ -25,6 +25,7 @@ import { wholeEnvelopeLimitsOf } from '../../../router/shared/whole-envelope-lim
 import { CONNECTION_INACTIVITY_TIMEOUT } from '../../../server/http-server';
 import { createServer } from '../../../server/server';
 import { createWSServer } from '../../../server/ws-server';
+import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
 import { TRANSPORT_WS } from '../../shared/constants';
 import {
   BODY_BYTES_BUDGET,
@@ -100,13 +101,15 @@ interface IMessage {
 
 /** One step of a case: what the test does, or what the server does next, on the exchange it names. */
 interface IStep {
+  advance?: number;
   close?: true;
   expect?: IExpectation | IHeardExpectation;
   on?: string;
   report?: number | 'exception';
   send?: IMessage | IRequest;
   stop?: true;
-  until?: { gauge: string; is: number };
+  until?: { gauge: string; is: number } | { timer: number };
+  wall?: number;
   within?: number;
 }
 
@@ -153,6 +156,7 @@ const TRANSPORTS = JSON.parse(
   cases: ICase[];
   defaults: Record<string, number>;
   responses: IResponseCase[];
+  wallClock: string;
 };
 
 const HOST = '127.0.0.1';
@@ -160,7 +164,7 @@ const HOST = '127.0.0.1';
 // the transports this harness plays a case over
 const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['http', 'websocket']);
 
-// how long a step waits on the real clock for its bytes, a gauge or a report, unless it says
+// how long a step waits on the real clock for its bytes, a gauge, a timer or a report, unless it says
 const PATIENCE = 3_000;
 const POLL = 10;
 
@@ -316,16 +320,20 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
 
 /**
  * A server of the interop service as each side's interop server builds one for its transport, the
- * case's options on the transport and its limits on the router. Over HTTP, its transport is given
- * them as they are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself.
+ * case's options on the transport and its limits on the router, every layer on the transport's
+ * `clock`. Over HTTP, its transport is given them as they are, `maximumBodyBytes` among them, which
+ * `createHTTPServer` sets itself.
  */
-const serverOf = ({ limits, options = {}, transport }: ICase): ServerUnderTest => {
+const serverOf = (
+  { limits, options = {}, transport }: ICase,
+  clock: TestClock
+): ServerUnderTest => {
   const { heartbeat, maximumMessageBytes, ...bounds } = options;
 
   if (transport === 'websocket') {
     return createWSServer<string>({
       limits,
-      transport: { heartbeat, maxPayload: maximumMessageBytes, WebSocketServer },
+      transport: { clock, heartbeat, maxPayload: maximumMessageBytes, WebSocketServer },
     });
   }
 
@@ -333,6 +341,7 @@ const serverOf = ({ limits, options = {}, transport }: ICase): ServerUnderTest =
     {
       transport: createHTTPTransportServer({
         ...bounds,
+        clock,
         createServer: (listener) => {
           return createNodeServer(listener);
         },
@@ -509,7 +518,10 @@ test.describe('the transports', () => {
     played.push(name);
 
     test(name, async () => {
-      const server = serverOf(testCase);
+      // the clock every layer runs on: only a step that moves time moves it; a platform's own timers,
+      // a ping's among them, stay on the real clock
+      const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
+      const server = serverOf(testCase, clock);
       const { port, reports } = await serve(server);
       const exchanges = new Map<string, IExchange>();
       const values = new Map([['host', `${HOST}:${String(port)}`]]);
@@ -570,7 +582,14 @@ test.describe('the transports', () => {
             await expectHeard({ at, exchange: exchangeOf(step.on, at), milliseconds }, step.expect);
           }
 
-          if (step.until !== undefined) {
+          if (step.until !== undefined && 'timer' in step.until) {
+            const { timer } = step.until;
+
+            await pollWithinPatience(() => {
+              return duesOn(clock).includes(timer);
+            });
+            expect(duesOn(clock), `${at}: the timers armed`).toContain(timer);
+          } else if (step.until !== undefined) {
             const { gauge, is } = step.until;
             const valueOf = (): number | undefined => {
               return server.transport.gauges().counts[gauge];
@@ -580,6 +599,14 @@ test.describe('the transports', () => {
               return valueOf() === is;
             });
             expect(valueOf(), `${at}: ${gauge}`).toBe(is);
+          }
+
+          if (step.advance !== undefined) {
+            await clock.tickAsync(step.advance);
+          }
+
+          if (step.wall !== undefined) {
+            clock.setSystemTime(clock.Date.now() + step.wall);
           }
 
           if (step.report !== undefined) {

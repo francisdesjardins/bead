@@ -111,6 +111,15 @@ def until(gauge, value):
     return {'until': {'gauge': gauge, 'is': value}}
 
 
+def armed(milliseconds):
+    """A timer armed on the server's clock, due that many milliseconds from now."""
+    return {'until': {'timer': milliseconds}}
+
+
+def advance(milliseconds):
+    return {'advance': milliseconds}
+
+
 def answered(on, envelope):
     return expect(on, 200, fields={'content-type': BEAD}, envelope=envelope)
 
@@ -147,6 +156,10 @@ cases = [
          *drawn(), post('cancel', cancel(1)), expect('cancel', 204, body=''), until('buriedCallIds', 1),
          post('buried', ECHO), expect('buried', 204, body=''),
          post('echo', request(3, 'echo', '"y"')), answered('echo', result(3, '"y"'))]),
+    ('a call id stays buried 5 seconds, after which a request on it is handed on', ['15.5'], None, [
+        *drawn(), post('cancel', cancel(1)), expect('cancel', 204, body=''), until('buriedCallIds', 1),
+        armed(5000), advance(5000), until('buriedCallIds', 0),
+        post('echo', ECHO), answered('echo', result(1, '"x"'))]),
     ('HTTP carries no transfer: a request that opens one is answered PAYLOAD_TOO_LARGE', ['15.11'], None, [
         *drawn(), post('opening', request(1, 'echo', '"', flags=0x04, words=5, tail=word(256, 8))),
         answered('opening', failure(1, PAYLOAD_TOO_LARGE))]),

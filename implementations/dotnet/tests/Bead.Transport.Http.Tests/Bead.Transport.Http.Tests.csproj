@@ -29,4 +29,9 @@
     <!-- the transports' cases: the file both implementations' tests read -->
     <Content Include="../../../../spec/transports.json" Link="transports.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- the clock the conformance files' harnesses give the side under test, shared with the conversations' -->
+    <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
+  </ItemGroup>
 </Project>

@@ -406,6 +406,89 @@
       ]
     },
     {
+      "name": "a call id stays buried 5 seconds, after which a request on it is handed on",
+      "clauses": [
+        "15.5"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 8\r\nconnection: close\r\n\r\n",
+            "body": "A1 16 00 02  00 00 00 01"
+          },
+          "on": "cancel"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "cancel"
+        },
+        {
+          "until": {
+            "gauge": "buriedCallIds",
+            "is": 1
+          }
+        },
+        {
+          "until": {
+            "timer": 5000
+          }
+        },
+        {
+          "advance": 5000
+        },
+        {
+          "until": {
+            "gauge": "buriedCallIds",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "echo"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "echo"
+        }
+      ]
+    },
+    {
       "name": "HTTP carries no transfer: a request that opens one is answered PAYLOAD_TOO_LARGE",
       "clauses": [
         "15.11"

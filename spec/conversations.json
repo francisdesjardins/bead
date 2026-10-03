@@ -461,6 +461,74 @@
       ]
     },
     {
+      "name": "a command past its time is cancelled and its call id reserved as long: an answer within is dropped in silence, one after is reported CALL_UNKNOWN",
+      "clauses": [
+        "9.7",
+        "10.1",
+        "10.3"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          }
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": "exception"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 6C 61 74 65 22"
+        },
+        {
+          "until": {
+            "timer": 10000
+          }
+        },
+        {
+          "advance": 10000
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 6C 61 74 65 22"
+        },
+        {
+          "report": 20
+        }
+      ]
+    },
+    {
       "name": "a request that opens a subscription to ticks is answered, and each tick notifies it on its call id",
       "clauses": [
         "11.1",

@@ -9,9 +9,9 @@ version spec/spec.md states as its specVersion; no group holds two vectors or co
 name, which a reader looking one up by name would never reach; each group of vectors.json is named
 by a section of the spec, which names no other; every unit an entry cites is one of spec.md's — a
 clause, an item of its numbered list, a row of its table — and spec/uncited.txt lists exactly the
-units no entry cites; and each implementation's tests read every group, the conversations and the
-transports' cases, any of which may name the row of docs/support.md it crosses. Exit 1 on any of
-them.
+units no entry cites; an advance follows a timer armed; and each implementation's tests read every
+group, the conversations, the transports' cases, any of which may name the row of docs/support.md
+it crosses, and the clock cases. Exit 1 on any of them.
 
   python spec/check.py --write-uncited
 
@@ -45,13 +45,14 @@ UNCITED_HEADER = ('# The units of spec/spec.md that no vector, conversation or c
                   '# spec/check.py fails when this list and the files disagree; --write-uncited writes it.\n')
 WRITE_UNCITED = '--write-uncited' in sys.argv[1:]
 
-# where each implementation's tests are, the files among them, and how they name a group of vectors,
-# the conversations and the transports' cases: a language that joins adds its row
+# the files of entries each side's tests read whole, beside the groups of vectors
+WHOLE = ('conversations', 'transports', 'clocks')
+
+# where each implementation's tests are, the files among them, how they name a group of vectors, and
+# how they name a file they read whole: a language that joins adds its row
 SIDES = {
-    'TypeScript': ('implementations/typescript/src', '.test.ts',
-                   r'\bVECTORS\.(\w+)', r"'[^']*\bconversations\.json'", r"'[^']*\btransports\.json'"),
-    'C#': ('implementations/dotnet/tests', '.cs',
-           r'\bVectors\.(?:NamesOf|Of)\("(\w+)"', r'"conversations\.json"', r'"transports\.json"'),
+    'TypeScript': ('implementations/typescript/src', '.test.ts', r'\bVECTORS\.(\w+)', r"'[^']*\b{}\.json'"),
+    'C#': ('implementations/dotnet/tests', '.cs', r'\bVectors\.(?:NamesOf|Of)\("(\w+)"', r'"{}\.json"'),
 }
 
 # the matrix whose rows a case that crosses a platform's difference names
@@ -142,6 +143,7 @@ groups = [group for group in vectors if group not in META]
 named = {group: vectors[group] for group in groups}
 named['conversations'] = documents['conversations']['conversations']
 named['transports'] = documents['transports']['cases']
+named['clocks'] = documents['clocks']['cases']
 
 for group, entries in named.items():
     seen = set()
@@ -281,8 +283,10 @@ units = units_of(text)
 known = set(units)
 citing = set()
 
+# the clock cases cite none: they hold the test clocks to one meaning of advance, which the spec does
+# not state
 for group, entries in named.items():
-    for entry in entries:
+    for entry in entries if group != 'clocks' else ():
         for unit in entry['clauses']:
             if unit not in known:
                 problems.append(f'{group}: {entry["name"]!r} cites {unit}, which spec.md does not have')
@@ -311,7 +315,7 @@ else:
 
 read = {}
 
-for side, (folder, suffix, group_pattern, conversations_pattern, transports_pattern) in SIDES.items():
+for side, (folder, suffix, group_pattern, file_pattern) in SIDES.items():
     sources = ''
 
     for directory, children, names in os.walk(os.path.join(ROOT, folder)):
@@ -327,11 +331,9 @@ for side, (folder, suffix, group_pattern, conversations_pattern, transports_patt
 
     read[side] = set(re.findall(group_pattern, sources))
 
-    if re.search(conversations_pattern, sources):
-        read[side].add('conversations')
-
-    if re.search(transports_pattern, sources):
-        read[side].add('transports')
+    for whole in WHOLE:
+        if re.search(file_pattern.format(whole), sources):
+            read[side].add(whole)
 
     for group in sorted(read[side] - set(named)):
         problems.append(f'{side}: its tests read a group, {group}, which vectors.json does not hold')
@@ -345,7 +347,7 @@ if problems:
 print(f'spec: {version}; {len(documents)} files, each under its schema; '
       f'{sum(len(vectors[group]) for group in groups)} vectors in {len(groups)} groups, each named by '
       f'the spec; {len(named["conversations"])} conversations; {len(named["transports"])} transports\' '
-      f'cases; {len(units) - len(uncited)} of the '
+      f'cases; {len(named["clocks"])} clock cases; {len(units) - len(uncited)} of the '
       f'spec\'s {len(units)} units cited, the others listed in uncited.txt.')
 
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())

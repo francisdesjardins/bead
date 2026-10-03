@@ -79,6 +79,15 @@ def answer(call_id, value):
     return {'send': f'A1 11 00 02  {word(call_id, 4)} | {text(value)}'}
 
 
+def armed(milliseconds):
+    """A timer armed on the server's clock, due that many milliseconds from now."""
+    return {'until': {'timer': milliseconds}}
+
+
+def advance(milliseconds):
+    return {'advance': milliseconds}
+
+
 def refusal(call_id, code, scope=PROTOCOL):
     return {'send': f'A1 12 00 02  {word(call_id, 4)} | {word(code, 2)} 00 {scope:02X}'}
 
@@ -201,6 +210,13 @@ conversations = [
     ('an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence', ['9.6.3', '9.6.5'], None, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), raw('A1 11 40 02  00 00 00 02'),
         cancelled(2), failure(1, PROCEDURE_FAILED), report(MALFORMED), answer(2, '"late"')]),
+    # 10.3: a command past its time is cancelled and its call id reserved as long as the command was
+    # given, 10 s; an answer within is late, and dropped in silence, one after is for no call
+    ('a command past its time is cancelled and its call id reserved as long: an answer within is dropped in silence, one after is reported CALL_UNKNOWN',
+     ['9.7', '10.1', '10.3'], None, [
+         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), armed(10_000), advance(10_000),
+         cancelled(2), failure(1, PROCEDURE_FAILED), report('exception'), answer(2, '"late"'),
+         armed(10_000), advance(10_000), answer(2, '"late"'), report(CALL_UNKNOWN)]),
     # 11: subscriptions, one per procedure and connection, on the call id that took it first
     ('a request that opens a subscription to ticks is answered, and each tick notifies it on its call id', ['11.1', '11.2'], None, [
         subscribe(1), result(1, 'null'), tick(3, 1), notification(1, '1'), result(3, 'null')]),
