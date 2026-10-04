@@ -14,6 +14,7 @@ import type {
   IEventIteratorOptions,
   IGauges,
   IReadyStateMethods,
+  ITransportMessage,
   IWorkerMessageEventLike,
   IWorkerPortLike,
 } from '../shared/types';
@@ -128,9 +129,13 @@ export interface ITransportServer<
    * dropped and resolves: the loss shows as that connection's `close`. A socket carries any message.
    * Over HTTP, an answer goes to the exchange of its request, and anything else waits for its client
    * to listen; a connection whose client does not listen rejects all but an answer with a
-   * {@link GenericError} — bytes that are no envelope with a {@link ProgrammerError}.
+   * {@link GenericError} — bytes that are no envelope with a {@link ProgrammerError}. No server
+   * carries a credential: an answer and what a listen brings back carry none, nor does a socket.
    */
-  send(data: Data, connectionHandle: TransportServerConnectionHandle): Promise<void>;
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
   /**
    * Listens. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, a
    * {@link CancelError}, or the system's own error — `EADDRINUSE` for a port taken — ending CLOSED.
@@ -159,7 +164,7 @@ export interface ITransportServerImplementation<Socket = unknown> {
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;
   /** What the transport keeps of its connections besides the registry, counted; none, when nothing. */
   gauges?(): IGauges<TransportServerConnectionHandle>;
-  send(data: Data, connection: ITransportServerClientAware<Socket>): Promise<void>;
+  send(message: ITransportMessage, connection: ITransportServerClientAware<Socket>): Promise<void>;
   start(
     options: TransportServerResolvedStartOptions & { signal?: AbortSignal | undefined }
   ): Promise<ITransportServerAddress>;
@@ -208,7 +213,8 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
    * no listen never emits it.
    */
   listen: [isHeld: boolean, connectionHandle: TransportServerConnectionHandle];
-  message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+  /** An envelope, and the credential carried beside it: over HTTP alone, with a request. */
+  message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
 };
 
 /** The events a server emits, named by the table that types them. */
@@ -327,6 +333,11 @@ export interface IHTTPRequestLike {
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
   readonly httpVersionMajor: number;
   readonly method?: string | undefined;
+  /**
+   * Its fields as they came, each name before its value: what counts an `Authorization` given
+   * twice, which `headers` keeps once.
+   */
+  readonly rawHeaders: readonly string[];
   readonly socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;

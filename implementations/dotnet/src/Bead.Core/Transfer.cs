@@ -186,15 +186,21 @@ internal sealed class IncomingTransfer
 
     /// <summary>
     /// A transfer received from <paramref name="opening"/>, or the failure that refuses it: an
-    /// opening that holds its whole total opens no transfer, and is <c>CHUNK_INVALID</c>. A total
-    /// past what an array holds is an <see cref="ArgumentOutOfRangeException"/>: the limits refuse it
-    /// before.
+    /// opening that carries no byte of its payload, or holds its whole total, opens no transfer, and
+    /// is <c>CHUNK_INVALID</c>. A total past what an array holds is an
+    /// <see cref="ArgumentOutOfRangeException"/>: the limits refuse it before.
     /// </summary>
     public static (IncomingTransfer? Transfer, Failure? Refusal) Open(
         ReadOnlyMemory<byte> opening,
         (RouterLimits Limits, int PayloadBytesPerChunk, long Total) options)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThan(options.Total, Array.MaxLength, nameof(options));
+
+        // an opening carries one byte of its payload at least
+        if (opening.IsEmpty)
+        {
+            return (null, Invalid("an opening carries one byte of its payload at least, not 0"));
+        }
 
         if (opening.Length >= options.Total)
         {

@@ -1101,6 +1101,91 @@ public sealed class RouterClientTests
     }
 
     [Fact]
+    public async Task Presents_OPAQUE_the_session_it_learned_on_a_call_that_asks_and_on_no_other_one_that_asks_before_any_session_fails_before_it_goes_SESSION_REQUIRED()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        async Task<FailureException> Refused()
+        {
+            return await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.Opaque() }))
+                    .WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        var before = await Refused();
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (before.Code, before.Origin));
+        Assert.Empty(transport.Sent);
+
+        // learned, it goes on a call that asks, and on no other
+        transport.Deliver(ResultOf(99, Token));
+        await scripted.Settle();
+        _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.Opaque() }));
+        _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+        _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.None }));
+        await scripted.Settle();
+
+        Assert.Equal(
+            [(1u, Credential.Opaque(Token)), (3u, null), (5u, null)],
+            transport.Envelopes.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, Assert.IsType<RequestHeader>(envelope.Header).Credential);
+            }));
+
+        // once it ended, a call that asks fails before it goes again
+        transport.Deliver(ResultOf(98, Credential.None));
+        await scripted.Settle();
+
+        var ended = await Refused();
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (ended.Code, ended.Origin));
+        Assert.Equal(3, transport.Sent.Count);
+    }
+
+    [Fact]
+    public async Task The_server_s_requests_resolve_their_credential_as_a_server_does_none_and_the_session_it_learned_run_in_it_another_token_is_refused_SESSION_REQUIRED_a_JWT_CREDENTIAL_UNSUPPORTED()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var sessions = new List<(uint CallId, bool IsInSession)>();
+
+        router.RegisterResolver(new ScriptedResolver(Service, (props) =>
+        {
+            sessions.Add((props.Header.CallId, props.Session is not null));
+
+            return router.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(props.ConnectionHandle, props.Header));
+        }));
+
+        // none runs in none while it learned none, and an OPAQUE does not hold
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(2), Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(4) with { Credential = Token }, Payload = new byte[] { 1 } });
+        await scripted.Settle();
+
+        // learned, none and its token run in it; another token does not hold, and a JWT is a
+        // scheme it takes none of
+        transport.Deliver(ResultOf(99, Token));
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(6), Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(8) with { Credential = Token }, Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(10) with { Credential = SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA") }, Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(12) with { Credential = Credential.Jwt("a.b.c") }, Payload = new byte[] { 1 } });
+        await scripted.Settle();
+
+        Assert.Equal([(2u, false), (6u, true), (8u, true)], sessions);
+        Assert.Equal(
+            [(4u, ProtocolCode.SessionRequired), (10u, ProtocolCode.SessionRequired), (12u, ProtocolCode.CredentialUnsupported)],
+            transport.Failures);
+
+        // a client announces nothing
+        Assert.All(transport.Envelopes, (envelope) =>
+        {
+            Assert.True(envelope.Header is ResultHeader { Credential: null } or FailureHeader { Credential: null });
+        });
+    }
+
+    [Fact]
     public async Task The_server_s_requests_cancelled_by_the_server_abort_their_resolver_s_signal_and_are_answered_by_nothing()
     {
         using var scripted = new ScriptedRouter();
@@ -1465,8 +1550,10 @@ public sealed class RouterClientTests
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             lock (_gate)
             {
                 _sent.Add(bytes.ToArray());
@@ -1786,8 +1873,10 @@ public sealed class RouterClientTests
                 Close?.Invoke(false, false);
             }
 
-            public Task Send(ReadOnlyMemory<byte> bytes)
+            public Task Send(TransportMessage message)
             {
+                var bytes = message.Bytes;
+
                 Peer!.Deliver(bytes);
 
                 return Task.CompletedTask;
@@ -1831,8 +1920,10 @@ public sealed class RouterClientTests
                 return Task.CompletedTask;
             }
 
-            public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+            public Task Send(TransportMessage message, string connectionHandle)
             {
+                var bytes = message.Bytes;
+
                 Peer!.Deliver(bytes);
 
                 return Task.CompletedTask;
@@ -1899,8 +1990,10 @@ public sealed class RouterClientTests
             Reconnect?.Invoke();
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             return Task.CompletedTask;
         }
     }

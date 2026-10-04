@@ -12,7 +12,7 @@
   "serviceId": 1,
   "serviceRevision": 1,
   "relay": {
-    "admits": "a connection with a session, as section 14.3 has a server's relay ask by default; any other is refused with SESSION_REQUIRED"
+    "admits": "requireSessionOrCredential, a server's relay's admission by default: a call in leg A's connection's session, or one whose header presents a JWT, or an ELSEWHERE its transport carried, read from its credential scheme alone; any other is refused with SESSION_REQUIRED"
   },
   "procedures": [
     {
@@ -88,21 +88,21 @@
       "procedureId": 12,
       "procedureName": "login",
       "request": "{\"name\":s}, with \"sessionTimeout\":t, \"connectionTimeout\":c, or both, in milliseconds",
-      "answers": "s, once it opened a new session for its connection, s its data, its session timeout t and its connection timeout c, each held as section 1.4 holds a duration and without end when not given (section 13.7); a t or c under a millisecond or past 2³¹ − 1, as given, opens no session and fails it, which its server answers with PROCEDURE_FAILED and reports"
+      "answers": "s, once it opened a new session for its connection, whatever its call presents, s its data, its session timeout t and its connection timeout c, each held as section 1.4 holds a duration and without end when not given (section 13.7); a t or c under a millisecond or past 2³¹ − 1, as given, opens no session and fails it, which its server answers with PROCEDURE_FAILED and reports"
     },
     {
       "procedureId": 13,
       "procedureName": "logout",
       "request": "any JSON value",
-      "admits": "a connection with a session; any other is refused with SESSION_REQUIRED",
+      "admits": "a call in its connection's session; one in a credential's session is refused with ACCESS_DENIED, since SESSION_REQUIRED would have its client withdraw a credential that holds, and one in none with SESSION_REQUIRED",
       "answers": "null, once it ended its connection's session"
     },
     {
       "procedureId": 14,
       "procedureName": "whoami",
       "request": "any JSON value",
-      "admits": "a connection with a session; any other is refused with SESSION_REQUIRED",
-      "answers": "the name its connection's session holds"
+      "admits": "a call with a session, its call's; one in none is refused with SESSION_REQUIRED",
+      "answers": "the name its call's session holds: the name login gave its connection's session, or the sub of its credential's claims, or of what its ELSEWHERE verifier gave"
     },
     {
       "procedureId": 15,

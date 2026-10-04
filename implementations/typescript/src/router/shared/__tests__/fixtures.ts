@@ -6,7 +6,7 @@ import type { IRouterClientTransportLike } from '../../client/types';
 import type { IRouterServerTransportLike } from '../../server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
-import type { Data } from '../../../transport/shared/types';
+import type { ITransportMessage } from '../../../transport/shared/types';
 import { createRouterCore } from '../router-core';
 import type {
   CallId,
@@ -206,7 +206,7 @@ export const createPipedTransports = ({
 }) => {
   const client = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
-    message: [data: Data];
+    message: [message: ITransportMessage];
     reconnect: [];
   }>();
   const server = createEmitter<{
@@ -216,7 +216,7 @@ export const createPipedTransports = ({
       request: unknown,
       connectionHandle: TransportServerConnectionHandle,
     ];
-    message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+    message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
   }>();
   const sent = { client: [] as Uint8Array[], server: [] as Uint8Array[] };
   let isOpen = false;
@@ -242,7 +242,7 @@ export const createPipedTransports = ({
     off: client.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: client.on,
-    send: (data) => {
+    send: ({ data }) => {
       if (!isOpen) {
         return Promise.reject(new Error(`${connectionHandle} is not open`));
       }
@@ -251,7 +251,7 @@ export const createPipedTransports = ({
 
       sent.client.push(bytes);
       hand(() => {
-        server.emit('message', bytes, connectionHandle);
+        server.emit('message', { data: bytes }, connectionHandle);
       });
 
       return Promise.resolve();
@@ -262,7 +262,7 @@ export const createPipedTransports = ({
     off: server.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: server.on,
-    send: (data, handle) => {
+    send: ({ data }, handle) => {
       if (!isOpen || handle !== connectionHandle) {
         return Promise.reject(new Error(`${handle} is not open`));
       }
@@ -271,7 +271,7 @@ export const createPipedTransports = ({
 
       sent.server.push(bytes);
       hand(() => {
-        client.emit('message', bytes);
+        client.emit('message', { data: bytes });
       });
 
       return Promise.resolve();

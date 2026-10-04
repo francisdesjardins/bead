@@ -6,7 +6,7 @@
 // dependencies
 
 import { createDebugStatistics, filterDebug } from '../src/router/shared/service-manager';
-import type { IBeforeRequest } from '../src/router/shared/types';
+import type { IAdmissionRequest, IBeforeRequest } from '../src/router/shared/types';
 import type { IServer, IServerTransportLike } from '../src/server/types';
 import type { TransportServerConnectionHandle } from '../src/transport/server/types';
 import {
@@ -85,10 +85,10 @@ export const offer = <Transport extends IServerTransportLike>(
 
   services.on('debug', filterDebug(statistics.listener, 'd(tx), -stats'));
 
-  // a write needs a session that holds the write permission: without a session, it is refused alike
+  // a write needs a call whose session holds the write permission: in none, it is refused alike
   const requireWrite: IBeforeRequest<TransportServerConnectionHandle> = Object.assign(
-    ({ connectionHandle }: { connectionHandle: TransportServerConnectionHandle }) => {
-      return sessions.get(connectionHandle)?.data?.permissions.includes('write') === true;
+    ({ session }: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>) => {
+      return (session?.data as IClaims | undefined)?.permissions.includes('write') === true;
     },
     {
       refusal: {

@@ -338,6 +338,42 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    public async Task A_call_presenting_the_session_it_learned_runs_in_it_the_session_opened_anew_presented_anew_and_none_presented_once_it_ended(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var presenting = new RequestOptions { Credential = Credential.Opaque() };
+
+        async Task<string> Answered((string ProcedureName, string Payload) call)
+        {
+            return (await RequesterOf(client, call.ProcedureName)(JsonOf(call.Payload))(presenting).WaitAsync(Patience, Cancelled)).GetRawText();
+        }
+
+        async Task<FailureException> Refused(string procedureName)
+        {
+            return await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return RequesterOf(client, procedureName)(JsonOf("null"))(presenting).WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        var before = await Refused("login");
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (before.Code, before.Origin));
+        Assert.Equal("\"ada\"", (await RequesterOf(client, "login")(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("\"ada\"", await Answered(("whoami", "null")));
+        Assert.Equal("\"bob\"", await Answered(("login", "{\"name\":\"bob\"}")));
+        Assert.Equal("\"bob\"", await Answered(("whoami", "null")));
+        Assert.Equal("null", await Answered(("logout", "null")));
+
+        var ended = await Refused("whoami");
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (ended.Code, ended.Origin));
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
     public async Task Login_and_register_hold_a_duration_as_section_1_4_does_a_fraction_rounded_one_under_a_millisecond_or_past_2_31_minus_1_refused_with_PROCEDURE_FAILED_nothing_opened_or_registered(string transport)
     {
         await using var client = await ConnectedOver(transport);

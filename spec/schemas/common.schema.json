@@ -79,7 +79,7 @@
     },
     "protocolCode": {
       "description": "A code of the protocol, as spec/spec.md section 8 names them.",
-      "enum": [1, 2, 3, 4, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 48, 49, 50, 51, 64, 65]
+      "enum": [1, 2, 3, 4, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 36, 48, 49, 50, 51, 64, 65]
     },
     "code": {
       "description": "A failure's code, the protocol's or the procedure's own: never 0.",

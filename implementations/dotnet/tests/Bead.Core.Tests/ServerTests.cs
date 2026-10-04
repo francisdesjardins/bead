@@ -407,18 +407,93 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void RequireSession_refuses_a_connection_without_a_session_with_SESSION_REQUIRED()
+    public void RequireSession_refuses_a_call_in_none_with_SESSION_REQUIRED_testing_the_call_s_session_never_its_connection_s()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+        Server.Sessions.Set(Server.Sessions.Create(Handle));
+
+        var request = new AdmissionRequest(Handle, (RequestHeader)RequestOf(1, ("whoami", false)).Header);
+
+        // the call's session, never its connection's
+        Assert.False(Server.RequireSession.Admits(request));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), Server.RequireSession.Refusal);
+        Assert.True(Server.RequireSession.Admits(request with { Session = new CallSession() }));
+    }
+
+    [Fact]
+    public async Task A_request_runs_in_its_connection_s_session_presenting_none_or_its_token_as_OPAQUE_the_session_s_data_a_copy_the_call_keeps_another_token_is_refused_SESSION_REQUIRED_whatever_its_procedure_requires()
+    {
+        static Envelope Presenting(Envelope request, Credential credential)
+        {
+            return new Envelope { Header = (RequestHeader)request.Header with { Credential = credential }, Payload = request.Payload };
+        }
+
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+
+        var token = Server.Sessions.Set(Server.Sessions.Create(Handle) with { Data = "ada" }).SessionToken!.Value;
+
+        await Deliver(RequestOf(1, ("whoami", false)));
+        await Deliver(Presenting(RequestOf(3, ("whoami", false)), token));
+
+        // another token, and the token of a session drawn anew, do not hold, whatever the
+        // procedure requires
+        await Deliver(Presenting(RequestOf(5, ("echo", false)), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA")));
+        Server.Sessions.Set(Server.Sessions.Create(Handle) with { Data = "bob" });
+        await Deliver(Presenting(RequestOf(7, ("echo", false)), token));
+
+        // the call keeps the data it resolved with, whatever its session holds after
+        var released = new TaskCompletionSource();
+        var held = new Procedure { ServiceId = 2, ProcedureId = 1, ProcedureName = "held", ServiceRevision = 1 };
+
+        Server.Services.GetRequestResolver(held, new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = InteropService.Json })(async (request, response) =>
+        {
+            await released.Task;
+            await response.Answer(JsonSerializer.SerializeToElement(request.Session?.Data));
+        });
+
+        var bob = Server.Sessions.Get(Handle)!;
+
+        await Deliver(new Envelope { Header = new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 }, Payload = Encoding.UTF8.GetBytes("null") });
+        Server.Sessions.UpdateData(bob with { Data = "eve" });
+        released.SetResult();
+        await _scheduler.WhenIdle();
+
+        Assert.Equal(
+            ["1 \"ada\"", "3 \"ada\"", "5 failure 32", "7 failure 32", "9 \"bob\""],
+            Enumerable.Range(0, 5).Select((index) =>
+            {
+                var envelope = _transport.Read(index);
+
+                return envelope.Failure is { } failure
+                    ? $"{envelope.Header.CallId} failure {failure.Code}"
+                    : $"{envelope.Header.CallId} {Encoding.UTF8.GetString(envelope.Payload.Span)}";
+            }));
+    }
+
+    [Fact]
+    public async Task A_call_presenting_its_connection_s_OPAQUE_and_one_presenting_none_hold_one_subscription_to_a_procedure_the_connection_s_session_s()
     {
         Start(Timeout.InfiniteTimeSpan);
         _transport.Open(Handle);
 
-        var request = new AdmissionRequest(Handle, (RequestHeader)RequestOf(1, ("whoami", false)).Header);
+        var token = Server.Sessions.Set(Server.Sessions.Create(Handle)).SessionToken!.Value;
+        var subscribing = RequestOf(1, ("ticks", true));
 
-        Assert.False(Server.RequireSession.Admits(request));
-        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), Server.RequireSession.Refusal);
+        await Deliver(new Envelope { Header = (RequestHeader)subscribing.Header with { Credential = token }, Payload = subscribing.Payload });
+        await Deliver(RequestOf(3, ("ticks", true)));
+        await Deliver(RequestOf(5, ("tick", false), "{\"value\":7}"));
 
-        Server.Sessions.Set(Server.Sessions.Create(Handle));
-        Assert.True(Server.RequireSession.Admits(request));
+        // the second is answered, and holds nothing: the tick goes on the first's call id alone
+        Assert.Equal(
+            ["Result 1", "Result 3", "Notification 1", "Result 5"],
+            Enumerable.Range(0, _transport.Sent.Count).Select((index) =>
+            {
+                var envelope = _transport.Read(index);
+
+                return $"{envelope.Kind} {envelope.Header.CallId}";
+            }));
     }
 
     [Fact]
@@ -989,8 +1064,10 @@ public sealed class ServerTests : IAsyncLifetime
             return EnvelopeCodec.ReadEnvelope(Sent[index].Span, new EnvelopeReadOptions { Side = RouterSide.Client })!;
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             var failing = Failing;
 
             Failing = Failing.None;
@@ -1080,8 +1157,10 @@ public sealed class ServerTests : IAsyncLifetime
             }
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             return Task.CompletedTask;
         }
 

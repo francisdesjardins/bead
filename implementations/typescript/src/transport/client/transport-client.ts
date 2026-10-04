@@ -61,7 +61,7 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export type { Data, IEventIteratorOptions } from '../shared/types';
+export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
 export { dispose } from './symbols';
 export type {
   ITransportClient,
@@ -220,8 +220,8 @@ export const createTransportClient = <
     disconnect: (options) => {
       return implementation.disconnect(options);
     },
-    send: (data) => {
-      return implementation.send(data);
+    send: (message) => {
+      return implementation.send(message);
     },
     [dispose]: () => {
       const wasOpen = client.isOpen();

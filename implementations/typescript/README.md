@@ -144,10 +144,11 @@ far a request went:
 | 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                    |
 | 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                        |
 | 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP                                                                             |
-| 32   | `SESSION_REQUIRED`         | the procedure needs a session the connection has not                                                                                                                                      |
+| 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                      |
 | 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header                                                                                                                                        |
 | 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                           |
 | 35   | `CAPACITY_EXCEEDED`        | every call id of the side is in use or reserved, or the transfers received hold every place or the budget                                                                                 |
+| 36   | `CREDENTIAL_UNSUPPORTED`   | the request presents a credential of a scheme the side takes none of, and its detail names those it takes                                                                                 |
 | 48   | `CHUNK_INVALID`            | a chunk runs past the total, is empty, does not read, is not full though more follow, says wrongly whether it is the last, overlaps bytes received in part, or leaves too many runs apart |
 | 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                      |
 | 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                        |
@@ -163,12 +164,15 @@ so `isProtocol(codes)` passes and `isProtocol(codes, side)` never does.
 is laid out this way.
 
 `router-client` runs over any transport that meets `IRouterClientTransportLike`, and learns the
-session the server announces — only when it changes, on an answer — without ever presenting it: the
-connection is the session. A request may name a `destinationId`, what it is for behind the peer,
-which a server's relay passes on to it — see [Relays](#relays). `router-server` runs over any
-transport server that meets `IRouterServerTransportLike`: it sends its own requests to the
-connection their options name — the types require one — and notifies the connections subscribed to
-a procedure.
+session the server announces — only when it changes, on an answer. A request runs in the session
+its connection holds, and presents the one the client learned only when its options ask,
+`credential: { scheme: CredentialScheme.OPAQUE }`: that call is bound to that session, and refused
+`SESSION_REQUIRED` should it have ended or been opened anew, rather than run in another; one that
+asks before any session fails before it goes. A request may name a `destinationId`, what it is for
+behind the peer, which a server's relay passes on to it — see [Relays](#relays). `router-server`
+runs over any transport server that meets `IRouterServerTransportLike`: it sends its own requests
+to the connection their options name — the types require one — and notifies the connections
+subscribed to a procedure.
 
 A subscription is the call that made it, left open. The request says it opens one: a client sets the
 SUBSCRIPTION flag on a call that subscribes a notification, and a server subscribes the requester of
@@ -319,8 +323,13 @@ application gives its own, OWASP ASVS 4.0.3 V3.3.2's for one that authenticates,
 inactivity at level 2, 15 at level 3. A connection that never opens a session is closed once silent
 for the server's `connectionInactivityTimeout`, when it has one. Over HTTP a listen held is no
 silence: no connection timeout runs while one is, and each counts anew from its end, while a session
-timeout counts messages alone. `requireSession` is the `beforeRequest` of every other
-procedure, and refuses with `SESSION_REQUIRED`; composed with `&&`, it loses that refusal and the
+timeout counts messages alone. Each request runs in its call's session, which its admission reads
+and its callback receives as `session`: its connection's, its data a copy the call keeps, when it
+presents none or that session's token, compared in constant time; any other token is refused
+`SESSION_REQUIRED`, whatever its procedure requires. The router asks `sessionOf` for it once per
+request, before `beforeRequest`, and a scheme it takes none of is refused `CREDENTIAL_UNSUPPORTED`.
+`requireSession` is the `beforeRequest` of every other procedure: it tests the call's session, and
+refuses a call in none with `SESSION_REQUIRED`; composed with `&&`, it loses that refusal and the
 composition refuses with `ACCESS_DENIED` — a caller that wants to keep it puts `refusal` on its own
 function. The server
 asks a client with a command, `getCommand`, which names the connection; the client runs it with
@@ -361,11 +370,13 @@ A1 14 00 04  00 00 00 07  00 00 00 00 01 3F FE BC | <324 bytes>
    the last CHUNK, from 20,971,196
 ```
 
-A transfer is refused before its bulk crosses. Its opening is routed, admitted — `beforeRequest`
-sees the header, never the payload — and held to its procedure's limit and the router's before
-anything is granted: a refusal falls on the opening, and no chunk follows it. An opening that holds
-its whole total needed no transfer, and is refused with `CHUNK_INVALID`. A receiver holds
-`maximumTransfers` transfers per connection at once, each until its call ends, and all of them
+A transfer is refused before its bulk crosses. Its opening is routed, its credential resolved,
+admitted — `beforeRequest` sees the header and the call's session, never the payload — and held to
+its procedure's limit and the router's before anything is granted: a refusal falls on the opening,
+and no chunk follows it. An opening carries one byte of its payload at least, and one that holds its
+whole total needed no transfer: either is refused with `CHUNK_INVALID`. A requester whose header
+leaves its opening no byte fails the call before it goes, with `ENVELOPE_TOO_LARGE`. A receiver
+holds `maximumTransfers` transfers per connection at once, each until its call ends, and all of them
 together hold at most `bufferedBytesBudget` bytes, reserved as each credit grants them; an opening
 past either is refused with `CAPACITY_EXCEEDED`, and a transfer the budget cannot credit waits until
 the budget frees, or its inactivity ends it.
@@ -459,8 +470,8 @@ chain: leg B names no destination, so no loop can form.
 connection — so the transport draws one. A `POST /bead` with no body connects: the server draws 16
 bytes from `crypto` and answers 201 with them, in base64url, in `bead-connection-token`; each
 exchange after presents that token, and a `DELETE` ends the connection. The router, the sessions and
-the relays see a connection, as over a socket, so a client still never presents its session: what it
-presents is its connection's token, a secret that enters no handle — `type=HTTP;ip=…;ordinal=…`
+the relays see a connection, as over a socket: what the transport presents is its connection's
+token, a secret that enters no handle — `type=HTTP;ip=…;ordinal=…`
 names the connection — no event and no report. `createHTTPTransportServer({ createServer })` takes
 the server's factory — `node:http`'s, `node:https`'s, or `node:http2`'s with `allowHTTP1` — as the
 WebSocket one takes `WebSocketServer`, and the application sets its timeouts.
@@ -611,10 +622,12 @@ call there.
 4. On the server, `server/server.ts` counts the message as its session's activity, and
    `router/server/router-server.ts` notes the connection open. `receive`, in the core, reads the
    prefix and the envelope — what does not read goes through `gate` — and `receiveRequest` checks
-   the call id, opens the call and its controller (`answering-calls.ts`), routes it, asks the
-   resolver's `admit`, and calls the resolver with the controller's `signal`. An opening is held
-   first (`receiving-transfers.ts`), credited, and its chunks put together — `receiveChunk` — until
-   the payload is whole.
+   the call id, opens the call and its controller (`answering-calls.ts`), routes it, resolves its
+   credential to the call's session — `sessionOf`, in the turn it came for none and `OPAQUE`, in a
+   later one for `JWT` and `ELSEWHERE` — asks the resolver's `admit` on that session, and calls the
+   resolver with it and the controller's `signal`. An opening is held first
+   (`receiving-transfers.ts`), credited, and its chunks put together — `receiveChunk` — until the
+   payload is whole.
 5. The resolver — `createResolver`, in the service manager — decodes the payload, its admission
    asked already, runs the callback, and its `response` calls `router.respond`, then the core's
    `respond`: an answer to a call no longer answered goes nowhere; `beforeAnswer` lets the server

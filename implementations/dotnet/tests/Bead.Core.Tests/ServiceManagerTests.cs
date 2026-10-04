@@ -1939,6 +1939,55 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Admission_reads_the_call_s_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it()
+    {
+        var router = new RecordingRouter();
+        var admitted = new List<object?>();
+        var received = new List<object?>();
+        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
+        {
+            admitted.Add(request.Session?.Data);
+
+            return true;
+        })))((request, response) =>
+        {
+            received.Add(request.Session?.Data);
+
+            return response.Answer(request.Payload);
+        });
+
+        // asked here, then by its router, which hands the callback the session it resolved
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Session = new CallSession { Data = "ada" } }).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = new CallSession { Data = "bob" } }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["ada", null], admitted);
+        Assert.Equal(["ada", null, "bob"], received);
+    }
+
+    [Fact]
+    public async Task Hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_its_trace()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+
+        await manager.GetRequest(Echo, Asked)(new Text("a"))(new RequestOptions { Credential = Credential.Opaque() }).WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("b"))().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(
+            [Credential.Opaque(), null],
+            router.Requests.Select((sent) =>
+            {
+                return sent.Request.Options.Credential;
+            }));
+        Assert.All(seen, (told) =>
+        {
+            Assert.Null(told.Event.Options!.Credential);
+        });
+    }
+
+    [Fact]
     public async Task Is_not_asked_again_of_a_request_its_router_admitted()
     {
         var router = new RecordingRouter();

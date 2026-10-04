@@ -187,6 +187,12 @@ public sealed partial class RouterServerTests : IDisposable
         return new Envelope { Header = new CreditHeader { CallId = callId, CreditEnd = creditEnd, Paced = true } };
     }
 
+    // `request`, presenting `credential`
+    private static Envelope Presenting(Envelope request, Credential credential)
+    {
+        return new Envelope { Header = (RequestHeader)request.Header with { Credential = credential }, Payload = request.Payload };
+    }
+
     private static Envelope CancelOf(uint callId)
     {
         return new Envelope { Header = new CancelHeader { CallId = callId } };
@@ -432,6 +438,75 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_connection_s_requests_are_each_asked_their_session_of_its_sessionOf_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        var admitted = new List<object?>();
+        var asked = new List<uint>();
+
+        Start(new RouterServerOptions
+        {
+            SessionOf = (request, _) =>
+            {
+                asked.Add(request.Header.CallId);
+
+                return ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (token, "ada")));
+            },
+        });
+        Services.GetRequestResolver(
+            Echo,
+            new RequestResolverDependencies<string, string>
+            {
+                Serializer = Text,
+                BeforeRequest = new BeforeRequest((request) =>
+                {
+                    admitted.Add(request.Session?.Data);
+
+                    return true;
+                }),
+            })((request, response) =>
+            {
+                return response.Answer($"{request.Session?.Data}");
+            });
+        // one at a time: a refusal goes out in the turn its request came, before a resolver answers
+        Deliver(First, RequestOf(1));
+        await Settle();
+        Deliver(First, Presenting(RequestOf(3), token));
+        await Settle();
+        Deliver(First, Presenting(RequestOf(5), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA")));
+        await Settle();
+
+        Assert.Equal(["first result 1 ada", "first result 3 ada", "first failure 5 SessionRequired"], SentSince());
+        Assert.Equal(["ada", "ada"], admitted);
+        Assert.Equal([1u, 3u, 5u], asked);
+    }
+
+    [Fact]
+    public async Task Requests_run_in_none_without_a_sessionOf_and_one_presenting_a_credential_is_refused_SESSION_REQUIRED_or_CREDENTIAL_UNSUPPORTED()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+
+        Start(new RouterServerOptions
+        {
+            SessionTokenOf = (_) =>
+            {
+                return token;
+            },
+        });
+        EchoOf((request, response) =>
+        {
+            return response.Answer(request.Session is null ? "none" : "a session");
+        });
+        Deliver(First, RequestOf(1));
+        await Settle();
+        Deliver(First, Presenting(RequestOf(3), token));
+        Deliver(First, Presenting(RequestOf(5), Credential.Jwt("a.b.c")));
+        await Settle();
+
+        Assert.Equal(["first result 1 none", "first failure 3 SessionRequired", "first failure 5 CredentialUnsupported"], SentSince());
+    }
+
+    [Fact]
     public void Requests_refuse_a_second_resolver_for_one_procedure()
     {
         Start();
@@ -583,6 +658,36 @@ public sealed partial class RouterServerTests : IDisposable
         Deliver(Second, ResultOf(8));
 
         Assert.NotNull(await staying.WaitAsync(Patience, Cancelled));
+    }
+
+    [Fact]
+    public async Task Its_own_requests_present_OPAQUE_when_they_ask_their_connection_s_session_as_sessionTokenOf_gives_it_and_fail_before_they_go_SESSION_REQUIRED_when_it_has_none()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        SessionToken? held = null;
+
+        Start(new RouterServerOptions
+        {
+            SessionTokenOf = (_) =>
+            {
+                return held;
+            },
+        });
+        _transport.Open(First);
+
+        var presenting = CommandOf(First) with { Options = CommandOf(First).Options with { Credential = Credential.Opaque() } };
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return Router.Request(ReadOnlyMemory<byte>.Empty, presenting).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (refused.Code, refused.Origin));
+        Assert.Empty(_transport.Sent);
+
+        held = token;
+        _ = Router.Request(ReadOnlyMemory<byte>.Empty, presenting);
+        await Settle();
+        Assert.Equal(Credential.Opaque(token), Assert.IsType<RequestHeader>(Assert.Single(_transport.Sent).Envelope.Header).Credential);
     }
 
     [Fact]
@@ -2050,8 +2155,10 @@ public sealed partial class RouterServerTests : IDisposable
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             server.Deliver(First, bytes.ToArray());
 
             return Task.CompletedTask;
@@ -2118,8 +2225,10 @@ public sealed partial class RouterServerTests : IDisposable
             return !OneWay.Contains(connectionHandle);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             var copy = bytes.ToArray();
             var envelope = EnvelopeCodec.ReadEnvelope(
                 copy,

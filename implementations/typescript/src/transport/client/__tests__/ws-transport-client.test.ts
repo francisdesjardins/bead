@@ -304,7 +304,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
           const received = nextMessage(server);
 
           await client.connect({ host, port });
-          await client.send(payload());
+          await client.send({ data: payload() });
 
           const { data, isBinary } = await received;
           expect(data.toString()).toBe('hello');
@@ -312,10 +312,23 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
       }
 
+      test('carries no credential: the envelope alone goes', async () => {
+        const received = nextMessage(server);
+
+        await client.connect({ host, port });
+        await client.send({
+          credential: 'Bearer mF_9.B5f-4.1JqM',
+          data: new TextEncoder().encode('hello'),
+        });
+
+        const { data, isBinary } = await received;
+        expect([isBinary, data.toString()]).toEqual([true, 'hello']);
+      });
+
       test('rejects with a ReadyStateError after disconnecting', async () => {
         await client.connect({ host, port });
         await client.disconnect();
-        await expect(client.send('HelloWorld')).rejects.toBeInstanceOf(ReadyStateError);
+        await expect(client.send({ data: 'HelloWorld' })).rejects.toBeInstanceOf(ReadyStateError);
       });
     });
 
@@ -328,7 +341,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         const messages: unknown[] = [];
         const both = new Promise<void>((resolve) => {
-          client.on('message', (data) => {
+          client.on('message', ({ data }) => {
             messages.push(data);
             if (messages.length === 2) {
               resolve();
@@ -352,7 +365,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         const message = nextEvent(client, 'message');
         await client.connect({ host, port });
-        const [data] = await message;
+        const [{ data }] = await message;
 
         expect(data).toBeInstanceOf(ArrayBuffer);
       });
@@ -365,7 +378,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         const message = nextEvent(client, 'message');
         await client.connect({ host, port });
-        const [data] = await message;
+        const [{ data }] = await message;
 
         expect(data).toBeInstanceOf(Blob);
         expect(await (data as Blob).text()).toBe('binary');
@@ -380,14 +393,14 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         await client.connect({ host, port });
         const echoed = nextEvent(client, 'message');
-        await client.send('ping');
+        await client.send({ data: 'ping' });
 
-        expect(await echoed).toEqual(['ping']);
+        expect(await echoed).toEqual([{ credential: undefined, data: 'ping' }]);
       });
 
       test('emits no message once a disconnect has begun', async () => {
         const messages: unknown[] = [];
-        client.on('message', (data) => {
+        client.on('message', ({ data }) => {
           messages.push(data);
         });
 
@@ -493,7 +506,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         drop(client);
 
         expect(client.isClosed()).toBe(true);
-        await expect(client.send('x')).rejects.toHaveProperty('got', ReadyState.CLOSED);
+        await expect(client.send({ data: 'x' })).rejects.toHaveProperty('got', ReadyState.CLOSED);
 
         await client.connect({ host, port });
         expect(client.isOpen()).toBe(true);

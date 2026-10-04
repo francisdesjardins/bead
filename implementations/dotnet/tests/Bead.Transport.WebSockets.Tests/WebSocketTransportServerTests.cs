@@ -24,6 +24,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     // a handle the tests give every connection, as a port given again would
     private const string Shared = "type=WS;ip=127.0.0.1;port=1";
 
+    // a bearer credential, RFC 6750's own example, its auth-scheme included
+    private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static readonly WebSocketTransportStartOptions Loopback = new() { Address = "127.0.0.1", FindOpenPort = true };
@@ -349,7 +352,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             await Task.WhenAll(Enumerable.Range(1, 20).Select((index) =>
             {
-                return _server.Send(new[] { (byte)index }, connectionHandle);
+                return _server.Send(new TransportMessage(new[] { (byte)index }, false), connectionHandle);
             }));
 
             for (var index = 1; index <= 20; index += 1)
@@ -470,9 +473,28 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Carries_no_credential_either_way()
+    {
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            await client.SendAsync("up"u8.ToArray(), WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Null((await Next(_messages)).Message.Credential);
+
+            await _server.Send(new TransportMessage("down"u8.ToArray(), false) { Credential = Bearer }, connectionHandle).WaitAsync(Patience, Cancelled);
+
+            var (result, bytes) = await ReceiveOf(client);
+
+            Assert.Equal((WebSocketMessageType.Binary, "down"), (result.MessageType, Encoding.ASCII.GetString(bytes)));
+        }
+    }
+
+    [Fact]
     public async Task Resolves_a_send_for_a_handle_nobody_holds()
     {
-        await _server.Send(new byte[] { 1 }, "type=WS;ip=127.0.0.1;port=1").WaitAsync(Patience, Cancelled);
+        await _server.Send(new TransportMessage(new byte[] { 1 }, false), "type=WS;ip=127.0.0.1;port=1").WaitAsync(Patience, Cancelled);
     }
 
     [Fact]
@@ -976,7 +998,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         _server.Connection += (connectionHandle) =>
         {
-            seen.TrySetResult((_server.ConnectionHandles.Contains(connectionHandle), _server.Send("hi"u8.ToArray(), connectionHandle)));
+            seen.TrySetResult((_server.ConnectionHandles.Contains(connectionHandle), _server.Send(new TransportMessage("hi"u8.ToArray(), false), connectionHandle)));
         };
 
         var (client, _) = await Connect();
@@ -1119,7 +1141,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal(Shared, connectionHandle);
             await older.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
             // a round trip on the newer: the older's end, which came first, is told by now
-            await _server.Send(new byte[] { 1 }, Shared).WaitAsync(Patience, Cancelled);
+            await _server.Send(new TransportMessage(new byte[] { 1 }, false), Shared).WaitAsync(Patience, Cancelled);
             await ReceiveOf(newer);
 
             Assert.Equal([Shared], _server.ConnectionHandles);

@@ -1,9 +1,21 @@
 namespace Bead;
 
-/// <summary>What a transport delivered: its bytes, and whether it came as text, which is no envelope.</summary>
+/// <summary>
+/// What a transport carries, both ways: an envelope's bytes, whether they came as text, which is no
+/// envelope, and the credential carried beside them (spec 15.1).
+/// </summary>
 /// <param name="Bytes">The bytes, the transport's no more: they must not change afterwards.</param>
-/// <param name="IsText">Whether it came as text.</param>
-public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool IsText);
+/// <param name="IsText">Whether they came as text; what a transport sends goes as bytes.</param>
+public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool IsText)
+{
+    /// <summary>
+    /// The credential carried beside the envelope: over HTTP, the <c>Authorization</c> field of the
+    /// <c>POST /bead</c> that carries a request, as it came, its surrounding whitespace removed; none
+    /// when nothing was carried, an empty field among them. A WebSocket carries none, nor does an
+    /// answer or what a listen brings back.
+    /// </summary>
+    public string? Credential { get; init; }
+}
 
 /// <summary>
 /// What a server's router needs of its transport: the connections that open and close, what they
@@ -17,17 +29,18 @@ public interface IRouterServerTransport
     /// <summary>A connection opened, named by its handle.</summary>
     event Action<string>? Connection;
 
-    /// <summary>A connection delivered a message.</summary>
+    /// <summary>A connection delivered a message: an envelope, and the credential carried beside it.</summary>
     event Action<TransportMessage, string>? Message;
 
     /// <summary>A connection closed: whether cleanly, and its handle.</summary>
     event Action<bool, string>? Close;
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> to a connection: at once, in order, without blocking; the
-    /// task settles once they were sent, or could not be.
+    /// Hands <paramref name="message"/> to a connection: at once, in order, without blocking; the
+    /// task settles once it was sent, or could not be. No server carries a credential: an answer and
+    /// what a listen brings back carry none, nor does a socket.
     /// </summary>
-    Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle);
+    Task Send(TransportMessage message, string connectionHandle);
 
     /// <summary>Whether a connection carries both ways; every one does by default.</summary>
     bool IsTwoWay(string connectionHandle)
@@ -56,9 +69,30 @@ public sealed record RouterServerOptions
 
     /// <summary>
     /// The session of a connection, which its next answer announces when it changed; none for none.
-    /// Asked for each answer only, from the router's scheduler. No session is announced when none.
+    /// Asked for each answer only, from the router's scheduler, and never waiting. No session is
+    /// announced when none.
     /// </summary>
     public Func<string, SessionToken?>? SessionTokenOf { get; init; }
+
+    /// <summary>
+    /// The call's session a request's credential resolves to, asked once per request, with the
+    /// call's signal, between holding its call id and its admission (spec 9.2, step 5): none, for a
+    /// request presenting none, runs it in none; for one presenting a credential, says that
+    /// credential does not hold, and it is refused SESSION_REQUIRED. One that throws or faults fails
+    /// the call, PROCEDURE_FAILED, and is reported. It may wait, never for a request presenting none
+    /// or <see cref="CredentialScheme.Opaque"/>, which resolves in the turn it came; a cancel or its
+    /// connection closing cancels the signal, and a resolution that settles after is dropped. When
+    /// none, the router knows no session: a request presenting none runs in none, and one presenting
+    /// a credential does not hold.
+    /// </summary>
+    public Func<SessionRequest, CancellationToken, ValueTask<CallSession?>>? SessionOf { get; init; }
+
+    /// <summary>
+    /// The credential schemes it takes besides <see cref="CredentialScheme.Opaque"/>, which every
+    /// side takes: <see cref="CredentialScheme.Jwt"/> and <see cref="CredentialScheme.Elsewhere"/>,
+    /// as its credentials say. A request presenting another is refused CREDENTIAL_UNSUPPORTED.
+    /// </summary>
+    internal IReadOnlyCollection<CredentialScheme>? CredentialSchemes { get; init; }
 
     /// <summary>Where resolvers run: the thread pool when none.</summary>
     internal TaskScheduler? ResolverScheduler { get; init; }
@@ -77,9 +111,10 @@ public sealed record RouterServerOptions
 /// resolver to a request that opens a subscription, and its first subscription to a procedure is the
 /// one it keeps. A paced subscription gets a notification while its client credited one, and queues
 /// the others, within <see cref="RouterServerOptions.Pacing"/>; past it, it ends with
-/// CAPACITY_EXCEEDED. Each answer announces its connection's session, as
-/// <see cref="RouterServerOptions.SessionTokenOf"/> gives it. A request that names a destination goes
-/// on through the relay to the destination registered, as <see cref="RouterServerOptions.Relay"/>
+/// CAPACITY_EXCEEDED. Each request runs in its call's session, which its credential resolves to by
+/// <see cref="RouterServerOptions.SessionOf"/>, and each answer announces its connection's session,
+/// as <see cref="RouterServerOptions.SessionTokenOf"/> gives it. A request that names a destination
+/// goes on through the relay to the destination registered, as <see cref="RouterServerOptions.Relay"/>
 /// admits it; while none is registered, it is refused: this router relays nothing.
 /// </summary>
 public sealed class RouterServer : IRouterLike, IDisposable
@@ -89,6 +124,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
     private readonly NotificationManager _notifications;
     private readonly SubscriptionPlaces _places;
     private readonly Func<string, SessionToken?>? _sessionTokenOf;
+    private readonly Func<SessionRequest, CancellationToken, ValueTask<CallSession?>>? _sessionOf;
+
+    // the credential schemes it takes, OPAQUE among them, in the order of their numbers
+    private readonly IReadOnlyList<CredentialScheme> _credentialSchemes;
 
     // the requests that name a destination go on through it; none does until one is registered
     private readonly Relay _relay;
@@ -116,6 +155,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 return _connections.Contains(connectionHandle);
             });
         _sessionTokenOf = options?.SessionTokenOf;
+        _sessionOf = options?.SessionOf;
+        _credentialSchemes = [.. (options?.CredentialSchemes ?? []).Append(CredentialScheme.Opaque).Distinct().Order()];
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions
@@ -515,7 +556,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return;
         }
 
-        _core.Receive(message.Bytes, connectionHandle);
+        _core.Receive(message, connectionHandle);
     }
 
     private void OnClose(bool wasClean, string connectionHandle)
@@ -615,9 +656,30 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return server._sessionTokenOf?.Invoke(connectionHandle);
         }
 
+        public IReadOnlyList<CredentialScheme> CredentialSchemes
+        {
+            get
+            {
+                return server._credentialSchemes;
+            }
+        }
+
+        // the server's own resolution, when it gives one; without it, the router knows no session:
+        // a request presenting none runs in none, and one presenting a credential does not hold.
+        // SessionTokenOf stays the announcement's alone, asked for each answer
+        public ValueTask<CallSession?> SessionOf(SessionRequest request, CancellationToken signal)
+        {
+            if (server._sessionOf is { } sessionOf)
+            {
+                return sessionOf(request, signal);
+            }
+
+            return ValueTask.FromResult<CallSession?>(null);
+        }
+
         public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
         {
-            return server.Transport.Send(bytes, connectionHandle);
+            return server.Transport.Send(new TransportMessage(bytes, false), connectionHandle);
         }
 
         public void Trace(DebugDirection direction, TracedEnvelope envelope)

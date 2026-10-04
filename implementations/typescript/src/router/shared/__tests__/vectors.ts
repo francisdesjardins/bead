@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { CredentialScheme, type EnvelopeKind, type ProtocolCode } from '../constants';
 import { toSessionToken } from '../identifiers';
+import type { IJwtKey, JwtVerdict } from '../jwt-verifier';
 import type { Credential, EnvelopeHeader, IReceivedFailure, RouterSide } from '../types';
 
 // interfaces
@@ -55,6 +56,19 @@ export interface IEnvelopeVector {
   payload?: string;
 }
 
+/**
+ * A `JWT`, the keys, the audience and the wall clock's reading, an RFC 3339 instant, it is verified
+ * against, and the verdict every side gives.
+ */
+export interface IJwtVerdictVector {
+  audience: string;
+  keys: IJwtKey[];
+  name: string;
+  now: string;
+  token: string;
+  verdict: JwtVerdict;
+}
+
 export interface IVectors {
   envelopeRefusals: IRefusalVector[];
   envelopes: (INamed & { envelope: IEnvelopeVector })[];
@@ -67,6 +81,7 @@ export interface IVectors {
   }[];
   headerRefusals: IRefusalVector[];
   headers: (INamed & { header: EnvelopeHeader })[];
+  jwtVerdicts: IJwtVerdictVector[];
   prefixRefusals: IRefusalVector[];
   prefixes: (INamed & { prefix: { callId: number; kind: number; layout: number } })[];
   reads: (INamed & { header: EnvelopeHeader | null; side: RouterSide })[];

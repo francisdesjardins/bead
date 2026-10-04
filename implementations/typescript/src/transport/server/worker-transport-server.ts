@@ -48,11 +48,13 @@ export const START_DEFAULTS = Object.freeze({
  * the application's, and left to it.
  *
  * `start` listens at once, before anything is awaited, so no connect a worker hears early is lost.
- * A worker terminated takes its connections with it, and a port does not say so.
+ * A worker terminated takes its connections with it, and a port does not say so. A worker carries no
+ * credential beside an envelope: each message delivered carries none, and a credential given to
+ * `send` is not carried.
  *
  * @example
  * const server = createWorkerTransportServer({ scope });
- * server.on('message', (data, connectionHandle) => {});
+ * server.on('message', ({ data }, connectionHandle) => {});
  * await server.start();
  */
 export const createWorkerTransportServer = ({
@@ -96,7 +98,9 @@ export const createWorkerTransportServer = ({
         if (data instanceof ArrayBuffer) {
           connection.lastActivity = server.clock.Date.now();
 
-          return (server.emit(MESSAGE_EVENT, data, connectionHandle), undefined);
+          return (
+            server.emit(MESSAGE_EVENT, { credential: undefined, data }, connectionHandle), undefined
+          );
         }
 
         if (data === WORKER_MESSAGES.CLOSE) {
@@ -128,7 +132,9 @@ export const createWorkerTransportServer = ({
 
         return Promise.resolve();
       },
-      send: (data, { socket: port }) => {
+      // TODO a credential given here is not carried: the router fails a command that presents one
+      // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+      send: ({ data }, { socket: port }) => {
         const bytes = transferableOf(data);
 
         if (bytes === undefined) {

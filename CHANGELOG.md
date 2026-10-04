@@ -55,6 +55,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   starting it anew. `spec/check.py` holds an advance over a socket to the due its `until` named; the
   transports' file names the HTTP server's own `connectionInactivityTimeout` among its defaults and
   options, and the conversations' limits take a transfer's inactivity.
+- Section 13.8 verifies a `JWT` one way, an access token of RFC 9068's profile, as RFC 8725
+  recommends, and its verdicts are a group of vectors, `jwtVerdicts`: a token, a key, a time and an
+  audience, taken or refused and why. Both sides verify it, on Web Crypto and on `ECDsa` and
+  `HMACSHA256`, and play the group. 219 vectors in 10 groups, where 123 were in 9.
+- `spec/check.py` refuses a published test key outside `spec/` and the tests: its parameters, or its
+  thumbprint (RFC 7638), in any file git lists.
+- A transport carries a credential beside an envelope, both ways, as one argument: on the
+  TypeScript side, the message event's first argument and `send`'s are `{ data, credential }`; on
+  the C# side, `TransportMessage` has its `Credential`. Over HTTP it is the `Authorization` field of
+  the `POST /bead` that carries a request, as it came, its surrounding whitespace removed: an empty
+  one carries none, and a `POST /bead` with two is refused 400, `malformed`.
+- A conversation names the token an answer announced, `token`, and writes it in a later send as
+  `<name>`; a failure's detail is compared where a conversation gives one. 97 conversations, where
+  89 were.
 
 ### Changed
 
@@ -63,9 +77,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   length on 2, its bytes padded to a word, so a header holds 1,020 bytes; `0x01` is kept for a block
   to come. An answer announces its connection's session as `OPAQUE`, 20 bytes, or its end as `NONE`,
   and a side counts 20 where it counted 16. Both sides name it `credential`, `Credential`, where they
-  said `sessionToken`, and a trace carries its scheme alone; a request's credential is read and
-  ignored until its semantics land; the C# side's `HeaderBytesOf` refuses a credential its kind does
-  not take, as its writer and the TypeScript side's do. 162 vectors, where 123 were.
+  said `sessionToken`, and a trace carries its scheme alone; the C# side's `HeaderBytesOf` refuses a
+  credential its kind does not take, as its writer and the TypeScript side's do.
+- A request runs in its call's session (decision 0010, section 9.2, step 5): a credential scheme the
+  side takes none of is refused `CREDENTIAL_UNSUPPORTED`, the admission block's new code 36, its
+  detail naming the schemes the side takes; then its credential resolves — none to its connection's
+  session, `OPAQUE` to it when the token is that session's, compared in constant time — and a
+  credential that does not hold is refused `SESSION_REQUIRED`, whatever its procedure requires; then
+  its admission decides. The router asks `sessionOf`, `SessionOf`, once per request, with its call's
+  signal, past its call id held and before `beforeRequest`; the call's session, `session`,
+  `Session`, reaches the admission and the resolver, and `requireSession`, `RequireSession`, tests
+  it, never the connection's. A client presents `OPAQUE`, the session it learned, on a call that asks
+  for it among its options, `credential`, `Credential`, and never by default.
+- A transfer's opening carries one byte of its payload at least: one without is refused
+  `CHUNK_INVALID`, and a requester whose header leaves it none fails before it goes,
+  `ENVELOPE_TOO_LARGE`. An opening gets no credit before its credential resolves and its admission
+  settles.
+- The interop service's `whoami` answers from its call's session, and `login` opens its
+  connection's session whatever its call presents.
 - A listen held over HTTP holds its connection's timeouts — the server's own, and a session's
   connection timeout — silence counting anew from its end, by a new optional event of the
   transport's, `listen` and `Listen`; a session's session timeout and `lastActivity` count messages

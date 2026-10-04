@@ -21,7 +21,7 @@ import { createTestClock, duesOn } from '../../../transport/shared/__tests__/fix
 import type { IServerTransportLike } from '../../../server/types';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
-import type { Data } from '../../../transport/shared/types';
+import type { Data, ITransportMessage } from '../../../transport/shared/types';
 import { createRouterClient } from '../../client/router-client';
 import { bytesOf } from '../../shared/envelope';
 import { createServiceManager } from '../../shared/service-manager';
@@ -40,7 +40,13 @@ import {
   type PacingLimitsOptions,
 } from '../router-server';
 import { createSessionManager } from '../session-manager';
-import { expectedOf, type IExpected } from './expected-envelope';
+import {
+  announcedTokenOf,
+  expectedOf,
+  failureDetailOf,
+  hexadecimalOf,
+  type IExpected,
+} from './expected-envelope';
 
 // interfaces
 
@@ -53,6 +59,8 @@ interface IStep {
   open?: string;
   report?: number | 'exception';
   send?: string;
+  /** The name the token its expected answer announced takes, for a later `send` to present. */
+  token?: string;
   twoWay?: false;
   until?: { timer: number };
   wall?: number;
@@ -83,6 +91,9 @@ const ONLY_CONNECTION = 'client';
 // how long an until waits on the real clock for its timer
 const PATIENCE = 3_000;
 
+// a token named in a send, between angle brackets
+const TOKEN_NAME = /<([a-z][a-z0-9]*)>/g;
+
 // helpers
 
 /**
@@ -98,12 +109,12 @@ const createConnections = () => {
       request: unknown,
       connectionHandle: TransportServerConnectionHandle,
     ];
-    message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+    message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
   }>();
   const handles = new Map<string, TransportServerConnectionHandle>();
   const opened = new Set<TransportServerConnectionHandle>();
   const oneWay = new Set<TransportServerConnectionHandle>();
-  const sent = new Map<TransportServerConnectionHandle, (IExpected | undefined)[]>();
+  const sent = new Map<TransportServerConnectionHandle, Uint8Array[]>();
   const handleOf = (name: string): TransportServerConnectionHandle => {
     const port = 50_001 + handles.size;
     const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port}` as const);
@@ -131,8 +142,8 @@ const createConnections = () => {
     stop: () => {
       return Promise.resolve();
     },
-    send: (data, connectionHandle) => {
-      queueOf(connectionHandle).push(expectedOf(bytesOf(data)));
+    send: ({ data }, connectionHandle) => {
+      queueOf(connectionHandle).push(bytesOf(data));
 
       return Promise.resolve();
     },
@@ -159,10 +170,10 @@ const createConnections = () => {
     },
     handleOf,
     message: (name: string, data: Data): void => {
-      emitter.emit('message', data, handleOf(name));
+      emitter.emit('message', { data }, handleOf(name));
     },
-    /** The next envelope sent on the connection `name`. */
-    next: (name: string): IExpected | undefined => {
+    /** The bytes of the next envelope sent on the connection `name`. */
+    next: (name: string): Uint8Array | undefined => {
       return queueOf(handleOf(name)).shift();
     },
     open: (name: string, { isTwoWay }: { isTwoWay: boolean }): void => {
@@ -186,13 +197,44 @@ const createConnections = () => {
         const queue = sent.get(handle) ?? [];
 
         if (queue.length > 0) {
-          untaken[name] = queue;
+          untaken[name] = queue.map(expectedOf);
         }
       }
 
       return untaken;
     },
   };
+};
+
+/**
+ * The envelope sent, as `expected` writes it: its failure's detail only where `expected` gives one,
+ * informative elsewhere.
+ */
+const actualOf = (bytes: Uint8Array | undefined, expected: IExpected): IExpected | undefined => {
+  const actual = bytes === undefined ? undefined : expectedOf(bytes);
+
+  if (
+    bytes === undefined ||
+    actual?.failure === undefined ||
+    expected.failure?.detail === undefined
+  ) {
+    return actual;
+  }
+
+  return { ...actual, failure: { ...actual.failure, detail: failureDetailOf(bytes) } };
+};
+
+/** `send` with each token it names, `<name>`, as the 16 bytes a step before kept under that name. */
+const withTokens = (send: string, tokens: ReadonlyMap<string, Uint8Array>): string => {
+  return send.replaceAll(TOKEN_NAME, (_, name: string) => {
+    const token = tokens.get(name);
+
+    if (token === undefined) {
+      throw new Error(`no step before named a token ${name}`);
+    }
+
+    return hexadecimalOf(token);
+  });
 };
 
 /** Lets what the server does settle: turns of the event loop, until three in a row add nothing. */
@@ -321,6 +363,8 @@ test.describe('the conversations', () => {
       );
       const { router } = server;
       const reports: IReport[] = [];
+      // the tokens its answers announced, by the names its steps gave them
+      const tokens = new Map<string, Uint8Array>();
       const count = (): number => {
         return connections.count() + reports.length;
       };
@@ -360,7 +404,7 @@ test.describe('the conversations', () => {
           }
 
           if (step.send !== undefined) {
-            connections.message(on, fromHexadecimal(step.send));
+            connections.message(on, fromHexadecimal(withTokens(step.send, tokens)));
             await settle(count);
           }
 
@@ -370,7 +414,15 @@ test.describe('the conversations', () => {
           }
 
           if (step.expect !== undefined) {
-            expect(connections.next(on), at).toEqual(step.expect);
+            const bytes = connections.next(on);
+
+            expect(actualOf(bytes, step.expect), at).toEqual(step.expect);
+
+            const token = bytes === undefined ? undefined : announcedTokenOf(bytes);
+
+            if (step.token !== undefined && token !== undefined) {
+              tokens.set(step.token, token);
+            }
           }
 
           if (step.report !== undefined) {

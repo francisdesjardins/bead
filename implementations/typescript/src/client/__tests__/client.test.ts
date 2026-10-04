@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { createEmitter } from '../../transport/shared/emitter';
-import type { Data } from '../../transport/shared/types';
+import type { ITransportMessage } from '../../transport/shared/types';
 import { createRouterClient } from '../../router/client/router-client';
 import { EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
@@ -43,7 +43,7 @@ interface IEchoTransport extends IClientTransportLike {
 const createEchoTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
-    message: [data: Data];
+    message: [message: ITransportMessage];
   }>();
   const calls: unknown[][] = [];
 
@@ -77,7 +77,7 @@ const createEchoTransport = () => {
         });
       });
     },
-    send: (data) => {
+    send: ({ data }) => {
       const request = readEnvelope(bytesOf(data), {
         failures: SERVER_FAILURES,
         maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
@@ -86,14 +86,13 @@ const createEchoTransport = () => {
       // a result on the request's own call id, with its own payload
       if (request?.kind === EnvelopeKind.REQUEST) {
         queueMicrotask(() => {
-          emitter.emit(
-            'message',
-            writeEnvelope({
+          emitter.emit('message', {
+            data: writeEnvelope({
               header: { callId: request.header.callId, kind: EnvelopeKind.RESULT },
               kind: EnvelopeKind.RESULT,
               payload: request.payload,
-            })
-          );
+            }),
+          });
         });
       }
 
@@ -101,7 +100,7 @@ const createEchoTransport = () => {
     },
     [Symbol.asyncDispose]: () => {
       calls.push(['asyncDispose']);
-      emitter.emit('message', new Uint8Array(0));
+      emitter.emit('message', { data: new Uint8Array(0) });
 
       return Promise.resolve();
     },

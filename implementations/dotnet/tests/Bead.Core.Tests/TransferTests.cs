@@ -208,15 +208,22 @@ public sealed class TransferTests
     }
 
     [Fact]
-    public void Refuses_an_opening_that_holds_its_whole_total_and_takes_one_without_a_byte()
+    public void Refuses_an_opening_that_holds_its_whole_total_and_one_without_a_byte_of_its_payload()
     {
-        var (refused, refusal) = IncomingTransfer.Open(PatternOf(4), (new RouterLimits { MaximumChunkRuns = 4, WindowBytes = 8 }, 1, 4));
-        var empty = IncomingOf(ReadOnlyMemory<byte>.Empty, 4);
+        var limits = new RouterLimits { MaximumChunkRuns = 4, WindowBytes = 8 };
+        var (whole, wholeRefusal) = IncomingTransfer.Open(PatternOf(4), (limits, 1, 4));
+        var (empty, emptyRefusal) = IncomingTransfer.Open(ReadOnlyMemory<byte>.Empty, (limits, 1, 4));
+        var one = IncomingOf(PatternOf(1), 4);
 
-        Assert.Null(refused);
-        Assert.Equal((ushort)ProtocolCode.ChunkInvalid, refusal!.Code);
-        Assert.Equal(FailureScope.Protocol, refusal.Scope);
-        Assert.Equal((0L, 0L, 4L), (empty.Contiguous, empty.CreditEnd, empty.Total));
+        Assert.Null(whole);
+        Assert.Null(empty);
+        Assert.Equal(
+            [((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol), ((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol)],
+            new[] { wholeRefusal!, emptyRefusal! }.Select((refusal) =>
+            {
+                return (refusal.Code, refusal.Scope);
+            }));
+        Assert.Equal((1L, 1L, 4L), (one.Contiguous, one.CreditEnd, one.Total));
     }
 
     [Fact]

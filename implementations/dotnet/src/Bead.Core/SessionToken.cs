@@ -133,6 +133,22 @@ public readonly record struct SessionToken
         }
     }
 
+    /// <summary>
+    /// Whether <paramref name="other"/> is this token, compared in a time that does not depend on
+    /// where they differ (spec 9.2, step 5): what a request presents tells nothing of the token it
+    /// was held to.
+    /// </summary>
+    internal bool FixedTimeEquals(SessionToken other)
+    {
+        Span<byte> bytes = stackalloc byte[Bytes];
+        Span<byte> others = stackalloc byte[Bytes];
+
+        BinaryPrimitives.WriteUInt128BigEndian(bytes, _value);
+        BinaryPrimitives.WriteUInt128BigEndian(others, other._value);
+
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(bytes, others);
+    }
+
     private void AssertToken()
     {
         if (_value == UInt128.Zero)

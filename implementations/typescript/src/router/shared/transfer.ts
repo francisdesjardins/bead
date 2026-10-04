@@ -168,6 +168,11 @@ export const createIncomingTransfer = (
     return { ...failures.chunkInvalid, detail };
   };
 
+  // an opening carries one byte of its payload at least (spec 12.3)
+  if (opening.length === 0) {
+    return invalid('an opening carries one byte of its payload at least, not none');
+  }
+
   // an opening that holds the whole payload opens no transfer
   if (opening.length >= total) {
     return invalid(

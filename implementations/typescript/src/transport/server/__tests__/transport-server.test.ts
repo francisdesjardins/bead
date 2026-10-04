@@ -373,8 +373,8 @@ test.describe('createTransportServer', () => {
     await server.start();
     register(A);
 
-    await server.send('x', B);
-    await server.send('x', A);
+    await server.send({ data: 'x' }, B);
+    await server.send({ data: 'x' }, A);
     expect(calls).toEqual(['start', `send:${A}`]);
   });
 

@@ -96,7 +96,8 @@ public static class InteropService
     /// <summary>
     /// Registers the interop service's resolvers on <paramref name="server"/>. The calls to
     /// <c>slow</c> each connection cancelled are counted per connection, for
-    /// <c>cancellations</c> to answer; a session holds the name its <c>login</c> gave. A connection
+    /// <c>cancellations</c> to answer; a session holds the name its <c>login</c> gave, which
+    /// <c>whoami</c> answers from its call's session. A connection
     /// registers itself as a destination of the server's relay by <c>register</c>; the destination
     /// it registered last is kept by its handle, once it closed too, for <c>unregister</c> to take
     /// out.
@@ -224,8 +225,8 @@ public static class InteropService
             await response.Answer(Null);
         });
 
-        // a new session each time, as the one it replaces ends: its token is drawn anew. A timeout not
-        // given is left out, for the sessions' default, without end
+        // a new session each time, as the one it replaces ends: its token is drawn anew, whatever its
+        // call presents. A timeout not given is left out, for the sessions' default, without end
         services.GetRequestResolver(ProcedureOf("login"), dependencies)((request, response) =>
         {
             var name = request.Payload.GetProperty("name").GetString();
@@ -240,17 +241,25 @@ public static class InteropService
             return response.Answer(JsonSerializer.SerializeToElement(name));
         });
 
-        // ended before it answers, so its answer — or the failure ending a subscription — announces it
+        // ended before it answers, so its answer — or the failure ending a subscription — announces it.
+        // A call in a credential's session is refused ACCESS_DENIED, never SESSION_REQUIRED, which
+        // would have its client withdraw a credential that holds
         services.GetRequestResolver(ProcedureOf("logout"), dependencies with { BeforeRequest = requireSession })((request, response) =>
         {
+            if (request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere)
+            {
+                return response.Fail(Failure.OfProtocol(ProtocolCode.AccessDenied, "logout ends its connection's session, which this call does not run in"));
+            }
+
             sessionManager.Delete(request.ConnectionHandle);
 
             return response.Answer(Null);
         });
 
+        // the name its call's session holds, which may be another than its connection's holds now
         services.GetRequestResolver(ProcedureOf("whoami"), dependencies with { BeforeRequest = requireSession })((request, response) =>
         {
-            return response.Answer(JsonSerializer.SerializeToElement(sessionManager.Get(request.ConnectionHandle)?.Data));
+            return response.Answer(JsonSerializer.SerializeToElement(request.Session?.Data as string));
         });
 
         // the server asks its client back, by a command, before it answers

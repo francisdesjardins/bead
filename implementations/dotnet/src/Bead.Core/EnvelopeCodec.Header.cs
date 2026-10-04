@@ -156,8 +156,8 @@ public static partial class EnvelopeCodec
         return $"0x{value:x2}";
     }
 
-    // a credential scheme's name, for a detail; its number for a scheme to come
-    private static string SchemeNameOf(CredentialScheme scheme)
+    /// <summary>A credential scheme's name, for a detail; its number for a scheme to come.</summary>
+    internal static string SchemeNameOf(CredentialScheme scheme)
     {
         return scheme switch
         {
@@ -665,6 +665,12 @@ public static partial class EnvelopeCodec
         if (credential.SessionToken is { IsDefault: true })
         {
             throw new ArgumentException("a session token is 16 bytes, not all zero", nameof(credential));
+        }
+
+        // a call's options' OPAQUE stands for a session its side fills in, and goes out with its token
+        if (credential is { Scheme: CredentialScheme.Opaque, SessionToken: null })
+        {
+            throw new ArgumentException("an OPAQUE carries its session's token", nameof(credential));
         }
 
         if (credential.Token is not { } token)

@@ -57,6 +57,16 @@ public readonly record struct Credential
         return new Credential { Scheme = CredentialScheme.Opaque, SessionToken = token };
     }
 
+    /// <summary>
+    /// <see cref="CredentialScheme.Opaque"/> without its token, among a call's options: it stands for
+    /// the connection's session as the side knows it — a client's, the one it learned — whose token
+    /// the side writes as the call goes. No header carries it as it is.
+    /// </summary>
+    public static Credential Opaque()
+    {
+        return new Credential { Scheme = CredentialScheme.Opaque };
+    }
+
     /// <summary>A JWT, its token in JWS Compact Serialization (RFC 7515).</summary>
     public static Credential Jwt(string token)
     {

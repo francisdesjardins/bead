@@ -482,7 +482,7 @@ internal sealed class Relay
             ArgumentNullException.ThrowIfNull(props);
 
             return relay._router.Respond(
-                RouterAnswer.OfFailure(Admit(new AdmissionRequest(props.ConnectionHandle, props.Header))!),
+                RouterAnswer.OfFailure(Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session })!),
                 new AnswerTarget(props.ConnectionHandle, props.Header));
         }
     }
@@ -507,7 +507,7 @@ internal sealed class Relay
         {
             ArgumentNullException.ThrowIfNull(props);
 
-            var refusal = props.IsAdmitted ? null : Admit(new AdmissionRequest(props.ConnectionHandle, props.Header));
+            var refusal = props.IsAdmitted ? null : Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session });
 
             return refusal is null
                 ? relay.Forward(registration, props)

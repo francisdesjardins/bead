@@ -1051,7 +1051,23 @@ public sealed partial class RouterCoreTests
         public SessionToken? Session { get; set; }
 
         // the session of a connection, when the test says it otherwise
-        public Func<string, SessionToken?>? SessionOf { get; set; }
+        public Func<string, SessionToken?>? TokenOf { get; set; }
+
+        // the credential schemes the side takes, when the test says it takes more than OPAQUE
+        public IReadOnlyList<CredentialScheme>? Schemes { get; set; }
+
+        // how a request's credential resolves, when the test says it otherwise: each one asked is kept
+        public Func<SessionRequest, CancellationToken, ValueTask<CallSession?>>? Resolution { get; set; }
+
+        public List<(SessionRequest Request, CancellationToken Signal)> Resolved { get; } = [];
+
+        public IReadOnlyList<CredentialScheme> CredentialSchemes
+        {
+            get
+            {
+                return Schemes ?? [CredentialScheme.Opaque];
+            }
+        }
 
         // whether the side takes a failure no call waits on
         public Func<Envelope, bool>? Unpaired { get; set; }
@@ -1090,7 +1106,15 @@ public sealed partial class RouterCoreTests
 
         public SessionToken? SessionTokenOf(string connectionHandle)
         {
-            return SessionOf is null ? Session : SessionOf(connectionHandle);
+            return TokenOf is null ? Session : TokenOf(connectionHandle);
+        }
+
+        public ValueTask<CallSession?> SessionOf(SessionRequest request, CancellationToken signal)
+        {
+            Resolved.Add((request, signal));
+
+            return Resolution?.Invoke(request, signal)
+                ?? ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (SessionTokenOf(request.ConnectionHandle), null)));
         }
 
         public void Trace(DebugDirection direction, TracedEnvelope envelope)

@@ -24,7 +24,10 @@ import { DisconnectError, FailureError } from '../errors';
 import { toSessionToken } from '../identifiers';
 import { createRouterCore } from '../router-core';
 import type {
+  Credential,
   Envelope,
+  IAdmissionRequest,
+  ICallSession,
   ICreditHeader,
   INotificationHeader,
   IProcedure,
@@ -34,6 +37,7 @@ import type {
   IRequestResolverProps,
   IRouterCore,
   IRouterCorePort,
+  ISessionRequest,
   OutgoingEnvelope,
   RouterLimitsOptions,
   SessionToken,
@@ -69,16 +73,21 @@ const fromHexadecimal = (text: string): Uint8Array => {
   });
 };
 
-/** A request's bytes for `procedure`, on `callId`, carrying `payload`, the opening of `total`. */
+/**
+ * A request's bytes for `procedure`, on `callId`, presenting `credential`, carrying `payload`, the
+ * opening of `total`.
+ */
 const requestOf = (
   callId: number,
   {
+    credential,
     destinationId,
     opensSubscription,
     payload = new Uint8Array(0),
     procedure = echo,
     total,
   }: {
+    credential?: Credential;
     destinationId?: number;
     opensSubscription?: true;
     payload?: Uint8Array;
@@ -89,6 +98,7 @@ const requestOf = (
   return envelopeOf({
     header: {
       callId,
+      credential,
       destinationId,
       kind: EnvelopeKind.REQUEST,
       opensSubscription,
@@ -389,10 +399,10 @@ test.describe('createRouterCore', () => {
       await sleep(0);
 
       expect(asked).toEqual([
-        [1, ['connectionHandle', 'header']],
-        [3, ['connectionHandle', 'header']],
-        [5, ['connectionHandle', 'header']],
-        [7, ['connectionHandle', 'header']],
+        [1, ['connectionHandle', 'header', 'session']],
+        [3, ['connectionHandle', 'header', 'session']],
+        [5, ['connectionHandle', 'header', 'session']],
+        [7, ['connectionHandle', 'header', 'session']],
       ]);
       expect(
         seen.map(({ header: { callId }, isAdmitted, payload: whole }) => {
@@ -1060,6 +1070,381 @@ test.describe('createRouterCore', () => {
       }
 
       core.registerResolver(resolverOf({ ...echo, procedureId: 0xffff, serviceId: 0xffff }));
+    });
+  });
+
+  test.describe("a request's credential", () => {
+    const JWT = Object.freeze({ scheme: CredentialScheme.JWT, token: 'a.b.c' });
+    const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
+    const SESSION: ICallSession = Object.freeze({ data: 'ada' });
+    const unknown = { ...echo, procedureId: 99 };
+
+    /** What sent says of each failure: its call id, its code and its detail. */
+    const failuresOf = (sent: { envelope: Envelope | undefined }[]) => {
+      return sent.flatMap(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [[envelope.header.callId, envelope.failure.code, envelope.failure.detail]]
+          : [];
+      });
+    };
+
+    test('of a scheme the side takes none of is refused CREDENTIAL_UNSUPPORTED, naming those it takes, past its route and before it resolves', () => {
+      const asked: string[] = [];
+      const sessionOf = ({ header }: ISessionRequest<Handle>) => {
+        asked.push(`resolve ${String(header.callId)}`);
+
+        return undefined;
+      };
+      const resolver = Object.assign(resolverOf(echo), {
+        admit: ({ header }: IAdmissionRequest<Handle>) => {
+          asked.push(`admit ${String(header.callId)}`);
+
+          return undefined;
+        },
+      });
+      const opaqueOnly = createPort({ sessionOf });
+      const every = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+        sessionOf,
+      });
+      using first = createRouterCore(opaqueOnly.port);
+      using second = createRouterCore(every.port);
+
+      first.registerResolver(resolver);
+      second.registerResolver(resolver);
+
+      for (const [callId, credential] of [
+        [1, JWT],
+        [3, ELSEWHERE],
+        [5, { bytes: Uint8Array.of(1, 2), scheme: 0xffff }],
+      ] as const) {
+        first.receive(requestOf(callId, { credential }), 'a');
+      }
+
+      // a scheme to come, to a procedure no route reaches: the route refuses it first
+      first.receive(
+        requestOf(7, { credential: { bytes: new Uint8Array(0), scheme: 7 }, procedure: unknown }),
+        'a'
+      );
+      second.receive(requestOf(1, { credential: { bytes: new Uint8Array(0), scheme: 4 } }), 'a');
+
+      expect(failuresOf(opaqueOnly.sent)).toEqual([
+        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+        [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+        [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+        [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
+      ]);
+      expect(failuresOf(every.sent)).toEqual([
+        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+      ]);
+      expect(asked).toEqual([]);
+    });
+
+    test('of none or OPAQUE resolves in the turn it came, the call’s session handed to its admission, then to its resolver', () => {
+      const asked: unknown[] = [];
+      const seen: IRequestResolverProps<Handle>[] = [];
+      const { port, reported } = createPort({
+        sessionOf: ({ connectionHandle, header, signal }) => {
+          asked.push([connectionHandle, header.callId, header.credential, signal.aborted]);
+
+          return header.credential === undefined ? undefined : SESSION;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo, seen), {
+          admit: ({ header, session }: IAdmissionRequest<Handle>) => {
+            asked.push(['admit', header.callId, session]);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3, { credential: OPAQUE }), 'b');
+
+      // nothing awaited: each resolved, was admitted and dispatched as it came
+      expect(asked).toEqual([
+        ['a', 1, undefined, false],
+        ['admit', 1, undefined],
+        ['b', 3, OPAQUE, false],
+        ['admit', 3, SESSION],
+      ]);
+      expect(
+        seen.map(({ header, session }) => {
+          return [header.callId, session];
+        })
+      ).toEqual([
+        [1, undefined],
+        [3, SESSION],
+      ]);
+      expect(reported).toEqual([]);
+    });
+
+    test('that does not resolve is refused SESSION_REQUIRED, whatever its procedure requires, never admitted, an ELSEWHERE as one that came without; none resolving to none runs in none', async () => {
+      const admitted: unknown[] = [];
+      const resolver = Object.assign(resolverOf(echo), {
+        admit: ({ header, session }: IAdmissionRequest<Handle>) => {
+          admitted.push([header.callId, session]);
+
+          return undefined;
+        },
+      });
+      const resolving = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE],
+        sessionOf: () => {
+          return undefined;
+        },
+      });
+      // no sessionOf at all resolves nothing either
+      const bare = createPort();
+      using first = createRouterCore(resolving.port);
+      using second = createRouterCore(bare.port);
+
+      first.registerResolver(resolver);
+      second.registerResolver(resolver);
+      first.receive(requestOf(1, { credential: OPAQUE }), 'a');
+      first.receive(requestOf(3), 'a');
+      first.receive(requestOf(5, { credential: ELSEWHERE }), 'a');
+      second.receive(requestOf(1, { credential: OPAQUE }), 'a');
+      second.receive(requestOf(3), 'a');
+      await sleep(0);
+
+      expect(failuresOf(resolving.sent)).toEqual([
+        [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+        [5, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+      ]);
+      expect(failuresOf(bare.sent)).toEqual([
+        [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      ]);
+      expect(admitted).toEqual([
+        [3, undefined],
+        [3, undefined],
+      ]);
+    });
+
+    test('whose resolution throws or rejects, or promises for none or OPAQUE, is answered PROCEDURE_FAILED, and reported, a JWT’s in a later turn', async () => {
+      const broken = new Error('no verifier answers');
+      const admitted: number[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }) => {
+          switch (header.callId) {
+            case 1:
+            case 7:
+              throw broken;
+            case 3:
+              return Promise.reject(broken);
+            default:
+              return Promise.resolve(SESSION);
+          }
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: ({ header }: IAdmissionRequest<Handle>) => {
+            admitted.push(header.callId);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3, { credential: JWT }), 'a');
+      // a JWT's that throws at once is answered after one presenting OPAQUE that came after it
+      core.receive(requestOf(7, { credential: JWT }), 'a');
+      core.receive(requestOf(5, { credential: OPAQUE }), 'a');
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 7, ProtocolCode.PROCEDURE_FAILED],
+      ]);
+      expect(
+        reported.map(([error, connectionHandle]) => {
+          return [error === broken ? 'broken' : error.constructor.name, connectionHandle];
+        })
+      ).toEqual([
+        ['broken', 'a'],
+        ['ProgrammerError', 'a'],
+        ['broken', 'a'],
+        ['broken', 'a'],
+      ]);
+      expect(admitted).toEqual([]);
+    });
+
+    test('of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {
+      const order: string[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+        // at once, never waiting
+        sessionOf: ({ header }) => {
+          order.push(`resolve ${String(header.callId)}`);
+
+          return SESSION;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: ({ header, session }: IAdmissionRequest<Handle>) => {
+            order.push(`admit ${String(header.callId)} ${String(session?.data)}`);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(requestOf(3, { credential: ELSEWHERE }), 'a');
+      // one presenting none, which came after, goes first
+      core.receive(requestOf(5), 'a');
+      // the call id of one resolving is open: a request on it is reported, never answered
+      core.receive(requestOf(1), 'a');
+
+      expect(order).toEqual(['resolve 1', 'resolve 3', 'resolve 5', 'admit 5 ada']);
+      expect(codesOf(reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
+
+      await sleep(0);
+
+      expect(order).toEqual([
+        'resolve 1',
+        'resolve 3',
+        'resolve 5',
+        'admit 5 ada',
+        'admit 1 ada',
+        'admit 3 ada',
+      ]);
+      expect(sent).toEqual([]);
+    });
+
+    test('resolving, its call’s cancel or its connection’s close tells sessionOf by the call’s signal, and what it settles to then is dropped', async () => {
+      const pending = new Map<number, PromiseWithResolvers<ICallSession | undefined>>();
+      const signals = new Map<number, AbortSignal>();
+      const admitted: number[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header, signal }) => {
+          const resolution = Promise.withResolvers<ICallSession | undefined>();
+
+          pending.set(header.callId, resolution);
+          signals.set(header.callId, signal);
+
+          return resolution.promise;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: ({ header }: IAdmissionRequest<Handle>) => {
+            admitted.push(header.callId);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(requestOf(3, { credential: JWT }), 'a');
+      core.receive(requestOf(5, { credential: JWT }), 'a');
+      core.receive(cancelOf(1), 'a');
+      core.rejectPending('a closed', 'a');
+
+      expect(signals.get(1)?.reason).toBeInstanceOf(CancelError);
+      expect(signals.get(3)?.reason).toBeInstanceOf(DisconnectError);
+      expect(signals.get(5)?.reason).toBeInstanceOf(DisconnectError);
+
+      pending.get(1)?.resolve(SESSION);
+      pending.get(3)?.reject(new Error('stopped'));
+      pending.get(5)?.resolve(undefined);
+      await sleep(0);
+
+      // the call id it held is free: a call on it is a new one
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      pending.get(1)?.resolve(SESSION);
+      await sleep(0);
+
+      expect(sent).toEqual([]);
+      expect(reported).toEqual([]);
+      expect(admitted).toEqual([1]);
+    });
+
+    test('resolving, a transfer’s opening gets no credit until its resolution and its admission settle', async () => {
+      const resolution = Promise.withResolvers<ICallSession | undefined>();
+      const { port, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: () => {
+          return resolution.promise;
+        },
+      });
+      using core = createRouterCore(port, { limits });
+
+      core.registerResolver(resolverOf(echo));
+      core.receive(requestOf(1, { credential: JWT, payload: patternOf(8), total: 100 }), 'a');
+      await sleep(0);
+
+      expect(sent).toEqual([]);
+
+      resolution.resolve(SESSION);
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([['a', 'credit', 1, 100]]);
+    });
+
+    test('this side presents is the one its side resolved, and one that leaves a transfer’s opening no byte fails it before it goes, ENVELOPE_TOO_LARGE', async () => {
+      const { port, sent } = createPort();
+      using core = createRouterCore(port, { limits });
+      // 8 bytes of prefix, 4 of service and procedure, 8 of total, 4 of the block's head: 36 of
+      // token leave 4 bytes of a 64-byte opening, and 40 none
+      const tokenOf = (length: number) => {
+        return { scheme: CredentialScheme.JWT, token: 'x'.repeat(length) };
+      };
+
+      const answering = core.request(patternOf(100), {
+        connectionHandle: 'a',
+        credential: tokenOf(36),
+        options,
+        procedure: echo,
+      });
+
+      await expect(
+        core.request(patternOf(100), {
+          connectionHandle: 'a',
+          credential: tokenOf(40),
+          options,
+          procedure: echo,
+        })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.ENVELOPE_TOO_LARGE,
+        origin: 'local',
+        procedureAddress: { procedureId: 1, serviceId: 2 },
+      });
+      // a header that leaves the payload room goes whole, whatever its credential
+      const whole = core.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        credential: OPAQUE,
+        options,
+        procedure: echo,
+      });
+
+      expect(
+        sent.map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.REQUEST
+            ? [envelope.header.callId, envelope.header.credential, envelope.payload.length]
+            : envelope?.kind;
+        })
+      ).toEqual([
+        [2, tokenOf(36), 4],
+        [6, OPAQUE, 1],
+      ]);
+
+      core.rejectPending('done', 'a');
+      await Promise.allSettled([answering, whole]);
     });
   });
 
@@ -1926,9 +2311,11 @@ test.describe('createRouterCore', () => {
         'a'
       );
 
+      // the JWT is refused, a scheme this side takes none of
       expect(headers).toEqual([
         ['tx', { callId: 1, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT }],
         ['rx', { ...headerOf(3), credentialScheme: CredentialScheme.JWT }],
+        ['tx', { callId: 3, kind: EnvelopeKind.FAILURE }],
       ]);
       expect(JSON.stringify(headers)).not.toContain(TOKEN);
       expect(JSON.stringify(headers)).not.toContain('a.b.c');

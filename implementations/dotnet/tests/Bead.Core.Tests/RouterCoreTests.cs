@@ -333,8 +333,10 @@ public sealed partial class RouterCoreTests
             }
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             Client.Receive(bytes.ToArray(), Handle);
 
             return Task.CompletedTask;

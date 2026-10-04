@@ -76,7 +76,16 @@
       ],
       "dependentSchemas": {
         "open": { "not": { "required": ["on"] } },
-        "twoWay": { "required": ["open"] }
+        "twoWay": { "required": ["open"] },
+        "token": {
+          "required": ["expect"],
+          "properties": {
+            "expect": {
+              "required": ["credential"],
+              "properties": { "credential": { "const": "OPAQUE" } }
+            }
+          }
+        }
       },
       "properties": {
         "open": { "$ref": "#/$defs/connection" },
@@ -85,7 +94,7 @@
           "const": false
         },
         "on": { "$ref": "#/$defs/connection" },
-        "send": { "$ref": "common.schema.json#/$defs/bytes" },
+        "send": { "$ref": "#/$defs/send" },
         "close": { "const": true },
         "until": {
           "type": "object",
@@ -96,6 +105,10 @@
         "advance": { "$ref": "common.schema.json#/$defs/advance" },
         "wall": { "$ref": "common.schema.json#/$defs/wall" },
         "expect": { "$ref": "#/$defs/expect" },
+        "token": {
+          "description": "Beside an expect whose answer announced OPAQUE, the name its token takes, which a later send writes between angle brackets.",
+          "$ref": "#/$defs/tokenName"
+        },
         "report": {
           "description": "A code, or exception for an error that carries none.",
           "type": ["integer", "string"],
@@ -104,6 +117,16 @@
           "else": { "const": "exception" }
         }
       }
+    },
+    "send": {
+      "description": "Bytes in hexadecimal, as common.schema.json writes them, where a token named by an earlier step stands, as its name between angle brackets, for its 16 bytes.",
+      "type": "string",
+      "pattern": "^(?:(?:[0-9A-F]{2}|<[a-z][a-z0-9]*>)[ |]*)*$"
+    },
+    "tokenName": {
+      "description": "The name a token announced takes in its conversation.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$"
     },
     "connection": {
       "description": "A connection's name, which the conversation opens with open; the only one, opened before the first step, where it opens none.",
@@ -181,14 +204,18 @@
         "kind": { "const": 18 },
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
         "failure": {
-          "description": "Its code, its scope, and the relays it crossed; its detail is informative.",
+          "description": "Its code, its scope, and the relays it crossed; its detail, where given, which is informative elsewhere.",
           "type": "object",
           "required": ["code", "scope", "relays"],
           "additionalProperties": false,
           "properties": {
             "code": { "$ref": "common.schema.json#/$defs/code" },
             "scope": { "$ref": "common.schema.json#/$defs/scope" },
-            "relays": { "$ref": "common.schema.json#/$defs/u8" }
+            "relays": { "$ref": "common.schema.json#/$defs/u8" },
+            "detail": {
+              "description": "The detail the spec states for this failure, as its UTF-8 reads.",
+              "type": "string"
+            }
           }
         },
         "credential": { "$ref": "#/$defs/announcement" }

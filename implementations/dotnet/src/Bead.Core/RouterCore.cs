@@ -47,6 +47,11 @@ public sealed class RouterCore : IDisposable
     // a chunk's header: its prefix, then its offset
     private static readonly int ChunkHeaderBytes = EnvelopeCodec.HeaderBytesOf(new ChunkHeader { CallId = 1, IsLast = true, Offset = 0 });
 
+    // TODO a relay forwards a JWT and an ELSEWHERE once it carries credentials (decision 0010):
+    // until then it resolves none and OPAQUE alone, to leg A's connection's session, and refuses
+    // the others at step 1 of section 14.3
+    private static readonly CredentialScheme[] RelaySchemes = [CredentialScheme.Opaque];
+
     private readonly IRouterCorePort _port;
     private readonly RouterSide _side;
     private readonly int _detailBytes;
@@ -501,8 +506,39 @@ public sealed class RouterCore : IDisposable
         IEnvelopeHeader opening = header is RequestHeader request
             ? request with { Total = payload.Length }
             : (ResultHeader)header with { Total = payload.Length };
+        var openingBytes = _wholeBytes - EnvelopeCodec.HeaderBytesOf(opening) - announcementBytes;
 
-        return (new OutgoingTransfer(payload, (_wholeBytes - EnvelopeCodec.HeaderBytesOf(opening) - announcementBytes, _payloadBytesPerChunk)), null);
+        // an opening carries one byte of its payload at least: a header that leaves it none — a
+        // credential's, which a request alone grows by — would be refused by its reader
+        if (openingBytes < 1)
+        {
+            return (null, ProtocolFailureOf(
+                ProtocolCode.EnvelopeTooLarge,
+                $"a header of {EnvelopeCodec.HeaderBytesOf(opening)} bytes leaves a transfer's opening no byte within {_wholeBytes}"));
+        }
+
+        return (new OutgoingTransfer(payload, (openingBytes, _payloadBytesPerChunk)), null);
+    }
+
+    // the credential a call of this side's own presents, as its options ask: OPAQUE stands for the
+    // connection's session as this side knows it, and a side that knows none fails the call before
+    // it goes, as its peer would refuse it
+    private Credential? PresentedOf(CoreRequest request)
+    {
+        var asked = request.Options.Credential;
+        var known = asked is { Scheme: CredentialScheme.Opaque, SessionToken: null } ? _port.KnownSessionTokenOf(request.ConnectionHandle) : null;
+        var (presented, refusal) = CallSession.PresentedCredentialOf(asked, known);
+
+        if (refusal is not null)
+        {
+            throw new FailureException(refusal, new FailureException.Raised(FailureOrigin.Local, _side))
+            {
+                DestinationId = request.Options.DestinationId,
+                ProcedureAddress = request.Procedure.Address,
+            };
+        }
+
+        return presented;
     }
 
     private async Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, CoreRequest request)
@@ -525,6 +561,7 @@ public sealed class RouterCore : IDisposable
         // drawn once the call starts: a cancelled token draws nothing
         token.ThrowIfCancellationRequested();
 
+        var credential = PresentedOf(request);
         var callId = _pendingCalls.Draw(request.ConnectionHandle)
             ?? throw new FailureException(
                 ProtocolFailureOf(ProtocolCode.CapacityExceeded, $"every call id of {request.ConnectionHandle} is in use"),
@@ -541,6 +578,7 @@ public sealed class RouterCore : IDisposable
             DestinationId = options.DestinationId,
             OpensSubscription = request.OpensSubscription,
             Paced = request.Paced,
+            Credential = credential,
         };
 
         // how it goes is decided before anything is kept of it: past its limit, nothing goes
@@ -552,7 +590,7 @@ public sealed class RouterCore : IDisposable
             throw new FailureException(refusal, new FailureException.Raised(FailureOrigin.Local, _side))
             {
                 DestinationId = options.DestinationId,
-                Header = header,
+                Header = Redact(header).Header,
                 ProcedureAddress = procedure.Address,
             };
         }
@@ -1007,6 +1045,7 @@ public sealed class RouterCore : IDisposable
             Header = target.Header,
             IsAdmitted = true,
             Payload = payload,
+            Session = answering.Session,
             Signal = answering.Source.Token,
         };
 
@@ -1190,9 +1229,9 @@ public sealed class RouterCore : IDisposable
         }
     }
 
-    private void ReceiveRequest(RequestHeader header, (string ConnectionHandle, ReadOnlyMemory<byte> Payload) received)
+    private void ReceiveRequest(RequestHeader header, (string ConnectionHandle, ReadOnlyMemory<byte> Payload, string? TransportCredential) received)
     {
-        var (connectionHandle, payload) = received;
+        var (connectionHandle, payload, _) = received;
         var callId = header.CallId;
         var target = new AnswerTarget(connectionHandle, header);
 
@@ -1245,9 +1284,154 @@ public sealed class RouterCore : IDisposable
         }
 
         _handlers.AddOrUpdate(header, resolver);
+        Resolve(resolver, new Arrival(target, answering, payload) { TransportCredential = received.TransportCredential });
+    }
 
-        // routed, it is asked its admission, on its header
-        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header)) is { } refusal)
+    // whether a request whose credential resolves is still its call's: a cancel, its connection
+    // closing or the router disposed ended it, and what its resolution brings is dropped
+    private bool IsResolving(Arrival arrival)
+    {
+        return !_isDisposed
+            && !arrival.Answering.IsAborted
+            && ReferenceEquals(_answeringCalls.CallOf(arrival.Target.Header), arrival.Answering)
+            && _answeringCalls.IsAnswering(arrival.Target);
+    }
+
+    // a resolution that failed: PROCEDURE_FAILED, and why reported, never SESSION_REQUIRED, which
+    // would have its requester withdraw a credential that holds
+    private void Fail(Exception reason, Arrival arrival)
+    {
+        _port.Report(reason, arrival.Target.ConnectionHandle);
+        Refuse(ProtocolFailureOf(ProtocolCode.ProcedureFailed), (arrival.Target, arrival.Answering));
+    }
+
+    // step 5 of section 9.2, its first two steps: a scheme the side takes none of is refused, then
+    // the credential resolves to the call's session, none and OPAQUE in the turn they came, JWT and
+    // ELSEWHERE in a later one, whether their verifier waits or not. Meanwhile its call id stays
+    // held, a cancel or its connection closing cancels the call's signal, which tells the verifier,
+    // and its transfer's opening gets no credit
+    private void Resolve(IRequestHandler resolver, Arrival arrival)
+    {
+        var (target, answering, _) = arrival;
+        var (connectionHandle, header) = target;
+        var credential = header.Credential;
+        var schemes = header.DestinationId is null ? _port.CredentialSchemes : RelaySchemes;
+
+        if (credential is { } presented && !schemes.Contains(presented.Scheme))
+        {
+            Refuse(ProtocolFailureOf(ProtocolCode.CredentialUnsupported, CallSession.CredentialSchemesDetailOf(schemes)), (target, answering));
+
+            return;
+        }
+
+        var waits = credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
+
+        // an ELSEWHERE whose transport carried nothing has nothing to resolve: no credential came
+        if (credential?.Scheme == CredentialScheme.Elsewhere && arrival.TransportCredential is null)
+        {
+            Post(() =>
+            {
+                if (IsResolving(arrival))
+                {
+                    Refuse(ProtocolFailureOf(ProtocolCode.SessionRequired, "no credential came"), (target, answering));
+                }
+            });
+
+            return;
+        }
+
+        ValueTask<CallSession?> resolving;
+
+        try
+        {
+            resolving = _port.SessionOf(
+                new SessionRequest { ConnectionHandle = connectionHandle, Header = header, TransportCredential = arrival.TransportCredential },
+                answering.Source.Token);
+        }
+        catch (Exception reason)
+        {
+            // one that throws as it is asked fails as one that faults does, in the same turn
+            resolving = ValueTask.FromException<CallSession?>(reason);
+        }
+
+        if (waits)
+        {
+            // * a later turn, even for a resolution that settled at once
+            resolving.AsTask().ContinueWith(
+                (resolved) =>
+                {
+                    Settle(resolver, (arrival, resolved));
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.DenyChildAttach,
+                Loop);
+
+            return;
+        }
+
+        // ! none and OPAQUE resolve in the turn they came, on every side: a resolution that waits
+        // would let a request sent after it be taken first. It fails its call, reported, and what it
+        // settles with is dropped
+        if (!resolving.IsCompleted)
+        {
+            resolving.AsTask().ContinueWith(
+                static (abandoned) =>
+                {
+                    _ = abandoned.Exception;
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.DenyChildAttach,
+                TaskScheduler.Default);
+            Fail(new InvalidOperationException("a request presenting none or OPAQUE resolves in the turn it came, and its session waited"), arrival);
+
+            return;
+        }
+
+        Settle(resolver, (arrival, resolving.AsTask()));
+    }
+
+    // a credential resolved: dropped once its call ended; refused when it does not hold; otherwise
+    // the call runs in the session it resolved to, whatever befell its connection's meanwhile
+    private void Settle(IRequestHandler resolver, (Arrival Arrival, Task<CallSession?> Resolution) resolved)
+    {
+        var (arrival, resolution) = resolved;
+
+        if (!IsResolving(arrival))
+        {
+            _ = resolution.Exception;
+
+            return;
+        }
+
+        if (!resolution.IsCompletedSuccessfully)
+        {
+            Fail(resolution.Exception?.InnerException ?? new TaskCanceledException(resolution), arrival);
+
+            return;
+        }
+
+        // a credential that resolves to no session does not hold, whatever the procedure requires
+        if (resolution.Result is null && arrival.Target.Header.Credential is not null)
+        {
+            Refuse(ProtocolFailureOf(ProtocolCode.SessionRequired, "the credential does not hold"), (arrival.Target, arrival.Answering));
+
+            return;
+        }
+
+        arrival.Answering.Session = resolution.Result;
+        Admit(resolver, arrival);
+    }
+
+    // step 5 of section 9.2, its last: its admission, on the call's session; then the steps after
+    // it, and its dispatch, or its transfer's first credit
+    private void Admit(IRequestHandler resolver, Arrival arrival)
+    {
+        var (target, answering, payload) = arrival;
+        var (connectionHandle, header) = target;
+        var dispatched = (target, answering);
+
+        // routed, it is asked its admission, on its header and its call's session
+        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header) { Session = answering.Session }) is { } refusal)
         {
             Refuse(refusal, dispatched);
 
@@ -1286,7 +1470,7 @@ public sealed class RouterCore : IDisposable
 
         // a transfer's opening is not its payload: refused once routed, before any credit goes;
         // opened, its call waits on the rest, which one silent too long ends
-        var call = new CallAddress(callId, connectionHandle);
+        var call = new CallAddress(header.CallId, connectionHandle);
         var (receiving, refused) = _receivings.Open(payload, (
             call,
             () =>
@@ -1591,8 +1775,9 @@ public sealed class RouterCore : IDisposable
         _port.OnSubscriptionCredit(header, connectionHandle);
     }
 
-    private void ReceiveOnLoop(ReadOnlyMemory<byte> data, string connectionHandle)
+    private void ReceiveOnLoop(TransportMessage message, string connectionHandle)
     {
+        var data = message.Bytes;
         EnvelopePrefix prefix;
 
         try
@@ -1640,7 +1825,7 @@ public sealed class RouterCore : IDisposable
         switch (envelope.Header)
         {
             case RequestHeader request:
-                ReceiveRequest(request, (connectionHandle, envelope.Payload));
+                ReceiveRequest(request, (connectionHandle, envelope.Payload, message.Credential));
                 break;
             case ResultHeader or FailureHeader:
                 ReceiveAnswer(envelope, connectionHandle);
@@ -1751,9 +1936,19 @@ public sealed class RouterCore : IDisposable
     /// </summary>
     public void Receive(ReadOnlyMemory<byte> data, string connectionHandle)
     {
+        Receive(new TransportMessage(data, false), connectionHandle);
+    }
+
+    /// <summary>
+    /// As <see cref="Receive(ReadOnlyMemory{byte}, string)"/>, with the credential its transport
+    /// carried beside it, which a request presenting <see cref="CredentialScheme.Elsewhere"/>
+    /// resolves.
+    /// </summary>
+    public void Receive(TransportMessage message, string connectionHandle)
+    {
         Post(() =>
         {
-            ReceiveOnLoop(data, connectionHandle);
+            ReceiveOnLoop(message, connectionHandle);
         });
     }
 
@@ -1891,5 +2086,12 @@ public sealed class RouterCore : IDisposable
     {
         _isDisposed = true;
         RejectPending($"{Disposed} before the answer");
+    }
+
+    // a request of the peer's, routed: where it is answered, its call, its payload — a transfer's
+    // opening, for one — and the credential its transport carried beside it
+    private sealed record Arrival(AnswerTarget Target, AnsweringCall Answering, ReadOnlyMemory<byte> Payload)
+    {
+        public string? TransportCredential { get; init; }
     }
 }

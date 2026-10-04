@@ -60,7 +60,11 @@ public sealed record Procedure
 /// <summary>A request as its admission sees it: where it came from, and its header — never its payload.</summary>
 /// <param name="ConnectionHandle">The connection it came from.</param>
 /// <param name="Header">Its header.</param>
-public readonly record struct AdmissionRequest(string ConnectionHandle, RequestHeader Header);
+public readonly record struct AdmissionRequest(string ConnectionHandle, RequestHeader Header)
+{
+    /// <summary>The call's session, as its credential resolved it; none when the call runs in none.</summary>
+    public CallSession? Session { get; init; }
+}
 
 /// <summary>A request as the router hands it to a resolver: its payload still encoded.</summary>
 public sealed record RequestResolverProps
@@ -76,6 +80,9 @@ public sealed record RequestResolverProps
 
     /// <summary>Its payload, encoded.</summary>
     public required ReadOnlyMemory<byte> Payload { get; init; }
+
+    /// <summary>The call's session, as its credential resolved it; none when the call runs in none.</summary>
+    public CallSession? Session { get; init; }
 
     /// <summary>
     /// Cancelled when the call ends before its answer: its requester cancelled it, its connection
@@ -186,6 +193,12 @@ public sealed record ResolvedRequestOptions
     /// closes it; none takes the manager's default.
     /// </summary>
     public bool? CloseOnTimeout { get; init; }
+
+    /// <summary>
+    /// The credential the call presents, as <see cref="RequestOptions.Credential"/> says; none
+    /// presents none.
+    /// </summary>
+    public Credential? Credential { get; init; }
 }
 
 /// <summary>The options of a request, as its caller gives them: what it leaves out is the manager's.</summary>
@@ -214,6 +227,16 @@ public sealed record RequestOptions
     /// closes it; none takes the manager's default.
     /// </summary>
     public bool? CloseOnTimeout { get; init; }
+
+    /// <summary>
+    /// The credential this call alone presents; none presents none, never one by default.
+    /// <see cref="Credential.Opaque()"/> stands for the connection's session as its side knows it —
+    /// a client's, the session it learned — and binds the call to it: a call made once that session
+    /// ended, or was opened anew under a new token, is refused SESSION_REQUIRED rather than run in
+    /// whatever session the connection holds. A side that knows no session fails such a call before
+    /// it goes, with SESSION_REQUIRED, and draws nothing.
+    /// </summary>
+    public Credential? Credential { get; init; }
 }
 
 /// <summary>That a procedure is on its way out, and what to use instead, when it says.</summary>
@@ -412,6 +435,49 @@ public interface IRouterCorePort
     SessionToken? SessionTokenOf(string connectionHandle)
     {
         return null;
+    }
+
+    /// <summary>
+    /// The credential schemes the side takes, in the order of their numbers: a request presenting
+    /// another is refused CREDENTIAL_UNSUPPORTED, its detail naming these. None is always taken, and
+    /// <see cref="CredentialScheme.Opaque"/> by every side.
+    /// </summary>
+    IReadOnlyList<CredentialScheme> CredentialSchemes
+    {
+        get
+        {
+            return [CredentialScheme.Opaque];
+        }
+    }
+
+    /// <summary>
+    /// The token of a connection's session as the side knows it — a server's, the one its answers
+    /// announce; a client's, the one it learned — which a call of the side's own presenting
+    /// <see cref="Credential.Opaque()"/> presents, and which the side's own resolution holds a
+    /// request presenting none or <see cref="CredentialScheme.Opaque"/> to.
+    /// </summary>
+    SessionToken? KnownSessionTokenOf(string connectionHandle)
+    {
+        return SessionTokenOf(connectionHandle);
+    }
+
+    /// <summary>
+    /// The call's session a request's credential resolves to, asked once per request of a scheme the
+    /// side takes, between holding its call id and its admission, with the call's signal, which a
+    /// cancel or its connection closing cancels (spec 9.2, step 5). None, for a request presenting
+    /// none, runs it in none; for one presenting a credential, says that credential does not hold,
+    /// and it is refused SESSION_REQUIRED. One that throws or faults fails it, PROCEDURE_FAILED, and
+    /// is reported. It may wait, never for a request presenting none or
+    /// <see cref="CredentialScheme.Opaque"/>, which resolves in the turn it came. By default, those
+    /// resolve against <see cref="KnownSessionTokenOf"/>, to a session without data.
+    /// </summary>
+    ValueTask<CallSession?> SessionOf(SessionRequest request, CancellationToken signal)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return ValueTask.FromResult(CallSession.ConnectionSessionOf(
+            request.Header.Credential,
+            (KnownSessionTokenOf(request.ConnectionHandle), null)));
     }
 
     /// <summary>Each envelope, out or in, its credential left out.</summary>

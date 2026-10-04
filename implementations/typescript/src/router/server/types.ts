@@ -3,10 +3,10 @@
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import type {
-  Data,
   EmitterListener,
   IEventIteratorOptions,
   IGauges,
+  ITransportMessage,
 } from '../../transport/shared/types';
 import type { IRouterClient } from '../client/types';
 import type {
@@ -29,6 +29,7 @@ import type {
   RouterActivity,
   RouterLimitsOptions,
   ServiceId,
+  SessionOf,
   SessionToken,
 } from '../shared/types';
 import type {
@@ -502,9 +503,17 @@ export interface IRouterServerOptions {
   /** How the router relays a request that names a destination registered in it. */
   relay?: IRelayOptions | undefined;
   /**
+   * The call's session each request's credential resolves to, asked once per request, its call id
+   * held, before its admission: as {@link SessionOf} says — a server's sessions give it. None when
+   * not given: a request presenting none runs in none, and one presenting a credential is refused
+   * with `SESSION_REQUIRED`.
+   */
+  sessionOf?: SessionOf<TransportServerConnectionHandle> | undefined;
+  /**
    * The session of a connection — a session manager's token, say — which the router announces on
-   * the next answer to it whenever it changed; `undefined` for none. Never announced when not
-   * given. What it throws fails the answer it was asked for.
+   * the next answer to it whenever it changed, and a command presenting `OPAQUE` presents;
+   * `undefined` for none. Never announced when not given. What it throws fails the answer it was
+   * asked for.
    */
   sessionTokenOf?:
     | ((connectionHandle: TransportServerConnectionHandle) => SessionToken | undefined)
@@ -585,7 +594,9 @@ export interface IRouterServerTransportLike {
   ): unknown;
   off(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
   on(
     event: 'close',
@@ -601,7 +612,9 @@ export interface IRouterServerTransportLike {
   ): unknown;
   on(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
   /**
    * Whether a connection carries both ways — what the server sends of its own, a notification, a
@@ -610,7 +623,10 @@ export interface IRouterServerTransportLike {
    * it no request.
    */
   isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean;
-  send(data: Data, connectionHandle: TransportServerConnectionHandle): Promise<void>;
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
 }
 
 // types

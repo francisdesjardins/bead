@@ -20,6 +20,7 @@ import { createHTTPClient, type HTTPClient } from '../http-client';
 import {
   CancelError,
   createWSClient,
+  CredentialScheme,
   FailureScope,
   ProtocolCode,
   TimeoutError,
@@ -360,6 +361,24 @@ test.describe('the C# server of the interop service', () => {
         await expect(requesterOf('whoami')(null)()).resolves.toBe('ada');
         await expect(requesterOf('logout')(null)()).resolves.toBeNull();
         expect(client.router.sessionToken).toBeUndefined();
+      });
+
+      test('a call presenting the session it learned runs in it, the session opened anew presented anew, and none presented once it ended', async () => {
+        const presenting = { credential: { scheme: CredentialScheme.OPAQUE } } as const;
+
+        await expect(requesterOf('login')({ name: 'ada' })(presenting)).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+          origin: 'local',
+        });
+        await expect(requesterOf('login')({ name: 'ada' })()).resolves.toBe('ada');
+        await expect(requesterOf('whoami')(null)(presenting)).resolves.toBe('ada');
+        await expect(requesterOf('login')({ name: 'bob' })(presenting)).resolves.toBe('bob');
+        await expect(requesterOf('whoami')(null)(presenting)).resolves.toBe('bob');
+        await expect(requesterOf('logout')(null)(presenting)).resolves.toBeNull();
+        await expect(requesterOf('whoami')(null)(presenting)).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+          origin: 'local',
+        });
       });
 
       test('login and register hold a duration as section 1.4 does: a fraction rounded, one under a millisecond or past 2³¹ − 1 refused with PROCEDURE_FAILED, nothing opened or registered', async () => {

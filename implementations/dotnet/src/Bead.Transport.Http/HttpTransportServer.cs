@@ -107,16 +107,19 @@ public sealed record HttpTransportStartOptions
 /// Each <c>POST</c> carries one envelope, of type <see cref="HttpTransport.MediaType"/>; the
 /// transport reads its layout, kind and call id, and nothing else. A request waits under its call id
 /// for the answer the router sends on it, its head going out as it is handed on; any other envelope
-/// ends 204. A cancel ends the exchange of its call; one before its request buries that call id for
-/// 5 seconds. Each refusal of its own is marked in <see cref="HttpTransport.RefusalHeader"/>. An
-/// exchange lost — its client gone before the transport ended it — closes the connection, as a socket
-/// that drops does; so do a request unanswered past its exchange timeout and a connection idle past
-/// its inactivity timeout. What the server sends of its own waits, numbered, in the outbox of a
-/// connection whose client said at connect that it listens, until a <c>GET</c> listen brings it back
-/// in a batch; each listen held, once past its refusals, raises <see cref="Listen"/> with true, and
-/// its end, while its connection stands, with false. Each exchange waits in its own request, on
-/// Kestrel's thread, for what ends it; what the transport holds is kept under one lock, and its
-/// events are raised outside it.
+/// ends 204. A request is handed on with its credential, the <c>Authorization</c> field of its
+/// <c>POST</c> as it came, its surrounding whitespace removed, and none when the field is empty or
+/// absent; no other exchange's is read, and a <c>POST</c> with two is refused 400. An answer, and
+/// what a listen brings back, carry none. A cancel ends the exchange of its call; one before its
+/// request buries that call id for 5 seconds. Each refusal of its own is marked in
+/// <see cref="HttpTransport.RefusalHeader"/>. An exchange lost — its client gone before the transport
+/// ended it — closes the connection, as a socket that drops does; so do a request unanswered past its
+/// exchange timeout and a connection idle past its inactivity timeout. What the server sends of its
+/// own waits, numbered, in the outbox of a connection whose client said at connect that it listens,
+/// until a <c>GET</c> listen brings it back in a batch; each listen held, once past its refusals,
+/// raises <see cref="Listen"/> with true, and its end, while its connection stands, with false. Each
+/// exchange waits in its own request, on Kestrel's thread, for what ends it; what the transport holds
+/// is kept under one lock, and its events are raised outside it.
 /// </remarks>
 public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -430,13 +433,17 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// it went out; anything else — a late answer too — waits in the outbox of a connection whose
     /// client listens, and is refused with an <see cref="InvalidOperationException"/> on one whose
     /// client does not, but for an answer, which goes nowhere. A connection it does not hold takes
-    /// nothing, and says nothing.
+    /// nothing, and says nothing. Neither carries a credential.
     /// </summary>
-    public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+    public Task Send(TransportMessage message, string connectionHandle)
     {
+        // TODO neither carries a credential: the router fails a command that presents one before it
+        // goes, DESTINATION_UNREACHABLE (decision 0010)
+        var bytes = message.Bytes;
+
         if (bytes.Length < HttpTransport.PrefixBytes)
         {
-            return Task.FromException(new ArgumentException("an HTTP exchange carries one envelope, as bytes", nameof(bytes)));
+            return Task.FromException(new ArgumentException("an HTTP exchange carries one envelope, as bytes", nameof(message)));
         }
 
         var kind = (EnvelopeKind)bytes.Span[1];
@@ -536,6 +543,16 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         var values = request.Headers[name];
 
         return values.Count == 0 ? null : values.ToString();
+    }
+
+    // the credential a request's Authorization carries: its value whole, without the spaces and tabs
+    // around it (RFC 9110 §5.5); none when nothing is left
+    private static string? CredentialOf(HttpRequest request)
+    {
+        var values = request.Headers.Authorization;
+        var value = values.Count == 0 ? "" : (values[0] ?? "").Trim(' ', '\t');
+
+        return value.Length == 0 ? null : value;
     }
 
     // a count a listen gives: absent is 0, and anything but 1 to 15 digits is none
@@ -867,6 +884,15 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // a request waits for its answer
     private async Task Receive(HttpContext context, Drawn connection)
     {
+        // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
+        // could be taken for the other
+        if (context.Request.Headers.Authorization.Count > 1)
+        {
+            await Finish(context, Malformed);
+
+            return;
+        }
+
         if (context.Request.ContentLength > _options.MaximumBodyBytes)
         {
             await Finish(context, new End(StatusCodes.Status413PayloadTooLarge, HttpRefusals.TooLarge));
@@ -1153,7 +1179,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return await Reply(context, waiting);
         }
 
-        Message?.Invoke(new TransportMessage(envelope, false), connection.ConnectionHandle);
+        // a request is handed on with the credential its exchange carried; no other envelope is
+        Message?.Invoke(new TransportMessage(envelope, false) { Credential = CredentialOf(context.Request) }, connection.ConnectionHandle);
 
         bool isWaiting;
 

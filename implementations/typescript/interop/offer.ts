@@ -7,9 +7,11 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import type { IDestinationRegistration } from '../src/router/server/types';
+import { CredentialScheme } from '../src/router/shared/constants';
 import type {
   IBeforeRequest,
   IProcedure,
+  IRequestHeader,
   IServiceManager,
   ServerConnectionHandle,
 } from '../src/router/shared/types';
@@ -71,6 +73,16 @@ const durationOf = (name: string, given: unknown): number | undefined => {
   return given === undefined ? undefined : assertHeldFinite(name, given);
 };
 
+/**
+ * Whether a call admitted runs in a credential's session: one that presented a `JWT` or an
+ * `ELSEWHERE`, which never runs in its connection's.
+ */
+const runsInCredentialSession = ({ credential }: Pick<IRequestHeader, 'credential'>): boolean => {
+  return (
+    credential?.scheme === CredentialScheme.JWT || credential?.scheme === CredentialScheme.ELSEWHERE
+  );
+};
+
 /** The procedure of the interop service named `procedureName`. */
 export const procedureOf = (procedureName: string): IProcedure => {
   const found = INTEROP_SERVICE.procedures.find((procedure) => {
@@ -115,9 +127,12 @@ export type InteropServer = Pick<
 
 /**
  * Registers the interop service's resolvers on `server`. The calls to `slow` each connection
- * cancelled are counted per connection, for `cancellations` to answer; a session holds the name its
- * `login` gave; the destination each connection registered last is kept past its close, for
- * `unregister` to take out from whichever connection takes its handle next.
+ * cancelled are counted per connection, for `cancellations` to answer; a connection's session holds
+ * the name its `login` gave, whatever its call presents, and `whoami` answers the name its call's
+ * session holds; the destination each connection registered last is kept past its close, for
+ * `unregister` to take out from whichever connection takes its handle next. Its relay takes `OPAQUE`
+ * alone, as its server does: a `JWT` or an `ELSEWHERE` to a destination is refused with
+ * CREDENTIAL_UNSUPPORTED before `beforeRoute`, never forwarded without its credential.
  */
 export const offerInterop = (server: InteropServer): void => {
   const { requireSession, router, services, sessions } = server;
@@ -291,21 +306,31 @@ export const offerInterop = (server: InteropServer): void => {
     }
   );
 
-  // ended before it answers, so its answer — or the failure ending a subscription — announces it
+  // ended before it answers, so its answer — or the failure ending a subscription — announces it. A
+  // call in a credential's session is denied: SESSION_REQUIRED would have its client withdraw a
+  // credential that holds
   services.getRequestResolver(procedureOf('logout'), {
     beforeRequest: requireSession,
     serializer: JSON_SERIALIZER,
   })((request, response) => {
+    if (runsInCredentialSession(request.header)) {
+      return response(null, {
+        ...failures.accessDenied,
+        detail: "a call in a credential's session ends no connection's session",
+      });
+    }
+
     sessions.delete(request.connectionHandle);
 
     return response(null);
   });
 
+  // the name its call's session holds, whatever its connection's holds meanwhile
   services.getRequestResolver(procedureOf('whoami'), {
     beforeRequest: requireSession,
     serializer: JSON_SERIALIZER,
   })((request, response) => {
-    return response(sessions.get(request.connectionHandle)?.data ?? null);
+    return response(request.session?.data ?? null);
   });
 
   // the server asks its client back, by a command, before it answers

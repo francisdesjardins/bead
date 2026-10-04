@@ -63,7 +63,7 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export type { Data, IEventIteratorOptions } from '../shared/types';
+export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
 export type {
   ITransportServer,
   ITransportServerAddress,
@@ -203,11 +203,11 @@ export const createTransportServer = <Socket extends object, Request>(
         ...(implementation.gauges === undefined ? [] : [implementation.gauges()]),
       ]);
     },
-    send: async (data, connectionHandle) => {
+    send: async (message, connectionHandle) => {
       const connection = connections.get(connectionHandle);
 
       if (connection !== undefined) {
-        await implementation.send(data, connection);
+        await implementation.send(message, connection);
       }
     },
     start: async (options) => {

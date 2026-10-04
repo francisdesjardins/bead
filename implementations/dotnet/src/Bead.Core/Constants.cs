@@ -166,6 +166,12 @@ public enum ProtocolCode : ushort
     /// <summary>A side holds all it can: call ids, transfers, or a subscription's queue.</summary>
     CapacityExceeded = 35,
 
+    /// <summary>
+    /// The request presents a credential of a scheme the receiver takes none of: one to come, or
+    /// one it has no verifier for. Its detail names the schemes the receiver takes.
+    /// </summary>
+    CredentialUnsupported = 36,
+
     /// <summary>A chunk does not fit its transfer.</summary>
     ChunkInvalid = 48,
 

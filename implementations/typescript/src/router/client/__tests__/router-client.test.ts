@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createWSTransportClient } from '../../../transport/client/ws-transport-client';
 import { createEmitter } from '../../../transport/shared/emitter';
-import type { Data } from '../../../transport/shared/types';
+import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { toSessionToken } from '../../shared/identifiers';
 import type {
@@ -49,9 +49,11 @@ const service: IProcedure = {
 const options = { timeout: 1_000 };
 
 const TOKEN = toSessionToken(new Uint8Array(16).fill(1));
+const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
 
-// what an answer announces: the session, by its token; its end
+// what an answer announces: the session, by its token; another; its end
 const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
+const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });
 const ENDED = Object.freeze({ scheme: CredentialScheme.NONE });
 
 /** A request header of the server's, for procedure 1 of service 2. */
@@ -89,7 +91,7 @@ const notificationEnvelopeOf = (callId: number, payload = Uint8Array.of(5)): Out
 const createScriptedTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
-    message: [data: Data];
+    message: [message: ITransportMessage];
     reconnect: [];
   }>();
   const sent: (Envelope | undefined)[] = [];
@@ -98,7 +100,7 @@ const createScriptedTransport = () => {
   const transport: IRouterClientTransportLike = {
     off: emitter.off,
     on: emitter.on,
-    send: (data) => {
+    send: ({ data }) => {
       sent.push(
         readEnvelope(bytesOf(data), {
           failures: SERVER_FAILURES,
@@ -113,7 +115,7 @@ const createScriptedTransport = () => {
   };
 
   const deliver = (envelope: OutgoingEnvelope) => {
-    emitter.emit('message', envelopeOf(envelope));
+    emitter.emit('message', { data: envelopeOf(envelope) });
   };
 
   const close = () => {
@@ -378,6 +380,51 @@ test.describe('createRouterClient', () => {
           return envelope !== undefined && !('credential' in envelope.header);
         })
       ).toBe(true);
+    });
+
+    test('presents OPAQUE, the session it learned, on a call that asks and on no other; one that asks before any session fails before it goes, SESSION_REQUIRED', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport);
+      const asking = { ...options, credential: { scheme: CredentialScheme.OPAQUE } } as const;
+
+      await expect(
+        router.request(new Uint8Array(0), { options: asking, procedure: service })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        origin: 'local',
+        side: 'client',
+      });
+
+      expect(sent).toEqual([]);
+
+      deliver(resultOf(99, { credential: OPAQUE }));
+
+      const calls = [
+        router.request(new Uint8Array(0), { options: asking, procedure: service }),
+        router.request(new Uint8Array(0), { options, procedure: service }),
+      ];
+
+      // a session opened anew is the one presented next
+      deliver(resultOf(97, { credential: OTHER_OPAQUE }));
+      calls.push(router.request(new Uint8Array(0), { options: asking, procedure: service }));
+
+      for (const callId of [1, 3, 5]) {
+        deliver(resultOf(callId));
+      }
+
+      await Promise.all(calls);
+
+      expect(
+        sent.map((envelope) => {
+          return envelope?.kind === EnvelopeKind.REQUEST
+            ? [envelope.header.callId, envelope.header.credential]
+            : envelope;
+        })
+      ).toEqual([
+        [1, OPAQUE],
+        [3, undefined],
+        [5, OTHER_OPAQUE],
+      ]);
     });
 
     test('writes the destination a request names, refuses a destination of 0, and writes none left undefined', async () => {
@@ -1535,6 +1582,56 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    test('resolve their credential as a server does: none and the session it learned run in it, another token is refused SESSION_REQUIRED, a JWT CREDENTIAL_UNSUPPORTED', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport);
+      const sessions: unknown[] = [];
+      const command = (callId: number, credential?: IRequestHeader['credential']) => {
+        deliver({
+          header: {
+            ...requestHeaderOf(callId),
+            ...(credential === undefined ? {} : { credential }),
+          },
+          kind: EnvelopeKind.REQUEST,
+          payload: new Uint8Array(0),
+        });
+      };
+
+      router.registerResolver(
+        Object.assign(async (props: IRequestResolverProps<'server'>) => {
+          sessions.push([props.header.callId, props.session]);
+
+          await router.respond({ payload: new Uint8Array(0) }, props);
+        }, service)
+      );
+      // no session learned: none runs in none, and OPAQUE holds nothing
+      command(2);
+      command(4, OPAQUE);
+      deliver(resultOf(99, { credential: OPAQUE }));
+      command(6);
+      command(8, OPAQUE);
+      command(10, OTHER_OPAQUE);
+      command(12, { scheme: CredentialScheme.JWT, token: 'a.b.c' });
+      await sleep(0);
+
+      expect(sessions).toEqual([
+        [2, undefined],
+        [6, { data: undefined }],
+        [8, { data: undefined }],
+      ]);
+      expect(
+        sent.flatMap((envelope) => {
+          return envelope?.kind === EnvelopeKind.FAILURE
+            ? [[envelope.header.callId, envelope.failure.code, envelope.failure.detail]]
+            : [];
+        })
+      ).toEqual([
+        [4, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+        [10, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+        [12, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+      ]);
+    });
+
     test('reports a resolver that rejects, and an answer the transport cannot send', async () => {
       const { control, deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -1587,7 +1684,7 @@ test.describe('createRouterClient', () => {
           payload: new Uint8Array(0),
         });
       }).not.toThrow();
-      emitter.emit('message', Uint8Array.of(0xa1, 0x17, 0, 2, 0, 0, 0, 2));
+      emitter.emit('message', { data: Uint8Array.of(0xa1, 0x17, 0, 2, 0, 0, 0, 2) });
 
       expect(errors[0]).toBe(failure);
       expect(codesOf(errors)).toEqual(['thrown at once', ProtocolCode.KIND_UNSUPPORTED]);
@@ -1618,9 +1715,9 @@ test.describe('createRouterClient', () => {
       using router = createRouterClient(transport);
       const errors = recordErrors(router);
 
-      emitter.emit('message', 'text');
-      emitter.emit('message', Uint8Array.of(0x0a, 0x14));
-      emitter.emit('message', Uint8Array.of(0xa1, 0x17, 0, 2, 0, 0, 0, 2));
+      emitter.emit('message', { data: 'text' });
+      emitter.emit('message', { data: Uint8Array.of(0x0a, 0x14) });
+      emitter.emit('message', { data: Uint8Array.of(0xa1, 0x17, 0, 2, 0, 0, 0, 2) });
 
       expect(codesOf(errors)).toEqual([
         ProtocolCode.ENVELOPE_MALFORMED,

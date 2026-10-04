@@ -123,8 +123,8 @@ export interface IReceivedFailure extends IFailure {
 /**
  * A request's header: its call, the procedure it asks for, and its blocks — where it goes behind
  * the peer, the `total` of a payload it opens a transfer for, its own payload then the transfer's
- * first bytes, and the credential it presents, which a router that holds connections reads and
- * ignores. `opensSubscription` says the call subscribes to the procedure's notifications: a server
+ * first bytes, and the credential it presents, which its receiver resolves to the call's session.
+ * `opensSubscription` says the call subscribes to the procedure's notifications: a server
  * subscribes the requester of no other request. `paced` asks for them as the requester credits
  * them, the first credited already.
  */
@@ -301,10 +301,25 @@ export type SessionToken = string & { readonly [sessionTokenBrand]: 'SessionToke
 
 // interfaces
 
-/** A request as its admission sees it: where it came from, and its header — never its payload. */
+/**
+ * A request as its admission sees it: where it came from, its header — never its payload — and the
+ * session its call runs in.
+ */
 export interface IAdmissionRequest<Handle extends string = ConnectionHandle> {
   connectionHandle: Handle;
   header: Readonly<IRequestHeader>;
+  /** The call's session, its credential resolved (spec 13.1); none when the call runs in none. */
+  session?: ICallSession | undefined;
+}
+
+/**
+ * The session a call runs in, its credential resolved (spec 13.1): its connection's session, for a
+ * call presenting none or that session's `OPAQUE`. Frozen: the call keeps the session it resolved
+ * to, whatever befalls its connection's meanwhile.
+ */
+export interface ICallSession {
+  /** What the session holds: a connection's session's data, as its server keeps it. */
+  readonly data: unknown;
 }
 
 /**
@@ -344,6 +359,14 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
    * does.
    */
   closeOnTimeout?: boolean | undefined;
+  /**
+   * The credential the call presents, for this call alone: `OPAQUE`, the session its router
+   * learned — a server's, its connection's — so the call is refused rather than run in another
+   * should that one end or be opened anew. None by default: the call runs in whatever session its
+   * connection holds. A router that knows no session fails the call before it goes, with
+   * `SESSION_REQUIRED`.
+   */
+  credential?: RequestCredential | undefined;
   /**
    * The connection the request goes to, for a router with more than one: a server's names its
    * client; a client's has one peer, and names none.
@@ -404,6 +427,8 @@ export interface IRequestResolverProps<Handle extends string = ConnectionHandle>
   /** Set by a router that asked the resolver's `admit` already: the resolver asks nothing again. */
   isAdmitted?: true | undefined;
   payload: Uint8Array;
+  /** The call's session, as its admission read it; none when the call runs in none. */
+  session?: ICallSession | undefined;
   /**
    * Aborted when the call ends before its answer: with a {@link CancelError} when its requester
    * cancels it, with a {@link DisconnectError} when its connection closes or the router is disposed.
@@ -486,11 +511,13 @@ export interface IRouterCore<Handle extends string> {
    * for that subscription's notifications as they are credited. `onCallId` hears
    * the call id before the request goes out. `onSent` hears `true` as it is handed to the transport
    * — its transfer's opening, for one — and `false` should the transport refuse it: before `true`,
-   * or after `false`, nothing of it was tried. None is drawn once `signal` aborted. A payload too
-   * large for one envelope goes as a transfer, as the peer's credit lets it, and a result may come
-   * as one; the payload is read until the call settles, and must not change meanwhile. Rejects with
-   * a {@link FailureError} for a failure answered, a payload too large — past its procedure's limit
-   * or the router's, or a transfer where this side sends none — or every call id taken; with a
+   * or after `false`, nothing of it was tried. None is drawn once `signal` aborted. Its header
+   * presents `credential`, as its side resolved what its options ask. A payload too large for one
+   * envelope goes as a transfer, as the peer's credit lets it, and a result may come as one; the
+   * payload is read until the call settles, and must not change meanwhile. Rejects with a
+   * {@link FailureError} for a failure answered, a payload too large — past its procedure's limit
+   * or the router's, or a transfer where this side sends none — a header that leaves a transfer's
+   * opening no byte, `ENVELOPE_TOO_LARGE`, or every call id taken; with a
    * {@link ProgrammerError}, drawing nothing, for a procedure's limit that is not a whole number
    * above 0, or a timeout no timer holds. Ended once it went out — its timeout passed, a transfer
    * silent too long, its signal aborted, a chunk that cannot go out — it cancels its call, before
@@ -500,6 +527,7 @@ export interface IRouterCore<Handle extends string> {
     payload: Uint8Array,
     request: {
       connectionHandle: Handle;
+      credential?: Credential | undefined;
       onCallId?: ((callId: CallId) => void) | undefined;
       onSent?: ((isHanded: boolean) => void) | undefined;
       opensSubscription?: boolean | undefined;
@@ -569,7 +597,8 @@ export interface IRouterCoreOptions {
  *
  * The core calls it in this order. An envelope that reads is traced, then dispatched by kind: a
  * request asks `isCallIdInUse`, then — one that names a destination — `handlerOfDestination`, then
- * its handler's `admit`, then — one that opens a subscription — `isTwoWay`, then goes to its handler
+ * — its credential of a scheme the side takes — `sessionOf`, then its handler's `admit`, on the
+ * call's session, then — one that opens a subscription — `isTwoWay`, then goes to its handler
  * once its payload is whole; a result or a failure
  * is shown to `onAnswerReceived`, then paired with its request, and a failure no call waits on is
  * offered to `onUnpairedFailure`; a notification goes to `onNotification`; a cancel to `onCancel`.
@@ -583,6 +612,12 @@ export interface IRouterCoreOptions {
  * they hold beyond the core's.
  */
 export interface IRouterCorePort<Handle extends string> {
+  /**
+   * The credential schemes the side takes besides `OPAQUE`, which it always does: `JWT`,
+   * `ELSEWHERE`, each resolved by `sessionOf` in a later turn. None when not given: a request
+   * presenting any other is refused with `CREDENTIAL_UNSUPPORTED`, whose detail names those taken.
+   */
+  readonly credentialSchemes?: readonly CredentialScheme[] | undefined;
   readonly failures: IRouterFailures;
 
   /** What the router did: sent a request, or took the response to one. */
@@ -647,6 +682,12 @@ export interface IRouterCorePort<Handle extends string> {
   report(error: Error, connectionHandle: Handle): void;
   /** Hands `bytes` over to the transport, for `connectionHandle`. */
   send(bytes: Uint8Array, connectionHandle: Handle): Promise<unknown>;
+  /**
+   * The call's session a request's credential resolves to, asked once per request, its call id
+   * held, as {@link SessionOf} says. None when not given: a request presenting none runs in none,
+   * and one presenting a credential is refused with `SESSION_REQUIRED`.
+   */
+  sessionOf?(request: ISessionRequest<Handle>): ReturnType<SessionOf<Handle>>;
   /**
    * The session of `connectionHandle`, which its next answer announces when it changed; `undefined`
    * for none. Asked for each answer only; what it throws fails that answer. None when not given.
@@ -727,6 +768,17 @@ export interface ICallAddress<Handle extends string = ConnectionHandle> {
   connectionHandle: Handle;
 }
 
+/** A request as `sessionOf` resolves its credential: where it came from, its header, its signal. */
+export interface ISessionRequest<Handle extends string = ConnectionHandle> {
+  connectionHandle: Handle;
+  header: Readonly<IRequestHeader>;
+  /**
+   * Aborted once the call ends while its credential resolves — its requester cancelled it, its
+   * connection closed — so a verifier stops: what it settles to then is dropped.
+   */
+  signal: AbortSignal;
+}
+
 // types
 
 /** Who a request came from, as the router names it. */
@@ -742,6 +794,21 @@ export type RouterLimitsOptions = { [Key in keyof IRouterLimits]?: IRouterLimits
 
 /** What a router did: sent or took a request, a response, or a notification. */
 export type RouterActivity = 'notification' | 'request' | 'response';
+
+/** The credential a call presents, among its options: `OPAQUE`, the session its router learned. */
+export type RequestCredential = Readonly<{ scheme: typeof CredentialScheme.OPAQUE }>;
+
+/**
+ * The call's session a request's credential resolves to (spec 9.2, step 5): its connection's
+ * session, for none or that session's `OPAQUE`, compared in constant time, in the turn the request
+ * came, never a promise; a credential's, for a `JWT` or an `ELSEWHERE`, which may wait, and is
+ * waited on in a later turn whether it waits or not. `undefined` runs a call presenting none in
+ * none, and refuses one presenting a credential with `SESSION_REQUIRED`; what throws or rejects
+ * refuses it with `PROCEDURE_FAILED`, reported.
+ */
+export type SessionOf<Handle extends string = ConnectionHandle> = (
+  request: ISessionRequest<Handle>
+) => ICallSession | undefined | PromiseLike<ICallSession | undefined>;
 
 /**
  * What a call of a procedure takes after its payload: options a server's router must have, naming
@@ -961,6 +1028,8 @@ export interface IRequestProps<Payload, Handle extends string = ConnectionHandle
   connectionHandle: Handle;
   header: Readonly<IRequestHeader>;
   payload: Readonly<Payload>;
+  /** The call's session, as its admission read it; none when the call runs in none. */
+  session?: ICallSession | undefined;
   /**
    * Aborted when the call ends before its answer — its requester cancelled it, its connection closed
    * — so the callback may stop: its answer would go nowhere, and what it throws then is no one's to

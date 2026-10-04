@@ -6,6 +6,7 @@
 // dependencies
 
 import { readEnvelope } from '../../shared/envelope';
+import { toSessionTokenBytes } from '../../shared/identifiers';
 import type { Envelope } from '../../shared/types';
 import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../router-server';
 
@@ -19,7 +20,8 @@ export interface IExpected {
   offset?: number;
   total?: number;
   credential?: 'NONE' | 'OPAQUE';
-  failure?: { code: number; relays: number; scope: number };
+  /** Its detail only where a conversation gives one: informative elsewhere. */
+  failure?: { code: number; detail?: string | undefined; relays: number; scope: number };
   flags?: number | undefined;
   kind: number;
   payload?: string;
@@ -52,14 +54,39 @@ const announcementOf = (envelope: Envelope): Pick<IExpected, 'credential'> => {
   return { credential: credential.scheme === CredentialScheme.NONE ? 'NONE' : 'OPAQUE' };
 };
 
-// definition
-
-/** The bytes of an envelope sent, as a conversation writes what it expects. */
-export const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
-  const envelope = readEnvelope(bytes, {
+/** An envelope sent, read as a client reads it. */
+const envelopeOf = (bytes: Uint8Array): Envelope | undefined => {
+  return readEnvelope(bytes, {
     failures: CLIENT_FAILURES,
     maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
   });
+};
+
+// definition
+
+/** The detail of the failure an envelope sent carries; `undefined` for any other envelope. */
+export const failureDetailOf = (bytes: Uint8Array): string | undefined => {
+  const envelope = envelopeOf(bytes);
+
+  return envelope?.kind === EnvelopeKind.FAILURE ? envelope.failure.detail : undefined;
+};
+
+/** The 16 bytes of the token an answer sent announced, `OPAQUE`; `undefined` for any other. */
+export const announcedTokenOf = (bytes: Uint8Array): Uint8Array | undefined => {
+  const envelope = envelopeOf(bytes);
+  const credential =
+    envelope?.kind === EnvelopeKind.RESULT || envelope?.kind === EnvelopeKind.FAILURE
+      ? envelope.header.credential
+      : undefined;
+
+  return credential?.scheme === CredentialScheme.OPAQUE
+    ? toSessionTokenBytes(credential.token)
+    : undefined;
+};
+
+/** The bytes of an envelope sent, as a conversation writes what it expects. */
+export const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
+  const envelope = envelopeOf(bytes);
 
   if (envelope === undefined) {
     return undefined;

@@ -90,7 +90,9 @@ public sealed record ServerOptions
 /// A server from its layers, bottom up: the transport, the router built on it, the services built on
 /// the router, and the sessions whose tokens the router announces to their connections as they
 /// change. A session is made by a request: the resolver of the procedure that opens one stores it,
-/// and the others take <see cref="RequireSession"/>, which refuses with SESSION_REQUIRED. A procedure
+/// and the others take <see cref="RequireSession"/>, which refuses a call in none with
+/// SESSION_REQUIRED. A request presenting none runs in its connection's session, with its data, and
+/// one presenting OPAQUE in that session when it carries its token. A procedure
 /// that closes a session deletes it before it answers, so the next answer announces the end. Each
 /// message is activity. Past a session's connection timeout, its connection is closed; past its
 /// session timeout, the session ends — each subscription of its connection with SESSION_REQUIRED —
@@ -146,7 +148,7 @@ public sealed class Server<TData> : IAsyncDisposable
         RequireSession = new BeforeRequest(
             (request) =>
             {
-                return Sessions.Has(request.ConnectionHandle);
+                return request.Session is not null;
             },
             Failure.OfProtocol(ProtocolCode.SessionRequired));
 
@@ -170,6 +172,16 @@ public sealed class Server<TData> : IAsyncDisposable
                     ResolverScheduler = options?.ResolverScheduler,
                     Scheduler = options?.Scheduler,
                     SessionTokenOf = Sessions.SessionTokenOf,
+                    SessionOf = (request, _) =>
+                    {
+                        // in the turn it came: its token read at once with its data, so a session
+                        // drawn anew meanwhile never lends its data to another's token
+                        var session = Sessions.Get(request.ConnectionHandle);
+
+                        return ValueTask.FromResult(CallSession.ConnectionSessionOf(
+                            request.Header.Credential,
+                            session is null ? (null, null) : (session.SessionToken, session.Data)));
+                    },
                     Clock = _clock,
                 });
         }
@@ -255,7 +267,10 @@ public sealed class Server<TData> : IAsyncDisposable
         return Bead.Health.Of(await Gauges());
     }
 
-    /// <summary>The admission of a procedure that needs a session: refused with SESSION_REQUIRED without one.</summary>
+    /// <summary>
+    /// The admission of a procedure that needs a session: a call in none — its call's session, never
+    /// its connection's — is refused with SESSION_REQUIRED.
+    /// </summary>
     public BeforeRequest RequireSession { get; }
 
     /// <summary>Follows its transport no more, disposes its router and its sessions, then stops its transport.</summary>

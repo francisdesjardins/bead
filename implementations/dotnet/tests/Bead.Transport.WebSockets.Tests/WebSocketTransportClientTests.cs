@@ -23,6 +23,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
     private const string Host = "127.0.0.1";
 
+    // a bearer credential, RFC 6750's own example, its auth-scheme included
+    private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private readonly WebSocketTransportServer _server = new();
@@ -587,7 +590,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return _client.Send(new byte[] { 1 });
+            return _client.Send(new TransportMessage(new byte[] { 1 }, false));
         });
     }
 
@@ -688,12 +691,32 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
         Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return _client.Send(new byte[] { 1 });
+            return _client.Send(new TransportMessage(new byte[] { 1 }, false));
         })).Message);
 
         await _client.Connect(Target, Cancelled);
 
         Assert.Equal(ReadyState.Open, _client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Carries_no_credential_the_envelope_alone_goes()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            await _client.Send(new TransportMessage("hello"u8.ToArray(), false) { Credential = Bearer }).WaitAsync(Patience, Cancelled);
+
+            var buffer = new byte[16];
+            var received = await server.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Binary, "hello"), (received.MessageType, Encoding.ASCII.GetString(buffer, 0, received.Count)));
+        }
     }
 
     [Fact]

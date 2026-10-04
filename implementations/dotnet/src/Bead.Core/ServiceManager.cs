@@ -164,6 +164,9 @@ public sealed record RequestProps<TPayload>
     /// <summary>Its payload, decoded.</summary>
     public required TPayload Payload { get; init; }
 
+    /// <summary>The call's session, as its credential resolved it; none when the call runs in none.</summary>
+    public CallSession? Session { get; init; }
+
     /// <summary>
     /// Cancelled when the call ends before its answer — its requester cancelled it, its connection
     /// closed — so the callback may stop: its answer would go nowhere.
@@ -298,7 +301,10 @@ public sealed record DebugEvent
     /// </summary>
     public TimeSpan? Duration { get; init; }
 
-    /// <summary>The call's options, its defaults applied; none for a step that has none.</summary>
+    /// <summary>
+    /// The call's options, its defaults applied, its credential left out; none for a step that has
+    /// none.
+    /// </summary>
     public ResolvedRequestOptions? Options { get; init; }
 
     /// <summary>The procedure's number in its service.</summary>
@@ -666,6 +672,7 @@ public sealed class ServiceManager
             CancellationToken = given?.CancellationToken ?? CancellationToken.None,
             CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
             ConnectionHandle = given?.ConnectionHandle,
+            Credential = given?.Credential,
             DestinationId = given?.DestinationId,
             Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
         };
@@ -703,7 +710,9 @@ public sealed class ServiceManager
     {
         var (procedure, serializer, given, (type, subscribes)) = call;
         var options = OptionsOf(given);
-        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = StartedNow(), Tx = payload };
+
+        // a credential stays out of what a side tells: the trace carries none
+        var step = new DebugStep(DebugDirection.Tx, type) { Options = options with { Credential = null }, Started = StartedNow(), Tx = payload };
 
         // what the call fails with once it went out is told as its answer
         void Failed(Exception reason)
@@ -894,7 +903,7 @@ public sealed class ServiceManager
 
                 try
                 {
-                    refusal = Admit(new AdmissionRequest(props.ConnectionHandle, props.Header));
+                    refusal = Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session });
                 }
                 catch
                 {
@@ -931,6 +940,7 @@ public sealed class ServiceManager
                 ConnectionHandle = props.ConnectionHandle,
                 Header = props.Header,
                 Payload = payload,
+                Session = props.Session,
                 Signal = props.Signal,
             };
 

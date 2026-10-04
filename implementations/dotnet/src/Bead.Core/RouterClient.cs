@@ -11,7 +11,10 @@ public interface IRouterClientTransport
     /// <summary>What its timers run on: the clock of the stack built on it.</summary>
     TimeProvider Clock { get; }
 
-    /// <summary>The connection delivered a message.</summary>
+    /// <summary>
+    /// The connection delivered a message: an envelope, and the credential carried beside it, which
+    /// no client is ever given.
+    /// </summary>
     event Action<TransportMessage>? Message;
 
     /// <summary>
@@ -37,10 +40,11 @@ public interface IRouterClientTransport
     }
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> to the connection: at once, in order, without blocking; the
-    /// task settles once they were sent, or could not be.
+    /// Hands <paramref name="message"/> to the connection: at once, in order, without blocking; the
+    /// task settles once it was sent, or could not be. Its credential goes over HTTP alone, in the
+    /// <c>Authorization</c> of its <c>POST</c>; a socket carries none.
     /// </summary>
-    Task Send(ReadOnlyMemory<byte> bytes);
+    Task Send(TransportMessage message);
 }
 
 /// <summary>How a client's router is built.</summary>
@@ -69,7 +73,9 @@ public sealed record RouterClientOptions
 /// The client side of a router, over any transport that meets <see cref="IRouterClientTransport"/>.
 /// The request itself — its call id, its pairing, its timeout and its cancel — is the core's: this
 /// router binds the notifications to the calls that subscribe them, learns the session the server
-/// announces, and answers the server's own requests, its commands, with the resolvers registered.
+/// announces, which a call presents when its options ask for it, and answers the server's own
+/// requests, its commands, with the resolvers registered, each in the session its credential
+/// resolves to against the one learned.
 /// A notification's callbacks run in the order the notifications came, never on the router's
 /// scheduler. A connection that closes, or that a reconnection replaces, takes with it what still
 /// waits, the session and the notifications.
@@ -156,8 +162,10 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     /// <summary>
-    /// The session the server announced last, which the connection is: the client never presents
-    /// it. None before any, once ended, or once the connection closed or a reconnection replaced it.
+    /// The session the server announced last, which the connection is: the client presents it only
+    /// on a call whose options ask for it, <see cref="Credential.Opaque()"/>, never by default, and
+    /// resolves a command's credential against it. None before any, once ended, or once the
+    /// connection closed or a reconnection replaced it.
     /// </summary>
     public SessionToken? SessionToken
     {
@@ -471,7 +479,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             return;
         }
 
-        _core.Receive(message.Bytes, ServerConnectionHandle);
+        _core.Receive(message, ServerConnectionHandle);
     }
 
     // in its turn, behind what the connection delivered before it closed
@@ -610,9 +618,16 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             client.Error?.Invoke(reason);
         }
 
+        // the session it learned stands for its connection's: a call presenting OPAQUE presents it,
+        // and a command presenting none or OPAQUE resolves against it
+        public SessionToken? KnownSessionTokenOf(string connectionHandle)
+        {
+            return client.SessionToken;
+        }
+
         public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
         {
-            return client.Transport.Send(bytes);
+            return client.Transport.Send(new TransportMessage(bytes, false));
         }
 
         public void Trace(DebugDirection direction, TracedEnvelope envelope)

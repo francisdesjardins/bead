@@ -449,7 +449,7 @@ public sealed partial class RouterCoreTests
     {
         var client = new Peer(RouterSide.Client)
         {
-            SessionOf = (_) =>
+            TokenOf = (_) =>
             {
                 throw new InvalidOperationException("a request asks no session");
             },
@@ -656,7 +656,7 @@ public sealed partial class RouterCoreTests
         var held = new List<TaskCompletionSource>();
         var server = new Peer(RouterSide.Server)
         {
-            SessionOf = (_) =>
+            TokenOf = (_) =>
             {
                 return current;
             },
@@ -709,7 +709,7 @@ public sealed partial class RouterCoreTests
         var unknown = new InvalidOperationException("no session to tell");
         var server = new Peer(RouterSide.Server)
         {
-            SessionOf = (_) =>
+            TokenOf = (_) =>
             {
                 throw unknown;
             },
@@ -730,18 +730,19 @@ public sealed partial class RouterCoreTests
         var server = new Peer(RouterSide.Server) { Session = token };
         var resolver = server.Resolve();
 
+        // a JWT, which this side takes none of, is refused, its refusal announcing the session
         await server.Deliver(new Envelope { Header = RequestOf(1) with { Credential = Credential.Jwt("a.b.c") }, Payload = new byte[] { 1 } });
-        await resolver.Answer(0, new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        Assert.Empty(resolver.Requests);
         Assert.Equal(
             [
                 (DebugDirection.Rx, (IEnvelopeHeader)RequestOf(1), (CredentialScheme?)CredentialScheme.Jwt),
-                (DebugDirection.Tx, new ResultHeader { CallId = 1 }, CredentialScheme.Opaque),
+                (DebugDirection.Tx, new FailureHeader { CallId = 1 }, CredentialScheme.Opaque),
             ],
             server.Traces.Select((trace) =>
             {
                 return (trace.Direction, trace.Envelope.Header, trace.Envelope.CredentialScheme);
             }));
-        Assert.Equal(token, ((ResultHeader)server.Sent[0].Header).Credential!.Value.SessionToken);
+        Assert.Equal(token, ((FailureHeader)server.Sent[0].Header).Credential!.Value.SessionToken);
     }
 
     [Fact]

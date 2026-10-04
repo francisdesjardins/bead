@@ -1,6 +1,7 @@
 """Writes spec/conversations.json: what a server of the interop service does with what a client sends."""
 import json
 import os
+import re
 
 from spec_version import spec_version
 
@@ -57,9 +58,11 @@ def result(call_id, value, credential=None):
                     **({'credential': credential} if credential else {})}}
 
 
-def failure(call_id, code, scope=PROTOCOL, credential=None, relays=0):
-    return {'expect': {'kind': FAILURE, 'callId': call_id, 'failure': {'code': code, 'scope': scope, 'relays': relays},
-                    **({'credential': credential} if credential else {})}}
+def failure(call_id, code, scope=PROTOCOL, credential=None, relays=0, detail=None):
+    return {'expect': {'kind': FAILURE, 'callId': call_id,
+                       'failure': {'code': code, 'scope': scope, 'relays': relays,
+                                   **({'detail': detail} if detail is not None else {})},
+                       **({'credential': credential} if credential else {})}}
 
 
 def report(code):
@@ -86,6 +89,14 @@ def armed(milliseconds):
 
 def advance(milliseconds):
     return {'advance': milliseconds}
+
+
+def on(step, connection):
+    return {**step, 'on': connection}
+
+
+def opened(connection, two_way=True):
+    return {'open': connection, **({} if two_way else {'twoWay': False})}
 
 
 def refusal(call_id, code, scope=PROTOCOL):
@@ -115,17 +126,36 @@ def credit(call_id, end):
 
 QUEUE_OF_TWO = {'maximumQueuedNotifications': 2}
 
-SESSION_REQUIRED = 32
+SESSION_REQUIRED, CREDENTIAL_UNSUPPORTED = 32, 36
+
+# a token no session holds: the server draws its own from a cryptographic source (13.2)
 TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 
 # what an answer announces, by the scheme of its CREDENTIAL block: a session's token, or its end
 OPENED, ENDED = 'OPAQUE', 'NONE'
 
+# the schemes the interop server takes, which code 36's detail names (9.2, step 5): a request that
+# presents none is always taken, and names no scheme
+# TODO the later phases, which give the interop server its JWT keys and its ELSEWHERE verifier,
+# widen it with each scheme they give, in the order of their numbers: OPAQUE, JWT, ELSEWHERE
+SCHEMES_TAKEN = 'OPAQUE'
+
 
 def presenting(call_id, procedure, value, block):
-    # a request whose CREDENTIAL block, the last, follows its procedure
-    words = 3 + len(block.split()) // 4
-    return json_request(call_id, procedure, value, flags=0x08, words=words, tail=block)
+    # a request whose CREDENTIAL block, the last, follows its procedure; a token named between angle
+    # brackets stands for its 16 bytes
+    length = sum(16 if part.startswith('<') else 1 for part in block.split())
+    return json_request(call_id, procedure, value, flags=0x08, words=3 + length // 4, tail=block)
+
+
+def opaque(token):
+    # an OPAQUE block: the scheme 1, the length 16, then the token, its bytes or its name
+    return f'00 01 00 10  {token}'
+
+
+def named(step, token):
+    # an answer that announced OPAQUE, whose token a later send presents as <token>
+    return {**step, 'token': token}
 
 
 def login(call_id, name):
@@ -279,7 +309,7 @@ conversations = [
         result(5, 'null'), tick(7, 3), result(7, 'null'), tick(9, 4), failure(1, CAPACITY_EXCEEDED),
         result(9, 'null')]),
     # 13: sessions, announced by the next answer after they change, and only by it
-    ('a procedure that requires a session refuses a connection without one with SESSION_REQUIRED', ['13.5'], None, [
+    ('a procedure that requires a session refuses a call in none with SESSION_REQUIRED', ['13.5'], None, [
         json_request(1, 'whoami', 'null'), failure(1, SESSION_REQUIRED)]),
     ('a session opened is announced by the next answer, and only by it', ['13.3'], None, [
         login(1, 'ada'), result(1, '"ada"', OPENED), json_request(3, 'whoami', 'null'), result(3, '"ada"')]),
@@ -292,11 +322,55 @@ conversations = [
         login(1, 'ada'), result(1, '"ada"', OPENED), subscribe(3), result(3, 'null'),
         json_request(5, 'logout', 'null'), failure(3, SESSION_REQUIRED, credential=ENDED), result(5, 'null'),
         tick(7, 1), result(7, 'null')]),
-    ('a request presenting a credential is read, and its credential ignored, whatever its scheme', ['13.4'], None, [
-        presenting(1, 'echo', '"x"', f'00 01 00 10  {TOKEN_BYTES}'), result(1, '"x"'),
-        presenting(3, 'echo', '"y"', '00 02 00 05  61 2E 62 2E 63  00 00 00'), result(3, '"y"'),
-        presenting(5, 'echo', '"z"', '00 03 00 00'), result(5, '"z"'),
-        presenting(7, 'echo', '"w"', '00 07 00 02  01 02  00 00'), result(7, '"w"')]),
+    # 9.2, step 5: a request's credential resolves to its call's session, which its admission reads
+    ('a request presenting its connection\'s OPAQUE is taken, and runs in that session', ['9.2.5', '13.1', '13.4'], None, [
+        login(1, 'ada'), named(result(1, '"ada"', OPENED), 'ada'),
+        presenting(3, 'whoami', 'null', opaque('<ada>')), result(3, '"ada"'),
+        presenting(5, 'logout', 'null', opaque('<ada>')), result(5, 'null', ENDED)]),
+    # echo admits anyone: a credential that does not hold is refused all the same
+    ('a request presenting an OPAQUE no session holds is refused SESSION_REQUIRED, whatever its procedure requires, and its connection\'s session stays',
+     ['9.2.5', '13.5'], None, [
+         presenting(1, 'echo', '"x"', opaque(TOKEN_BYTES)), failure(1, SESSION_REQUIRED),
+         login(3, 'ada'), result(3, '"ada"', OPENED),
+         presenting(5, 'echo', '"y"', opaque(TOKEN_BYTES)), failure(5, SESSION_REQUIRED),
+         json_request(7, 'whoami', 'null'), result(7, '"ada"')]),
+    ('a request presenting another connection\'s OPAQUE is refused SESSION_REQUIRED: a token holds on its own connection alone',
+     ['9.2.5', '13.2'], None, [
+         opened('client'), opened('other'),
+         on(login(1, 'ada'), 'client'), on(named(result(1, '"ada"', OPENED), 'ada'), 'client'),
+         on(login(1, 'bob'), 'other'), on(named(result(1, '"bob"', OPENED), 'bob'), 'other'),
+         on(presenting(3, 'whoami', 'null', opaque('<ada>')), 'other'), on(failure(3, SESSION_REQUIRED), 'other'),
+         on(presenting(5, 'whoami', 'null', opaque('<bob>')), 'other'), on(result(5, '"bob"'), 'other'),
+         on(presenting(3, 'whoami', 'null', opaque('<ada>')), 'client'), on(result(3, '"ada"'), 'client')]),
+    ('a request presenting the OPAQUE of a session ended is refused SESSION_REQUIRED', ['9.2.5', '13.4'], None, [
+        login(1, 'ada'), named(result(1, '"ada"', OPENED), 'ada'),
+        json_request(3, 'logout', 'null'), result(3, 'null', ENDED),
+        presenting(5, 'echo', '"x"', opaque('<ada>')), failure(5, SESSION_REQUIRED),
+        json_request(7, 'echo', '"y"'), result(7, '"y"')]),
+    # login opens its connection's session whatever its call presents, under a token drawn anew
+    ('a request presenting the OPAQUE of a session opened anew under a new token is refused SESSION_REQUIRED',
+     ['9.2.5', '13.2', '13.4'], None, [
+         login(1, 'ada'), named(result(1, '"ada"', OPENED), 'ada'),
+         presenting(3, 'login', '{"name":"bob"}', opaque('<ada>')), named(result(3, '"bob"', OPENED), 'bob'),
+         presenting(5, 'whoami', 'null', opaque('<ada>')), failure(5, SESSION_REQUIRED),
+         presenting(7, 'whoami', 'null', opaque('<bob>')), result(7, '"bob"')]),
+    # a scheme the server takes none of is refused after its procedure is known and before its
+    # admission, whatever its length
+    ('a credential scheme to come is answered CREDENTIAL_UNSUPPORTED, its detail naming the schemes the server takes, before its admission',
+     ['9.2.4', '9.2.5'], None, [
+         presenting(1, 'echo', '"x"', '00 04 00 00'), failure(1, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN),
+         presenting(3, 'whoami', 'null', 'FF FF 00 02  01 02  00 00'),
+         failure(3, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN),
+         presenting(5, 99, '{}', '00 07 00 00'), failure(5, PROCEDURE_UNKNOWN)]),
+    # TODO the phase that gives the interop server its JWT keys moves this one: a JWT is then
+    # resolved, and refused SESSION_REQUIRED when it does not hold
+    ('a JWT, to a server with no key, is answered CREDENTIAL_UNSUPPORTED', ['9.2.5'], None, [
+        presenting(1, 'echo', '"x"', '00 02 00 05  61 2E 62 2E 63  00 00 00'),
+        failure(1, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN)]),
+    # TODO the phase that gives the interop server its ELSEWHERE verifier moves this one: an
+    # ELSEWHERE is then resolved, and refused SESSION_REQUIRED when its transport carried nothing
+    ('an ELSEWHERE, to a server with no verifier, is answered CREDENTIAL_UNSUPPORTED', ['9.2.5'], None, [
+        presenting(1, 'echo', '"x"', '00 03 00 00'), failure(1, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN)]),
     # 9.2, steps 1 and 2: what would answer another call
     ('a request on the server\'s own parity is reported, never answered', ['9.2.1'], None, [
         json_request(2, 'echo', 'null'), report(MALFORMED)]),
@@ -380,6 +454,8 @@ conversations = [
         raw('A1 14 40 04  00 00 00 01  00 20 00 00 00 00 00 00 | 01'), failure(1, CHUNK_INVALID)]),
     ('an opening that holds its whole total is answered CHUNK_INVALID', ['12.3.3'], CHUNKED, [
         opening(1, 'echo', b'"ab"', 4), failure(1, CHUNK_INVALID)]),
+    ('an opening that carries no byte of its payload is answered CHUNK_INVALID', ['12.3', '12.3.3'], CHUNKED, [
+        opening(1, 'echo', b'', 100), failure(1, CHUNK_INVALID)]),
     ('an opening that declares a total of 0 is answered PAYLOAD_TOO_LARGE', ['12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 0), failure(1, PAYLOAD_TOO_LARGE)]),
     ('a transfer past those a connection receives at once is answered CAPACITY_EXCEEDED', ['12.3.3'], {**CHUNKED, 'maximumTransfers': 1}, [
@@ -426,14 +502,6 @@ conversations = [
 # registers its own connection as a destination on the wire
 DESTINATION_UNREACHABLE, SUBSCRIPTION_UNSUPPORTED, DESTINATION_LOST = 17, 22, 65
 DEVICE = 12
-
-
-def on(step, connection):
-    return {**step, 'on': connection}
-
-
-def opened(connection, two_way=True):
-    return {'open': connection, **({} if two_way else {'twoWay': False})}
 
 
 def closed(connection):
@@ -520,12 +588,23 @@ conversations += [
         on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')]),
 ]
 
+# a token a send presents is one an earlier step named
+for name, _, _, *rest in conversations:
+    tokens = set()
+
+    for step in rest[-1]:
+        for token in re.findall(r'<([a-z][a-z0-9]*)>', step.get('send', '')):
+            assert token in tokens, f'{name}: presents <{token}>, which no step before it named'
+
+        tokens |= {step['token']} if 'token' in step else set()
+
 document = {
     '$schema': 'schemas/conversations.schema.json',
     '$comment': [
         "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
-        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
+        'token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.',
+        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.',

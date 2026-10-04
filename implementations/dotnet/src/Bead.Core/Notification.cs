@@ -73,7 +73,10 @@ public interface INotificationRegistration : IAsyncDisposable
     Task Unregister();
 }
 
-/// <summary>A registration, its payload and callback given: its options, when any, then the registration.</summary>
+/// <summary>
+/// A registration, its payload and callback given: its options, when any, then the registration.
+/// The request that subscribes presents no credential, whatever its options say.
+/// </summary>
 public delegate Task<INotificationRegistration> Registrar(RequestOptions? options = null);
 
 /// <summary>
@@ -293,14 +296,15 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
     }
 
     // the one request that subscribes, held by the router before it is asked for, so a notification
-    // sent right behind the answer is heard
+    // sent right behind the answer is heard. It presents no credential: its subscription is the
+    // connection's, whichever registration asks it
     private async Task Subscribing(TRequest payload, RequestOptions? options)
     {
         try
         {
             await _router.RegisterNotification(this);
 
-            var subscription = await _subscribe(payload, (options, this));
+            var subscription = await _subscribe(payload, (options is null ? null : options with { Credential = null }, this));
 
             lock (_gate)
             {

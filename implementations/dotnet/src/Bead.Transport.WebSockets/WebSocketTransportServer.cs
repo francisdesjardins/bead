@@ -292,12 +292,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     /// <inheritdoc/>
-    public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+    public Task Send(TransportMessage message, string connectionHandle)
     {
+        // TODO a credential given here is not carried: the router fails a command that presents one
+        // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+
         // as the TypeScript side's: what goes to a connection not open goes nowhere, and says nothing,
         // for the router refuses what is for a connection it does not hold itself
         return _connections.TryGetValue(connectionHandle, out var held) && held.Connection.Socket.State == WebSocketState.Open
-            ? held.Connection.Send(bytes)
+            ? held.Connection.Send(message.Bytes)
             : Task.CompletedTask;
     }
 

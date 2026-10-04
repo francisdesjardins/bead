@@ -60,7 +60,7 @@ public sealed partial class RouterCoreTests
         var token = SessionToken.FromBytes(PatternOf(16));
         var server = new Peer(RouterSide.Server)
         {
-            SessionOf = (_) =>
+            TokenOf = (_) =>
             {
                 return token;
             },

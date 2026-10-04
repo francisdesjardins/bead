@@ -70,11 +70,16 @@ def notification(call_id, value):
 # ── Exchanges ───────────────────────────────────────────────────────────────────────────────────
 
 
+def pairs(fields):
+    """A request's fields in their order: a dict's, or a list of pairs, where a name may come twice."""
+    return list(fields.items()) if isinstance(fields, dict) else list(fields or [])
+
+
 def send(on, method, target='/bead', *, fields=None, body=None, host='{host}'):
     """A request of HTTP/1.1, rendered to its octets: its line, its fields in their order — its host,
     those given, its body's length when it has one or posts — and a socket closed once answered."""
     lines = [f'{method} {target} HTTP/1.1', f'host: {host}']
-    lines += [f'{name}: {value}' for name, value in (fields or {}).items()]
+    lines += [f'{name}: {value}' for name, value in pairs(fields)]
 
     if body is not None or method in ('POST', 'DELETE'):
         lines.append(f'content-length: {length_of(body or "")}')
@@ -90,7 +95,7 @@ def connect(on='connect', *, listen=False, fields=None, host='{host}', body=None
 
 
 def post(on, body, *, fields=None):
-    return send(on, 'POST', fields={'bead-connection-token': '{token}', 'content-type': BEAD, **(fields or {})}, body=body)
+    return send(on, 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD), *pairs(fields)], body=body)
 
 
 def listen(on, after, wait):
@@ -130,6 +135,8 @@ def answered(on, envelope):
 
 
 ECHO = request(1, 'echo', '"x"')
+# a bearer credential, RFC 6750's own example, its auth-scheme included
+BEARER = 'Bearer mF_9.B5f-4.1JqM'
 SUBSCRIBE = request(1, 'ticks', 'null', flags=0x10)
 
 
@@ -156,6 +163,15 @@ cases = [
     ('a request on a call id already waiting is refused 409, marked', ['15.5.3', '15.6.8'], None, [
         *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
         post('again', ECHO), refused('again', 409, 'call-waiting')]),
+    # 15.5: a request's Authorization, which the transport hands on with it, and two refused
+    ('a request carries its credential in its Authorization, or none in an empty one, and is handed on as any other',
+     ['15.5'], None, [
+         *drawn(), post('bearer', ECHO, fields={'authorization': BEARER}), answered('bearer', result(1, '"x"')),
+         post('empty', request(3, 'echo', '"y"'), fields={'authorization': ''}), answered('empty', result(3, '"y"'))]),
+    ('a POST with two Authorization fields is refused 400, marked, and hands the router nothing', ['15.5', '15.6.4'], None, [
+        *drawn(), post('twice', ECHO, fields=[('authorization', BEARER), ('authorization', BEARER)]),
+        refused('twice', 400, 'malformed'),
+        post('once', ECHO, fields={'authorization': BEARER}), answered('once', result(1, '"x"'))]),
     ('a cancel that comes before its request buries its call id, and the request ends 204, never handed on',
      ['15.5'], None, [
          *drawn(), post('cancel', cancel(1)), expect('cancel', 204, body=''), until('buriedCallIds', 1),

@@ -57,7 +57,8 @@ public sealed record RequestHeader : IEnvelopeHeader
 
     /// <summary>
     /// The credential the request presents, of any scheme but <see cref="CredentialScheme.None"/>,
-    /// which a router that holds connections reads, and ignores.
+    /// which its receiver resolves to the call's session; none presents none, and runs the call in
+    /// its connection's session.
     /// </summary>
     public Credential? Credential { get; init; }
 }

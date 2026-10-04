@@ -474,7 +474,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     };
 
     const resolver = nameAfter(async (props: IRequestResolverProps<Handle>): Promise<void> => {
-      const { connectionHandle, header, signal } = props;
+      const { connectionHandle, header, session, signal } = props;
       // the call starts as it arrives: its admission and its decoding count in its duration
       const started = startedNow();
       const target = { connectionHandle, header };
@@ -489,7 +489,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         let refusal: AdmissionFailure | undefined;
 
         try {
-          refusal = admit(target);
+          refusal = admit({ ...target, session });
         } catch (reason) {
           await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
 
@@ -510,11 +510,12 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
       trace(procedure, { direction: 'rx', rx: requestPayload, started, type });
 
-      // the callback is handed the request, decoded, and no more
+      // the callback is handed the request, decoded, its call's session, and no more
       const request: IRequestProps<RequestPayload, Handle> = Object.freeze({
         connectionHandle,
         header,
         payload: requestPayload,
+        session,
         signal,
       });
       const answer = async (payload: ResponsePayload | null, failure?: Failure) => {

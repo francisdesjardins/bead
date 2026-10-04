@@ -147,7 +147,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
                 return connection.connectionHandle === connectionHandle;
               });
 
-            void server.send('hi', connectionHandle);
+            void server.send({ data: 'hi' }, connectionHandle);
             resolve({ isRegistered, connectionHandle });
           });
         });
@@ -158,7 +158,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
 
         expect(isRegistered).toBe(true);
         expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+$/);
-        expect(await greeted).toEqual(['hi']);
+        expect(await greeted).toEqual([{ credential: undefined, data: 'hi' }]);
       });
     });
 
@@ -169,12 +169,15 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(before?.lastActivity).toBeUndefined();
 
         const text = nextServerEvent(server, 'message');
-        await client.send('hello');
-        expect(await text).toEqual(['hello', before?.connectionHandle]);
+        await client.send({ data: 'hello' });
+        expect(await text).toEqual([
+          { credential: undefined, data: 'hello' },
+          before?.connectionHandle,
+        ]);
 
         const binary = nextServerEvent(server, 'message');
-        await client.send(new TextEncoder().encode('bytes'));
-        const [data] = await binary;
+        await client.send({ data: new TextEncoder().encode('bytes') });
+        const [{ data }] = await binary;
         expect(data).toBeInstanceOf(ArrayBuffer);
         expect(new TextDecoder().decode(data as ArrayBuffer)).toBe('bytes');
 
@@ -189,7 +192,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
 
         await connectClient(client);
         const reading = (async () => {
-          for await (const [data] of server.events('message', { signal: controller.signal })) {
+          for await (const [{ data }] of server.events('message', { signal: controller.signal })) {
             received.push(typeof data === 'string' ? data : 'binary');
             if (received.length === 3) {
               controller.abort();
@@ -197,9 +200,9 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
           }
         })();
 
-        await client.send('a');
-        await client.send('b');
-        await client.send('c');
+        await client.send({ data: 'a' });
+        await client.send({ data: 'b' });
+        await client.send({ data: 'c' });
         await reading;
 
         expect(received).toEqual(['a', 'b', 'c']);
@@ -211,14 +214,31 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         await connectClient(client);
         const received = nextClientEvent(client, 'message');
 
-        await server.send('hello', server.clients[0]!.connectionHandle);
+        await server.send({ data: 'hello' }, server.clients[0]!.connectionHandle);
 
-        expect(await received).toEqual(['hello']);
+        expect(await received).toEqual([{ credential: undefined, data: 'hello' }]);
+      });
+
+      test('carries no credential, either way', async () => {
+        await connectClient(client);
+        const taken = nextServerEvent(server, 'message');
+        const received = nextClientEvent(client, 'message');
+
+        await client.send({ credential: 'Bearer mF_9.B5f-4.1JqM', data: 'up' });
+        expect((await taken)[0]).toEqual({ credential: undefined, data: 'up' });
+
+        await server.send(
+          { credential: 'Bearer mF_9.B5f-4.1JqM', data: 'down' },
+          server.clients[0]!.connectionHandle
+        );
+        expect(await received).toEqual([{ credential: undefined, data: 'down' }]);
       });
 
       test('resolves for a handle nobody holds', async () => {
         await connectClient(client);
-        await expect(server.send('hello', 'type=WS;ip=0.0.0.0;port=1')).resolves.toBeUndefined();
+        await expect(
+          server.send({ data: 'hello' }, 'type=WS;ip=0.0.0.0;port=1')
+        ).resolves.toBeUndefined();
       });
     });
 
@@ -351,7 +371,7 @@ test.describe('WSTransportServer, on the wire', () => {
     server.on('connection', () => {
       events.push('connection');
     });
-    server.on('message', (data) => {
+    server.on('message', ({ data }) => {
       events.push(`message:${typeof data === 'string' ? data : 'binary'}`);
     });
 
@@ -390,12 +410,12 @@ test.describe('WSTransportServer, on the wire', () => {
 
     const binary = nextServerEvent(server, 'message');
     socket.send(Buffer.from('bytes'));
-    const [data] = await binary;
+    const [{ data }] = await binary;
     expect(Buffer.isBuffer(data)).toBe(true);
 
     const text = nextServerEvent(server, 'message');
     socket.send('text');
-    expect((await text)[0]).toBe('text');
+    expect((await text)[0].data).toBe('text');
 
     socket.close();
   });

@@ -1,5 +1,10 @@
 """Writes spec/vectors.json: Bead's conformance vectors, the one source every implementation's tests read."""
+import base64
+import datetime
+import hashlib
+import hmac
 import json
+import math
 import os
 import re
 
@@ -373,6 +378,294 @@ failure_refusals = [
 ]
 
 
+# ── The verdicts of JWTs (section 13.8) ─────────────────────────────────────────────────────────
+
+
+def base64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def unbase64url(text):
+    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
+
+
+def compact(value):
+    """JSON as a token carries it: no space, its members in the order written, ASCII escaped."""
+    return json.dumps(value, separators=(',', ':')).encode('ascii')
+
+
+def thumbprint(jwk):
+    """A JWK's thumbprint (RFC 7638): SHA-256 over its required members, in their order, no space."""
+    required = ('crv', 'kty', 'x', 'y') if jwk['kty'] == 'EC' else ('k', 'kty')
+    return base64url(hashlib.sha256(compact({name: jwk[name] for name in required})).digest())
+
+
+# the published test keys, their public halves alone, but the HMAC key's: RFC 7515's A.1 and A.3, and
+# RFC 7517's A.1, a key set's encryption key; spec/check.py keeps them out of every file but spec/'s,
+# the tests' and the interop service's
+HMAC_KEY = {'kty': 'oct', 'k': 'AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow'}
+EC_KEY = {'kty': 'EC', 'crv': 'P-256', 'x': 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU',
+          'y': 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0'}
+ENCRYPTION_KEY = {'kty': 'EC', 'crv': 'P-256', 'x': 'MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4',
+                  'y': '4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM', 'use': 'enc', 'kid': '1'}
+
+# the EC key's public bytes as a library takes them: SubjectPublicKeyInfo's DER (RFC 5480), whose head
+# names P-256, then the point uncompressed; its PEM (RFC 7468); its JWK's JSON
+EC_DER = (bytes.fromhex('3059301306072a8648ce3d020106082a8648ce3d030107034200') + b'\x04'
+          + unbase64url(EC_KEY['x']) + unbase64url(EC_KEY['y']))
+EC_PEM = ('-----BEGIN PUBLIC KEY-----\n' + base64.b64encode(EC_DER).decode('ascii')
+          + '\n-----END PUBLIC KEY-----\n').encode('ascii')
+EC_JSON = compact(EC_KEY)
+
+ISSUER, TRUST, OTHER = 'https://issuer.example', 'https://trust.example', 'https://other.example'
+AUDIENCE = 'https://bead.example'
+
+# 2026-10-03T12:00:00Z, and an hour later
+IAT = 1791028800
+EXP = IAT + 3600
+
+LEEWAY = 60_000
+LARGEST = 2 ** 53 - 1
+
+# the ES256 tokens are constants, by choice: signed once under RFC 7515's A.3 key, the EC key, or RFC
+# 7517's encryption key, each verified by both platforms before it was written here, which RFC 6979's
+# deterministic ECDSA would also let this generator sign itself; and an RS256 one, under RFC 7515's
+# A.2 key. Their claims: an ID token's (OpenID Connect Core 1.0 §2), or an access token's (RFC 9068
+# §2.2), from ISSUER, for AUDIENCE, issued at IAT and expiring at EXP
+ES256_ID_TOKEN = (
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQ'
+    'uZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJhdXRoX3RpbWUiOjE3OTEwMjg3NDAsIm5vbmNlIjoibi0wUzZfV3pBMk1qIn0.'
+    'afdHHFBG13xzIyaj7YYD8hRyhoiOC5dYkgTJmuEGGgiNBiXgVoNSKtF0kH4PSrFUQGf9m31rY0yO-1IhmwXWDA')
+ES256_ID_TOKEN_TWIN = (
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2J'
+    'lYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJhdXRoX3RpbWUiOjE3OTEwMjg3NDAsIm5vbmNlIjoibi0wUzZfV3pBMk1qIn0.'
+    'EnvKoA_KfmlqnXT-sR3E-WbhRWZ_JIOLD5fsQNz1DOjjsrjezokrClVqBoqytK0Rjcg68wvAFG3tKvI-KEyybw')
+ES256_BY_THUMBPRINT = (
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6Im9LSXl3dkdVcFRWVHl4TVEzYndJSWVRVXVkZnJfQ2tMTWpDRTE5RUNELVUifQ.eyJpc3MiOiJod'
+    'HRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMD'
+    'I4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.'
+    'WiY3sfvUEgIK1ZLd-SQn5jTcqNyDDNFSDihxQnJtkt7GslcL3JPGN05kUz-mmcvDhj1yfBVmCd5ZoBSbS3Bliw')
+ES256_OWN_JWK = (
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImp3ayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6Ik1LQkNUTkljS1VTRGlpMTF5U3MzNTI2aURa'
+    'OEFpVG83VHU2S1BBcXY3RDQiLCJ5IjoiNEV0bDZTUlcyWWlMVXJONXZmdlZIdWhwN3g4UHhsdG1XV2xiYk00SUZ5TSJ9fQ.eyJpc3MiOiJodHRwczovL2lzc3Vlc'
+    'i5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOi'
+    'JhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.'
+    'cRVKc-oghK1S2kelPyrGpIOweCc8_FfZU2o79-fgbJIYlVqp-wZvevmBj2yPEWDLYbhPFcgZ7RHk-hgBrznv2w')
+ES256_UNDER_ENCRYPTION_KEY = (
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6IjEifQ.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOi'
+    'JodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGll'
+    'bnQifQ.hq3cHkJJ-joFclVGnVCxbJCqzlW9eg8TuU6voNQnWI_2Rb0bfuYVMFjz9FVSZZ-BGTz-MPYA1247frXhTwrjIQ')
+ES256_UNNAMED_KID = (
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6IjIwMjYtMTAifQ.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLC'
+    'JhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVh'
+    'ZC1jbGllbnQifQ.FRMoxYau2SZ6eYewa4qhAoI1bLnoXuDDlbAWFvg11jFxoiu23ff1agki1OkJzOAntiXBmI2LpFA4CxRbLiiv-g')
+RS256_TOKEN = (
+    'eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2J'
+    'lYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.'
+    'BdUqfQft_6sxQFjVnnTMpSC41R61RM90O2KtrtRfZiD_DKySmzsYRvN70gCzsykaWJkxVzybNFn6LPmxXd6VR_LG-uFH7-Lr7VWhylDBgpxMzAQBBwn01WpqL_bb9'
+    'SDEOfuIlE0Dy94Kcgb6MfxJ-BDghGtaN5Qsp2uLd3dp_V1jpMkcF9f-OlO2aTD4x0wQ4vVmiA7bvVG8Q5ltmi3zDjMCWLGoR6cul2q-aJyKsGm6gyV1L-pPZteC'
+    'Wq47cdr7EpBCllLeh0abrhCd12yawTpflkj-u4JzDcZ127BATNOZZZwEFZ7wdjYKtnJYF_-sKydyNFqJTWumdJ3O5j8xAg')
+
+# the steps of section 13.8, each an item of its list, in their order
+TOKEN, CRIT, TYP, KID, ALG, KEY, SIGNATURE, ISS, EXP_STEP, NBF, AUD, SID, SUB = range(1, 14)
+REASONS = {TOKEN: 'token', CRIT: 'crit', TYP: 'typ', KID: 'kid', ALG: 'alg', KEY: 'key', SIGNATURE: 'signature',
+           ISS: 'iss', EXP_STEP: 'exp', NBF: 'nbf', AUD: 'aud', SID: 'sid', SUB: 'sub'}
+
+
+def instant(milliseconds):
+    """The wall clock's reading as an RFC 3339 instant, to the millisecond, in UTC."""
+    seconds, fraction = divmod(milliseconds, 1000)
+    moment = datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc)
+    return moment.strftime('%Y-%m-%dT%H:%M:%S') + f'.{fraction:03d}Z'
+
+
+NOW = IAT * 1000 + 60_000
+
+
+def key(issuer, algorithm, jwk):
+    return {'issuer': issuer, 'algorithm': algorithm, 'jwk': jwk}
+
+
+ES = key(ISSUER, 'ES256', EC_KEY)
+ES_BY_THUMBPRINT = key(ISSUER, 'ES256', {**EC_KEY, 'kid': thumbprint(EC_KEY)})
+HS = key(TRUST, 'HS256', HMAC_KEY)
+HS_BY_THUMBPRINT = key(TRUST, 'HS256', {**HMAC_KEY, 'kid': thumbprint(HMAC_KEY)})
+
+
+def part(value):
+    """A header or a claims set, from a JSON value or from its bytes as given."""
+    return base64url(value if isinstance(value, bytes) else compact(value))
+
+
+def hs256(header, claims, secret=unbase64url(HMAC_KEY['k'])):
+    """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac."""
+    signing_input = part(header) + '.' + part(claims)
+    return signing_input + '.' + base64url(hmac.new(secret, signing_input.encode('ascii'), hashlib.sha256).digest())
+
+
+def access(issuer=TRUST, **claims):
+    """An access token's claims (RFC 9068 §2.2), changed or, by None, left out."""
+    written = {'iss': issuer, 'sub': 'bob', 'aud': AUDIENCE, 'exp': EXP, 'iat': IAT, 'jti': 'at-0002', 'client_id': 'bead-client'}
+    written.update(claims)
+    return {name: value for name, value in written.items() if value is not None}
+
+
+AT_JWT = {'alg': 'HS256', 'typ': 'at+jwt'}
+
+
+def with_signature(token, signature):
+    return token.rsplit('.', 1)[0] + '.' + base64url(signature)
+
+
+def flipped(token):
+    """The token with its signature's first byte changed."""
+    signature = bytearray(unbase64url(token.rsplit('.', 1)[1]))
+    signature[0] ^= 0x01
+    return with_signature(token, bytes(signature))
+
+
+def der_of(token):
+    """The token with its ES256 signature, R then S, written as DER's ECDSA-Sig-Value (RFC 3279)."""
+    signature = unbase64url(token.rsplit('.', 1)[1])
+
+    def integer(value):
+        value = value.lstrip(b'\x00') or b'\x00'
+        value = b'\x00' + value if value[0] & 0x80 else value
+        return b'\x02' + bytes([len(value)]) + value
+
+    body = integer(signature[:32]) + integer(signature[32:])
+    return with_signature(token, b'\x30' + bytes([len(body)]) + body)
+
+
+def past_its_bytes(token):
+    """The token with a bit set past its signature's last byte, in its last character's unused bits."""
+    alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    last = alphabet.index(token[-1])
+    assert last & 1 == 0, 'a last character whose unused bits are zero'
+    return token[:-1] + alphabet[last | 1]
+
+
+def holds(token, issuer, end, **named):
+    """A verdict that holds: its session's identifier, its claims set as the token carries it, its end."""
+    claims = json.loads(unbase64url(token.split('.')[1]))
+    return {'holds': True, 'identifier': {'issuer': issuer, **named}, 'claims': claims, 'end': end}
+
+
+def refused(step):
+    return {'holds': False, 'reason': REASONS[step]}
+
+
+# the fraction of exp that a floor would lose: the token holds a millisecond past what floor allows
+FRACTIONAL_EXP = EXP + 0.0005
+assert math.floor(FRACTIONAL_EXP * 1000) == EXP * 1000 and math.ceil(FRACTIONAL_EXP * 1000) == EXP * 1000 + 1
+
+# the last whole second of exp whose end is 2^53 - 1 at most, and the one after it
+LAST_EXP = (LARGEST - LEEWAY) // 1000
+assert LAST_EXP * 1000 + LEEWAY <= LARGEST < (LAST_EXP + 1) * 1000 + LEEWAY
+
+TWIN_END = EXP * 1000 + LEEWAY
+HS_TOKEN = hs256(AT_JWT, access())
+
+jwt_verdicts = [
+    # typ: an ID token of the same issuer, under the same key, refused; its twin taken
+    ('an ID token, typed JWT by its issuer', [TYP], ES256_ID_TOKEN, [ES], NOW, refused(TYP)),
+    ('its twin, typed at+jwt', ['13.8', TYP], ES256_ID_TOKEN_TWIN, [ES], NOW,
+     holds(ES256_ID_TOKEN_TWIN, ISSUER, TWIN_END, sub='alice')),
+    ('typed application/at+jwt, its media type written whole', [TYP], hs256({**AT_JWT, 'typ': 'application/at+jwt'}, access()), [HS],
+     NOW, holds(hs256({**AT_JWT, 'typ': 'application/at+jwt'}, access()), TRUST, TWIN_END, sub='bob')),
+    ('typed AT+JWT, a value RFC 9068 does not name', [TYP], hs256({**AT_JWT, 'typ': 'AT+JWT'}, access()), [HS], NOW, refused(TYP)),
+    ('with no typ', [TYP], hs256({'alg': 'HS256'}, access()), [HS], NOW, refused(TYP)),
+    # the key: found by kid among the keys alone, never by what the token carries
+    ('an ES256 token found by its kid, its key\'s thumbprint', ['13.8', KID], ES256_BY_THUMBPRINT, [HS, ES_BY_THUMBPRINT], NOW,
+     holds(ES256_BY_THUMBPRINT, ISSUER, TWIN_END, sub='alice')),
+    ('an HS256 token found by its kid, among two issuers\' keys', ['13.8', KID],
+     hs256({**AT_JWT, 'kid': thumbprint(HMAC_KEY)}, access()), [ES, HS_BY_THUMBPRINT], NOW,
+     holds(hs256({**AT_JWT, 'kid': thumbprint(HMAC_KEY)}, access()), TRUST, TWIN_END, sub='bob')),
+    ('two issuers\' keys under one kid, the token\'s issuer\'s taken', [KID], hs256({**AT_JWT, 'kid': 'k1'}, access()),
+     [key(ISSUER, 'ES256', {**EC_KEY, 'kid': 'k1'}), key(TRUST, 'HS256', {**HMAC_KEY, 'kid': 'k1'})], NOW,
+     holds(hs256({**AT_JWT, 'kid': 'k1'}, access()), TRUST, TWIN_END, sub='bob')),
+    ('a kid that names no key, while the issuer\'s one key would verify', [KID], ES256_UNNAMED_KID, [ES], NOW, refused(KID)),
+    ('a token without a kid, whose issuer has two keys', [KID], HS_TOKEN, [HS, HS_BY_THUMBPRINT], NOW, refused(KID)),
+    ('a token carrying its own key in jwk, which is never read', [CRIT, SIGNATURE], ES256_OWN_JWK, [ES], NOW, refused(SIGNATURE)),
+    ('a token with crit', [CRIT], hs256({**AT_JWT, 'crit': ['urn:example:bound'], 'urn:example:bound': True}, access()), [HS], NOW,
+     refused(CRIT)),
+    # alg: its key's, whatever the token says
+    ('an ES256 token met by an HS256 key', [ALG], ES256_ID_TOKEN_TWIN, [key(ISSUER, 'HS256', HMAC_KEY)], NOW, refused(ALG)),
+    ('an HS256 token met by an ES256 key', [ALG], hs256(AT_JWT, access(ISSUER)), [ES], NOW, refused(ALG)),
+    ('an HS256 token keyed with an ES256 key\'s public bytes, its PEM', [ALG], hs256(AT_JWT, access(ISSUER), EC_PEM), [ES], NOW,
+     refused(ALG)),
+    ('an HS256 token keyed with an ES256 key\'s public bytes, its DER', [ALG], hs256(AT_JWT, access(ISSUER), EC_DER), [ES], NOW,
+     refused(ALG)),
+    ('an HS256 token keyed with an ES256 key\'s public bytes, its JWK\'s JSON', [ALG], hs256(AT_JWT, access(ISSUER), EC_JSON), [ES], NOW,
+     refused(ALG)),
+    ('an RS256 token', [ALG], RS256_TOKEN, [ES], NOW, refused(ALG)),
+    ('alg none, with no signature', [ALG], part({'alg': 'none', 'typ': 'at+jwt'}) + '.' + part(access()) + '.', [HS], NOW, refused(ALG)),
+    # the key serves by its JWK's alg, use and key_ops
+    ('a key whose JWK names its algorithm, its use and its key_ops', ['13.8', KEY], HS_TOKEN,
+     [key(TRUST, 'HS256', {**HMAC_KEY, 'alg': 'HS256', 'use': 'sig', 'key_ops': ['verify']})], NOW,
+     holds(HS_TOKEN, TRUST, TWIN_END, sub='bob')),
+    ('a token under a key set\'s encryption key', [KEY], ES256_UNDER_ENCRYPTION_KEY, [key(ISSUER, 'ES256', ENCRYPTION_KEY)], NOW,
+     refused(KEY)),
+    ('a key whose key_ops leave verify out', [KEY], HS_TOKEN, [key(TRUST, 'HS256', {**HMAC_KEY, 'key_ops': ['sign']})], NOW,
+     refused(KEY)),
+    ('a key whose JWK names another algorithm', [KEY], HS_TOKEN, [key(TRUST, 'HS256', {**HMAC_KEY, 'alg': 'HS512'})], NOW, refused(KEY)),
+    # the signature, over the token's first two parts as they came
+    ('an ES256 signature with a byte changed', [SIGNATURE], flipped(ES256_ID_TOKEN_TWIN), [ES], NOW, refused(SIGNATURE)),
+    ('an ES256 signature written in DER, never converted', [SIGNATURE], der_of(ES256_ID_TOKEN_TWIN), [ES], NOW, refused(SIGNATURE)),
+    ('an HS256 signature with a byte changed', [SIGNATURE], flipped(HS_TOKEN), [HS], NOW, refused(SIGNATURE)),
+    # iss: its key's issuer, octet for octet
+    ('the right key and audience under a foreign iss', [ISS], hs256({**AT_JWT, 'kid': thumbprint(HMAC_KEY)}, access(ISSUER)),
+     [ES, HS_BY_THUMBPRINT], NOW, refused(ISS)),
+    ('no iss, its key found by its kid', [ISS], hs256({**AT_JWT, 'kid': thumbprint(HMAC_KEY)}, access(None)), [HS_BY_THUMBPRINT], NOW,
+     refused(ISS)),
+    # exp and nbf, each a millisecond either side of its leeway
+    ('exp plus 60,000 less 1, the last millisecond it holds', ['13.8', EXP_STEP], HS_TOKEN, [HS], EXP * 1000 + LEEWAY - 1,
+     holds(HS_TOKEN, TRUST, TWIN_END, sub='bob')),
+    ('exp plus 60,000, the first millisecond it does not hold', [EXP_STEP], HS_TOKEN, [HS], EXP * 1000 + LEEWAY, refused(EXP_STEP)),
+    ('nbf less 60,000, the first millisecond it holds', ['13.8', NBF], hs256(AT_JWT, access(nbf=IAT)), [HS], IAT * 1000 - LEEWAY,
+     holds(hs256(AT_JWT, access(nbf=IAT)), TRUST, TWIN_END, sub='bob')),
+    ('nbf less 60,001, the last millisecond it does not hold', [NBF], hs256(AT_JWT, access(nbf=IAT)), [HS], IAT * 1000 - LEEWAY - 1,
+     refused(NBF)),
+    ('a fraction of exp, rounded up to its millisecond', ['13.8', EXP_STEP], hs256(AT_JWT, access(exp=FRACTIONAL_EXP)), [HS],
+     EXP * 1000 + LEEWAY, holds(hs256(AT_JWT, access(exp=FRACTIONAL_EXP)), TRUST, EXP * 1000 + 1 + LEEWAY, sub='bob')),
+    ('no exp', [EXP_STEP], hs256(AT_JWT, access(exp=None)), [HS], NOW, refused(EXP_STEP)),
+    ('exp a string', [EXP_STEP], hs256(AT_JWT, access(exp=str(EXP))), [HS], NOW, refused(EXP_STEP)),
+    ('an exp whose end is 2^53 - 1 at most', ['13.8', EXP_STEP], hs256(AT_JWT, access(exp=LAST_EXP)), [HS], NOW,
+     holds(hs256(AT_JWT, access(exp=LAST_EXP)), TRUST, LAST_EXP * 1000 + LEEWAY, sub='bob')),
+    ('an exp a second later, whose end passes 2^53 - 1', [EXP_STEP], hs256(AT_JWT, access(exp=LAST_EXP + 1)), [HS], NOW,
+     refused(EXP_STEP)),
+    ('nbf a string', [NBF], hs256(AT_JWT, access(nbf=str(IAT))), [HS], NOW, refused(NBF)),
+    ('an nbf whose milliseconds pass -(2^53 - 1)', [NBF], hs256(AT_JWT, access(nbf=-(LARGEST // 1000 + 1))), [HS], NOW, refused(NBF)),
+    # aud: a string, or an array of strings, that names the audience
+    ('aud an array naming the audience among others', ['13.8', AUD], hs256(AT_JWT, access(aud=[OTHER, AUDIENCE])), [HS], NOW,
+     holds(hs256(AT_JWT, access(aud=[OTHER, AUDIENCE])), TRUST, TWIN_END, sub='bob')),
+    ('aud naming another audience', [AUD], hs256(AT_JWT, access(aud=OTHER)), [HS], NOW, refused(AUD)),
+    ('no aud', [AUD], hs256(AT_JWT, access(aud=None)), [HS], NOW, refused(AUD)),
+    ('aud an array holding a number beside the audience', [AUD], hs256(AT_JWT, access(aud=[AUDIENCE, 7])), [HS], NOW, refused(AUD)),
+    # the session's identifier: iss with sid, else with sub
+    ('sid against sub, named by sid', ['13.8', SID], hs256(AT_JWT, access(sid='s-2026')), [HS], NOW,
+     holds(hs256(AT_JWT, access(sid='s-2026')), TRUST, TWIN_END, sid='s-2026')),
+    ('sub alone, named by sub', ['13.8', SUB], HS_TOKEN, [HS], NOW, holds(HS_TOKEN, TRUST, TWIN_END, sub='bob')),
+    ('sid a number', [SID], hs256(AT_JWT, access(sid=7)), [HS], NOW, refused(SID)),
+    ('neither sid nor sub', [SUB], hs256(AT_JWT, access(sub=None)), [HS], NOW, refused(SUB)),
+    ('a sub holding a lone surrogate, which names nothing', [SUB], hs256(AT_JWT, access(sub='\ud800')), [HS], NOW, refused(SUB)),
+    # the token's form: three parts of base64url, a header and a claims set each a JSON object
+    ('a token of two parts', [TOKEN], HS_TOKEN.rsplit('.', 1)[0], [HS], NOW, refused(TOKEN)),
+    ('a signature padded as base64 is', [TOKEN], HS_TOKEN + '=', [HS], NOW, refused(TOKEN)),
+    ('a signature whose last character sets a bit past its bytes', [TOKEN], past_its_bytes(HS_TOKEN), [HS], NOW, refused(TOKEN)),
+    ('a header opening with a byte order mark', [TOKEN], hs256(b'\xef\xbb\xbf' + compact(AT_JWT), access()), [HS], NOW,
+     refused(TOKEN)),
+    ('a claims set holding a byte that is not UTF-8', [TOKEN], hs256(AT_JWT, compact(access(jti='at-\xff')).replace(b'\\u00ff', b'\xff')),
+     [HS], NOW, refused(TOKEN)),
+    ('a claims set that is an array', [TOKEN], hs256(AT_JWT, [access()]), [HS], NOW, refused(TOKEN)),
+    ('a claims set naming aud twice', [TOKEN],
+     hs256(AT_JWT, compact(access(aud=OTHER))[:-1] + b',"aud":' + compact(AUDIENCE) + b'}'), [HS], NOW, refused(TOKEN)),
+    ('a header naming alg twice, once escaped', [TOKEN], hs256(b'{"alg":"none","typ":"at+jwt","\\u0061lg":"HS256"}', access()), [HS],
+     NOW, refused(TOKEN)),
+    ('a claims set naming a member by a lone surrogate', [TOKEN], hs256(AT_JWT, access(**{'\udc00': 1})), [HS], NOW, refused(TOKEN)),
+]
+
+
 def entry(**fields):
     return {key: value for key, value in fields.items() if value is not None}
 
@@ -388,6 +681,7 @@ document = {
         "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
         "side is the side that reads: a failure says which side raised it.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
+        "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
     ],
     'specVersion': spec_version(),
     'headers': [entry(name=name, clauses=clauses, bytes=data, header=header) for name, clauses, data, header in headers],
@@ -403,6 +697,9 @@ document = {
     'failures': [entry(name=name, clauses=clauses, record=record, maximumDetailBytes=maximum, failure=failure)
                  for name, clauses, record, maximum, failure in failures],
     'failureRefusals': [entry(name=name, clauses=clauses, record=record, code=MALFORMED) for name, clauses, record in failure_refusals],
+    'jwtVerdicts': [{'name': name, 'clauses': [unit if isinstance(unit, str) else f'13.8.{unit}' for unit in units], 'token': token,
+                     'keys': keys, 'audience': AUDIENCE, 'now': instant(now), 'verdict': verdict}
+                    for name, units, token, keys, now, verdict in jwt_verdicts],
 }
 
 with open(OUT, 'w', encoding='utf-8', newline='\n') as file:

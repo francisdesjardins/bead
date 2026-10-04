@@ -15,7 +15,13 @@ import {
 } from '../shared/constants';
 import { assertHeld, assertHeldDelay, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { ConnectError, GenericError, ReadyStateError, wrapReason } from '../shared/errors';
+import {
+  ConnectError,
+  GenericError,
+  ProgrammerError,
+  ReadyStateError,
+  wrapReason,
+} from '../shared/errors';
 import { noop } from '../shared/noop';
 import {
   getReadyState,
@@ -112,6 +118,10 @@ export const WAIT = 25_000;
 // the length before each envelope of a batch
 const LENGTH_BYTES = 4;
 
+// what a field's value holds, and so a credential the `Authorization` field carries: visible ASCII,
+// spaces and tabs (RFC 9110 §5.5)
+const FIELD_VALUE = /^[\t\x20-\x7e]*$/u;
+
 // helpers
 
 // the media type of a response, parameters aside
@@ -196,6 +206,10 @@ const retryDelayOf = (losses: number): number => {
  * and takes the connection token the server answers 201 with, each `send` posts one envelope with
  * that token, and `disconnect` deletes the connection. The token is kept here, never on `socket`.
  *
+ * Each `send` carries its credential, when it has one, in the `Authorization` field of its `POST`,
+ * as it is given; one that is no field's value — anything but visible ASCII, spaces and tabs — is
+ * refused before it goes. An answer, and what a listen brings back, carry none.
+ *
  * `send` settles on the head of its answer, so a caller knows whether the server had its envelope: a
  * 2xx resolves — the router has it, and an answer comes as a `message` when it does; a refusal the
  * transport marks in `bead-refusal` rejects, nothing having been tried, and the one that says the
@@ -214,9 +228,9 @@ const retryDelayOf = (losses: number): number => {
  *
  * @example
  * const client = createHTTPTransportClient();
- * client.on('message', (data) => {});
+ * client.on('message', ({ data }) => {});
  * await client.connect({ host, port });
- * await client.send(envelope);
+ * await client.send({ credential: 'Bearer mF_9.B5f-4.1JqM', data: envelope });
  * await client.disconnect();
  */
 export const createHTTPTransportClient = (
@@ -275,10 +289,11 @@ export const createHTTPTransportClient = (
         }
       };
 
-      // an envelope an answer or a listen brought back; a listener that throws stops nothing
+      // an envelope an answer or a listen brought back, which carry no credential; a listener that
+      // throws stops nothing
       const hear = (envelope: ArrayBuffer): void => {
         try {
-          client.emit(MESSAGE_EVENT, envelope);
+          client.emit(MESSAGE_EVENT, { credential: undefined, data: envelope });
         } catch (reason) {
           rethrow(reason);
         }
@@ -622,17 +637,25 @@ export const createHTTPTransportClient = (
           client.emit(CLOSE_EVENT, isClean, isQuick);
         },
 
-        send: (data) => {
+        send: ({ credential, data }) => {
           const connection = drawn;
 
           if (!client.isOpen() || connection === undefined) {
             return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
           }
 
+          // refused before it goes, the connection kept: a field could not carry it as it is
+          if (credential !== undefined && !FIELD_VALUE.test(credential)) {
+            return Promise.reject(
+              new ProgrammerError('a credential holds visible ASCII, spaces and tabs alone')
+            );
+          }
+
           return createPromise((resolve, reject) => {
             fetchImpl(connection.url, {
               body: data as BodyInit,
               headers: {
+                ...(credential === undefined ? {} : { authorization: credential }),
                 'content-type': BEAD_MEDIA_TYPE,
                 [CONNECTION_TOKEN_HEADER]: connection.connectionToken,
               },

@@ -91,7 +91,13 @@ public sealed partial class RouterServerTests
         var given = setup ?? new Setup();
         var device = DeviceOf(given);
 
-        Start(new RouterServerOptions { Relay = given.Relay, Clock = given.Clock });
+        Start(new RouterServerOptions
+        {
+            Relay = given.Relay,
+            Clock = given.Clock,
+            SessionOf = given.SessionOf,
+            CredentialSchemes = given.CredentialSchemes,
+        });
         _transport.Open(First);
         Router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7, Label = "the device" });
 
@@ -177,6 +183,70 @@ public sealed partial class RouterServerTests
             ],
             SentSince());
         Assert.Empty(device.Pipe.ClientSent);
+    }
+
+    [Fact]
+    public async Task Refuses_a_JWT_or_an_ELSEWHERE_CREDENTIAL_UNSUPPORTED_before_beforeRoute_forwarding_nothing_OPAQUE_resolves_to_leg_A_s_connection_s_session_which_beforeRoute_reads()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        var admitted = new List<object?>();
+
+        using var device = StartRelayed(new Setup
+        {
+            // TODO it forwards a JWT and an ELSEWHERE once it carries credentials (decision 0010):
+            // until then it takes none of them, whatever its side takes
+            CredentialSchemes = [CredentialScheme.Jwt, CredentialScheme.Elsewhere],
+            SessionOf = (request, _) =>
+            {
+                return ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (token, "ada")));
+            },
+            Relay = new RelayOptions
+            {
+                BeforeRoute = new BeforeRequest((request) =>
+                {
+                    admitted.Add(request.Session?.Data);
+
+                    return true;
+                }),
+            },
+        });
+
+        Deliver(First, To(7, Presenting(RequestOf(1), Credential.Jwt("a.b.c"))));
+        Deliver(First, To(7, Presenting(RequestOf(3), Credential.Elsewhere)));
+        Deliver(First, To(8, Presenting(RequestOf(5), Credential.Of((CredentialScheme)7, []))));
+        await Settle();
+
+        Assert.Equal(
+            ["OPAQUE", "OPAQUE", "OPAQUE"],
+            _transport.Sent.Select((entry) =>
+            {
+                return entry.Envelope.Failure!.Detail;
+            }));
+        Assert.Equal(
+            ["first failure 1 CredentialUnsupported", "first failure 3 CredentialUnsupported", "first failure 5 CredentialUnsupported"],
+            SentSince());
+        Assert.Empty(admitted);
+        Assert.Empty(device.Pipe.ClientSent);
+
+        // none and its OPAQUE run in leg A's connection's session; another token does not hold.
+        // One at a time: the TypeScript side answers each within its delivery, over its pipe
+        Deliver(First, To(7, RequestOf(7, payload: "hi")));
+        await Settle();
+        Deliver(First, To(7, Presenting(RequestOf(9, payload: "ho"), token)));
+        await Settle();
+        Deliver(First, To(7, Presenting(RequestOf(11), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA"))));
+        await Settle();
+
+        Assert.Equal(["first result 7 HI", "first result 9 HO", "first failure 11 SessionRequired"], SentSince());
+        Assert.Equal(["ada", "ada"], admitted);
+
+        // leg B presents nothing
+        Assert.All(device.Pipe.ClientSent, (bytes) =>
+        {
+            var header = EnvelopeCodec.ReadEnvelope(bytes, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = int.MaxValue })!.Header;
+
+            Assert.Null(Assert.IsType<RequestHeader>(header).Credential);
+        });
     }
 
     [Fact]
@@ -504,6 +574,10 @@ public sealed partial class RouterServerTests
         public bool IsDeferred { get; init; }
 
         public TimeProvider? Clock { get; init; }
+
+        public Func<SessionRequest, CancellationToken, ValueTask<CallSession?>>? SessionOf { get; init; }
+
+        public IReadOnlyCollection<CredentialScheme>? CredentialSchemes { get; init; }
     }
 
     // a device behind the relay, its router and leg B to it; how many calls to held it saw cancelled
@@ -704,8 +778,10 @@ public sealed partial class RouterServerTests
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             return pipe.FromClient(bytes);
         }
     }
@@ -742,8 +818,10 @@ public sealed partial class RouterServerTests
             Message?.Invoke(new TransportMessage(bytes, false), pipe.ConnectionHandle);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             return pipe.FromServer(bytes, connectionHandle);
         }
     }

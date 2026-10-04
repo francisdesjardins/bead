@@ -130,6 +130,22 @@ export const isSessionToken = (value: unknown): value is SessionToken => {
   return typeof value === 'string' && SESSION_TOKEN_PATTERN.test(value) && value !== ZERO_TOKEN;
 };
 
+/**
+ * Whether `presented` is the token `held`, compared in constant time (spec 9.2, step 5): every
+ * character of `held` is read, wherever the two differ. Base64url spells 16 bytes one way only, so
+ * comparing the characters compares the bytes.
+ */
+export const isSameSessionToken = (presented: string, held: SessionToken): boolean => {
+  let difference = presented.length ^ held.length;
+
+  for (let index = 0; index < held.length; index += 1) {
+    // ! past the end of `presented`, NaN reads as 0, and its length already differs
+    difference |= presented.charCodeAt(index) ^ held.charCodeAt(index);
+  }
+
+  return difference === 0;
+};
+
 /** Which side opened the call `callId` names: odd, a client; even, a server; `undefined` for none. */
 export const sideOfCallId = (callId: CallId): RouterSide | undefined => {
   if (!Number.isInteger(callId) || callId < 1 || callId > 0xffffffff) {

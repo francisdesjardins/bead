@@ -9,11 +9,12 @@ import { CancelError, ProgrammerError, toError } from '../../transport/shared/er
 import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT } from '../../transport/shared/constants';
 import { gaugesOf, mergeGauges } from '../../transport/shared/gauges';
 import { createEventMethods } from '../../transport/shared/lifecycle';
-import type { Data } from '../../transport/shared/types';
+import type { ITransportMessage } from '../../transport/shared/types';
+import { presentedCredentialOf } from '../shared/call-session';
 import { EnvelopeKind, SERVER_FAILURES } from '../shared/constants';
 import { DisconnectError } from '../shared/errors';
 import { createRouterCore } from '../shared/router-core';
-import type { ICallAddress, IFailure, IRequestHeader } from '../shared/types';
+import type { Credential, ICallAddress, IFailure, IRequestHeader } from '../shared/types';
 import { createNotificationManager } from './notification-manager';
 import { createRelay } from './relay';
 import { createSubscriptionPlaces } from './subscription-places';
@@ -57,6 +58,7 @@ export type {
   FailureOrigin,
   IAdmissionRequest,
   IBeforeRequest,
+  ICallSession,
   ICancelHeader,
   IChunkHeader,
   ICreditHeader,
@@ -71,9 +73,12 @@ export type {
   IRouterFailures,
   IRouterLimits,
   NotificationKey,
+  ISessionRequest,
   RedactedHeader,
+  RequestCredential,
   RouterLimitsOptions,
   RouterSide,
+  SessionOf,
   SessionToken,
 } from '../shared/types';
 export type {
@@ -210,8 +215,9 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       },
       report,
       send: (bytes, connectionHandle) => {
-        return transport.send(bytes, connectionHandle);
+        return transport.send({ data: bytes }, connectionHandle);
       },
+      ...(options?.sessionOf === undefined ? {} : { sessionOf: options.sessionOf }),
       ...(options?.sessionTokenOf === undefined ? {} : { sessionTokenOf: options.sessionTokenOf }),
       trace: (direction, { connectionHandle, header }) => {
         if (emitter.listenerCount('debug') > 0) {
@@ -289,7 +295,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     }
   };
 
-  const onMessage = (data: Data, connectionHandle: TransportServerConnectionHandle): void => {
+  const onMessage = (
+    { data }: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): void => {
     // a connection that speaks is open, even one opened before the router was built
     connections.set(connectionHandle, connectionHandle);
     core.receive(data, connectionHandle);
@@ -339,8 +348,24 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       );
     }
 
+    let credential: Credential | undefined;
+
+    // OPAQUE, the connection's session, as its answers announce it
+    try {
+      credential =
+        requestOptions.credential === undefined
+          ? undefined
+          : presentedCredentialOf(requestOptions.credential, {
+              failures: SERVER_FAILURES,
+              token: options?.sessionTokenOf?.(connectionHandle),
+            });
+    } catch (reason) {
+      return Promise.reject(toError(reason));
+    }
+
     return core.request(payload, {
       connectionHandle,
+      credential,
       onSent,
       options: requestOptions,
       procedure,

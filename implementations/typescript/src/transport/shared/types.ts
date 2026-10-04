@@ -83,6 +83,18 @@ export interface IGauges<Handle extends string = string> {
   readonly counts: Readonly<Record<string, number>>;
 }
 
+/**
+ * What a transport carries, both ways: an envelope, and the credential it carried beside it (spec
+ * 15.1). Over HTTP, it is the `Authorization` field of the `POST /bead` that carries a request, as it
+ * came, its surrounding whitespace removed; a WebSocket and a Web Worker carry none, and what a listen
+ * brings back carries none either.
+ */
+export interface ITransportMessage {
+  /** None when nothing was carried: an empty field carries none. */
+  readonly credential?: string | undefined;
+  readonly data: Data;
+}
+
 /** A message as a port or a worker's scope delivers it: its data, and the ports it carried. */
 export interface IWorkerMessageEventLike {
   readonly data: unknown;

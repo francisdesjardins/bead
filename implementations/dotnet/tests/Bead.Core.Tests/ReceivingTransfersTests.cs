@@ -156,18 +156,18 @@ public sealed class ReceivingTransfersTests
     [Fact]
     public void Grants_a_transfer_the_budget_starved_once_another_gives_its_bytes_back()
     {
-        var (credits, receiving, _) = ReceivingOf(LimitsOf() with { BufferedBytesBudget = 20, MaximumPayloadBytes = 20 });
+        var (credits, receiving, _) = ReceivingOf(LimitsOf() with { BufferedBytesBudget = 21, MaximumPayloadBytes = 20 });
         var first = OpenedOf(receiving.Open(new byte[4], (CallOf(1, "a"), null, 20)));
 
         receiving.Grant(first);
 
-        var second = OpenedOf(receiving.Open(ReadOnlyMemory<byte>.Empty, (CallOf(1, "b"), null, 20)));
+        var second = OpenedOf(receiving.Open(new byte[1], (CallOf(1, "b"), null, 20)));
 
         receiving.Grant(second);
         Assert.Equal(["a 1 20"], credits);
         Assert.Equal(0, receiving.Available);
         receiving.Close(first);
-        Assert.Equal(["a 1 20", "b 1 16"], credits);
+        Assert.Equal(["a 1 20", "b 1 17"], credits);
         Assert.Equal(4, receiving.Available);
     }
 

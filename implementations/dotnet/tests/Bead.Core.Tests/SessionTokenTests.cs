@@ -24,6 +24,25 @@ public sealed class SessionTokenTests
         Assert.Equal(Bytes, written);
     }
 
+    [Fact]
+    public void Is_one_token_only_when_every_byte_is_one_byte_apart_at_either_end_is_another()
+    {
+        var token = SessionToken.FromBytes(Bytes);
+
+        SessionToken Apart(int index)
+        {
+            var bytes = (byte[])Bytes.Clone();
+
+            bytes[index] ^= 0x01;
+
+            return SessionToken.FromBytes(bytes);
+        }
+
+        Assert.True(token.FixedTimeEquals(SessionToken.Parse(Text)));
+        Assert.False(token.FixedTimeEquals(Apart(0)));
+        Assert.False(token.FixedTimeEquals(Apart(SessionToken.Bytes - 1)));
+    }
+
     [Theory]
     [InlineData(15)]
     [InlineData(17)]

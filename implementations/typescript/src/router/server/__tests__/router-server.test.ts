@@ -6,16 +6,18 @@ import { allClosed, host, IMPLEMENTATIONS } from '../../../transport/shared/__te
 import { createWSTransportServer } from '../../../transport/server/ws-transport-server';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
-import type { Data } from '../../../transport/shared/types';
+import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { headerBytesOf } from '../../shared/header';
 import { toSessionToken } from '../../shared/identifiers';
 import { createServiceManager } from '../../shared/service-manager';
 import type {
+  Credential,
   Envelope,
   IProcedure,
   OutgoingEnvelope,
   RouterLimitsOptions,
+  SessionOf,
 } from '../../shared/types';
 import type { IRelayOptions, RelayTarget } from '../types';
 import {
@@ -97,15 +99,17 @@ const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(8));
 // what an answer announces: the session, by its token
 const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 
-/** A client's request for `procedure`, on `callId`, carrying `payload`. */
+/** A client's request for `procedure`, on `callId`, presenting `credential`, carrying `payload`. */
 const requestOf = (
   callId: number,
   {
+    credential,
     destinationId,
     opensSubscription,
     payload = new Uint8Array(0),
     procedure = echo,
   }: {
+    credential?: Credential;
     destinationId?: number;
     opensSubscription?: true;
     payload?: Uint8Array;
@@ -115,6 +119,7 @@ const requestOf = (
   return {
     header: {
       callId,
+      credential,
       destinationId,
       kind: EnvelopeKind.REQUEST,
       opensSubscription,
@@ -176,7 +181,7 @@ const createScriptedTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [socket: unknown, request: unknown, connectionHandle: Handle];
-    message: [data: Data, connectionHandle: Handle];
+    message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
   const sent: ISentEnvelope[] = [];
   const control = {
@@ -189,7 +194,7 @@ const createScriptedTransport = () => {
   const transport: IRouterServerTransportLike = {
     off: emitter.off,
     on: emitter.on,
-    send: (data, connectionHandle) => {
+    send: ({ data }, connectionHandle) => {
       const sentEnvelope = {
         connectionHandle,
         envelope: readEnvelope(bytesOf(data), {
@@ -217,7 +222,7 @@ const createScriptedTransport = () => {
   const deliver = (connectionHandle: Handle, envelope: OutgoingEnvelope | Uint8Array) => {
     emitter.emit(
       'message',
-      envelope instanceof Uint8Array ? envelope : envelopeOf(envelope),
+      { data: envelope instanceof Uint8Array ? envelope : envelopeOf(envelope) },
       connectionHandle
     );
   };
@@ -389,6 +394,49 @@ test.describe('createRouterServer', () => {
       ]);
     });
 
+    test('are each asked their session of its sessionOf, once, their call id held, before their admission, which reads it, as their callback does', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      const order: unknown[] = [];
+      using router = createRouterServer(transport, {
+        sessionOf: ({ connectionHandle, header, signal }) => {
+          order.push(['session', connectionHandle, header.callId, signal.aborted]);
+
+          return header.credential === undefined ? undefined : Object.freeze({ data: 'ada' });
+        },
+      });
+      const services = createServiceManager(router);
+
+      services.getRequestResolver(echo, {
+        beforeRequest: ({ header, session }) => {
+          order.push(['admit', header.callId, session]);
+
+          return true;
+        },
+        serializer: answering,
+      })((request, response) => {
+        order.push(['callback', request.header.callId, request.session]);
+
+        return response('ok');
+      });
+
+      deliver(first, requestOf(31));
+      deliver(first, requestOf(33, { credential: OPAQUE }));
+      await sleep(0);
+
+      expect(order).toEqual([
+        ['session', first, 31, false],
+        ['admit', 31, undefined],
+        ['callback', 31, undefined],
+        ['session', first, 33, false],
+        ['admit', 33, { data: 'ada' }],
+        ['callback', 33, { data: 'ada' }],
+      ]);
+      expect(answersOf(sent)).toEqual([
+        [first, 'result', 31, 'ok'],
+        [first, 'result', 33, 'ok'],
+      ]);
+    });
+
     test('refused their admission never reach a callback, which would subscribe a plain request', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
@@ -518,7 +566,7 @@ test.describe('createRouterServer', () => {
 
       deliver(first, requestOf(1));
       deliver(second, subscribingOf(1));
-      emitter.emit('message', 'text', first);
+      emitter.emit('message', { data: 'text' }, first);
 
       // a refusal that cannot go out
       control.sendErrors.set(second, new Error('gone'));
@@ -639,6 +687,59 @@ test.describe('createRouterServer', () => {
       expect(text.decode((await answering).payload)).toBe('pong');
       expect(reportedOf(errors)).toEqual([[ProtocolCode.CALL_UNKNOWN, second]]);
       expect(activity).toEqual(['request first', 'response first']);
+    });
+
+    test('present OPAQUE when they ask, their connection’s session as sessionTokenOf gives it, and fail before they go, SESSION_REQUIRED, when it has none', async () => {
+      const { deliver, open, sent, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, {
+        sessionTokenOf: (connectionHandle) => {
+          return connectionHandle === first ? TOKEN : undefined;
+        },
+      });
+      const asking = {
+        ...options,
+        credential: { scheme: CredentialScheme.OPAQUE },
+      } as const;
+
+      open(first);
+      open(second);
+
+      await expect(
+        router.request(new Uint8Array(0), {
+          options: { ...asking, connectionHandle: second },
+          procedure: echo,
+        })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        origin: 'local',
+        side: 'server',
+      });
+
+      const answering = router.request(new Uint8Array(0), {
+        options: { ...asking, connectionHandle: first },
+        procedure: echo,
+      });
+
+      await sleep(0);
+      deliver(first, resultOf(2));
+      await answering;
+
+      expect(
+        sent.map(({ connectionHandle, envelope }) => {
+          return [connectionHandle, envelope?.header];
+        })
+      ).toEqual([
+        [
+          first,
+          {
+            callId: 2,
+            credential: OPAQUE,
+            kind: EnvelopeKind.REQUEST,
+            procedureId: 1,
+            serviceId: 2,
+          },
+        ],
+      ]);
     });
 
     test('name their connection, and it must be open; a server holds no subscription', async () => {
@@ -2145,14 +2246,16 @@ test.describe('createRouterServer, relaying', () => {
     deviceLimits,
     isDeferred,
     relay = admitting,
+    sessionOf,
   }: {
     clock?: TestClock;
     deviceLimits?: RouterLimitsOptions;
     isDeferred?: boolean;
     relay?: IRelayOptions;
+    sessionOf?: SessionOf<Handle>;
   } = {}) => {
     const legA = createScriptedTransport();
-    const router = createRouterServer(legA.transport, { clock, relay });
+    const router = createRouterServer(legA.transport, { clock, relay, sessionOf });
     const { [Symbol.dispose]: disposeDevice, ...behind } = createDevice({
       clock,
       isDeferred,
@@ -2216,6 +2319,79 @@ test.describe('createRouterServer, relaying', () => {
     // the target's own failures are answered, not reported
     expect(errors).toEqual([]);
     expect(router.destinations()).toEqual([{ destinationId: 7, label: 'the device' }]);
+  });
+
+  test('refuses a JWT or an ELSEWHERE, CREDENTIAL_UNSUPPORTED, before beforeRoute, forwarding nothing; OPAQUE resolves to leg A’s connection’s session, which beforeRoute reads', async () => {
+    const routed: unknown[] = [];
+    using relayed = createRelayed({
+      relay: {
+        beforeRoute: ({ header, session }) => {
+          routed.push([header.callId, session]);
+
+          return session !== undefined;
+        },
+      },
+      sessionOf: ({ header }) => {
+        const { credential } = header;
+
+        return credential !== undefined && 'token' in credential && credential.token === TOKEN
+          ? Object.freeze({ data: 'leg A' })
+          : undefined;
+      },
+    });
+    const { deliver, pipe, sent } = relayed;
+
+    deliver(
+      first,
+      requestOf(1, {
+        credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+        destinationId: 7,
+      })
+    );
+    deliver(
+      first,
+      requestOf(3, { credential: { scheme: CredentialScheme.ELSEWHERE }, destinationId: 7 })
+    );
+    deliver(first, requestOf(5, { destinationId: 7 }));
+    deliver(
+      first,
+      requestOf(7, { credential: OPAQUE, destinationId: 7, payload: text.encode('hi') })
+    );
+    deliver(
+      first,
+      requestOf(9, {
+        credential: { scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN },
+        destinationId: 7,
+      })
+    );
+    await sleep(0);
+
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
+          : [envelope?.header.callId, envelope?.kind];
+      })
+    ).toEqual([
+      [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+      [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+      [5, ProtocolCode.ACCESS_DENIED, ''],
+      [9, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      [7, EnvelopeKind.RESULT],
+    ]);
+    expect(routed).toEqual([
+      [5, undefined],
+      [7, { data: 'leg A' }],
+    ]);
+    // leg B carried the one admitted alone, and no credential
+    expect(
+      pipe.sent.client.map((bytes) => {
+        return readEnvelope(bytes, {
+          failures: SERVER_FAILURES,
+          maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+        })?.header;
+      })
+    ).toEqual([{ callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 }]);
   });
 
   test('refuses before leg B — the routing not admitted, the destination unknown, a subscription, a payload past the target’s limit — and sends the target nothing', async () => {

@@ -60,13 +60,14 @@ const errorOf = (event: unknown): unknown => {
 /**
  * A transport client over one WebSocket. Over `ws`, it pings the server every `heartbeat`, and
  * closes when a ping went unanswered: a server gone without a word ends in a `close` rather than
- * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it.
+ * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it. A
+ * WebSocket carries no credential beside an envelope: one given to `send` is not carried.
  *
  * @example
  * const client = createWSTransportClient();
- * client.on('message', (data) => {});
+ * client.on('message', ({ data }) => {});
  * await client.connect({ host, port });
- * await client.send('hello');
+ * await client.send({ data: 'hello' });
  * await client.disconnect();
  */
 export const createWSTransportClient = (options?: IWSTransportClientOptions): WSTransportClient => {
@@ -182,7 +183,10 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                     return undefined;
                   }
 
-                  return (client.emit(MESSAGE_EVENT, data as Data), undefined);
+                  return (
+                    client.emit(MESSAGE_EVENT, { credential: undefined, data: data as Data }),
+                    undefined
+                  );
                 };
 
                 socket.onclose = () => {
@@ -294,7 +298,9 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
         }
       },
 
-      send: (data) => {
+      // TODO a credential given here is not carried: the client fails a call that presents one its
+      // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+      send: ({ data }) => {
         return createPromise((resolve, reject) => {
           const { socket } = client;
 

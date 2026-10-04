@@ -9,6 +9,7 @@ import type { IClient, IClientLayers, IClientOptions, IClientTransportLike } fro
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   DisconnectError,
   FailureError,
   FailureScope,
@@ -29,8 +30,10 @@ export {
 } from '../transport/shared/errors';
 export type { IClient, IClientLayers, IClientOptions, IClientTransportLike } from './types';
 export type {
+  ICallSession,
   IRouterClientOptions,
   IRouterLimits,
+  RequestCredential,
   RouterLimitsOptions,
 } from '../router/client/router-client';
 

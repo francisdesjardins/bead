@@ -3,7 +3,8 @@
   "$comment": [
     "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
     "A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client's connection.",
-    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
+    "token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.",
+    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
     "report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.",
@@ -1305,7 +1306,7 @@
       ]
     },
     {
-      "name": "a procedure that requires a session refuses a connection without one with SESSION_REQUIRED",
+      "name": "a procedure that requires a session refuses a call in none with SESSION_REQUIRED",
       "clauses": [
         "13.5"
       ],
@@ -1493,9 +1494,53 @@
       ]
     },
     {
-      "name": "a request presenting a credential is read, and its credential ignored, whatever its scheme",
+      "name": "a request presenting its connection's OPAQUE is taken, and runs in that session",
       "clauses": [
+        "9.2.5",
+        "13.1",
         "13.4"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada"
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 03  00 01 00 0E  00 01 00 10  <ada> | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 61 64 61 22"
+          }
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 05  00 01 00 0D  00 01 00 10  <ada> | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C",
+            "credential": "NONE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request presenting an OPAQUE no session holds is refused SESSION_REQUIRED, whatever its procedure requires, and its connection's session stays",
+      "clauses": [
+        "9.2.5",
+        "13.5"
       ],
       "steps": [
         {
@@ -1503,39 +1548,344 @@
         },
         {
           "expect": {
-            "kind": 17,
+            "kind": 18,
             "callId": 1,
-            "payload": "22 78 22"
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
           }
         },
         {
-          "send": "A1 10 08 06  00 00 00 03  00 01 00 01  00 02 00 05  61 2E 62 2E 63  00 00 00 | 22 79 22"
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 3,
-            "payload": "22 79 22"
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
           }
         },
         {
-          "send": "A1 10 08 04  00 00 00 05  00 01 00 01  00 03 00 00 | 22 7A 22"
+          "send": "A1 10 08 08  00 00 00 05  00 01 00 01  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F | 22 79 22"
         },
         {
           "expect": {
-            "kind": 17,
+            "kind": 18,
             "callId": 5,
-            "payload": "22 7A 22"
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
           }
         },
         {
-          "send": "A1 10 08 05  00 00 00 07  00 01 00 01  00 07 00 02  01 02  00 00 | 22 77 22"
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 0E | 6E 75 6C 6C"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 7,
-            "payload": "22 77 22"
+            "payload": "22 61 64 61 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request presenting another connection's OPAQUE is refused SESSION_REQUIRED: a token holds on its own connection alone",
+      "clauses": [
+        "9.2.5",
+        "13.2"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "other"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 62 6F 62 22 7D",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 62 6F 62 22",
+            "credential": "OPAQUE"
+          },
+          "token": "bob",
+          "on": "other"
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 03  00 01 00 0E  00 01 00 10  <ada> | 6E 75 6C 6C",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 05  00 01 00 0E  00 01 00 10  <bob> | 6E 75 6C 6C",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 62 6F 62 22"
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 03  00 01 00 0E  00 01 00 10  <ada> | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 61 64 61 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request presenting the OPAQUE of a session ended is refused SESSION_REQUIRED",
+      "clauses": [
+        "9.2.5",
+        "13.4"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 0D | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C",
+            "credential": "NONE"
+          }
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 05  00 01 00 01  00 01 00 10  <ada> | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 79 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request presenting the OPAQUE of a session opened anew under a new token is refused SESSION_REQUIRED",
+      "clauses": [
+        "9.2.5",
+        "13.2",
+        "13.4"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada"
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 03  00 01 00 0C  00 01 00 10  <ada> | 7B 22 6E 61 6D 65 22 3A 22 62 6F 62 22 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 62 6F 62 22",
+            "credential": "OPAQUE"
+          },
+          "token": "bob"
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 05  00 01 00 0E  00 01 00 10  <ada> | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 08  00 00 00 07  00 01 00 0E  00 01 00 10  <bob> | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 62 6F 62 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a credential scheme to come is answered CREDENTIAL_UNSUPPORTED, its detail naming the schemes the server takes, before its admission",
+      "clauses": [
+        "9.2.4",
+        "9.2.5"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 01  00 04 00 00 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 36,
+              "scope": 0,
+              "relays": 0,
+              "detail": "OPAQUE"
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 05  00 00 00 03  00 01 00 0E  FF FF 00 02  01 02  00 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 36,
+              "scope": 0,
+              "relays": 0,
+              "detail": "OPAQUE"
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 05  00 01 00 63  00 07 00 00 | 7B 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a JWT, to a server with no key, is answered CREDENTIAL_UNSUPPORTED",
+      "clauses": [
+        "9.2.5"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 06  00 00 00 01  00 01 00 01  00 02 00 05  61 2E 62 2E 63  00 00 00 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 36,
+              "scope": 0,
+              "relays": 0,
+              "detail": "OPAQUE"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE, to a server with no verifier, is answered CREDENTIAL_UNSUPPORTED",
+      "clauses": [
+        "9.2.5"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 01  00 03 00 00 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 36,
+              "scope": 0,
+              "relays": 0,
+              "detail": "OPAQUE"
+            }
           }
         }
       ]
@@ -2316,6 +2666,33 @@
       "steps": [
         {
           "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 04 | 22 61 62 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an opening that carries no byte of its payload is answered CHUNK_INVALID",
+      "clauses": [
+        "12.3",
+        "12.3.3"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 64"
         },
         {
           "expect": {

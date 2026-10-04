@@ -840,8 +840,8 @@ test.describe('createServiceManager', () => {
 
       expect(reached).toEqual(['allowed']);
       expect(seen).toEqual([
-        ['connectionHandle', 'header'],
-        ['connectionHandle', 'header'],
+        ['connectionHandle', 'header', 'session'],
+        ['connectionHandle', 'header', 'session'],
       ]);
       expect(calls.respond[0]?.response).toEqual({ failure: SERVER_FAILURES.accessDenied });
     });
@@ -2175,6 +2175,38 @@ test.describe('createServiceManager', () => {
       }).toThrow(thrown);
     });
 
+    test('reads the call’s session its router resolved, and so does the callback, whoever asks it', async () => {
+      const { router } = createFakeRouter();
+      const session = Object.freeze({ data: 'ada' });
+      const read: unknown[] = [];
+      const resolver = createServiceManager(router).getRequestResolver(echo, {
+        beforeRequest: (request) => {
+          read.push(['admission', request.session]);
+
+          return request.session !== undefined;
+        },
+        serializer: serverSerializer,
+      })((request, response) => {
+        read.push(['callback', request.session]);
+
+        return response(request.payload);
+      });
+
+      // asked by its router, then by itself, for a router that asks nothing
+      expect(resolver.admit?.({ connectionHandle, header, session })).toBeUndefined();
+      await resolver({ ...propsOf(encode({ text: 'hi' })), isAdmitted: true, session });
+      await resolver({ ...propsOf(encode({ text: 'hi' })), session });
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(read).toEqual([
+        ['admission', session],
+        ['callback', session],
+        ['admission', session],
+        ['callback', session],
+        ['admission', undefined],
+      ]);
+    });
+
     test('is not asked again of a request its router admitted', async () => {
       const { calls, router } = createFakeRouter();
       const asked: number[] = [];
@@ -2196,7 +2228,7 @@ test.describe('createServiceManager', () => {
 
       expect(asked).toEqual([]);
       // the callback is handed the request, and nothing of its admission
-      expect(handed).toEqual([['connectionHandle', 'header', 'payload', 'signal']]);
+      expect(handed).toEqual([['connectionHandle', 'header', 'payload', 'session', 'signal']]);
       expect(calls.respond[0]?.response).toEqual({ payload: encode({ text: 'hi' }) });
     });
 

@@ -7,12 +7,13 @@ import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { CLOSE_EVENT, MESSAGE_EVENT, RECONNECT_EVENT } from '../../transport/shared/constants';
-import type { Data } from '../../transport/shared/types';
+import type { ITransportMessage } from '../../transport/shared/types';
+import { connectionSessionOf, presentedCredentialOf } from '../shared/call-session';
 import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../shared/constants';
 import { FailureError } from '../shared/errors';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
-import type { CallId, INotificationLike, SessionToken } from '../shared/types';
+import type { CallId, Credential, INotificationLike, SessionToken } from '../shared/types';
 import type {
   IRouterClient,
   IRouterClientOptions,
@@ -58,10 +59,12 @@ export type {
   IProtocolFailure,
   IRequestHeader,
   IResultHeader,
+  ICallSession,
   IRouterResult,
   IRouterFailures,
   IRouterLimits,
   RedactedHeader,
+  RequestCredential,
   RouterLimitsOptions,
   RouterSide,
   SessionToken,
@@ -298,7 +301,11 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       },
       report,
       send: (bytes) => {
-        return transport.send(bytes);
+        return transport.send({ data: bytes });
+      },
+      // a command runs in the session this client learned, as a request runs in its connection's
+      sessionOf: ({ header }) => {
+        return connectionSessionOf(header.credential, { token: sessionToken });
       },
       trace: (direction, { header }) => {
         if (emitter.listenerCount('debug') > 0) {
@@ -363,7 +370,8 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     }
   };
 
-  const onMessage = (data: Data): void => {
+  // what a transport carried beside the envelope is the server's, and no client's to read
+  const onMessage = ({ data }: ITransportMessage): void => {
     core.receive(data, SERVER_CONNECTION_HANDLE);
   };
 
@@ -425,9 +433,20 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     },
     request: (payload, { onSent, options, procedure, subscribes }) => {
       const connectionHandle = SERVER_CONNECTION_HANDLE;
+      let credential: Credential | undefined;
+
+      // OPAQUE, the session this client learned, as its answers announced it
+      try {
+        credential = presentedCredentialOf(options.credential, {
+          failures: CLIENT_FAILURES,
+          token: sessionToken,
+        });
+      } catch (reason) {
+        return Promise.reject(toError(reason));
+      }
 
       if (subscribes === undefined) {
-        return core.request(payload, { connectionHandle, onSent, options, procedure });
+        return core.request(payload, { connectionHandle, credential, onSent, options, procedure });
       }
 
       // only the notification held for the procedure is bound, or its notifications would reach
@@ -445,6 +464,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       return core
         .request(payload, {
           connectionHandle,
+          credential,
           onCallId,
           onSent,
           opensSubscription: true,

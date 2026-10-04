@@ -16,7 +16,7 @@ import type {
 } from '../router/shared/types';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import type { IClock } from '../transport/shared/clock';
-import type { Data, EmitterListener, IGauges } from '../transport/shared/types';
+import type { EmitterListener, IGauges, ITransportMessage } from '../transport/shared/types';
 import type { IHealth, ServerGauges } from './health';
 
 // interfaces
@@ -55,13 +55,14 @@ export interface IServer<
    */
   health(): IHealth;
   /**
-   * A `beforeRequest` that lets through only a connection with a session: what every procedure but
-   * the one that makes the session asks for. It refuses with its `refusal`, SESSION_REQUIRED. A
-   * composition by `&&` loses that refusal and answers ACCESS_DENIED; a caller that wants to keep
-   * SESSION_REQUIRED puts `refusal` on its own function.
+   * A `beforeRequest` that lets through only a call with a session, its call's, never its
+   * connection's (spec 13.5): what every procedure but the one that makes the session asks for. It
+   * refuses with its `refusal`, SESSION_REQUIRED. A composition by `&&` loses that refusal and
+   * answers ACCESS_DENIED; a caller that wants to keep SESSION_REQUIRED puts `refusal` on its own
+   * function.
    */
   requireSession: ((
-    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'connectionHandle'>
+    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>
   ) => boolean) & { readonly refusal: AdmissionFailure };
   /**
    * What `await using` calls: the layers come apart in the reverse of the order they were built in
@@ -168,7 +169,9 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   ): unknown;
   off(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
   on(
     event: 'close',
@@ -189,7 +192,9 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   ): unknown;
   on(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
   stop(): Promise<void>;
 }

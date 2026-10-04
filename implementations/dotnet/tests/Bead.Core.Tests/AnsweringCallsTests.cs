@@ -131,10 +131,10 @@ public sealed class AnsweringCallsTests
         var answering = calls.Open(new AnswerTarget("a", HeaderOf(3)));
 
         // a call not open receives nothing, on a connection with calls open or none
-        calls.Attach(new CallAddress(5, "a"), ReceivingOf(answering, (5, "a", 0)));
-        calls.Attach(new CallAddress(5, "b"), ReceivingOf(answering, (5, "b", 0)));
+        calls.Attach(new CallAddress(5, "a"), ReceivingOf(answering, (5, "a", 1)));
+        calls.Attach(new CallAddress(5, "b"), ReceivingOf(answering, (5, "b", 1)));
 
-        var closed = ReceivingOf(answering, (3, "a", 0));
+        var closed = ReceivingOf(answering, (3, "a", 1));
 
         calls.Attach(call, closed);
         Assert.Null(calls.ReceivingOf(new CallAddress(5, "a")));
@@ -147,7 +147,7 @@ public sealed class AnsweringCallsTests
         Assert.Null(calls.ReceivingOf(call));
 
         var reopened = calls.Open(new AnswerTarget("a", HeaderOf(3)));
-        var taken = ReceivingOf(reopened, (3, "a", 0));
+        var taken = ReceivingOf(reopened, (3, "a", 1));
 
         calls.Attach(call, taken);
         calls.Take(call);
@@ -155,7 +155,7 @@ public sealed class AnsweringCallsTests
         calls.Open(new AnswerTarget("a", HeaderOf(3)));
 
         var other = calls.Open(new AnswerTarget("b", HeaderOf(3)));
-        var gone = ReceivingOf(other, (3, "b", 0));
+        var gone = ReceivingOf(other, (3, "b", 1));
 
         calls.Attach(new CallAddress(3, "b"), gone);
         calls.TakeAll(null);

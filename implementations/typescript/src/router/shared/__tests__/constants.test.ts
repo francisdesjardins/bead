@@ -34,6 +34,7 @@ test.describe('ProtocolCode', () => {
       ACCESS_DENIED: 2,
       PAYLOAD_TOO_LARGE: 2,
       CAPACITY_EXCEEDED: 2,
+      CREDENTIAL_UNSUPPORTED: 2,
       CHUNK_INVALID: 3,
       CREDIT_EXCEEDED: 3,
       PAYLOAD_UNDECODABLE: 3,
@@ -49,13 +50,13 @@ test.describe('ProtocolCode', () => {
     }
   });
 
-  test('holds 21 codes, each once, and leaves out the ones to come', () => {
+  test('holds 22 codes, each once, and leaves out the ones to come', () => {
     const codes = Object.values(ProtocolCode);
 
-    expect(codes).toHaveLength(21);
-    expect(new Set(codes).size).toBe(21);
+    expect(codes).toHaveLength(22);
+    expect(new Set(codes).size).toBe(22);
 
-    for (const later of [23, 66]) {
+    for (const later of [23, 37, 66]) {
       expect(codes).not.toContain(later);
     }
 
@@ -77,6 +78,7 @@ test.describe('FAILURE_KEYS', () => {
     expect(FAILURE_KEYS.procedureUnknown).toBe(ProtocolCode.PROCEDURE_UNKNOWN);
     expect(FAILURE_KEYS.sessionRequired).toBe(32);
     expect(FAILURE_KEYS.accessDenied).toBe(33);
+    expect(FAILURE_KEYS.credentialUnsupported).toBe(36);
   });
 });
 

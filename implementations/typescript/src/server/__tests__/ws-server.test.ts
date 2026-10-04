@@ -248,10 +248,10 @@ test.describe('a WebSocket server and client, carrying transfers', () => {
     const taken = { client: [] as number[], server: [] as number[] };
     const credits = { client: 0, server: 0 };
 
-    server.transport.on('message', (data) => {
+    server.transport.on('message', ({ data }) => {
       taken.server.push(bytesOf(data).length);
     });
-    client.transport.on('message', (data) => {
+    client.transport.on('message', ({ data }) => {
       taken.client.push(bytesOf(data).length);
     });
     server.router.on('debug', ({ direction, header }) => {

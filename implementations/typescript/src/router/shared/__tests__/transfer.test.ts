@@ -278,18 +278,24 @@ test.describe('createOutgoingTransfer', () => {
 });
 
 test.describe('createIncomingTransfer', () => {
-  test('refuses an opening that holds its whole total, and takes one without a byte', () => {
-    const refused = createIncomingTransfer(patternOf(4), {
-      failures: SERVER_FAILURES,
-      limits: { maximumChunkRuns: 4, windowBytes: 8 },
-      payloadBytesPerChunk: 1,
-      total: 4,
-    });
+  test('refuses an opening that holds its whole total, and one without a byte of its payload', () => {
+    for (const opening of [patternOf(4), new Uint8Array(0)]) {
+      const refused = createIncomingTransfer(opening, {
+        failures: SERVER_FAILURES,
+        limits: { maximumChunkRuns: 4, windowBytes: 8 },
+        payloadBytesPerChunk: 1,
+        total: 4,
+      });
 
-    expect(refused).toMatchObject({ code: ProtocolCode.CHUNK_INVALID, side: 'server' });
-    expect(incomingOf(new Uint8Array(0), { total: 4 })).toMatchObject({
-      contiguous: 0,
-      creditEnd: 0,
+      expect(refused, String(opening.length)).toMatchObject({
+        code: ProtocolCode.CHUNK_INVALID,
+        side: 'server',
+      });
+    }
+
+    expect(incomingOf(patternOf(1), { total: 4 })).toMatchObject({
+      contiguous: 1,
+      creditEnd: 1,
       total: 4,
     });
   });

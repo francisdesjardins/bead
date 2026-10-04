@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Bead.Interop;
 
 namespace Bead.Tests;
@@ -136,6 +137,44 @@ public sealed class ConversationsTests
         };
     }
 
+    // what a send writes, its tokens named between angle brackets written as their 16 bytes
+    private static byte[] SentOf(string written, Dictionary<string, SessionToken> tokens)
+    {
+        var hexadecimal = Regex.Replace(written, "<([^<>]+)>", (named) =>
+        {
+            Span<byte> bytes = stackalloc byte[SessionToken.Bytes];
+
+            tokens[named.Groups[1].Value].CopyTo(bytes);
+
+            return Convert.ToHexString(bytes);
+        });
+
+        return Vectors.FromHexadecimal(hexadecimal);
+    }
+
+    // the token an answer announced, OPAQUE; none for any other
+    private static SessionToken? AnnouncedOf(ReadOnlyMemory<byte> bytes)
+    {
+        var header = EnvelopeCodec.ReadEnvelope(
+            bytes.Span,
+            new EnvelopeReadOptions { Side = RouterSide.Client, MaximumEnvelopeBytes = int.MaxValue })!.Header;
+
+        return header switch
+        {
+            ResultHeader { Credential.SessionToken: { } token } => token,
+            FailureHeader { Credential.SessionToken: { } token } => token,
+            _ => null,
+        };
+    }
+
+    // a failure's detail, as it was sent
+    private static string DetailOf(ReadOnlyMemory<byte> bytes)
+    {
+        return EnvelopeCodec.ReadEnvelope(
+            bytes.Span,
+            new EnvelopeReadOptions { Side = RouterSide.Client, MaximumEnvelopeBytes = int.MaxValue })!.Failure!.Detail;
+    }
+
     // what a conversation expects, written as OutOf writes what was sent
     private static string ExpectedOf(JsonElement expected)
     {
@@ -196,6 +235,9 @@ public sealed class ConversationsTests
 
         // what the server reported, each with the connection it came with
         var reports = new List<(string Report, string ConnectionHandle)>();
+
+        // the tokens the server announced, by the name the conversation gave each
+        var tokens = new Dictionary<string, SessionToken>();
 
         await using var server = new Server<string>(
             transport,
@@ -261,7 +303,7 @@ public sealed class ConversationsTests
                 if (step.TryGetProperty("send", out var bytes))
                 {
                     await NothingMore();
-                    transport.Deliver(Vectors.FromHexadecimal(bytes.GetString()!), connection);
+                    transport.Deliver(SentOf(bytes.GetString()!, tokens), connection);
                     await scheduler.WhenIdle();
                 }
 
@@ -290,12 +332,26 @@ public sealed class ConversationsTests
                     clock.Wall(TimeSpan.FromMilliseconds(wall.GetInt64()));
                 }
 
-                // the next envelope sent on its connection; when none was, what came instead
+                // the next envelope sent on its connection; when none was, what came instead. A
+                // failure's detail is compared where the conversation gives it, and a token
+                // announced is kept under the name the step gives it
                 if (step.TryGetProperty("expect", out var expected))
                 {
+                    var sent = transport.Next(connection);
+
                     Assert.Equal(
                         ExpectedOf(expected),
-                        transport.Next(connection) is { } sent ? OutOf(sent) : $"nothing, but [{string.Join(", ", Pending())}]");
+                        sent is { } envelope ? OutOf(envelope) : $"nothing, but [{string.Join(", ", Pending())}]");
+
+                    if (expected.TryGetProperty("failure", out var failure) && failure.TryGetProperty("detail", out var detail))
+                    {
+                        Assert.Equal(detail.GetString(), DetailOf(sent!.Value));
+                    }
+
+                    if (step.TryGetProperty("token", out var token))
+                    {
+                        tokens[token.GetString()!] = AnnouncedOf(sent!.Value)!.Value;
+                    }
                 }
 
                 // the next report; on a connection named, it came with that connection's handle
@@ -455,8 +511,10 @@ public sealed class ConversationsTests
             return Task.CompletedTask;
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             lock (_gate)
             {
                 if (!_sent.TryGetValue(connectionHandle, out var sent))

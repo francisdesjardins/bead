@@ -189,11 +189,14 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     }
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> to the connection; refused with a
-    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError.
+    /// Hands the bytes of <paramref name="message"/> to the connection, as binary; refused with a
+    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. A
+    /// WebSocket carries no credential: one given is not carried.
     /// </summary>
-    public Task Send(ReadOnlyMemory<byte> bytes)
+    public Task Send(TransportMessage message)
     {
+        // TODO a credential given here is not carried: the client fails a call that presents one its
+        // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
         WebSocketConnection? connection;
         ReadyState readyState;
 
@@ -204,7 +207,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
 
         return readyState == ReadyState.Open && connection is not null
-            ? connection.Send(bytes)
+            ? connection.Send(message.Bytes)
             : Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
     }
 

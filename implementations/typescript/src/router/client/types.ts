@@ -1,7 +1,11 @@
 // dependencies
 
 import type { IClock } from '../../transport/shared/clock';
-import type { Data, EmitterListener, IEventIteratorOptions } from '../../transport/shared/types';
+import type {
+  EmitterListener,
+  IEventIteratorOptions,
+  ITransportMessage,
+} from '../../transport/shared/types';
 import type {
   DebugDirection,
   INotificationLike,
@@ -114,12 +118,12 @@ export interface IRouterClientTransportLike {
   /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
   readonly clock?: IClock | undefined;
   off(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown;
-  off(event: 'message', listener: (data: Data) => void): unknown;
+  off(event: 'message', listener: (message: ITransportMessage) => void): unknown;
   off(event: 'reconnect', listener: () => void): unknown;
   on(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown;
-  on(event: 'message', listener: (data: Data) => void): unknown;
+  on(event: 'message', listener: (message: ITransportMessage) => void): unknown;
   on(event: 'reconnect', listener: () => void): unknown;
-  send(data: Data): Promise<void>;
+  send(message: ITransportMessage): Promise<void>;
 }
 
 /** An envelope as the router sent or took it. */
