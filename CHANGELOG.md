@@ -58,6 +58,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The SESSION block gives way to the CREDENTIAL block (decision 0010): bit `0x08`, the header's last
+  block, a credential scheme on 2 bytes — `NONE`, `OPAQUE`, `JWT`, `ELSEWHERE`, or one to come — its
+  length on 2, its bytes padded to a word, so a header holds 1,020 bytes; `0x01` is kept for a block
+  to come. An answer announces its connection's session as `OPAQUE`, 20 bytes, or its end as `NONE`,
+  and a side counts 20 where it counted 16. Both sides name it `credential`, `Credential`, where they
+  said `sessionToken`, and a trace carries its scheme alone; a request's credential is read and
+  ignored until its semantics land; the C# side's `HeaderBytesOf` refuses a credential its kind does
+  not take, as its writer and the TypeScript side's do. 162 vectors, where 123 were.
 - A listen held over HTTP holds its connection's timeouts — the server's own, and a session's
   connection timeout — silence counting anew from its end, by a new optional event of the
   transport's, `listen` and `Listen`; a session's session timeout and `lastActivity` count messages

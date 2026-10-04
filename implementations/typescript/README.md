@@ -91,7 +91,7 @@ length field: each transport delimits the envelope, as WebSocket does with its m
 A1 10 00 03   00 00 00 03   00 02 00 01 | 68 69
 │  │  │  │    └─ call id ┘  └ svc ┘└proc┘  payload "hi"
 │  │  │  └ header words (3 × 4 = 12 bytes)
-│  │  └ flags: SESSION 0x01 (16 bytes), DESTINATION 0x02 (4 bytes), TRANSFER 0x04 (8 bytes);
+│  │  └ flags: DESTINATION 0x02 (4 bytes), TRANSFER 0x04 (8 bytes), CREDENTIAL 0x08 (last);
 │  │          SUBSCRIPTION 0x10, PACED 0x20, MORE 0x40 (on a chunk), which add none
 │  └ kind: REQUEST 0x10, RESULT 0x11, FAILURE 0x12, NOTIFICATION 0x13, CHUNK 0x14, CREDIT 0x15,
 │          CANCEL 0x16
@@ -99,9 +99,10 @@ A1 10 00 03   00 00 00 03   00 02 00 01 | 68 69
 ```
 
 A request is 12 bytes of header, a result 8, a chunk and a credit 16, a cancel 8 and nothing after
-it. The flags of the low nibble each add a block, in the order of their bits, and 0x08 is kept for a
-block to come; those of the high nibble add none, and 0x80 is kept: a reader knows a header's length
-from `flags & 0x0F` alone. A flag its kind does not take makes the envelope malformed. The kinds 0x17 to 0x7F are the ones to come, and are reported; those from 0x80 are advisory, and
+it. The flags of the low nibble each add a block, in the order of their bits, CREDENTIAL last, and
+0x01 is kept for a block to come; those of the high nibble add none, and 0x80 is kept: a reader knows
+a header's length from `flags & 0x0F`, and with CREDENTIAL from the length its block states — its
+credential scheme on 2 bytes, its length on 2, its bytes padded to a word. A flag its kind does not take makes the envelope malformed. The kinds 0x17 to 0x7F are the ones to come, and are reported; those from 0x80 are advisory, and
 skipped. A first byte outside 0xA1–0xAF is not an envelope at all, and is refused as malformed. A
 call id is odd when a client opened the call and even when a server did, as HTTP/2 numbers its
 streams, so the two sides never draw the same one; a subscription's notifications carry the call id
@@ -250,7 +251,7 @@ await client.connect({ host: 'localhost', port });
 
 `debug` tells each step of each call — its direction, its type, its procedure, what went out and
 came in, and how long it took — and builds nothing while no one listens; each router's own `debug`
-tells each envelope, its header copied without its session token. `filterDebug(listener, filter)`
+tells each envelope, its header copied without its credential, its scheme alone. `filterDebug(listener, filter)`
 keeps what a call's listener hears, and `filterEnvelopeDebug` what an envelope's does, in the
 convention of the `DEBUG` variable of the `debug` package: words parted by commas or white space,
 `*` for any run of characters, `-` before a name to leave it out, and the exclusions winning. A
@@ -755,7 +756,7 @@ abbreviated ([0003](../../docs/decisions/0003-one-word-one-meaning.md)).
 | function id, function name    | `procedureId`, `procedureName`          | no abbreviation                                                                                                 |
 | service version               | `serviceRevision`                       | the version is the protocol's                                                                                   |
 | device id                     | `destinationId`                         | what is behind the peer, which a relay passes the call on to                                                    |
-| session id                    | `sessionToken`                          | 16 bytes, announced only when it changes                                                                        |
+| session id                    | an `OPAQUE` `credential`                | 16 bytes, announced only when it changes                                                                        |
 | notification id               | the subscribing call's `callId`         | nothing of it travels in a payload                                                                              |
 | req, res, err                 | `request`, `response`, `failure`        | no abbreviation                                                                                                 |
 | exclude self                  | `exclude`                               | it names the connection to leave out                                                                            |

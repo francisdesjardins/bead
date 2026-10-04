@@ -79,17 +79,18 @@ values, as `ChunkOutcome.Refused` does. A send on a connection not open throws a
 `ArgumentException`, or an `InvalidOperationException` where the state, not an argument, is wrong,
 and a failure a `FailureException`. Data alike, which the TypeScript side compares by their
 structure, is the data's own `Equals`, or the comparer `SessionManagerOptions.DataComparer` names. A
-field that may be absent, `null` or a value, as an answer's session, none, ended or a token, is a
-nullable `SessionAnnouncement`, which holds a nullable `SessionToken`; the C# side names a header's
-two sessions by their type, `SessionToken` on a request and `Session` on an answer, as one field
-cannot be two types. Names stay the TypeScript side's, in PascalCase, but where .NET names
-otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and the HTTP client is `BeadHttpClient`, as
-.NET's own is `HttpClient`. A time in milliseconds is a `TimeSpan`, and the clock a layer takes and
-exposes, the TypeScript side's `IClock`, is a `TimeProvider`, named `Clock`
-([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), so a test moves it itself. A
-synchronous question of a router's state is a `Task`, since the state is on the router's scheduler.
-A callable that carries members, a requester or a notification, is a delegate or an interface: a
-request is made in three calls, as on the TypeScript side,
+field that may be absent, `null` or a value, as a header's credential, is a nullable `Credential`, a
+record of its `CredentialScheme` and what that scheme holds — an `OPAQUE` one's `SessionToken`, a
+`JWT`'s token, a scheme to come's bytes — where the TypeScript side's is a union of its schemes;
+both name the field `credential`, `Credential`, on a request and on an answer alike
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). Names stay the TypeScript side's, in
+PascalCase, but where .NET names otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and the
+HTTP client is `BeadHttpClient`, as .NET's own is `HttpClient`. A time in milliseconds is a
+`TimeSpan`, and the clock a layer takes and exposes, the TypeScript side's `IClock`, is a
+`TimeProvider`, named `Clock` ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)),
+so a test moves it itself. A synchronous question of a router's state is a `Task`, since the state
+is on the router's scheduler. A callable that carries members, a requester or a notification, is a
+delegate or an interface: a request is made in three calls, as on the TypeScript side,
 `GetRequest(procedure, dependencies)(payload)(options)`, and a notification registers with
 `Register(payload, callback)(options)`.
 
