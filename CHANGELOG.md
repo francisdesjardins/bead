@@ -55,9 +55,100 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   starting it anew. `spec/check.py` holds an advance over a socket to the due its `until` named; the
   transports' file names the HTTP server's own `connectionInactivityTimeout` among its defaults and
   options, and the conversations' limits take a transfer's inactivity.
+- Section 13.8 verifies a `JWT` one way, an access token of RFC 9068's profile, as RFC 8725
+  recommends, and its verdicts are a group of vectors, `jwtVerdicts`: a token, a key, a time and an
+  audience, taken or refused and why. Both sides verify it, on Web Crypto and on `ECDsa` and
+  `HMACSHA256`, and play the group, its audience one or a set.
+- `spec/check.py` refuses a published test key outside `spec/`, the tests and the interop service:
+  its parameters, or its thumbprint (RFC 7638), in any file git lists.
+- A transport carries a credential beside an envelope, both ways, as one argument: on the
+  TypeScript side, the message event's first argument and `send`'s are `{ data, credential }`; on
+  the C# side, `TransportMessage` has its `Credential`. Over HTTP it is the `Authorization` field of
+  the `POST /bead` that carries a request, as it came, its surrounding whitespace removed: an empty
+  one carries none, and a `POST /bead` with two is refused 400, `malformed`.
+- A conversation names the token an answer announced, `token`, and writes it in a later send as
+  `<name>`; a failure's detail is compared where a conversation gives one. A send says what its
+  transport carried beside it, `carried`, and so does a request leg B sends; a connection may carry
+  no credential, `carries`, or reach off the machine in the clear, `secure`; a conversation may set
+  its server's relay, `relay`; and a request expected names the credential it presents.
+- A credential's session (decision 0010, sections 13.9 and 13.10): a `JWT` a side verifies, or an
+  `ELSEWHERE` its verifier holds, runs its call in a session of its own, named by a record — its
+  issuer with its `sid`, else with its `sub`, or its verifier's `id` — and kept per connection while
+  it bounds a subscription, its end timed on the clock the side is given, the wall clock read again
+  at each step and a timer of 2³¹ − 1 ms at most armed toward it. A credential renewed under the
+  same identifier moves its end, and `endSession`, `EndSession`, ends it by its identifier on every
+  connection that keeps it, and nothing else: a credential that still holds opens it anew;
+  `endSessionsOf`, `EndSessionsOf`, ends every credential's session of an issuer, as when a key of
+  its leaks. A connection holds one subscription per procedure and per session.
+- `credentials`, `Credentials`, among a server's and a client's options: a `JWT`'s keys, each with
+  its issuer and its algorithm, its audience, and a key set, given with the issuers it answers for
+  and asked for those alone, when no key of a token's issuer names its `kid`, once a minute at most
+  for an issuer, with a signal its deadline aborts: its answer is held ten minutes, an ask under way
+  is shared, a `kid` that comes while its issuer's minute runs waits for the ask its deadline lets
+  go, a token without a `kid` waits on its issuer's keys while none serve, and at most
+  `maximumWaitingCalls`, `MaximumWaitingCalls`, 64 by default, wait for an issuer's deadline at
+  once, one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s verifier, `verify`,
+  `Verify`, given what the transport carried and the call's signal. A side given a `JWT`'s keys
+  holds its limits to 1,024 bytes at least (section 12.2), and keys or a key set given without an
+  audience are refused as the side is built. A `JWT`'s verdict reads the wall clock once its
+  signature has verified.
+- A client's credential, `credential`, `Credential`, by default and per call: `NONE`, `OPAQUE`, a
+  `JWT` or an `ELSEWHERE`. A default withdrawn once a call that presented it is refused
+  `SESSION_REQUIRED`, while it is still, by value, the credential that call presented, tells its
+  application, `credentialWithdrawn`, `CredentialWithdrawn`; a call
+  presenting an `ELSEWHERE` over a transport that carries none, or a bearer credential in the clear
+  off the machine, fails before it goes, `DESTINATION_UNREACHABLE`, as does a server's command over
+  HTTP. A transport says whether it carries a credential and whether it is secure,
+  `carriesCredential` and `isSecure`, on both sides, and a server's transport may be told what
+  stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy in the clear.
+- A relay forwards a credential, and its destination verifies it (section 14): its default
+  admission is `requireSessionOrCredential`, `RequireSessionOrCredential`, and an admission never
+  answers `SESSION_REQUIRED` to a call that presented a credential, but `ACCESS_DENIED`, so its
+  client keeps a credential that may hold; a destination is
+  registered with the audience it verifies; `verifies`, `Verifies`, has the relay verify what it
+  forwards against its destinations' audiences; a `JWT` crosses with its same bytes to a destination
+  of its audience, an `ELSEWHERE` moves to leg B's transport, and a call the relay cannot so forward
+  is refused `DESTINATION_UNREACHABLE` at a step of its own, 14.3's fifth; leg B's header counts its
+  credential, at the sixth.
+- The interop service verifies a `JWT` under two issuers' published test keys and a key set's third,
+  and an `ELSEWHERE` of its own auth-scheme, `Interop`; `endSession` ends a credential's session by
+  its identifier, and `endSessionsOf` an issuer's, `register` takes the audience its destination
+  verifies, and `ticks` and `tick` hold per session. 221 vectors in 10 groups, where 123 were in 9;
+  142 conversations, where 89 were; 56 transports' cases, where 50 were.
 
 ### Changed
 
+- The SESSION block gives way to the CREDENTIAL block (decision 0010): bit `0x08`, the header's last
+  block, a credential scheme on 2 bytes — `NONE`, `OPAQUE`, `JWT`, `ELSEWHERE`, or one to come — its
+  length on 2, its bytes padded to a word, so a header holds 1,020 bytes; `0x01` is kept for a block
+  to come. An answer announces its connection's session as `OPAQUE`, 20 bytes, or its end as `NONE`,
+  and a side counts 20 where it counted 16. Both sides name it `credential`, `Credential`, where they
+  said `sessionToken`, and a trace carries its scheme alone; the C# side's `HeaderBytesOf` refuses a
+  credential its kind does not take, as its writer and the TypeScript side's do.
+- A request runs in its call's session (decision 0010, section 9.2, step 5): a credential scheme the
+  side takes none of is refused `CREDENTIAL_UNSUPPORTED`, the admission block's new code 36, its
+  detail naming the schemes the side takes; then its credential resolves — none to its connection's
+  session, `OPAQUE` to it when the token is that session's, compared in constant time — and a
+  credential that does not hold is refused `SESSION_REQUIRED`, whatever its procedure requires; then
+  its admission decides. The router asks `sessionOf`, `SessionOf`, once per request, with its call's
+  signal, past its call id held and before `beforeRequest`; the call's session, `session`,
+  `Session`, reaches the admission and the resolver, and `requireSession`, `RequireSession`, tests
+  it, never the connection's. A client presents `OPAQUE`, the session it learned, on a call that asks
+  for it among its options, `credential`, `Credential`, and never by default. A notification's
+  filter is given the session a subscription is held in, `filter(handle, identifier)`; on the
+  TypeScript side `sessionOf` takes its request and its signal apart, and on the C# side
+  `Credential.Elsewhere` is a method, `JwtKey` and `JwtAlgorithm` are public, and
+  `DropSubscriptions` ends the subscriptions of a connection's own session alone.
+- A transfer's opening carries one byte of its payload at least: one without is refused
+  `CHUNK_INVALID`, and a requester whose header leaves it none fails before it goes,
+  `ENVELOPE_TOO_LARGE`. An opening gets no credit before its credential resolves and its admission
+  settles.
+- The interop service's `whoami` answers from its call's session, and `login` opens its
+  connection's session whatever its call presents.
+- The demo's tokens are access tokens of RFC 9068's profile, typed `at+jwt` and signed HS256: the
+  page presents its token as a `JWT` on every call, the servers verify it through their
+  `credentials`, `whoami` answers the call's session and `logout` ends it; `DEMO_KEY` gives the
+  demo its key, in base64url, 32 bytes at least, and a key published with its RFC is refused.
 - A listen held over HTTP holds its connection's timeouts — the server's own, and a session's
   connection timeout — silence counting anew from its end, by a new optional event of the
   transport's, `listen` and `Listen`; a session's session timeout and `lastActivity` count messages

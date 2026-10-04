@@ -9,6 +9,7 @@ import type { IClient, IClientLayers, IClientOptions, IClientTransportLike } fro
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   DisconnectError,
   FailureError,
   FailureScope,
@@ -29,8 +30,10 @@ export {
 } from '../transport/shared/errors';
 export type { IClient, IClientLayers, IClientOptions, IClientTransportLike } from './types';
 export type {
+  ICallSession,
   IRouterClientOptions,
   IRouterLimits,
+  RequestCredential,
   RouterLimitsOptions,
 } from '../router/client/router-client';
 
@@ -63,7 +66,12 @@ export const createClient = <Transport extends IClientTransportLike>(
   options?: IClientOptions
 ): IClient<Transport> => {
   const { clock } = transport;
-  const router = createRouter(transport, { clock, limits: options?.limits });
+  const router = createRouter(transport, {
+    clock,
+    credential: options?.credential,
+    credentials: options?.credentials,
+    limits: options?.limits,
+  });
 
   // a router a builder made on another clock comes apart, refused
   try {

@@ -8,10 +8,9 @@ import { WebSocketServer } from 'ws';
 import type { HealthStatus } from '../src/server/health';
 import { createHTTPServer } from '../src/server/http-server';
 import { createWSServer } from '../src/server/ws-server';
-import { isRole, offer } from './offer';
-import type { IClaims } from './procedures';
+import { isRole, offer, SILENCE_MILLISECONDS } from './offer';
 import { pathOf, relayExchanges, relayUpgrades } from './relay';
-import { issueToken, keyOf } from './token';
+import { credentialsOf, issueToken, keyOf, secretOf } from './token';
 
 // constants
 
@@ -27,8 +26,21 @@ const BEAD_PATHNAME = '/bead';
 /** Where a probe reads the health of both Bead servers, on this machine alone. */
 const HEALTH_PATHNAME = '/health';
 
-/** The identity provider's key, from a secret drawn at each start: no token outlives the demo. */
-const KEY = keyOf(crypto.getRandomValues(new Uint8Array(32)));
+/**
+ * The identity provider's key: `DEMO_KEY`'s, in base64url, else one drawn at each start, so no token
+ * outlives the demo. A key refused says why, and the demo does not start.
+ */
+const SECRET = await secretOf(process.env['DEMO_KEY']).catch((reason: unknown): never => {
+  process.stderr.write(`DEMO_KEY is refused: ${(reason as Error).message}\n`);
+
+  return process.exit(1);
+});
+
+/** What the identity provider signs with. */
+const KEY = keyOf(SECRET);
+
+/** What both Bead servers verify each call's token with: the same key, as a JWK, and the audience. */
+const CREDENTIALS = credentialsOf(SECRET);
 
 // this module runs from `dist/`, where the launcher builds it next to the page's script
 const FILES = Object.freeze({
@@ -66,9 +78,16 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
 
 // definition
 
-const overWebSocket = createWSServer<IClaims>({ transport: { WebSocketServer } });
+// a connection gone silent is closed, as no session of its own times it
+const overWebSocket = createWSServer({
+  connectionInactivityTimeout: SILENCE_MILLISECONDS,
+  credentials: CREDENTIALS,
+  transport: { WebSocketServer },
+});
 // behind the relay: the host a page named, and the address the relay says it came from
-const overHTTP = createHTTPServer<IClaims>({
+const overHTTP = createHTTPServer({
+  connectionInactivityTimeout: SILENCE_MILLISECONDS,
+  credentials: CREDENTIALS,
   transport: {
     createServer: (listener) => {
       return createServer(listener);
@@ -78,8 +97,8 @@ const overHTTP = createHTTPServer<IClaims>({
   },
 });
 
-offer(overWebSocket, KEY);
-offer(overHTTP, KEY);
+offer(overWebSocket);
+offer(overHTTP);
 
 // each Bead server on a local port the system picks, reached through the public one alone
 const [wsTarget, httpTarget] = await Promise.all([

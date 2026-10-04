@@ -11,6 +11,7 @@ import { LONGEST_TIMER } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   CLIENT_FAILURES,
+  CredentialScheme,
   EnvelopeKind,
   FailureScope,
   LIMIT_DEFAULTS,
@@ -19,12 +20,16 @@ import {
   SERVER_FAILURES,
 } from '../constants';
 import { readEnvelope } from '../envelope';
-import { DisconnectError, FailureError } from '../errors';
+import { CapacityError, DisconnectError, FailureError } from '../errors';
 import { toSessionToken } from '../identifiers';
 import { createRouterCore } from '../router-core';
 import type {
+  Credential,
   Envelope,
+  IAdmissionRequest,
+  ICallSession,
   ICreditHeader,
+  IFailure,
   INotificationHeader,
   IProcedure,
   IRequestHandler,
@@ -33,6 +38,7 @@ import type {
   IRequestResolverProps,
   IRouterCore,
   IRouterCorePort,
+  ISessionRequest,
   OutgoingEnvelope,
   RouterLimitsOptions,
   SessionToken,
@@ -54,6 +60,11 @@ const options = { timeout: 1_000 };
 const TOKEN = toSessionToken(new Uint8Array(16).fill(1));
 const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
 
+// what an answer announces: the session, by its token; another; its end
+const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
+const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });
+const ENDED = Object.freeze({ scheme: CredentialScheme.NONE });
+
 /** The bytes a hexadecimal string spells, spaces aside. */
 const fromHexadecimal = (text: string): Uint8Array => {
   const digits = text.replaceAll(/\s/g, '');
@@ -63,16 +74,21 @@ const fromHexadecimal = (text: string): Uint8Array => {
   });
 };
 
-/** A request's bytes for `procedure`, on `callId`, carrying `payload`, the opening of `total`. */
+/**
+ * A request's bytes for `procedure`, on `callId`, presenting `credential`, carrying `payload`, the
+ * opening of `total`.
+ */
 const requestOf = (
   callId: number,
   {
+    credential,
     destinationId,
     opensSubscription,
     payload = new Uint8Array(0),
     procedure = echo,
     total,
   }: {
+    credential?: Credential;
     destinationId?: number;
     opensSubscription?: true;
     payload?: Uint8Array;
@@ -83,6 +99,7 @@ const requestOf = (
   return envelopeOf({
     header: {
       callId,
+      credential,
       destinationId,
       kind: EnvelopeKind.REQUEST,
       opensSubscription,
@@ -185,7 +202,7 @@ const createPort = (hooks: Partial<IRouterCorePort<Handle>> = {}) => {
     report: (error, connectionHandle) => {
       reported.push([error, connectionHandle]);
     },
-    send: (bytes, connectionHandle) => {
+    send: ({ data: bytes }, connectionHandle) => {
       const sendError = control.sendErrors.get(connectionHandle);
 
       sizes.push(bytes.length);
@@ -383,10 +400,10 @@ test.describe('createRouterCore', () => {
       await sleep(0);
 
       expect(asked).toEqual([
-        [1, ['connectionHandle', 'header']],
-        [3, ['connectionHandle', 'header']],
-        [5, ['connectionHandle', 'header']],
-        [7, ['connectionHandle', 'header']],
+        [1, ['connectionHandle', 'header', 'session']],
+        [3, ['connectionHandle', 'header', 'session']],
+        [5, ['connectionHandle', 'header', 'session']],
+        [7, ['connectionHandle', 'header', 'session']],
       ]);
       expect(
         seen.map(({ header: { callId }, isAdmitted, payload: whole }) => {
@@ -711,8 +728,8 @@ test.describe('createRouterCore', () => {
 
       core.receive(fromHexadecimal('0A 10 00 03  00 00 00 03  00 02 00 01'), 'a');
       core.receive(fromHexadecimal('00 10 00 03  00 00 00 03  00 02 00 01'), 'a');
-      // a reserved bit
-      core.receive(fromHexadecimal('A1 10 08 03  00 00 00 05  00 02 00 01'), 'a');
+      // the kept bit
+      core.receive(fromHexadecimal('A1 10 01 03  00 00 00 05  00 02 00 01'), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.ENVELOPE_MALFORMED]]);
@@ -1054,6 +1071,514 @@ test.describe('createRouterCore', () => {
       }
 
       core.registerResolver(resolverOf({ ...echo, procedureId: 0xffff, serviceId: 0xffff }));
+    });
+  });
+
+  test.describe("a request's credential", () => {
+    const JWT = Object.freeze({ scheme: CredentialScheme.JWT, token: 'a.b.c' });
+    const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
+    const SESSION: ICallSession = Object.freeze({ data: 'ada' });
+    const unknown = { ...echo, procedureId: 99 };
+
+    /** What sent says of each failure: its call id, its code and its detail. */
+    const failuresOf = (sent: { envelope: Envelope | undefined }[]) => {
+      return sent.flatMap(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [[envelope.header.callId, envelope.failure.code, envelope.failure.detail]]
+          : [];
+      });
+    };
+
+    test('of a scheme the side takes none of is refused CREDENTIAL_UNSUPPORTED, naming those it takes, past its route and before it resolves', () => {
+      const asked: string[] = [];
+      const sessionOf = ({ header }: ISessionRequest<Handle>) => {
+        asked.push(`resolve ${String(header.callId)}`);
+
+        return undefined;
+      };
+      const resolver = Object.assign(resolverOf(echo), {
+        admit: ({ header }: IAdmissionRequest<Handle>) => {
+          asked.push(`admit ${String(header.callId)}`);
+
+          return undefined;
+        },
+      });
+      const opaqueOnly = createPort({ sessionOf });
+      const every = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+        sessionOf,
+      });
+      using first = createRouterCore(opaqueOnly.port);
+      using second = createRouterCore(every.port);
+
+      first.registerResolver(resolver);
+      second.registerResolver(resolver);
+
+      for (const [callId, credential] of [
+        [1, JWT],
+        [3, ELSEWHERE],
+        [5, { bytes: Uint8Array.of(1, 2), scheme: 0xffff }],
+      ] as const) {
+        first.receive(requestOf(callId, { credential }), 'a');
+      }
+
+      // a scheme to come, to a procedure no route reaches: the route refuses it first
+      first.receive(
+        requestOf(7, { credential: { bytes: new Uint8Array(0), scheme: 7 }, procedure: unknown }),
+        'a'
+      );
+      second.receive(requestOf(1, { credential: { bytes: new Uint8Array(0), scheme: 4 } }), 'a');
+
+      expect(failuresOf(opaqueOnly.sent)).toEqual([
+        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+        [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+        [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+        [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
+      ]);
+      expect(failuresOf(every.sent)).toEqual([
+        [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+      ]);
+      expect(asked).toEqual([]);
+    });
+
+    test('of none or OPAQUE resolves in the turn it came, the call’s session handed to its admission, then to its resolver', () => {
+      const asked: unknown[] = [];
+      const seen: IRequestResolverProps<Handle>[] = [];
+      const { port, reported } = createPort({
+        sessionOf: ({ connectionHandle, header }, signal) => {
+          asked.push([connectionHandle, header.callId, header.credential, signal.aborted]);
+
+          return header.credential === undefined ? undefined : SESSION;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo, seen), {
+          admit: ({ header, session }: IAdmissionRequest<Handle>) => {
+            asked.push(['admit', header.callId, session]);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3, { credential: OPAQUE }), 'b');
+
+      // nothing awaited: each resolved, was admitted and dispatched as it came
+      expect(asked).toEqual([
+        ['a', 1, undefined, false],
+        ['admit', 1, undefined],
+        ['b', 3, OPAQUE, false],
+        ['admit', 3, SESSION],
+      ]);
+      expect(
+        seen.map(({ header, session }) => {
+          return [header.callId, session];
+        })
+      ).toEqual([
+        [1, undefined],
+        [3, SESSION],
+      ]);
+      expect(reported).toEqual([]);
+    });
+
+    test('that does not resolve is refused SESSION_REQUIRED, whatever its procedure requires, never admitted, an ELSEWHERE as one that came without; none resolving to none runs in none', async () => {
+      const admitted: unknown[] = [];
+      const resolver = Object.assign(resolverOf(echo), {
+        admit: ({ header, session }: IAdmissionRequest<Handle>) => {
+          admitted.push([header.callId, session]);
+
+          return undefined;
+        },
+      });
+      const resolving = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE],
+        sessionOf: () => {
+          return undefined;
+        },
+      });
+      // no sessionOf at all resolves nothing either
+      const bare = createPort();
+      using first = createRouterCore(resolving.port);
+      using second = createRouterCore(bare.port);
+
+      first.registerResolver(resolver);
+      second.registerResolver(resolver);
+      first.receive(requestOf(1, { credential: OPAQUE }), 'a');
+      first.receive(requestOf(3), 'a');
+      first.receive(requestOf(5, { credential: ELSEWHERE }), 'a');
+      // one its transport carried a credential beside came, and did not hold
+      first.receive(
+        { credential: 'Interop sub=Ada', data: requestOf(7, { credential: ELSEWHERE }) },
+        'a'
+      );
+      second.receive(requestOf(1, { credential: OPAQUE }), 'a');
+      second.receive(requestOf(3), 'a');
+      await sleep(0);
+
+      expect(failuresOf(resolving.sent)).toEqual([
+        [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+        [5, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+        [7, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      ]);
+      expect(failuresOf(bare.sent)).toEqual([
+        [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      ]);
+      expect(admitted).toEqual([
+        [3, undefined],
+        [3, undefined],
+      ]);
+    });
+
+    test('whose resolution throws or rejects, or promises for none or OPAQUE, is answered PROCEDURE_FAILED, and reported, a JWT’s in a later turn', async () => {
+      const broken = new Error('no verifier answers');
+      const admitted: number[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }) => {
+          switch (header.callId) {
+            case 1:
+            case 7:
+              throw broken;
+            case 3:
+              return Promise.reject(broken);
+            default:
+              return Promise.resolve(SESSION);
+          }
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: ({ header }: IAdmissionRequest<Handle>) => {
+            admitted.push(header.callId);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3, { credential: JWT }), 'a');
+      // a JWT's that throws at once is answered after one presenting OPAQUE that came after it
+      core.receive(requestOf(7, { credential: JWT }), 'a');
+      core.receive(requestOf(5, { credential: OPAQUE }), 'a');
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 7, ProtocolCode.PROCEDURE_FAILED],
+      ]);
+      expect(
+        reported.map(([error, connectionHandle]) => {
+          return [error === broken ? 'broken' : error.constructor.name, connectionHandle];
+        })
+      ).toEqual([
+        ['broken', 'a'],
+        ['ProgrammerError', 'a'],
+        ['broken', 'a'],
+        ['broken', 'a'],
+      ]);
+      expect(admitted).toEqual([]);
+    });
+
+    test('whose resolution rejects with a CapacityError is answered CAPACITY_EXCEEDED, its message for detail, and reported nowhere; a FailureError of that code stays PROCEDURE_FAILED, reported', async () => {
+      const bounded = new CapacityError('as many calls wait already');
+      const thrown = new FailureError(SERVER_FAILURES.capacityExceeded);
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }) => {
+          return Promise.reject(header.callId === 1 ? bounded : thrown);
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(resolverOf(echo));
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(requestOf(3, { credential: JWT }), 'a');
+      await sleep(0);
+
+      expect(
+        sent.map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.FAILURE
+            ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
+            : envelope;
+        })
+      ).toEqual([
+        [1, ProtocolCode.CAPACITY_EXCEEDED, 'as many calls wait already'],
+        [3, ProtocolCode.PROCEDURE_FAILED, ''],
+      ]);
+      expect(reported).toEqual([[thrown, 'a']]);
+    });
+
+    test('answers an admission’s SESSION_REQUIRED to a request that presented a credential ACCESS_DENIED, its detail kept, and to one that presented none SESSION_REQUIRED, whatever its handler', async () => {
+      const detailed: IProcedure = { ...echo, procedureId: 4, procedureName: 'detailed' };
+      const own: IProcedure = { ...echo, procedureId: 5, procedureName: 'own' };
+      const credentials = [undefined, OPAQUE, JWT, ELSEWHERE] as const;
+
+      // a core on each side, its own table, its peer's call ids
+      for (const [failures, firstCallId] of [
+        [SERVER_FAILURES, 1],
+        [CLIENT_FAILURES, 2],
+      ] as const) {
+        const { port, reported, sent } = createPort({
+          credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+          failures,
+          sessionOf: ({ header }) => {
+            return header.credential === undefined ? undefined : SESSION;
+          },
+        });
+        const refusing = (procedure: IProcedure, refusal: IFailure) => {
+          return Object.assign(resolverOf(procedure), {
+            admit: () => {
+              return refusal;
+            },
+          });
+        };
+        using core = createRouterCore(port);
+        const expected: unknown[] = [];
+        let callId = firstCallId;
+
+        // handlers registered raw, refusing every call: the table's SESSION_REQUIRED, one with a
+        // detail of its own, and an application's failure whose code is 32, which is left alone
+        core.registerResolver(refusing(echo, failures.sessionRequired));
+        core.registerResolver(
+          refusing(detailed, { ...failures.sessionRequired, detail: 'sign in first' })
+        );
+        core.registerResolver(
+          refusing(own, { code: 32, detail: 'its own', scope: FailureScope.APPLICATION })
+        );
+
+        for (const [procedure, detail] of [
+          [echo, ''],
+          [detailed, 'sign in first'],
+        ] as const) {
+          for (const credential of credentials) {
+            core.receive(
+              {
+                data: requestOf(callId, {
+                  ...(credential === undefined ? {} : { credential }),
+                  procedure,
+                }),
+                ...(credential === ELSEWHERE ? { credential: 'carried' } : {}),
+              },
+              'a'
+            );
+            expected.push([
+              callId,
+              credential === undefined ? ProtocolCode.SESSION_REQUIRED : ProtocolCode.ACCESS_DENIED,
+              FailureScope.PROTOCOL,
+              detail,
+            ]);
+            callId += 2;
+          }
+        }
+
+        core.receive(requestOf(callId, { credential: JWT, procedure: own }), 'a');
+        expected.push([callId, 32, FailureScope.APPLICATION, 'its own']);
+        await sleep(0);
+
+        expect(
+          sent
+            .map(({ envelope }) => {
+              return envelope?.kind === EnvelopeKind.FAILURE
+                ? [
+                    envelope.header.callId,
+                    envelope.failure.code,
+                    envelope.failure.scope,
+                    envelope.failure.detail,
+                  ]
+                : envelope;
+            })
+            .toSorted((a, b) => {
+              return Number((a as number[])[0]) - Number((b as number[])[0]);
+            })
+        ).toEqual(expected);
+        expect(reported).toEqual([]);
+      }
+    });
+
+    test('of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {
+      const order: string[] = [];
+      const carried: unknown[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+        // at once, never waiting
+        sessionOf: ({ header, transportCredential }) => {
+          order.push(`resolve ${String(header.callId)}`);
+          carried.push([header.callId, transportCredential]);
+
+          return SESSION;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: ({ header, session }: IAdmissionRequest<Handle>) => {
+            order.push(`admit ${String(header.callId)} ${String(session?.data)}`);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(
+        { credential: 'Bearer mF_9.B5f-4.1JqM', data: requestOf(3, { credential: ELSEWHERE }) },
+        'a'
+      );
+      // one presenting none, which came after, goes first
+      core.receive(requestOf(5), 'a');
+      // the call id of one resolving is open: a request on it is reported, never answered
+      core.receive(requestOf(1), 'a');
+
+      expect(order).toEqual(['resolve 1', 'resolve 3', 'resolve 5', 'admit 5 ada']);
+      expect(codesOf(reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
+
+      await sleep(0);
+
+      expect(order).toEqual([
+        'resolve 1',
+        'resolve 3',
+        'resolve 5',
+        'admit 5 ada',
+        'admit 1 ada',
+        'admit 3 ada',
+      ]);
+      // the credential an ELSEWHERE stands for is the one its transport carried
+      expect(carried).toEqual([
+        [1, undefined],
+        [3, 'Bearer mF_9.B5f-4.1JqM'],
+        [5, undefined],
+      ]);
+      expect(sent).toEqual([]);
+    });
+
+    test('resolving, its call’s cancel or its connection’s close tells sessionOf by the call’s signal, and what it settles to then is dropped', async () => {
+      const pending = new Map<number, PromiseWithResolvers<ICallSession | undefined>>();
+      const signals = new Map<number, AbortSignal>();
+      const admitted: number[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }, signal) => {
+          const resolution = Promise.withResolvers<ICallSession | undefined>();
+
+          pending.set(header.callId, resolution);
+          signals.set(header.callId, signal);
+
+          return resolution.promise;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: ({ header }: IAdmissionRequest<Handle>) => {
+            admitted.push(header.callId);
+
+            return undefined;
+          },
+        })
+      );
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(requestOf(3, { credential: JWT }), 'a');
+      core.receive(requestOf(5, { credential: JWT }), 'a');
+      core.receive(cancelOf(1), 'a');
+      core.rejectPending('a closed', 'a');
+
+      expect(signals.get(1)?.reason).toBeInstanceOf(CancelError);
+      expect(signals.get(3)?.reason).toBeInstanceOf(DisconnectError);
+      expect(signals.get(5)?.reason).toBeInstanceOf(DisconnectError);
+
+      pending.get(1)?.resolve(SESSION);
+      pending.get(3)?.reject(new Error('stopped'));
+      pending.get(5)?.resolve(undefined);
+      await sleep(0);
+
+      // the call id it held is free: a call on it is a new one
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      pending.get(1)?.resolve(SESSION);
+      await sleep(0);
+
+      expect(sent).toEqual([]);
+      expect(reported).toEqual([]);
+      expect(admitted).toEqual([1]);
+    });
+
+    test('resolving, a transfer’s opening gets no credit until its resolution and its admission settle', async () => {
+      const resolution = Promise.withResolvers<ICallSession | undefined>();
+      const { port, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: () => {
+          return resolution.promise;
+        },
+      });
+      using core = createRouterCore(port, { limits });
+
+      core.registerResolver(resolverOf(echo));
+      core.receive(requestOf(1, { credential: JWT, payload: patternOf(8), total: 100 }), 'a');
+      await sleep(0);
+
+      expect(sent).toEqual([]);
+
+      resolution.resolve(SESSION);
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([['a', 'credit', 1, 100]]);
+    });
+
+    test('this side presents is the one its side resolved, and one that leaves a transfer’s opening no byte fails it before it goes, ENVELOPE_TOO_LARGE', async () => {
+      const { port, sent } = createPort();
+      using core = createRouterCore(port, { limits });
+      // 8 bytes of prefix, 4 of service and procedure, 8 of total, 4 of the block's head: 36 of
+      // token leave 4 bytes of a 64-byte opening, and 40 none
+      const tokenOf = (length: number) => {
+        return { scheme: CredentialScheme.JWT, token: 'x'.repeat(length) };
+      };
+
+      const answering = core.request(patternOf(100), {
+        connectionHandle: 'a',
+        credential: tokenOf(36),
+        options,
+        procedure: echo,
+      });
+
+      await expect(
+        core.request(patternOf(100), {
+          connectionHandle: 'a',
+          credential: tokenOf(40),
+          options,
+          procedure: echo,
+        })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.ENVELOPE_TOO_LARGE,
+        origin: 'local',
+        procedureAddress: { procedureId: 1, serviceId: 2 },
+      });
+      // a header that leaves the payload room goes whole, whatever its credential
+      const whole = core.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        credential: OPAQUE,
+        options,
+        procedure: echo,
+      });
+
+      expect(
+        sent.map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.REQUEST
+            ? [envelope.header.callId, envelope.header.credential, envelope.payload.length]
+            : envelope?.kind;
+        })
+      ).toEqual([
+        [2, tokenOf(36), 4],
+        [6, OPAQUE, 1],
+      ]);
+
+      core.rejectPending('done', 'a');
+      await Promise.allSettled([answering, whole]);
     });
   });
 
@@ -1747,11 +2272,11 @@ test.describe('createRouterCore', () => {
 
       expect(
         sent.map(({ envelope }) => {
-          const header = envelope?.header as { sessionToken?: unknown } | undefined;
+          const header = envelope?.header as { credential?: unknown } | undefined;
 
-          return header !== undefined && 'sessionToken' in header ? header.sessionToken : 'none';
+          return header !== undefined && 'credential' in header ? header.credential : 'none';
         })
-      ).toEqual([TOKEN, 'none', OTHER_TOKEN, null, 'none', 'none']);
+      ).toEqual([OPAQUE, 'none', OTHER_OPAQUE, ENDED, 'none', 'none']);
     });
 
     test('announce again what an answer that did not go out announced', async () => {
@@ -1778,8 +2303,8 @@ test.describe('createRouterCore', () => {
           return envelope?.header;
         })
       ).toEqual([
-        { callId: 1, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
-        { callId: 3, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
+        { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT },
+        { callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT },
       ]);
     });
 
@@ -1823,8 +2348,8 @@ test.describe('createRouterCore', () => {
           return envelope?.header;
         })
       ).toEqual([
-        { callId: 1, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
-        { callId: 3, kind: EnvelopeKind.RESULT, sessionToken: OTHER_TOKEN },
+        { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT },
+        { callId: 3, credential: OTHER_OPAQUE, kind: EnvelopeKind.RESULT },
         { callId: 5, kind: EnvelopeKind.RESULT },
       ]);
     });
@@ -1860,8 +2385,8 @@ test.describe('createRouterCore', () => {
           return envelope?.header;
         })
       ).toEqual([
-        { callId: 1, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
-        { callId: 3, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
+        { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT },
+        { callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT },
       ]);
     });
 
@@ -1894,9 +2419,9 @@ test.describe('createRouterCore', () => {
       ).toEqual([{ callId: 1, kind: EnvelopeKind.RESULT }]);
     });
 
-    test('trace what goes out and what comes in without its session token', async () => {
+    test('trace what goes out and what comes in without its credential, its scheme alone', async () => {
       const headers: unknown[] = [];
-      const { control, port } = createPort({
+      const { control, port, sent } = createPort({
         trace: (direction, { header }) => {
           headers.push([direction, header]);
         },
@@ -1913,18 +2438,26 @@ test.describe('createRouterCore', () => {
       );
       core.receive(
         envelopeOf({
-          header: { ...headerOf(3), sessionToken: TOKEN },
+          header: { ...headerOf(3), credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } },
           kind: EnvelopeKind.REQUEST,
           payload: new Uint8Array(0),
         } satisfies OutgoingEnvelope),
         'a'
       );
 
+      // the JWT is refused, a scheme this side takes none of
       expect(headers).toEqual([
-        ['tx', { callId: 1, hasSessionToken: true, kind: EnvelopeKind.RESULT }],
-        ['rx', { ...headerOf(3), hasSessionToken: true }],
+        ['tx', { callId: 1, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT }],
+        ['rx', { ...headerOf(3), credentialScheme: CredentialScheme.JWT }],
+        ['tx', { callId: 3, kind: EnvelopeKind.FAILURE }],
       ]);
       expect(JSON.stringify(headers)).not.toContain(TOKEN);
+      expect(JSON.stringify(headers)).not.toContain('a.b.c');
+      expect(sent[0]?.envelope?.header).toEqual({
+        callId: 1,
+        credential: OPAQUE,
+        kind: EnvelopeKind.RESULT,
+      });
     });
   });
 
@@ -2800,7 +3333,7 @@ test.describe('createRouterCore', () => {
       const failure = { code: 1, detail, scope: FailureScope.APPLICATION };
 
       for (const [limits, length] of [
-        [{ chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 }, 36],
+        [{ chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 }, 32],
         [{ maximumDetailBytes: 10 }, 10],
       ] as const) {
         const { port, sent } = createPort();
@@ -3592,20 +4125,20 @@ test.describe('createRouterCore', () => {
         );
       };
 
-      // a request's header takes 12 bytes; a result's 8, and 16 more for a session it may announce
+      // a request's header takes 12 bytes; a result's 8, and 20 more for an announcement it may carry
       void ask(52);
       void ask(53);
       core.receive(requestOf(1), 'a');
       core.receive(requestOf(3), 'a');
-      void settledOf(answerOf(answering, { payload: new Uint8Array(40) }));
-      void settledOf(answerOf(answering, { index: 1, payload: new Uint8Array(41) }));
+      void settledOf(answerOf(answering, { payload: new Uint8Array(36) }));
+      void settledOf(answerOf(answering, { index: 1, payload: new Uint8Array(37) }));
       await sleep(0);
 
       expect(piecesOf(sent)).toEqual([
         [EnvelopeKind.REQUEST, 2, undefined, 52],
         [EnvelopeKind.REQUEST, 4, 53, 44],
-        [EnvelopeKind.RESULT, 1, undefined, 40],
-        [EnvelopeKind.RESULT, 3, 41, 32],
+        [EnvelopeKind.RESULT, 1, undefined, 36],
+        [EnvelopeKind.RESULT, 3, 37, 28],
       ]);
 
       const none = createAnswering({ maximumTransfers: 0 });
@@ -3618,7 +4151,7 @@ test.describe('createRouterCore', () => {
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
         detail: 'a payload of 53 bytes goes as a transfer, which this side sends none of',
       });
-      await expect(answerOf(none, { payload: new Uint8Array(41) })).rejects.toMatchObject({
+      await expect(answerOf(none, { payload: new Uint8Array(37) })).rejects.toMatchObject({
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
       });
       expect(none.sent).toEqual([]);
@@ -3691,10 +4224,10 @@ test.describe('createRouterCore', () => {
 
       expect(seen).toHaveLength(2);
       expect(piecesOf(sent)).toEqual([
-        [EnvelopeKind.RESULT, 1, 150, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
-        [EnvelopeKind.CHUNK, 1, 80, 48],
-        [EnvelopeKind.CHUNK, 1, 128, 22],
+        [EnvelopeKind.RESULT, 1, 150, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
+        [EnvelopeKind.CHUNK, 1, 76, 48],
+        [EnvelopeKind.CHUNK, 1, 124, 26],
       ]);
       expect(payloadOf(sent, 1)).toEqual(payload);
       expect(Math.max(...sizes)).toBeLessThanOrEqual(64);
@@ -3754,11 +4287,11 @@ test.describe('createRouterCore', () => {
         [EnvelopeKind.CHUNK, 2, 92, 48],
         [EnvelopeKind.CHUNK, 2, 140, 48],
         [EnvelopeKind.CHUNK, 2, 188, 12],
-        [EnvelopeKind.RESULT, 1, 200, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
-        [EnvelopeKind.CHUNK, 1, 80, 48],
-        [EnvelopeKind.CHUNK, 1, 128, 48],
-        [EnvelopeKind.CHUNK, 1, 176, 24],
+        [EnvelopeKind.RESULT, 1, 200, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
+        [EnvelopeKind.CHUNK, 1, 76, 48],
+        [EnvelopeKind.CHUNK, 1, 124, 48],
+        [EnvelopeKind.CHUNK, 1, 172, 28],
       ]);
       expect([payloadOf(sent, 2), payloadOf(sent, 1)]).toEqual([payload, payload]);
       // the chunks go inside the opening's send, whose credit came back as it went, and one after the
@@ -3783,8 +4316,8 @@ test.describe('createRouterCore', () => {
       await expect(responding).rejects.toBeInstanceOf(CancelError);
       expect(seen[0]?.signal.aborted).toBe(true);
       expect(piecesOf(sent)).toEqual([
-        [EnvelopeKind.RESULT, 1, 150, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
+        [EnvelopeKind.RESULT, 1, 150, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
       ]);
       expect(reported).toEqual([]);
     });
@@ -3813,8 +4346,8 @@ test.describe('createRouterCore', () => {
 
       await expect(Promise.all(answers)).resolves.toEqual([expect.any(CancelError), undefined]);
       expect(piecesOf(sent)).toEqual([
-        [EnvelopeKind.RESULT, 1, 150, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
+        [EnvelopeKind.RESULT, 1, 150, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
       ]);
       expect(codesOf(reported)).toEqual([['failed behind its answer', 'a']]);
     });
@@ -3827,14 +4360,14 @@ test.describe('createRouterCore', () => {
         {
           ...port,
           // a transport that throws as it is handed the first answer
-          send: (bytes, connectionHandle) => {
-            if (isRefusing && bytes[1] === EnvelopeKind.RESULT) {
+          send: (message, connectionHandle) => {
+            if (isRefusing && message.data[1] === EnvelopeKind.RESULT) {
               isRefusing = false;
 
               throw new Error('the transport is closing');
             }
 
-            return port.send(bytes, connectionHandle);
+            return port.send(message, connectionHandle);
           },
         },
         { limits }
@@ -4122,9 +4655,9 @@ test.describe('createRouterCore', () => {
       ]);
       expect(piecesOf(sent)).toEqual([
         [EnvelopeKind.REQUEST, 2, 200, 44],
-        [EnvelopeKind.RESULT, 1, 150, 32],
+        [EnvelopeKind.RESULT, 1, 150, 28],
         [EnvelopeKind.CHUNK, 2, 44, 48],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
       ]);
       expect(reported).toEqual([]);
     });
@@ -4283,22 +4816,22 @@ test.describe('createRouterCore', () => {
       } as const;
 
       await expect(
-        core.respond({ payload: new Uint8Array(41) }, subscribing)
+        core.respond({ payload: new Uint8Array(37) }, subscribing)
       ).rejects.toMatchObject({
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
         detail: "a subscription's result goes in one envelope, of 64 bytes at most",
       });
       await expect(
         core.respond(
-          { payload: new Uint8Array(41) },
+          { payload: new Uint8Array(37) },
           { connectionHandle: 'a', header: headerOf(3) }
         )
       ).rejects.toBeInstanceOf(ProgrammerError);
       // in one envelope, it goes
-      await core.respond({ payload: new Uint8Array(40) }, subscribing);
+      await core.respond({ payload: new Uint8Array(36) }, subscribing);
 
       expect(told).toEqual(['told']);
-      expect(piecesOf(sent)).toEqual([[EnvelopeKind.RESULT, 1, undefined, 40]]);
+      expect(piecesOf(sent)).toEqual([[EnvelopeKind.RESULT, 1, undefined, 36]]);
     });
 
     test('announce a session on a result’s opening, which leaves room for it within its envelope', async () => {
@@ -4316,11 +4849,11 @@ test.describe('createRouterCore', () => {
       core.receive(creditOf(1, 100), 'a');
       await responding;
 
-      expect(sizes).toEqual([64, 64, 36]);
+      expect(sizes).toEqual([64, 64, 40]);
       expect(sent[0]?.envelope?.kind === EnvelopeKind.RESULT && sent[0].envelope.header).toEqual({
         callId: 1,
+        credential: OPAQUE,
         kind: EnvelopeKind.RESULT,
-        sessionToken: TOKEN,
         total: 100,
       });
     });
@@ -4368,7 +4901,7 @@ test.describe('createRouterCore', () => {
       expect(await asking).toBeInstanceOf(DisconnectError);
       expect(piecesOf(sent)).toEqual([
         [EnvelopeKind.REQUEST, 2, 200, 44],
-        [EnvelopeKind.RESULT, 1, 150, 32],
+        [EnvelopeKind.RESULT, 1, 150, 28],
       ]);
       expect(reported).toEqual([]);
     });

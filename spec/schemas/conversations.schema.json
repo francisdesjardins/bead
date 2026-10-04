@@ -5,14 +5,24 @@
   "required": ["$comment", "specVersion", "wallClock", "conversations"],
   "additionalProperties": false,
   "properties": {
-    "$schema": { "const": "schemas/conversations.schema.json" },
-    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
-    "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
-    "wallClock": { "$ref": "common.schema.json#/$defs/wallClock" },
+    "$schema": {
+      "const": "schemas/conversations.schema.json"
+    },
+    "$comment": {
+      "$ref": "common.schema.json#/$defs/comment"
+    },
+    "specVersion": {
+      "$ref": "common.schema.json#/$defs/specVersion"
+    },
+    "wallClock": {
+      "$ref": "common.schema.json#/$defs/wallClock"
+    },
     "conversations": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/conversation" }
+      "items": {
+        "$ref": "#/$defs/conversation"
+      }
     }
   },
   "$defs": {
@@ -22,14 +32,27 @@
       "required": ["name", "clauses", "steps"],
       "additionalProperties": false,
       "properties": {
-        "name": { "$ref": "common.schema.json#/$defs/name" },
-        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
-        "limits": { "$ref": "#/$defs/limits" },
-        "pacing": { "$ref": "#/$defs/pacing" },
+        "name": {
+          "$ref": "common.schema.json#/$defs/name"
+        },
+        "clauses": {
+          "$ref": "common.schema.json#/$defs/clauses"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        },
+        "pacing": {
+          "$ref": "#/$defs/pacing"
+        },
+        "relay": {
+          "$ref": "#/$defs/relay"
+        },
         "steps": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/step" }
+          "items": {
+            "$ref": "#/$defs/step"
+          }
         }
       }
     },
@@ -39,15 +62,41 @@
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "maximumEnvelopeBytes": { "type": "integer", "minimum": 1 },
-        "maximumPayloadBytes": { "type": "integer", "minimum": 1 },
-        "maximumTransfers": { "type": "integer", "minimum": 0 },
-        "chunkBytes": { "type": "integer", "minimum": 1 },
-        "windowBytes": { "type": "integer", "minimum": 1 },
-        "bufferedBytesBudget": { "type": "integer", "minimum": 0 },
-        "maximumChunkRuns": { "type": "integer", "minimum": 1 },
-        "transferInactivityTimeout": { "$ref": "common.schema.json#/$defs/duration" },
-        "maximumDetailBytes": { "type": "integer", "minimum": 0 }
+        "maximumEnvelopeBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maximumPayloadBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maximumTransfers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chunkBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "windowBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bufferedBytesBudget": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximumChunkRuns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "transferInactivityTimeout": {
+          "$ref": "common.schema.json#/$defs/duration"
+        },
+        "maximumDetailBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "pacing": {
@@ -56,8 +105,14 @@
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "maximumQueuedNotifications": { "type": "integer", "minimum": 1 },
-        "maximumQueuedNotificationBytes": { "type": "integer", "minimum": 1 }
+        "maximumQueuedNotifications": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maximumQueuedNotificationBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "step": {
@@ -65,45 +120,155 @@
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
-        { "required": ["open"] },
-        { "required": ["send"] },
-        { "required": ["close"] },
-        { "required": ["expect"] },
-        { "required": ["report"] },
-        { "required": ["until"] },
-        { "required": ["advance"] },
-        { "required": ["wall"] }
+        {
+          "required": ["open"]
+        },
+        {
+          "required": ["send"]
+        },
+        {
+          "required": ["close"]
+        },
+        {
+          "required": ["expect"]
+        },
+        {
+          "required": ["report"]
+        },
+        {
+          "required": ["until"]
+        },
+        {
+          "required": ["advance"]
+        },
+        {
+          "required": ["wall"]
+        }
       ],
       "dependentSchemas": {
-        "open": { "not": { "required": ["on"] } },
-        "twoWay": { "required": ["open"] }
+        "open": {
+          "not": {
+            "required": ["on"]
+          }
+        },
+        "twoWay": {
+          "required": ["open"]
+        },
+        "token": {
+          "required": ["expect"],
+          "properties": {
+            "expect": {
+              "required": ["credential"],
+              "properties": {
+                "credential": {
+                  "const": "OPAQUE"
+                }
+              }
+            }
+          }
+        },
+        "carried": {
+          "anyOf": [
+            {
+              "required": ["send"]
+            },
+            {
+              "required": ["expect"],
+              "properties": {
+                "expect": {
+                  "properties": {
+                    "kind": {
+                      "const": 16
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "carries": {
+          "required": ["open"]
+        },
+        "secure": {
+          "required": ["open"]
+        }
       },
       "properties": {
-        "open": { "$ref": "#/$defs/connection" },
+        "open": {
+          "$ref": "#/$defs/connection"
+        },
         "twoWay": {
           "description": "false for a connection that carries nothing back, as an HTTP client that does not listen.",
           "const": false
         },
-        "on": { "$ref": "#/$defs/connection" },
-        "send": { "$ref": "common.schema.json#/$defs/bytes" },
-        "close": { "const": true },
+        "on": {
+          "$ref": "#/$defs/connection"
+        },
+        "send": {
+          "$ref": "#/$defs/send"
+        },
+        "close": {
+          "const": true
+        },
         "until": {
           "type": "object",
           "required": ["timer"],
           "additionalProperties": false,
-          "properties": { "timer": { "$ref": "common.schema.json#/$defs/timer" } }
+          "properties": {
+            "timer": {
+              "$ref": "common.schema.json#/$defs/timer"
+            }
+          }
         },
-        "advance": { "$ref": "common.schema.json#/$defs/advance" },
-        "wall": { "$ref": "common.schema.json#/$defs/wall" },
-        "expect": { "$ref": "#/$defs/expect" },
+        "advance": {
+          "$ref": "common.schema.json#/$defs/advance"
+        },
+        "wall": {
+          "$ref": "common.schema.json#/$defs/wall"
+        },
+        "expect": {
+          "$ref": "#/$defs/expect"
+        },
+        "token": {
+          "description": "Beside an expect whose answer announced OPAQUE, the name its token takes, which a later send writes between angle brackets.",
+          "$ref": "#/$defs/tokenName"
+        },
         "report": {
           "description": "A code, or exception for an error that carries none.",
           "type": ["integer", "string"],
-          "if": { "type": "integer" },
-          "then": { "$ref": "common.schema.json#/$defs/code" },
-          "else": { "const": "exception" }
+          "if": {
+            "type": "integer"
+          },
+          "then": {
+            "$ref": "common.schema.json#/$defs/code"
+          },
+          "else": {
+            "const": "exception"
+          }
+        },
+        "carried": {
+          "description": "Beside a send, the credential the client's transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization's value. Beside an expect of a request leg B sends to a destination's connection, what leg B's transport carried beside it. Absent, it carried none.",
+          "$ref": "#/$defs/carried"
+        },
+        "carries": {
+          "description": "false for a connection whose transport carries no credential beside an envelope, as a WebSocket's, or a listen's batch.",
+          "const": false
+        },
+        "secure": {
+          "description": "false for a connection that reaches off the machine in the clear, neither over TLS nor within the machine.",
+          "const": false
         }
       }
+    },
+    "send": {
+      "description": "Bytes in hexadecimal, as common.schema.json writes them, where a token named by an earlier step stands, as its name between angle brackets, for its 16 bytes.",
+      "type": "string",
+      "pattern": "^(?:(?:[0-9A-F]{2}|<[a-z][a-z0-9]*>)[ |]*)*$"
+    },
+    "tokenName": {
+      "description": "The name a token announced takes in its conversation.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$"
     },
     "connection": {
       "description": "A connection's name, which the conversation opens with open; the only one, opened before the first step, where it opens none.",
@@ -114,50 +279,132 @@
       "description": "The next envelope the server sends on its connection, each kind with its own fields.",
       "type": "object",
       "required": ["kind"],
-      "properties": { "kind": { "$ref": "common.schema.json#/$defs/kind" } },
+      "properties": {
+        "kind": {
+          "$ref": "common.schema.json#/$defs/kind"
+        }
+      },
       "allOf": [
         {
-          "if": { "required": ["kind"], "properties": { "kind": { "const": 16 } } },
-          "then": { "$ref": "#/$defs/request" }
+          "if": {
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": 16
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/request"
+          }
         },
         {
-          "if": { "required": ["kind"], "properties": { "kind": { "const": 17 } } },
-          "then": { "$ref": "#/$defs/result" }
+          "if": {
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": 17
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/result"
+          }
         },
         {
-          "if": { "required": ["kind"], "properties": { "kind": { "const": 18 } } },
-          "then": { "$ref": "#/$defs/failure" }
+          "if": {
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": 18
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/failure"
+          }
         },
         {
-          "if": { "required": ["kind"], "properties": { "kind": { "const": 19 } } },
-          "then": { "$ref": "#/$defs/notification" }
+          "if": {
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": 19
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/notification"
+          }
         },
         {
-          "if": { "required": ["kind"], "properties": { "kind": { "const": 20 } } },
-          "then": { "$ref": "#/$defs/chunk" }
+          "if": {
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": 20
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/chunk"
+          }
         },
         {
-          "if": { "required": ["kind"], "properties": { "kind": { "const": 21 } } },
-          "then": { "$ref": "#/$defs/credit" }
+          "if": {
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": 21
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/credit"
+          }
         },
         {
-          "if": { "required": ["kind"], "properties": { "kind": { "const": 22 } } },
-          "then": { "$ref": "#/$defs/cancel" }
+          "if": {
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": 22
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/cancel"
+          }
         }
       ]
     },
     "request": {
-      "description": "A command the server calls, with its service and its procedure.",
+      "description": "A request the server sends — a command it calls, or a relay's leg B — with its service, its procedure, and the credential it presents.",
       "type": "object",
       "required": ["kind", "callId", "flags", "serviceId", "procedureId", "payload"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": 16 },
-        "callId": { "$ref": "common.schema.json#/$defs/u32" },
-        "flags": { "$ref": "common.schema.json#/$defs/u8" },
-        "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
-        "procedureId": { "$ref": "common.schema.json#/$defs/u16" },
-        "payload": { "$ref": "common.schema.json#/$defs/bytes" }
+        "kind": {
+          "const": 16
+        },
+        "callId": {
+          "$ref": "common.schema.json#/$defs/u32"
+        },
+        "flags": {
+          "$ref": "common.schema.json#/$defs/u8"
+        },
+        "serviceId": {
+          "$ref": "common.schema.json#/$defs/u16"
+        },
+        "procedureId": {
+          "$ref": "common.schema.json#/$defs/u16"
+        },
+        "payload": {
+          "$ref": "common.schema.json#/$defs/bytes"
+        },
+        "credential": {
+          "$ref": "#/$defs/presented"
+        }
       }
     },
     "result": {
@@ -166,11 +413,21 @@
       "required": ["kind", "callId", "payload"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": 17 },
-        "callId": { "$ref": "common.schema.json#/$defs/u32" },
-        "payload": { "$ref": "common.schema.json#/$defs/bytes" },
-        "session": { "$ref": "#/$defs/session" },
-        "total": { "$ref": "common.schema.json#/$defs/u53" }
+        "kind": {
+          "const": 17
+        },
+        "callId": {
+          "$ref": "common.schema.json#/$defs/u32"
+        },
+        "payload": {
+          "$ref": "common.schema.json#/$defs/bytes"
+        },
+        "credential": {
+          "$ref": "#/$defs/announcement"
+        },
+        "total": {
+          "$ref": "common.schema.json#/$defs/u53"
+        }
       }
     },
     "failure": {
@@ -178,20 +435,36 @@
       "required": ["kind", "callId", "failure"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": 18 },
-        "callId": { "$ref": "common.schema.json#/$defs/u32" },
+        "kind": {
+          "const": 18
+        },
+        "callId": {
+          "$ref": "common.schema.json#/$defs/u32"
+        },
         "failure": {
-          "description": "Its code, its scope, and the relays it crossed; its detail is informative.",
+          "description": "Its code, its scope, and the relays it crossed; its detail, where given, which is informative elsewhere.",
           "type": "object",
           "required": ["code", "scope", "relays"],
           "additionalProperties": false,
           "properties": {
-            "code": { "$ref": "common.schema.json#/$defs/code" },
-            "scope": { "$ref": "common.schema.json#/$defs/scope" },
-            "relays": { "$ref": "common.schema.json#/$defs/u8" }
+            "code": {
+              "$ref": "common.schema.json#/$defs/code"
+            },
+            "scope": {
+              "$ref": "common.schema.json#/$defs/scope"
+            },
+            "relays": {
+              "$ref": "common.schema.json#/$defs/u8"
+            },
+            "detail": {
+              "description": "The detail the spec states for this failure, as its UTF-8 reads.",
+              "type": "string"
+            }
           }
         },
-        "session": { "$ref": "#/$defs/session" }
+        "credential": {
+          "$ref": "#/$defs/announcement"
+        }
       }
     },
     "notification": {
@@ -199,9 +472,15 @@
       "required": ["kind", "callId", "payload"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": 19 },
-        "callId": { "$ref": "common.schema.json#/$defs/u32" },
-        "payload": { "$ref": "common.schema.json#/$defs/bytes" }
+        "kind": {
+          "const": 19
+        },
+        "callId": {
+          "$ref": "common.schema.json#/$defs/u32"
+        },
+        "payload": {
+          "$ref": "common.schema.json#/$defs/bytes"
+        }
       }
     },
     "chunk": {
@@ -209,11 +488,21 @@
       "required": ["kind", "callId", "offset", "isLast", "payload"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": 20 },
-        "callId": { "$ref": "common.schema.json#/$defs/u32" },
-        "offset": { "$ref": "common.schema.json#/$defs/u53" },
-        "isLast": { "type": "boolean" },
-        "payload": { "$ref": "common.schema.json#/$defs/bytes" }
+        "kind": {
+          "const": 20
+        },
+        "callId": {
+          "$ref": "common.schema.json#/$defs/u32"
+        },
+        "offset": {
+          "$ref": "common.schema.json#/$defs/u53"
+        },
+        "isLast": {
+          "type": "boolean"
+        },
+        "payload": {
+          "$ref": "common.schema.json#/$defs/bytes"
+        }
       }
     },
     "credit": {
@@ -221,9 +510,15 @@
       "required": ["kind", "callId", "creditEnd"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": 21 },
-        "callId": { "$ref": "common.schema.json#/$defs/u32" },
-        "creditEnd": { "$ref": "common.schema.json#/$defs/u53" }
+        "kind": {
+          "const": 21
+        },
+        "callId": {
+          "$ref": "common.schema.json#/$defs/u32"
+        },
+        "creditEnd": {
+          "$ref": "common.schema.json#/$defs/u53"
+        }
       }
     },
     "cancel": {
@@ -231,13 +526,49 @@
       "required": ["kind", "callId"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": 22 },
-        "callId": { "$ref": "common.schema.json#/$defs/u32" }
+        "kind": {
+          "const": 22
+        },
+        "callId": {
+          "$ref": "common.schema.json#/$defs/u32"
+        }
       }
     },
-    "session": {
-      "description": "What an answer announced of its connection's session: a token, which is random, or its end. Absent, nothing.",
-      "enum": ["announced", "ended"]
+    "announcement": {
+      "description": "The scheme of the CREDENTIAL block an answer carried, what it announced of its connection's session: OPAQUE, its token, which is random; NONE, its end. Absent, it carried none.",
+      "enum": ["OPAQUE", "NONE"]
+    },
+    "carried": {
+      "description": "A credential a transport carries beside an envelope: visible ASCII, spaces and tabs within, none around it, as an Authorization's value is handed on (spec 15.5).",
+      "type": "string",
+      "pattern": "^[!-~](?:[ \\t!-~]*[!-~])?$"
+    },
+    "relay": {
+      "description": "The options of the server's relay, where given; any other is its default.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "verifies": {
+          "description": "true: the relay verifies what it forwards, with the server's credentials, before its admission (section 14.3, step 1).",
+          "const": true
+        },
+        "beforeRoute": {
+          "description": "The relay's admission, by the name both sides give it: requireSessionOrCredential, its default, or requireSession.",
+          "enum": ["requireSessionOrCredential", "requireSession"]
+        }
+      }
+    },
+    "presented": {
+      "description": "The CREDENTIAL block a request presents, as vectors.json writes a header's: a credential of any scheme but NONE. Absent, it presents none.",
+      "$ref": "common.schema.json#/$defs/credential",
+      "not": {
+        "properties": {
+          "scheme": {
+            "const": "NONE"
+          }
+        }
+      }
     }
   }
 }

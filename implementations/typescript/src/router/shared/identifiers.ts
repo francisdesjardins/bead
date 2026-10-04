@@ -9,8 +9,8 @@ import type { CallId, DestinationId, RouterSide, SessionToken } from './types';
 // 16 bytes are 22 characters, the last of which holds 2 bits: A, Q, g or w
 const SESSION_TOKEN_PATTERN = /^[\w-]{21}[AQgw]$/;
 
-// 16 zero bytes, which say a session ended rather than name one
-const ENDED_SESSION = 'A'.repeat(22);
+// 16 zero bytes, which no session's token is
+const ZERO_TOKEN = 'A'.repeat(22);
 
 // helpers
 
@@ -124,10 +124,26 @@ export const drawSessionToken = (
 
 /**
  * Whether `value` is a session token as the wire gives one: 16 bytes in unpadded base64url, and not
- * all of them zero, which says a session ended.
+ * all of them zero.
  */
 export const isSessionToken = (value: unknown): value is SessionToken => {
-  return typeof value === 'string' && SESSION_TOKEN_PATTERN.test(value) && value !== ENDED_SESSION;
+  return typeof value === 'string' && SESSION_TOKEN_PATTERN.test(value) && value !== ZERO_TOKEN;
+};
+
+/**
+ * Whether `presented` is the token `held`, compared in constant time (spec 9.2, step 5): every
+ * character of `held` is read, wherever the two differ. Base64url spells 16 bytes one way only, so
+ * comparing the characters compares the bytes.
+ */
+export const isSameSessionToken = (presented: string, held: SessionToken): boolean => {
+  let difference = presented.length ^ held.length;
+
+  for (let index = 0; index < held.length; index += 1) {
+    // ! past the end of `presented`, NaN reads as 0, and its length already differs
+    difference |= presented.charCodeAt(index) ^ held.charCodeAt(index);
+  }
+
+  return difference === 0;
 };
 
 /** Which side opened the call `callId` names: odd, a client; even, a server; `undefined` for none. */
@@ -141,7 +157,7 @@ export const sideOfCallId = (callId: CallId): RouterSide | undefined => {
 
 /**
  * The session token 16 bytes spell, in unpadded base64url; a {@link ProgrammerError} for any other
- * length, or for 16 zero bytes, which say a session ended.
+ * length, or for 16 zero bytes, which no token is.
  */
 export const toSessionToken = (bytes: Uint8Array): SessionToken => {
   if (bytes.length !== SESSION_TOKEN_BYTES || isZero(bytes)) {

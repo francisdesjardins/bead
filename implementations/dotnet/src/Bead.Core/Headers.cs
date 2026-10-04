@@ -18,8 +18,8 @@ public interface IEnvelopeHeader
 
 /// <summary>
 /// A request's header: its call, the procedure it asks for, and its blocks — where it goes behind
-/// the peer, the session it presents, and the total of a payload it opens a transfer for: its own
-/// payload is then the transfer's first bytes. <see cref="OpensSubscription"/> says the call
+/// the peer, the total of a payload it opens a transfer for, its own payload then the transfer's
+/// first bytes, and the credential it presents. <see cref="OpensSubscription"/> says the call
 /// subscribes to the procedure's notifications; <see cref="Paced"/> asks for them as the requester
 /// credits them, the first credited already.
 /// </summary>
@@ -52,16 +52,20 @@ public sealed record RequestHeader : IEnvelopeHeader
     /// <summary>Whether the subscription it opens goes at its client's pace.</summary>
     public bool Paced { get; init; }
 
-    /// <summary>The session the request presents, which a router that holds connections ignores.</summary>
-    public SessionToken? SessionToken { get; init; }
-
     /// <summary>The total of the payload it opens a transfer for, from 0 to 2⁵³ − 1.</summary>
     public long? Total { get; init; }
+
+    /// <summary>
+    /// The credential the request presents, of any scheme but <see cref="CredentialScheme.None"/>,
+    /// which its receiver resolves to the call's session; none presents none, and runs the call in
+    /// its connection's session.
+    /// </summary>
+    public Credential? Credential { get; init; }
 }
 
 /// <summary>
-/// A result's header: its call, the session it announces when it changed, and the total of a
-/// payload it opens a transfer for.
+/// A result's header: its call, the total of a payload it opens a transfer for, and what it
+/// announces of its connection's session when it changed.
 /// </summary>
 public sealed record ResultHeader : IEnvelopeHeader
 {
@@ -77,16 +81,20 @@ public sealed record ResultHeader : IEnvelopeHeader
         }
     }
 
-    /// <summary>The session announced, when it changed: its token, or that it ended.</summary>
-    public SessionAnnouncement? Session { get; init; }
-
     /// <summary>The total of the payload it opens a transfer for, from 0 to 2⁵³ − 1.</summary>
     public long? Total { get; init; }
+
+    /// <summary>
+    /// What it announces of its connection's session, when it changed:
+    /// <see cref="CredentialScheme.Opaque"/>, its token, or <see cref="CredentialScheme.None"/>,
+    /// that it ended.
+    /// </summary>
+    public Credential? Credential { get; init; }
 }
 
 /// <summary>
-/// A failure's header: its call, and the session it announces when it changed. An answer names its
-/// call alone: never a destination.
+/// A failure's header: its call, and what it announces of its connection's session when it changed.
+/// An answer names its call alone: never a destination.
 /// </summary>
 public sealed record FailureHeader : IEnvelopeHeader
 {
@@ -102,8 +110,12 @@ public sealed record FailureHeader : IEnvelopeHeader
         }
     }
 
-    /// <summary>The session announced, when it changed: its token, or that it ended.</summary>
-    public SessionAnnouncement? Session { get; init; }
+    /// <summary>
+    /// What it announces of its connection's session, when it changed:
+    /// <see cref="CredentialScheme.Opaque"/>, its token, or <see cref="CredentialScheme.None"/>,
+    /// that it ended.
+    /// </summary>
+    public Credential? Credential { get; init; }
 }
 
 /// <summary>A notification's header: the call id of the subscription it belongs to.</summary>

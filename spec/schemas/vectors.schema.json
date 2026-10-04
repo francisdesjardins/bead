@@ -13,7 +13,8 @@
     "envelopes",
     "envelopeRefusals",
     "failures",
-    "failureRefusals"
+    "failureRefusals",
+    "jwtVerdicts"
   ],
   "additionalProperties": false,
   "properties": {
@@ -143,6 +144,106 @@
           "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
           "record": { "$ref": "common.schema.json#/$defs/bytes" },
           "code": { "$ref": "common.schema.json#/$defs/protocolCode" }
+        }
+      }
+    },
+    "jwtVerdicts": {
+      "description": "JWTs verified against keys, an audience or a set of them, and the wall clock's reading, and the verdict every side gives (section 13.8).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "clauses", "token", "keys", "audience", "now", "verdict"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+          "token": {
+            "description": "The token as its CREDENTIAL block carries it.",
+            "type": "string"
+          },
+          "keys": {
+            "description": "The receiver's keys, each a JWK (RFC 7517) with its issuer and its one algorithm.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["issuer", "algorithm", "jwk"],
+              "additionalProperties": false,
+              "properties": {
+                "issuer": { "type": "string" },
+                "algorithm": { "enum": ["ES256", "HS256"] },
+                "jwk": { "type": "object", "required": ["kty"] }
+              }
+            }
+          },
+          "audience": {
+            "description": "The receiver's audience, or the set of them a relay that verifies holds (section 14.3), any of which the token's aud may name.",
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+            ]
+          },
+          "now": {
+            "description": "The wall clock's reading, W, an RFC 3339 instant in UTC to the millisecond.",
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+          },
+          "verdict": {
+            "oneOf": [
+              {
+                "description": "The token holds: its session's identifier, its claims set, and its end, E, in milliseconds since the epoch.",
+                "type": "object",
+                "required": ["holds", "identifier", "claims", "end"],
+                "additionalProperties": false,
+                "properties": {
+                  "holds": { "const": true },
+                  "identifier": {
+                    "type": "object",
+                    "required": ["issuer"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "issuer": { "type": "string" },
+                      "sid": { "type": "string" },
+                      "sub": { "type": "string" }
+                    },
+                    "oneOf": [{ "required": ["sid"] }, { "required": ["sub"] }]
+                  },
+                  "claims": { "type": "object" },
+                  "end": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                }
+              },
+              {
+                "description": "The token does not hold: the step of section 13.8 that refused it.",
+                "type": "object",
+                "required": ["holds", "reason"],
+                "additionalProperties": false,
+                "properties": {
+                  "holds": { "const": false },
+                  "reason": {
+                    "enum": [
+                      "token",
+                      "crit",
+                      "typ",
+                      "kid",
+                      "alg",
+                      "key",
+                      "signature",
+                      "iss",
+                      "exp",
+                      "nbf",
+                      "aud",
+                      "sid",
+                      "sub"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     }
@@ -280,7 +381,7 @@
         "destinationId": { "$ref": "common.schema.json#/$defs/u32" },
         "opensSubscription": { "type": "boolean" },
         "paced": { "type": "boolean" },
-        "sessionToken": { "$ref": "common.schema.json#/$defs/sessionToken" },
+        "credential": { "$ref": "#/$defs/presented" },
         "total": { "$ref": "common.schema.json#/$defs/u53" }
       }
     },
@@ -291,7 +392,7 @@
       "properties": {
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
         "kind": { "const": 17 },
-        "sessionToken": { "$ref": "#/$defs/announcement" },
+        "credential": { "$ref": "#/$defs/announcement" },
         "total": { "$ref": "common.schema.json#/$defs/u53" }
       }
     },
@@ -302,7 +403,7 @@
       "properties": {
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
         "kind": { "const": 18 },
-        "sessionToken": { "$ref": "#/$defs/announcement" }
+        "credential": { "$ref": "#/$defs/announcement" }
       }
     },
     "notification": {
@@ -345,11 +446,15 @@
         "kind": { "const": 22 }
       }
     },
+    "presented": {
+      "description": "What a request presents: a credential of any scheme but NONE.",
+      "$ref": "common.schema.json#/$defs/credential",
+      "not": { "properties": { "scheme": { "const": "NONE" } } }
+    },
     "announcement": {
-      "description": "What an answer announces of its session: its token, or null for its end.",
-      "type": ["string", "null"],
-      "if": { "type": "string" },
-      "then": { "$ref": "common.schema.json#/$defs/sessionToken" }
+      "description": "What an answer announces of its connection's session: OPAQUE, its token; NONE, its end.",
+      "$ref": "common.schema.json#/$defs/credential",
+      "properties": { "scheme": { "enum": ["OPAQUE", "NONE"] } }
     }
   }
 }

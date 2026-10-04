@@ -40,7 +40,7 @@ const startWorker = async () => {
   server.on('connection', (...[, request, connectionHandle]) => {
     events.push(['connection', request, connectionHandle]);
   });
-  server.on('message', (data, connectionHandle) => {
+  server.on('message', ({ data }, connectionHandle) => {
     events.push(['message', [...new Uint8Array(data as ArrayBuffer)], connectionHandle]);
   });
   server.on('close', (...params) => {
@@ -162,7 +162,7 @@ test.describe('createWorkerTransportServer', () => {
       server.clients[0]?.connectionHandle ?? 'type=WORKER;ip=local;ordinal=1';
     const envelope = Uint8Array.of(7, 8, 9);
 
-    await server.send(envelope.subarray(1), connectionHandle);
+    await server.send({ data: envelope.subarray(1) }, connectionHandle);
 
     // the caller's bytes stay its own
     await expect
@@ -173,9 +173,50 @@ test.describe('createWorkerTransportServer', () => {
         [WORKER_MESSAGES.OPEN, [8, 9]],
         [7, 8, 9],
       ]);
-    await expect(server.send('text', connectionHandle)).rejects.toThrow(
+    await expect(server.send({ data: 'text' }, connectionHandle)).rejects.toThrow(
       new ProgrammerError('a worker connection carries envelopes, as bytes')
     );
+  });
+
+  test('carries no credential, either way', async () => {
+    await using started = await startWorker();
+    const { connect, server } = started;
+    const { heard, port } = connect();
+    const credentials: unknown[] = [];
+
+    server.on('message', ({ credential }) => {
+      credentials.push(credential);
+    });
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.OPEN]);
+    port.postMessage(Uint8Array.of(1).buffer);
+    await expect
+      .poll(() => {
+        return credentials;
+      })
+      .toEqual([undefined]);
+
+    await server.send(
+      { credential: 'Bearer mF_9.B5f-4.1JqM', data: Uint8Array.of(2) },
+      'type=WORKER;ip=local;ordinal=1'
+    );
+
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.OPEN, [2]]);
+  });
+
+  test('says it carries no credential toward a connection, and is secure, never leaving the machine', async () => {
+    await using started = await startWorker();
+    const { server } = started;
+    const handle = 'type=WORKER;ip=local;ordinal=1' as const;
+
+    expect([server.carriesCredential(handle), server.isSecure(handle)]).toEqual([false, true]);
   });
 
   test('ends a connection its page closes, once, and one it closes itself, telling the page', async () => {
@@ -275,7 +316,7 @@ test.describe('createWorkerTransportServer', () => {
     // listening at once, before anything was awaited
     expect([posted, server.clients.length]).toEqual([['started', WORKER_MESSAGES.OPEN], 1]);
 
-    await server.send(Uint8Array.of(1), 'type=WORKER;ip=local;ordinal=1');
+    await server.send({ data: Uint8Array.of(1) }, 'type=WORKER;ip=local;ordinal=1');
 
     expect(posted.at(-1)).toEqual(['transferred', true]);
 

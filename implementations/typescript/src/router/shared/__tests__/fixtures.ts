@@ -6,7 +6,7 @@ import type { IRouterClientTransportLike } from '../../client/types';
 import type { IRouterServerTransportLike } from '../../server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
-import type { Data } from '../../../transport/shared/types';
+import type { ITransportMessage } from '../../../transport/shared/types';
 import { createRouterCore } from '../router-core';
 import type {
   CallId,
@@ -119,7 +119,7 @@ export const createLoopback = ({
       report: (error) => {
         recorded[side].reported.push(error);
       },
-      send: (bytes) => {
+      send: ({ data: bytes }) => {
         // the kind is an envelope's second byte, whatever its layout
         const kind = bytes[1] ?? 0;
         const isLoose = kind === EnvelopeKind.CHUNK || kind === EnvelopeKind.CREDIT;
@@ -206,7 +206,7 @@ export const createPipedTransports = ({
 }) => {
   const client = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
-    message: [data: Data];
+    message: [message: ITransportMessage];
     reconnect: [];
   }>();
   const server = createEmitter<{
@@ -216,7 +216,7 @@ export const createPipedTransports = ({
       request: unknown,
       connectionHandle: TransportServerConnectionHandle,
     ];
-    message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+    message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
   }>();
   const sent = { client: [] as Uint8Array[], server: [] as Uint8Array[] };
   let isOpen = false;
@@ -237,12 +237,15 @@ export const createPipedTransports = ({
     return (deliver(), undefined);
   };
 
+  // in process, never leaving it: a credential is carried both ways, as it is given
   const clientTransport: IRouterClientTransportLike = {
+    carriesCredential: true,
+    isSecure: true,
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: client.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: client.on,
-    send: (data) => {
+    send: ({ credential, data }) => {
       if (!isOpen) {
         return Promise.reject(new Error(`${connectionHandle} is not open`));
       }
@@ -251,18 +254,24 @@ export const createPipedTransports = ({
 
       sent.client.push(bytes);
       hand(() => {
-        server.emit('message', bytes, connectionHandle);
+        server.emit('message', { credential, data: bytes }, connectionHandle);
       });
 
       return Promise.resolve();
     },
   };
   const serverTransport: IRouterServerTransportLike = {
+    carriesCredential: () => {
+      return true;
+    },
+    isSecure: () => {
+      return true;
+    },
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: server.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: server.on,
-    send: (data, handle) => {
+    send: ({ credential, data }, handle) => {
       if (!isOpen || handle !== connectionHandle) {
         return Promise.reject(new Error(`${handle} is not open`));
       }
@@ -271,7 +280,7 @@ export const createPipedTransports = ({
 
       sent.server.push(bytes);
       hand(() => {
-        client.emit('message', bytes);
+        client.emit('message', { credential, data: bytes });
       });
 
       return Promise.resolve();

@@ -52,10 +52,12 @@ interop service registers its caller's connection as a destination, under the id
 given, and unregisters it, so a destination that dies with its connection and one registered anew
 are steps, not a harness's setup. A connection may be declared one that carries nothing back, as an
 HTTP client that does not listen is (section 15.8), which reaches section 14.3's fourth step. Leg B's
-request is then an `expect` on that connection, its flags given, so a relay that passes on a
-destination or a session fails; and every failure an entry expects gives the relays it crossed,
-0 where it crossed none. The interop's relay asks for a session, as section 14.3 has a server's
-relay do by default, and `interop-service.json` says so:
+request is then an `expect` on that connection, its flags and the credential it presents given, so a
+relay that passes on a destination, or presents on leg B other than what section 14.2's table says,
+fails; and every failure an entry expects gives the relays it crossed, 0 where it crossed none. The
+interop's relay admits as section 14.3 has a server's relay do by default, a call in leg A's
+connection's session or one presenting a credential it forwards, and `interop-service.json` says
+so:
 
 ```json
 {
@@ -69,7 +71,7 @@ relay do by default, and `interop-service.json` says so:
       "on": "client"
     },
     {
-      "expect": { "kind": 17, "callId": 1, "payload": "22 61 64 61 22", "session": "announced" },
+      "expect": { "kind": 17, "callId": 1, "payload": "22 61 64 61 22", "credential": "OPAQUE" },
       "on": "client"
     },
     {
@@ -207,16 +209,17 @@ Y, or comes back to it, and Z comes to all of them at once, by a decision that m
 ## Consequences
 
 **Each behaviour is written and tested once per language.** The conformance files take most of that
-cost off the wire: 123 vectors in 9 groups, 89 conversations, 50 transports' cases and 9 clock
+cost off the wire: 221 vectors in 10 groups, 142 conversations, 56 transports' cases and 9 clock
 cases, which both sides play, written once. CI's `spec` job regenerates them and fails on any byte
 that differs, or on any file a generator writes that is not committed.
 
 **What no entry plays stays with each side's twin tests**, and `docs/support.md` says so: a
 destination that is a router the relay calls through, with its two legs' limits and the session
-every requester shares behind it (sections 14.3 and 14.7), until a relay across languages comes with
-the federation of nodes; HTTP/2 and TLS, which both servers serve, an open row of the matrix naming
-both; keep-alive, pipelining and a connection used again, which one socket per exchange leaves out;
-and the transport's contract with its router — its events, its handles, its gauges.
+every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 14.7), until a relay
+across languages comes with the federation of nodes; HTTP/2 and TLS, which both servers serve, an
+open row of the matrix naming both; keep-alive, pipelining and a connection used again, which one
+socket per exchange leaves out; and the transport's contract with its router — its events, its
+handles, its gauges.
 
 **Nothing is retired in this change.** A twin test leaves both sides one assertion at a time, in the
 change that pairs each of its assertions with the case that plays it, and the cell of the matrix it

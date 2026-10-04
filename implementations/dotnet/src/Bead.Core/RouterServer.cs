@@ -1,9 +1,21 @@
 namespace Bead;
 
-/// <summary>What a transport delivered: its bytes, and whether it came as text, which is no envelope.</summary>
+/// <summary>
+/// What a transport carries, both ways: an envelope's bytes, whether they came as text, which is no
+/// envelope, and the credential carried beside them (spec 15.1).
+/// </summary>
 /// <param name="Bytes">The bytes, the transport's no more: they must not change afterwards.</param>
-/// <param name="IsText">Whether it came as text.</param>
-public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool IsText);
+/// <param name="IsText">Whether they came as text; what a transport sends goes as bytes.</param>
+public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool IsText)
+{
+    /// <summary>
+    /// The credential carried beside the envelope: over HTTP, the <c>Authorization</c> field of the
+    /// <c>POST /bead</c> that carries a request, as it came, its surrounding whitespace removed; none
+    /// when nothing was carried, an empty field among them. A WebSocket carries none, nor does an
+    /// answer or what a listen brings back.
+    /// </summary>
+    public string? Credential { get; init; }
+}
 
 /// <summary>
 /// What a server's router needs of its transport: the connections that open and close, what they
@@ -17,22 +29,43 @@ public interface IRouterServerTransport
     /// <summary>A connection opened, named by its handle.</summary>
     event Action<string>? Connection;
 
-    /// <summary>A connection delivered a message.</summary>
+    /// <summary>A connection delivered a message: an envelope, and the credential carried beside it.</summary>
     event Action<TransportMessage, string>? Message;
 
     /// <summary>A connection closed: whether cleanly, and its handle.</summary>
     event Action<bool, string>? Close;
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> to a connection: at once, in order, without blocking; the
-    /// task settles once they were sent, or could not be.
+    /// Hands <paramref name="message"/> to a connection: at once, in order, without blocking; the
+    /// task settles once it was sent, or could not be. No server carries a credential: an answer and
+    /// what a listen brings back carry none, nor does a socket.
     /// </summary>
-    Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle);
+    Task Send(TransportMessage message, string connectionHandle);
 
     /// <summary>Whether a connection carries both ways; every one does by default.</summary>
     bool IsTwoWay(string connectionHandle)
     {
         return true;
+    }
+
+    /// <summary>
+    /// Whether a connection carries a credential beside an envelope the server sends on it (spec
+    /// 15.1): a command presenting <see cref="CredentialScheme.Elsewhere"/>, a relay's leg B among
+    /// them, needs one. None does by default, as no server's transport carries one toward its client.
+    /// </summary>
+    bool CarriesCredential(string connectionHandle)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a connection is secure — its listener under TLS, or bound to the loopback, or within
+    /// the machine, or as its application says what stands in front of it (spec 13.4): a command
+    /// presenting a bearer credential needs one. None is by default.
+    /// </summary>
+    bool IsSecure(string connectionHandle)
+    {
+        return false;
     }
 }
 
@@ -56,9 +89,40 @@ public sealed record RouterServerOptions
 
     /// <summary>
     /// The session of a connection, which its next answer announces when it changed; none for none.
-    /// Asked for each answer only, from the router's scheduler. No session is announced when none.
+    /// Asked for each answer only, from the router's scheduler, and never waiting. No session is
+    /// announced when none.
     /// </summary>
     public Func<string, SessionToken?>? SessionTokenOf { get; init; }
+
+    /// <summary>
+    /// The call's session a request's credential resolves to, asked once per request, with the
+    /// call's signal, between holding its call id and its admission (spec 9.2, step 5): none, for a
+    /// request presenting none, runs it in none; for one presenting a credential, says that
+    /// credential does not hold, and it is refused SESSION_REQUIRED. One that throws or faults fails
+    /// the call, PROCEDURE_FAILED, and is reported. It may wait, never for a request presenting none
+    /// or <see cref="CredentialScheme.Opaque"/>, which resolves in the turn it came; a cancel or its
+    /// connection closing cancels the signal, and a resolution that settles after is dropped. When
+    /// none, the router knows no session: a request presenting none runs in none, and one presenting
+    /// a credential does not hold.
+    /// </summary>
+    public Func<SessionRequest, CancellationToken, ValueTask<CallSession?>>? SessionOf { get; init; }
+
+    /// <summary>
+    /// What it resolves a request's <see cref="CredentialScheme.Jwt"/> and
+    /// <see cref="CredentialScheme.Elsewhere"/> with, on its clock; it takes no other when none. A
+    /// request presenting a scheme it takes none of is refused CREDENTIAL_UNSUPPORTED. Given JWT keys
+    /// or a key set, its limits hold a chunk's envelope and an envelope of 1,024 bytes at least, or
+    /// they do not hold together, an <see cref="ArgumentException"/> (spec 12.2); and they come with
+    /// their audience, whatever its relay does, or they are an <see cref="ArgumentException"/>
+    /// (spec 13.8).
+    /// </summary>
+    public Credentials? Credentials { get; init; }
+
+    /// <summary>
+    /// The credential schemes it takes besides <see cref="CredentialScheme.Opaque"/> and those its
+    /// credentials give, which <see cref="SessionOf"/> resolves: a test's own.
+    /// </summary>
+    internal IReadOnlyCollection<CredentialScheme>? CredentialSchemes { get; init; }
 
     /// <summary>Where resolvers run: the thread pool when none.</summary>
     internal TaskScheduler? ResolverScheduler { get; init; }
@@ -77,10 +141,17 @@ public sealed record RouterServerOptions
 /// resolver to a request that opens a subscription, and its first subscription to a procedure is the
 /// one it keeps. A paced subscription gets a notification while its client credited one, and queues
 /// the others, within <see cref="RouterServerOptions.Pacing"/>; past it, it ends with
-/// CAPACITY_EXCEEDED. Each answer announces its connection's session, as
-/// <see cref="RouterServerOptions.SessionTokenOf"/> gives it. A request that names a destination goes
-/// on through the relay to the destination registered, as <see cref="RouterServerOptions.Relay"/>
-/// admits it; while none is registered, it is refused: this router relays nothing.
+/// CAPACITY_EXCEEDED. Each request runs in its call's session, which its credential resolves to by
+/// <see cref="RouterServerOptions.SessionOf"/> — a <see cref="CredentialScheme.Jwt"/> and an
+/// <see cref="CredentialScheme.Elsewhere"/> by its <see cref="RouterServerOptions.Credentials"/> —
+/// and each answer announces its connection's session, as
+/// <see cref="RouterServerOptions.SessionTokenOf"/> gives it. A connection holds one subscription
+/// per procedure and per session (spec 11.3): its connection's, for calls presenting none or OPAQUE,
+/// and each credential's, kept while it bounds one and ended at its end on a timer of the router's
+/// clock, or by <see cref="EndSession"/> or <see cref="EndSessionsOf"/>. A request that names a
+/// destination goes on through the relay to the destination registered, as
+/// <see cref="RouterServerOptions.Relay"/> admits it; while none is registered, it is refused: this
+/// router relays nothing.
 /// </summary>
 public sealed class RouterServer : IRouterLike, IDisposable
 {
@@ -89,6 +160,17 @@ public sealed class RouterServer : IRouterLike, IDisposable
     private readonly NotificationManager _notifications;
     private readonly SubscriptionPlaces _places;
     private readonly Func<string, SessionToken?>? _sessionTokenOf;
+    private readonly Func<SessionRequest, CancellationToken, ValueTask<CallSession?>>? _sessionOf;
+
+    // what resolves a JWT and an ELSEWHERE, from its credentials
+    private readonly CredentialResolver _resolver;
+
+    // the credential schemes it takes, OPAQUE among them, in the order of their numbers
+    private readonly IReadOnlyList<CredentialScheme> _credentialSchemes;
+
+    // the credentials' sessions kept, by connection and identifier, each while it bounds a
+    // subscription: its end, and the one timer toward it
+    private readonly Dictionary<SubscriptionPlace, Kept> _kept = [];
 
     // the requests that name a destination go on through it; none does until one is registered
     private readonly Relay _relay;
@@ -116,6 +198,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 return _connections.Contains(connectionHandle);
             });
         _sessionTokenOf = options?.SessionTokenOf;
+        _sessionOf = options?.SessionOf;
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions
@@ -125,9 +208,16 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 Scheduler = options?.Scheduler,
                 Clock = clock,
             });
+
+        // * what a key set's deadline does goes on the router's scheduler, as its other timers' work
+        _resolver = new CredentialResolver(options?.Credentials, (clock, _core.Post));
+        _credentialSchemes = [.. (options?.CredentialSchemes ?? []).Concat(_resolver.Schemes).Distinct().Order()];
+        CredentialResolver.AssertLimits(_core.Limits, _resolver.TakesJwt);
         _relay = new Relay(
             new RelayRouter
             {
+                CarriesCredential = transport.CarriesCredential,
+                IsSecure = transport.IsSecure,
                 IsTwoWay = transport.IsTwoWay,
                 Limits = _core.Limits,
                 Report = Report,
@@ -135,6 +225,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 Respond = Respond,
             },
             options?.Relay);
+        _notifications.OnRegister = OnSubscribed;
+        _notifications.OnRemove = OnUnsubscribed;
         transport.Connection += OnConnection;
         transport.Message += OnMessage;
         transport.Close += OnClose;
@@ -146,7 +238,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// <summary>What the router did: sent a request, took a response, sent a notification.</summary>
     public event Action<RouterActivity, string>? Activity;
 
-    /// <summary>Each envelope, out or in, its token left out; nothing is built while none listens.</summary>
+    /// <summary>Each envelope, out or in, its credential left out; nothing is built while none listens.</summary>
     public event Action<DebugDirection, TracedEnvelope>? Debug;
 
     /// <inheritdoc/>
@@ -235,7 +327,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
             // who gets it is settled before any is sent
             var targets = _notifications.Candidates(request.Procedure).Where((candidate) =>
             {
-                return request.Filter is null || request.Filter(candidate.ConnectionHandle);
+                return request.Filter is null
+                    || request.Filter(candidate.ConnectionHandle, _notifications.SubscriptionAt(candidate.CallId, candidate.ConnectionHandle)?.Session);
             }).ToList();
             var sending = targets.Select((target) =>
             {
@@ -260,8 +353,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     /// <summary>
-    /// Subscribes the connection a request came from to that request's procedure, and gives the call
-    /// id of the subscription. A request that opens no subscription is an
+    /// Subscribes the connection a request came from to that request's procedure, in the call's
+    /// session, which bounds it, and gives the call id of the subscription. A request that opens no subscription is an
     /// <see cref="InvalidOperationException"/>; a connection closed, a
     /// <see cref="DisconnectException"/>; a call cancelled or answered already, an
     /// <see cref="OperationCanceledException"/>.
@@ -292,7 +385,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             }
 
             var subscribed = _places.Subscribe(
-                new SubscribingCall(header.CallId, connectionHandle, header.Paced),
+                new SubscribingCall(header.CallId, connectionHandle, header.Paced) { Session = _core.SessionOf(target) },
                 new ProcedureAddress(header.ServiceId, header.ProcedureId));
 
             // the call took the place, in flight: its request answers it, should its queue go past
@@ -376,11 +469,12 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     /// <summary>
-    /// Ends each subscription a connection holds, established by its answer, with
-    /// <paramref name="failure"/> on its call id — SESSION_REQUIRED when its session ended, say,
-    /// whose end the first failure announces — then forgets it; each call waiting ends the same way.
-    /// A subscribing call still in flight is left to its own answer. Settles once each failure was
-    /// tried; one that cannot go out is reported.
+    /// Ends each subscription a connection's session bounds — those of the connection that no
+    /// credential's session bounds — established by its answer, with <paramref name="failure"/> on
+    /// its call id — SESSION_REQUIRED when its session ended, say, whose end the first failure
+    /// announces — then forgets it; each call waiting ends the same way. A subscribing call still in
+    /// flight is left to its own answer. Settles once each failure was tried; one that cannot go out
+    /// is reported.
     /// </summary>
     public Task DropSubscriptions(string connectionHandle, Failure failure)
     {
@@ -390,6 +484,51 @@ public sealed class RouterServer : IRouterLike, IDisposable
             {
                 return EndSubscription(new CallAddress(callId, connectionHandle), failure);
             }).ToList());
+        });
+    }
+
+    /// <summary>
+    /// Ends a credential's session by its identifier on every connection that keeps it, and nothing
+    /// else: each subscription it bounds fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// identifier no connection keeps ends nothing. Ending a session refuses no credential: one that
+    /// still holds opens it anew, a call that resolved to it before it ended and subscribes as it is
+    /// answered after among them. Settles once each failure was tried; one that cannot go out is
+    /// reported.
+    /// </summary>
+    public Task EndSession(SessionIdentifier identifier)
+    {
+        ArgumentNullException.ThrowIfNull(identifier);
+
+        return _core.Loop.Run(() =>
+        {
+            return Task.WhenAll(_kept.Keys.Where((place) =>
+            {
+                return place.Session == identifier;
+            }).ToList().Select(EndKept).ToList());
+        });
+    }
+
+    /// <summary>
+    /// Ends every credential's session of an issuer alike, as when a key of that issuer's leaks:
+    /// each <see cref="CredentialScheme.Jwt"/>'s session whose identifier's issuer it is, compared
+    /// octet for octet, whatever its <c>sid</c> or <c>sub</c>, on every connection that keeps one,
+    /// and nothing else — an <see cref="CredentialScheme.Elsewhere"/>'s identifier names no
+    /// issuer. Each subscription they bound fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// issuer no kept session names ends nothing. Ending a session refuses no credential: one that
+    /// still holds opens its session anew, a token a leaked key signed among them while that key
+    /// serves. Settles once each failure was tried; one that cannot go out is reported. An issuer
+    /// that is null is an <see cref="ArgumentNullException"/>.
+    /// </summary>
+    public Task EndSessionsOf(string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(issuer);
+
+        return _core.Loop.Run(() =>
+        {
+            return Task.WhenAll(_kept.Keys.Where((place) =>
+            {
+                return place.Session is { Scheme: CredentialScheme.Jwt, Issuer: { } named } && string.Equals(named, issuer, StringComparison.Ordinal);
+            }).ToList().Select(EndKept).ToList());
         });
     }
 
@@ -425,8 +564,167 @@ public sealed class RouterServer : IRouterLike, IDisposable
             _connections.Clear();
             _places.Clear();
             _notifications.CleanAll();
+            Forget(null);
         });
         _core.Dispose();
+    }
+
+    // the end a credential's session gives, in milliseconds since the epoch; none for one no timer
+    // ends
+    private static long? EndOf(CallSession session)
+    {
+        return session.End;
+    }
+
+    // whether an end is later than another, none — a session no timer ends — the latest
+    private static bool IsLater(long? end, long? than)
+    {
+        return than is { } before && (end is not { } after || after > before);
+    }
+
+    // a call that subscribed in a credential's session keeps that session on its connection, with
+    // the later of its end and the one kept
+    private void OnSubscribed(SubscribingCall call)
+    {
+        if (call.Session is not { Identifier: not null } session || !_connections.Contains(call.ConnectionHandle))
+        {
+            return;
+        }
+
+        var place = call.Place;
+
+        if (_kept.TryGetValue(place, out var kept))
+        {
+            if (IsLater(EndOf(session), kept.End))
+            {
+                kept.End = EndOf(session);
+                Arm(place, kept);
+            }
+
+            return;
+        }
+
+        kept = new Kept { End = EndOf(session) };
+        _kept[place] = kept;
+        Arm(place, kept);
+    }
+
+    // a credential's session that bounds no subscription any more is kept no more, nor timed
+    private void OnUnsubscribed(Subscription subscription)
+    {
+        if (subscription.Session is not { } identifier)
+        {
+            return;
+        }
+
+        var place = new SubscriptionPlace(subscription.ConnectionHandle, identifier);
+
+        if (!_kept.TryGetValue(place, out var kept)
+            || _notifications.Subscriptions(subscription.ConnectionHandle).Any((held) =>
+            {
+                return held.Session == identifier;
+            }))
+        {
+            return;
+        }
+
+        _kept.Remove(place);
+        kept.Stop();
+    }
+
+    // a call resolving to the identifier of a session its connection keeps moves that end to the
+    // later of the two, and runs with it: a credential renewed keeps its subscriptions
+    private CallSession Renew(CallSession session, string connectionHandle)
+    {
+        var place = new SubscriptionPlace(connectionHandle, session.Identifier);
+
+        if (!_kept.TryGetValue(place, out var kept))
+        {
+            return session;
+        }
+
+        if (IsLater(EndOf(session), kept.End))
+        {
+            kept.End = EndOf(session);
+            Arm(place, kept);
+        }
+
+        return session with { End = kept.End };
+    }
+
+    // the timer toward a kept session's end, in place of the one before, from the wall clock read
+    // now, never counted down: R = E − W, ended at once at R ≤ 0, else armed for R, or for the
+    // longest timer, whose due reads it again
+    private void Arm(SubscriptionPlace place, Kept kept)
+    {
+        kept.Stop();
+
+        if (kept.End is not { } end)
+        {
+            return;
+        }
+
+        var remaining = end - _core.Clock.GetUtcNow().ToUnixTimeMilliseconds();
+        var generation = kept.Generation;
+
+        // ended then, no timer armed: in its own turn, past what subscribed or renewed it
+        if (remaining <= 0)
+        {
+            _core.Post(() =>
+            {
+                if (kept.Generation == generation && _kept.TryGetValue(place, out var current) && ReferenceEquals(current, kept))
+                {
+                    _ = EndKept(place);
+                }
+            });
+
+            return;
+        }
+
+        kept.Timer = _core.Clock.CreateTimer(
+            (_) =>
+            {
+                _core.Post(() =>
+                {
+                    if (kept.Generation == generation && _kept.TryGetValue(place, out var current) && ReferenceEquals(current, kept))
+                    {
+                        Arm(place, kept);
+                    }
+                });
+            },
+            null,
+            TimeSpan.FromMilliseconds(Math.Min(remaining, int.MaxValue)),
+            Timeout.InfiniteTimeSpan);
+    }
+
+    // a kept session that ends ends the subscriptions it bounds on its connection, each with
+    // SESSION_REQUIRED on its call id; a call still unanswered is left to its own answer
+    private Task EndKept(SubscriptionPlace place)
+    {
+        if (_kept.Remove(place, out var kept))
+        {
+            kept.Stop();
+        }
+
+        var failure = Failure.OfProtocol(ProtocolCode.SessionRequired, "its credential's session ended");
+
+        return Task.WhenAll(_places.Drop(place).Select((callId) =>
+        {
+            return EndSubscription(new CallAddress(callId, place.ConnectionHandle), failure);
+        }).ToList());
+    }
+
+    // the kept sessions of a connection that closed, or every one, forgotten with their timers
+    private void Forget(string? connectionHandle)
+    {
+        foreach (var place in _kept.Keys.Where((place) =>
+        {
+            return connectionHandle is null || place.ConnectionHandle == connectionHandle;
+        }).ToList())
+        {
+            _kept.Remove(place, out var kept);
+            kept?.Stop();
+        }
     }
 
     // one notification to one subscription; a connection that cannot take it keeps none of the
@@ -515,7 +813,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return;
         }
 
-        _core.Receive(message.Bytes, connectionHandle);
+        _core.Receive(message, connectionHandle);
     }
 
     private void OnClose(bool wasClean, string connectionHandle)
@@ -528,6 +826,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             _relay.CloseConnection(connectionHandle);
             _places.Clear(connectionHandle);
             _notifications.Clean(connectionHandle);
+            Forget(connectionHandle);
         });
         _core.RejectPending("the connection closed before the answer", connectionHandle);
     }
@@ -568,12 +867,21 @@ public sealed class RouterServer : IRouterLike, IDisposable
         public Action? BeforeAnswer(AnswerInfo answer)
         {
             var (connectionHandle, header) = answer.Target;
-
-            return server._places.Settle(
-                new SubscribingCall(header.CallId, connectionHandle, header.Paced),
+            var call = new SubscribingCall(header.CallId, connectionHandle, header.Paced) { Session = answer.Session };
+            var undo = server._places.Settle(
+                call,
                 (answer.IsFailure,
                     header.OpensSubscription && answer.Resolver is INotificationResolver && server._connections.Contains(connectionHandle),
                     new ProcedureAddress(header.ServiceId, header.ProcedureId)));
+
+            // a call in flight whose session ended meanwhile keeps it anew as its answer subscribes
+            // it, which ends it then should its end be reached
+            if (server._notifications.SubscriptionAt(header.CallId, connectionHandle) is { Session: { } identifier } && identifier == answer.Session?.Identifier)
+            {
+                server.OnSubscribed(call);
+            }
+
+            return undo;
         }
 
         // a cancel takes away what its call subscribed, established or still in flight
@@ -599,10 +907,20 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return server.Transport.IsTwoWay(connectionHandle);
         }
 
-        // a request that names a destination goes on through the relay
-        public IRequestHandler? HandlerOfDestination(uint destinationId)
+        public bool CarriesCredential(string connectionHandle)
         {
-            return server._relay.HandlerOf(destinationId);
+            return server.Transport.CarriesCredential(connectionHandle);
+        }
+
+        public bool IsSecure(string connectionHandle)
+        {
+            return server.Transport.IsSecure(connectionHandle);
+        }
+
+        // a request that names a destination goes on through the relay
+        public IRequestHandler? HandlerOfDestination(RequestHeader header)
+        {
+            return server._relay.HandlerOf(header);
         }
 
         public void Report(Exception reason, string connectionHandle)
@@ -615,14 +933,69 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return server._sessionTokenOf?.Invoke(connectionHandle);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public IReadOnlyList<CredentialScheme> CredentialSchemes
         {
-            return server.Transport.Send(bytes, connectionHandle);
+            get
+            {
+                return server._credentialSchemes;
+            }
+        }
+
+        // a JWT and an ELSEWHERE by its credentials — a relay's that verifies held to the audiences
+        // its destinations were registered with as the call came — and the rest by the server's own
+        // resolution, when it gives one; without it, the router knows no session: a request
+        // presenting none runs in none, and one presenting a credential does not hold.
+        // SessionTokenOf stays the announcement's alone, asked for each answer
+        public ValueTask<CallSession?> SessionOf(SessionRequest request, CancellationToken signal)
+        {
+            if (request.Header.Credential?.Scheme is { } scheme && server._resolver.Schemes.Contains(scheme) && scheme != CredentialScheme.Opaque)
+            {
+                return server._resolver.Resolve(
+                    request.Header.DestinationId is null ? request : request with { Audiences = server._relay.Audiences() },
+                    signal);
+            }
+
+            if (server._sessionOf is { } sessionOf)
+            {
+                return sessionOf(request, signal);
+            }
+
+            return ValueTask.FromResult<CallSession?>(null);
+        }
+
+        public CallSession OnResolved(CallSession session, string connectionHandle)
+        {
+            return server.Renew(session, connectionHandle);
+        }
+
+        public Task Send(TransportMessage message, string connectionHandle)
+        {
+            return server.Transport.Send(message, connectionHandle);
         }
 
         public void Trace(DebugDirection direction, TracedEnvelope envelope)
         {
             server.Debug?.Invoke(direction, envelope);
+        }
+    }
+
+    // a credential's session kept on a connection: its end in milliseconds since the epoch, none
+    // for one no timer ends, and the one timer toward it, whose arming stands while its generation
+    // does
+    private sealed class Kept
+    {
+        public long? End { get; set; }
+
+        public ITimer? Timer { get; set; }
+
+        public int Generation { get; private set; }
+
+        // its timer stopped, and one whose due was on its way ends nothing
+        public void Stop()
+        {
+            Timer?.Dispose();
+            Timer = null;
+            Generation += 1;
         }
     }
 }

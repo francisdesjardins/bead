@@ -39,12 +39,16 @@ import {
   type IHTTPTransportClientOptions,
 } from '../http-transport-client';
 import { dispose } from '../transport-client';
+import type { ITransportMessage } from '../../shared/types';
 import type { ITransportClientInternal } from '../types';
 import { createFakeFetch, responseOf } from './fake-fetch';
 
 // helpers
 
 const host = '127.0.0.1';
+
+/** A bearer credential, RFC 6750's own example, its auth-scheme included. */
+const BEARER = 'Bearer mF_9.B5f-4.1JqM';
 
 /** An envelope as the transports read it: its layout, its kind, its call id, and `extra` bytes. */
 const envelopeOf = (kind: number, { callId, extra = 0 }: { callId: number; extra?: number }) => {
@@ -90,6 +94,23 @@ const nextEvent = (client: HTTPTransportClient, event: 'close' | 'message') => {
   });
 };
 
+/**
+ * Whether a client carries a credential, and is secure, once a connect to `target` was tried — the
+ * judgement made from the URL it was given, the network down.
+ */
+const judgedOf = async (target: { host: string; secured?: boolean }) => {
+  const client = createHTTPTransportClient({
+    fetch: () => {
+      return Promise.reject(new Error('the network is down'));
+    },
+    isListening: false,
+  });
+
+  await client.connect({ ...target, port: 8_080 }).catch(() => {});
+
+  return [client.carriesCredential, client.isSecure];
+};
+
 const handleOf = (server: HTTPTransportServer) => {
   return server.clients.at(-1)?.connectionHandle as TransportServerConnectionHandle;
 };
@@ -111,6 +132,29 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test.describe('createHTTPTransportClient, what it carries', () => {
+  test('carries a credential beside an envelope, in its POST’s Authorization, and is secure under https or to a loopback host, judged by the URL it was given', async () => {
+    expect(createHTTPTransportClient().isSecure).toBe(false);
+    expect(
+      await Promise.all([
+        judgedOf({ host: 'bead.example', secured: true }),
+        judgedOf({ host: 'localhost' }),
+        judgedOf({ host: '127.0.0.1' }),
+        judgedOf({ host: '::1' }),
+        judgedOf({ host: 'bead.example' }),
+        judgedOf({ host: '192.0.2.1' }),
+      ])
+    ).toEqual([
+      [true, true],
+      [true, true],
+      [true, true],
+      [true, true],
+      [true, false],
+      [true, false],
+    ]);
+  });
+});
+
 test.describe('createHTTPTransportClient', () => {
   test.afterAll(async () => {
     await tcpSocketsClosed();
@@ -122,7 +166,7 @@ test.describe('createHTTPTransportClient', () => {
     const client = createHTTPTransportClient({ isListening: false });
     const heard: unknown[] = [];
 
-    client.on('message', (data) => {
+    client.on('message', ({ data }) => {
       heard.push([...new Uint8Array(data as ArrayBuffer)]);
     });
     await client.connect({ host, port });
@@ -132,19 +176,22 @@ test.describe('createHTTPTransportClient', () => {
     expect(JSON.stringify(client.socket)).not.toContain(CONNECTION_TOKEN_HEADER);
 
     // settled once the server has it, before any answer
-    await client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    await client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     expect(heard).toEqual([]);
 
     const message = nextEvent(client, 'message');
 
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 }), handleOf(server));
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 }) },
+      handleOf(server)
+    );
     await message;
 
     expect(heard).toEqual([[...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 })]]);
 
     // a cancel ends empty: nothing is heard
-    await client.send(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }));
+    await client.send({ data: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }) });
     await client.disconnect();
 
     expect(heard).toHaveLength(1);
@@ -157,11 +204,69 @@ test.describe('createHTTPTransportClient', () => {
     await client.connect({ host, port: started.port });
 
     // a request on the server's own parity
-    await expect(client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 2 }))).rejects.toThrow(
-      new GenericError('the server refused the exchange: 400 malformed')
-    );
+    await expect(
+      client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 2 }) })
+    ).rejects.toThrow(new GenericError('the server refused the exchange: 400 malformed'));
     expect(client.isOpen()).toBe(true);
     await client.disconnect();
+  });
+
+  test('carries its credential in the Authorization of its POST, which the server hands on with the request, and hears the answer with none', async () => {
+    await using started = await startServer();
+    const { port, server } = started;
+    const client = createHTTPTransportClient({ isListening: false });
+    const taken: unknown[] = [];
+
+    server.on('message', ({ credential }, connectionHandle) => {
+      taken.push(credential);
+      void server.send(
+        { credential: BEARER, data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) },
+        connectionHandle
+      );
+    });
+    await client.connect({ host, port });
+
+    const message = nextEvent(client, 'message');
+
+    await client.send({
+      credential: BEARER,
+      data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+    });
+
+    const [{ credential }] = (await message) as [ITransportMessage];
+
+    expect([taken, credential]).toEqual([[BEARER], undefined]);
+    await client.disconnect();
+  });
+
+  test('writes Authorization only with a credential, and refuses one no field carries before it goes, its connection kept', async () => {
+    const { client, fake } = await connectFake();
+    const carrying = client.send({
+      credential: BEARER,
+      data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+    });
+
+    fake.calls[1]?.answer({ status: 204 });
+    await carrying;
+
+    const bare = client.send({ data: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }) });
+
+    fake.calls[2]?.answer({ status: 204 });
+    await bare;
+
+    expect(fake.calls[1]?.init.headers).toMatchObject({ authorization: BEARER });
+    expect(fake.calls[2]?.init.headers).not.toHaveProperty('authorization');
+
+    for (const credential of ['Bearer a\r\nb', 'Bearer é', 'Bearer \u0000']) {
+      await expect(
+        client.send({ credential, data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) }),
+        JSON.stringify(credential)
+      ).rejects.toThrow(
+        new ProgrammerError('a credential holds visible ASCII, spaces and tabs alone')
+      );
+    }
+
+    expect([fake.calls.length, client.isOpen()]).toEqual([3, true]);
   });
 
   test('disconnects by a DELETE, the server closing first, and closes clean', async () => {
@@ -181,7 +286,7 @@ test.describe('createHTTPTransportClient', () => {
     expect(client.isClosed()).toBe(true);
     expect(client.socket).toBeNull();
     await expect(client.disconnect()).rejects.toBeInstanceOf(ReadyStateError);
-    await expect(client.send(new Uint8Array(8))).rejects.toBeInstanceOf(ReadyStateError);
+    await expect(client.send({ data: new Uint8Array(8) })).rejects.toBeInstanceOf(ReadyStateError);
   });
 
   test('closes once the server says the connection is gone, after rejecting the exchange that learned it', async () => {
@@ -197,7 +302,7 @@ test.describe('createHTTPTransportClient', () => {
     await server.close(handleOf(server));
 
     await client
-      .send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }))
+      .send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
       .catch((reason: unknown) => {
         order.push(`rejected ${(reason as Error).message}`);
       });
@@ -215,7 +320,7 @@ test.describe('createHTTPTransportClient', () => {
   test('closes, and tells the server, when the server is lost under an exchange, which counts as handed over', async () => {
     const { client, fake } = await connectFake();
     const closed = nextEvent(client, 'close');
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     fake.calls[1]?.fail();
 
@@ -236,7 +341,7 @@ test.describe('createHTTPTransportClient', () => {
     for (const status of [404, 502, 504]) {
       const { client, fake } = await connectFake();
       const closed = nextEvent(client, 'close');
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ status });
 
@@ -249,7 +354,7 @@ test.describe('createHTTPTransportClient', () => {
 
   test('rejects a refusal the server marked, and keeps its connection', async () => {
     const { client, fake } = await connectFake();
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     fake.calls[1]?.answer({ headers: { [REFUSAL_HEADER]: 'busy' }, status: 429 });
 
@@ -280,13 +385,13 @@ test.describe('createHTTPTransportClient', () => {
         status: 201,
       });
       await connecting;
-      client.on('message', (data) => {
+      client.on('message', ({ data }) => {
         heard.push(data);
       });
 
       const closed = nextEvent(client, 'close');
 
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ ...answer, status: 200 });
       await sending;
@@ -325,14 +430,14 @@ test.describe('createHTTPTransportClient', () => {
         status: 201,
       });
       await connecting;
-      client.on('message', (data) => {
+      client.on('message', ({ data }) => {
         heard.push(new Uint8Array(data as ArrayBuffer)[0] ?? 0);
       });
       client.on('close', () => {
         isClosed = true;
       });
 
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ ...answer, status: 200 });
       await sending;
@@ -350,25 +455,25 @@ test.describe('createHTTPTransportClient', () => {
     const { client, fake } = await connectFake();
     const heard: unknown[] = [];
 
-    client.on('message', (data) => {
+    client.on('message', ({ data }) => {
       heard.push(data);
     });
 
     // cancelled: its exchange ends with no body
-    const cancelled = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const cancelled = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     fake.calls[1]?.answer({ headers: { 'content-type': BEAD_MEDIA_TYPE }, status: 200 });
     await cancelled;
 
     const { promise: later, resolve: bodyCame } = Promise.withResolvers<Uint8Array>();
-    const coming = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }));
+    const coming = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) });
 
     fake.calls[2]?.answer({ headers: { 'content-type': BEAD_MEDIA_TYPE }, later, status: 200 });
     await coming;
 
     // another exchange lost: the connection goes, and the answer still coming with it
     const closed = nextEvent(client, 'close');
-    const lost = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 }));
+    const lost = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 }) });
 
     fake.calls[3]?.fail();
     await lost;
@@ -394,7 +499,7 @@ test.describe('createHTTPTransportClient', () => {
     };
 
     try {
-      const sent = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sent = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({
         body: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }),
@@ -424,8 +529,8 @@ test.describe('createHTTPTransportClient', () => {
       closes.push(params);
     });
 
-    const first = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
-    const second = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }));
+    const first = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+    const second = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) });
 
     fake.calls[1]?.fail();
     fake.calls[2]?.fail();
@@ -439,7 +544,7 @@ test.describe('createHTTPTransportClient', () => {
 
     const told = await connectFake();
     const closed = nextEvent(told.client, 'close');
-    const refused = told.client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const refused = told.client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     told.fake.calls[1]?.answer({
       headers: { [REFUSAL_HEADER]: CONNECTION_UNKNOWN },
@@ -462,7 +567,7 @@ test.describe('createHTTPTransportClient', () => {
     ]) {
       const { client, fake } = await connectFake();
       const closed = nextEvent(client, 'close');
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ ...answer, status: 200 });
       await sending;
@@ -607,9 +712,11 @@ test.describe('createHTTPTransportClient', () => {
       heard.push('message');
     });
 
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })).then(() => {
-      heard.push('settled');
-    });
+    const sending = client
+      .send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+      .then(() => {
+        heard.push('settled');
+      });
 
     heard.push('sent');
     await sending;
@@ -678,7 +785,7 @@ test.describe('createHTTPTransportClient', () => {
 
   test('a drop aborts what is in flight, tells the server, and a dispose while connecting rejects the connect', async () => {
     const { client, fake } = await connectFake();
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     (client as ITransportClientInternal<object, never>)[dispose]();
 
@@ -752,7 +859,7 @@ const connectListening = async (options?: Partial<IHTTPTransportClientOptions>) 
     status: 201,
   });
   await connecting;
-  client.on('message', (data) => {
+  client.on('message', ({ data }) => {
     heard.push([...new Uint8Array(data as ArrayBuffer)]);
   });
 
@@ -848,6 +955,12 @@ test.describe('createHTTPTransportClient, listening', () => {
     const { callOf, client, fake, heard } = await connectListening({ wait: 1_000 });
     const first = envelopeOf(0x13, { callId: 1 });
     const second = envelopeOf(0x10, { callId: 2, extra: 2 });
+    const credentials: unknown[] = [];
+
+    // what a listen brings back carries no credential
+    client.on('message', ({ credential }) => {
+      credentials.push(credential);
+    });
 
     expect(fake.calls[0]?.init.headers).toMatchObject({ [LISTEN_HEADER]: '?1' });
     expect([(await callOf(1))?.url, (await callOf(1))?.init]).toMatchObject([
@@ -858,7 +971,10 @@ test.describe('createHTTPTransportClient, listening', () => {
     (await callOf(1))?.answer(batch(1, first, second));
 
     expect((await callOf(2))?.url).toContain('?after=2&');
-    expect(heard).toEqual([[...first], [...second]]);
+    expect([heard, credentials]).toEqual([
+      [[...first], [...second]],
+      [undefined, undefined],
+    ]);
 
     // nothing, and it listens again at the same point
     (await callOf(2))?.answer({ status: 204 });
@@ -1166,7 +1282,7 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     // gone while it listens: what its listen brings back is heard by nobody, and it listens no more
     const closed = nextEvent(client, 'close');
-    const lost = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const lost = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     (await callOf(3))?.fail();
     await lost;

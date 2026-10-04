@@ -61,7 +61,7 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export type { Data, IEventIteratorOptions } from '../shared/types';
+export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
 export { dispose } from './symbols';
 export type {
   ITransportClient,
@@ -179,8 +179,14 @@ export const createTransportClient = <
       return client;
     }),
 
+    get carriesCredential() {
+      return implementation.carriesCredential === true;
+    },
     get clock() {
       return implementation.clock ?? PLATFORM_CLOCK;
+    },
+    get isSecure() {
+      return implementation.isSecure === true;
     },
 
     connect: (given) => {
@@ -220,8 +226,8 @@ export const createTransportClient = <
     disconnect: (options) => {
       return implementation.disconnect(options);
     },
-    send: (data) => {
-      return implementation.send(data);
+    send: (message) => {
+      return implementation.send(message);
     },
     [dispose]: () => {
       const wasOpen = client.isOpen();

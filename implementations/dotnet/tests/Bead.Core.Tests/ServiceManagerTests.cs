@@ -770,6 +770,38 @@ public sealed class ServiceManagerTests
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), router.Responses[0].Failure);
     }
 
+    [Fact]
+    public void Keeps_its_refusal_SESSION_REQUIRED_whatever_the_call_presented_for_its_router_to_answer()
+    {
+        BeforeRequest Refusing(Failure? refusal)
+        {
+            return new BeforeRequest(
+                (_) =>
+                {
+                    return false;
+                },
+                refusal);
+        }
+
+        var plain = Refusing(Failure.OfProtocol(ProtocolCode.SessionRequired));
+        var detailed = Refusing(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"));
+        var request = new AdmissionRequest(Handle, Header);
+
+        // the router answers a call that presented a credential ACCESS_DENIED, whatever the
+        // admission
+        foreach (var presenting in new Credential?[] { null, (Credential)SessionToken.FromBytes([.. Enumerable.Repeat((byte)1, SessionToken.Bytes)]), Credential.Jwt("a.b.c"), Credential.Elsewhere() }.Select((credential) =>
+        {
+            return request with { Header = Header with { Credential = credential } };
+        }))
+        {
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), plain.RefusalOf(presenting));
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"), detailed.RefusalOf(presenting));
+
+            // ACCESS_DENIED when it gives none
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), Refusing(null).RefusalOf(presenting));
+        }
+    }
+
     // a failure carries no side here — the router writes it as its own — so what is left to show is
     // a client's resolver refusing before it reads
     [Fact]
@@ -1218,7 +1250,7 @@ public sealed class ServiceManagerTests
         await resolver.Notify(new Text("news"), new NotifyOptions { Exclude = "b" }).WaitAsync(Patience, Cancelled);
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
-            Filter = (handle) =>
+            Filter = (handle, _) =>
             {
                 return handle != "a";
             },
@@ -1226,7 +1258,7 @@ public sealed class ServiceManagerTests
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
             Exclude = "c",
-            Filter = (handle) =>
+            Filter = (handle, _) =>
             {
                 return handle != "a";
             },
@@ -1236,7 +1268,12 @@ public sealed class ServiceManagerTests
             ["each", "a c", "b c", "b"],
             router.Notified.Select((notified) =>
             {
-                return notified.Request.Filter is { } filter ? string.Join(' ', handles.Where(filter)) : "each";
+                return notified.Request.Filter is { } filter
+                    ? string.Join(' ', handles.Where((handle) =>
+                    {
+                        return filter(handle, null);
+                    }))
+                    : "each";
             }));
     }
 
@@ -1936,6 +1973,82 @@ public sealed class ServiceManagerTests
                 throw thrown;
             })).Admit(request);
         }));
+    }
+
+    [Fact]
+    public async Task Admission_reads_the_call_s_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it()
+    {
+        var router = new RecordingRouter();
+        var admitted = new List<object?>();
+        var received = new List<object?>();
+        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
+        {
+            admitted.Add(request.Session?.Data);
+
+            return true;
+        })))((request, response) =>
+        {
+            received.Add(request.Session?.Data);
+
+            return response.Answer(request.Payload);
+        });
+
+        // asked here, then by its router, which hands the callback the session it resolved
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Session = new CallSession { Data = "ada" } }).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = new CallSession { Data = "bob" } }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["ada", null], admitted);
+        Assert.Equal(["ada", null, "bob"], received);
+    }
+
+    [Fact]
+    public async Task Hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_its_trace()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+
+        await manager.GetRequest(Echo, Asked)(new Text("a"))(new RequestOptions { Credential = Credential.Opaque() }).WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("b"))().WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("c"))(new RequestOptions { Credential = Credential.Jwt("a.b.c") }).WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("d"))(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(
+            [Credential.Opaque(), null, Credential.Jwt("a.b.c"), Credential.Elsewhere("Interop sub=ada")],
+            router.Requests.Select((sent) =>
+            {
+                return sent.Request.Options.Credential;
+            }));
+        Assert.All(seen, (told) =>
+        {
+            Assert.Null(told.Event.Options!.Credential);
+        });
+    }
+
+    [Fact]
+    public async Task Hands_the_filter_the_identifier_of_the_session_holding_each_subscription_beside_its_connection()
+    {
+        var router = new RecordingRouter();
+        var resolver = new ServiceManager(router).GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
+        var grace = new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = "https://a.example", Sub = "grace" };
+        var heard = new List<(string ConnectionHandle, SessionIdentifier? Identifier)>();
+
+        await resolver.Notify(new Text("news"), new NotifyOptions
+        {
+            Exclude = "b",
+            Filter = (handle, identifier) =>
+            {
+                heard.Add((handle, identifier));
+
+                return identifier == grace;
+            },
+        }).WaitAsync(Patience, Cancelled);
+
+        var filter = Assert.Single(router.Notified).Request.Filter!;
+
+        Assert.Equal([true, false, false], new[] { filter("a", grace), filter("a", null), filter("b", grace) });
+        Assert.Equal([("a", (SessionIdentifier?)grace), ("a", null)], heard);
     }
 
     [Fact]

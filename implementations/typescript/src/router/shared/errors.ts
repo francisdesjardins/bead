@@ -3,6 +3,7 @@
 import { GenericError } from '../../transport/shared/errors';
 import { FailureScope, ProtocolCode } from './constants';
 import type {
+  Credential,
   DestinationId,
   EnvelopeHeader,
   FailureOrigin,
@@ -20,7 +21,7 @@ import type {
 /** Where a failure belongs, besides what it says: the call it failed and the envelope that said it. */
 interface IFailureErrorOptions extends ErrorOptions {
   destinationId?: DestinationId | undefined;
-  /** Kept redacted: a copy, without its session token. */
+  /** Kept redacted: a copy, without its credential. */
   header?: EnvelopeHeader | undefined;
   procedureAddress?: IProcedureAddress | undefined;
 }
@@ -70,15 +71,29 @@ const messageOf = ({
 };
 
 /**
- * `header` fit to be traced or thrown: a copy without its session token, saying whether it had one.
+ * `header` fit to be traced or thrown: a copy without its credential, saying its scheme alone when it
+ * had one.
  */
 export const redactHeader = (header: EnvelopeHeader): RedactedHeader => {
-  const { sessionToken, ...rest } = header as EnvelopeHeader & { sessionToken?: unknown };
+  const { credential, ...rest } = header as EnvelopeHeader & { credential?: Credential };
 
-  return { ...rest, hasSessionToken: typeof sessionToken === 'string' };
+  return {
+    ...rest,
+    ...(credential === undefined ? {} : { credentialScheme: credential.scheme }),
+  };
 };
 
 // definition
+
+/**
+ * A call a bound of the side's own refuses as its credential resolves (spec 8.2): its router answers
+ * it `CAPACITY_EXCEEDED`, its message for detail, and reports nothing, since nothing failed and its
+ * requester withdraws nothing. Only the side's own resolver raises it: a key set's bound on the calls
+ * that wait for an issuer's deadline (spec 13.8).
+ */
+export class CapacityError extends GenericError {
+  public override readonly name: string = 'CapacityError';
+}
 
 /** A request whose connection closed before its answer came. */
 export class DisconnectError extends GenericError {

@@ -529,7 +529,7 @@
         </div>
         <div>
           <dt>Identity</dt>
-          <dd id="identity">no session</dd>
+          <dd id="identity">logged out</dd>
         </div>
       </dl>
     </header>
@@ -539,7 +539,8 @@
         <section class="card" aria-labelledby="identity-h">
           <h2 id="identity-h">Identity</h2>
           <p class="note">
-            A fake JWT: a read needs a session, a write the <code>write</code> right.
+            An access token, a JWT each call presents in its header: a read needs one that holds, a
+            write one whose scope holds <code>write</code>.
           </p>
           <div class="buttons">
             <button type="button" data-action="reader">Log in as a reader</button>

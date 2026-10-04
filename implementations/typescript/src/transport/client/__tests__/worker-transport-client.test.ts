@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createWorkerTransportServer } from '../../server/worker-transport-server';
 import { ConnectError, ProgrammerError, ReadyStateError, TimeoutError } from '../../shared/errors';
+import type { ITransportMessage } from '../../shared/types';
 import { dispose } from '../transport-client';
 import type { ITransportClientInternal } from '../types';
 import {
@@ -35,8 +36,13 @@ const startWorker = async () => {
   };
 
   scope.port1.start();
-  server.on('message', (data, connectionHandle) => {
-    serverEvents.push(['message', [...new Uint8Array(data as ArrayBuffer)], connectionHandle]);
+  server.on('message', ({ credential, data }, connectionHandle) => {
+    serverEvents.push([
+      'message',
+      [...new Uint8Array(data as ArrayBuffer)],
+      credential,
+      connectionHandle,
+    ]);
   });
   server.on('close', (...params) => {
     serverEvents.push(['close', ...params]);
@@ -77,12 +83,16 @@ test.describe('createWorkerTransportClient', () => {
     const connectionHandle = 'type=WORKER;ip=local;ordinal=1';
     const hearing = nextEvent(client, 'message');
 
-    await client.send(Uint8Array.of(1, 2));
-    await server.send(Uint8Array.of(3, 4), connectionHandle);
+    // a worker carries no credential, either way
+    await client.send({ credential: 'Bearer mF_9.B5f-4.1JqM', data: Uint8Array.of(1, 2) });
+    await server.send(
+      { credential: 'Bearer mF_9.B5f-4.1JqM', data: Uint8Array.of(3, 4) },
+      connectionHandle
+    );
 
-    const [data] = await hearing;
+    const [{ credential, data }] = (await hearing) as [ITransportMessage];
 
-    expect([...new Uint8Array(data as ArrayBuffer)]).toEqual([3, 4]);
+    expect([...new Uint8Array(data as ArrayBuffer), credential]).toEqual([3, 4, undefined]);
     expect(client.socket).not.toBeNull();
 
     const closed = nextEvent(client, 'close');
@@ -96,11 +106,18 @@ test.describe('createWorkerTransportClient', () => {
         return serverEvents;
       })
       .toEqual([
-        ['message', [1, 2], connectionHandle],
+        ['message', [1, 2], undefined, connectionHandle],
         ['close', true, connectionHandle],
       ]);
     expect([client.isClosed(), client.socket]).toEqual([true, null]);
     expect(CONNECT_DEFAULTS.timeout).toBe(10_000);
+  });
+
+  test('says it carries no credential beside an envelope, and is secure, never leaving the machine, before any connect', async () => {
+    await using started = await startWorker();
+    const client = createWorkerTransportClient({ worker: started.worker });
+
+    expect([client.carriesCredential, client.isSecure]).toEqual([false, true]);
   });
 
   test('closes as its server closes it, or as its worker errs, and connects again', async () => {
@@ -193,7 +210,7 @@ test.describe('createWorkerTransportClient', () => {
 
     const client = createWorkerTransportClient({ worker });
 
-    client.on('message', (data) => {
+    client.on('message', ({ data }) => {
       heard.push([...new Uint8Array(data as ArrayBuffer)]);
     });
     client.on('close', () => {
@@ -218,12 +235,12 @@ test.describe('createWorkerTransportClient', () => {
     await using started = await startWorker();
     const client = createWorkerTransportClient({ worker: started.worker });
 
-    await expect(client.send(Uint8Array.of(1))).rejects.toBeInstanceOf(ReadyStateError);
+    await expect(client.send({ data: Uint8Array.of(1) })).rejects.toBeInstanceOf(ReadyStateError);
     await expect(client.disconnect()).rejects.toBeInstanceOf(ReadyStateError);
 
     await client.connect({});
 
-    await expect(client.send('text')).rejects.toThrow(
+    await expect(client.send({ data: 'text' })).rejects.toThrow(
       new ProgrammerError('a worker connection carries envelopes, as bytes')
     );
 

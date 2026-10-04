@@ -96,8 +96,11 @@ public interface IRequestSerializerServer<TRequest, TResponse>
 }
 
 /// <summary>
-/// Whether a request may reach a resolver, on its header alone: only <c>true</c> admits it; anything
-/// else refuses it, with <see cref="Refusal"/>, or with <see cref="ProtocolCode.AccessDenied"/>.
+/// Whether a request may reach a resolver, on its header alone: only <c>true</c> admits it;
+/// anything else refuses it, with <see cref="Refusal"/>, or with
+/// <see cref="ProtocolCode.AccessDenied"/>. The router answers a refusal SESSION_REQUIRED of a
+/// call that presented a credential ACCESS_DENIED, its detail kept: the credential may hold, and
+/// its requester would withdraw it (spec 9.2, step 5).
 /// </summary>
 public sealed class BeforeRequest
 {
@@ -137,6 +140,22 @@ public sealed class BeforeRequest
     {
         return _admits(request);
     }
+
+    /// <summary>
+    /// What the admission makes of a request: none admits it; any other its refusal, or
+    /// ACCESS_DENIED. The router answers a refusal SESSION_REQUIRED of a call whose header presents
+    /// a credential ACCESS_DENIED, whatever the admission (spec 9.2, step 5). An admission that
+    /// throws throws.
+    /// </summary>
+    internal Failure? RefusalOf(AdmissionRequest request)
+    {
+        if (Admits(request))
+        {
+            return null;
+        }
+
+        return Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+    }
 }
 
 /// <summary>What a resolver of a procedure needs: how its payloads are written, and who it admits.</summary>
@@ -164,6 +183,9 @@ public sealed record RequestProps<TPayload>
     /// <summary>Its payload, decoded.</summary>
     public required TPayload Payload { get; init; }
 
+    /// <summary>The call's session, as its credential resolved it; none when the call runs in none.</summary>
+    public CallSession? Session { get; init; }
+
     /// <summary>
     /// Cancelled when the call ends before its answer — its requester cancelled it, its connection
     /// closed — so the callback may stop: its answer would go nowhere.
@@ -190,11 +212,14 @@ public interface IResponse<TPayload>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
 public delegate Task RequestResolverCallback<TRequest, TResponse>(RequestProps<TRequest> request, IResponse<TResponse> response);
 
-/// <summary>What a notification goes to: its procedure, which connections, and its key.</summary>
+/// <summary>What a notification goes to: its procedure, which subscriptions, and its key.</summary>
 /// <param name="Procedure">The procedure that notifies.</param>
-/// <param name="Filter">Whether a connection subscribed gets it; each does when none.</param>
+/// <param name="Filter">
+/// Whether a subscription gets it, by its connection and the session that holds it — a
+/// credential's, by its identifier; its connection's, none; each does when none.
+/// </param>
 /// <param name="Key">What it replaces, queued for a paced subscription: the one of the same key.</param>
-public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, bool>? Filter, object? Key);
+public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, SessionIdentifier?, bool>? Filter, object? Key);
 
 /// <summary>Who a notification goes to, as its code says: the connections, and what it is about.</summary>
 public sealed record NotifyOptions
@@ -202,8 +227,11 @@ public sealed record NotifyOptions
     /// <summary>A connection left out: the one whose request made the change, say.</summary>
     public string? Exclude { get; init; }
 
-    /// <summary>Whether a connection gets it: those of one user, say.</summary>
-    public Func<string, bool>? Filter { get; init; }
+    /// <summary>
+    /// Whether a subscription gets it, by its connection and the session that holds it — a
+    /// credential's, by its identifier; its connection's, none: those of one user, say.
+    /// </summary>
+    public Func<string, SessionIdentifier?, bool>? Filter { get; init; }
 
     /// <summary>
     /// What it is about — the entity whose state it carries — for a paced subscription: queued past
@@ -298,7 +326,10 @@ public sealed record DebugEvent
     /// </summary>
     public TimeSpan? Duration { get; init; }
 
-    /// <summary>The call's options, its defaults applied; none for a step that has none.</summary>
+    /// <summary>
+    /// The call's options, its defaults applied, its credential left out; none for a step that has
+    /// none.
+    /// </summary>
     public ResolvedRequestOptions? Options { get; init; }
 
     /// <summary>The procedure's number in its service.</summary>
@@ -666,6 +697,7 @@ public sealed class ServiceManager
             CancellationToken = given?.CancellationToken ?? CancellationToken.None,
             CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
             ConnectionHandle = given?.ConnectionHandle,
+            Credential = given?.Credential,
             DestinationId = given?.DestinationId,
             Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
         };
@@ -703,7 +735,9 @@ public sealed class ServiceManager
     {
         var (procedure, serializer, given, (type, subscribes)) = call;
         var options = OptionsOf(given);
-        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = StartedNow(), Tx = payload };
+
+        // a credential stays out of what a side tells: the trace carries none
+        var step = new DebugStep(DebugDirection.Tx, type) { Options = options with { Credential = null }, Started = StartedNow(), Tx = payload };
 
         // what the call fails with once it went out is told as its answer
         void Failed(Exception reason)
@@ -821,11 +855,11 @@ public sealed class ServiceManager
         {
             var exclude = options?.Exclude;
             var filter = options?.Filter;
-            Func<string, bool>? filtered = exclude is null && filter is null
+            Func<string, SessionIdentifier?, bool>? filtered = exclude is null && filter is null
                 ? null
-                : (connectionHandle) =>
+                : (connectionHandle, identifier) =>
                 {
-                    return connectionHandle != exclude && (filter is null || filter(connectionHandle));
+                    return connectionHandle != exclude && (filter is null || filter(connectionHandle, identifier));
                 };
 
             var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.StartedNow(), Tx = notification };
@@ -868,14 +902,7 @@ public sealed class ServiceManager
 
         public Failure? Admit(AdmissionRequest request)
         {
-            var beforeRequest = made.BeforeRequest;
-
-            if (beforeRequest is null || beforeRequest.Admits(request))
-            {
-                return null;
-            }
-
-            return beforeRequest.Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+            return made.BeforeRequest?.RefusalOf(request);
         }
 
         public async Task Handle(RequestResolverProps props)
@@ -894,7 +921,7 @@ public sealed class ServiceManager
 
                 try
                 {
-                    refusal = Admit(new AdmissionRequest(props.ConnectionHandle, props.Header));
+                    refusal = Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session });
                 }
                 catch
                 {
@@ -931,6 +958,7 @@ public sealed class ServiceManager
                 ConnectionHandle = props.ConnectionHandle,
                 Header = props.Header,
                 Payload = payload,
+                Session = props.Session,
                 Signal = props.Signal,
             };
 

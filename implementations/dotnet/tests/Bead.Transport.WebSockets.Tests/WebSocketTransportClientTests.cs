@@ -23,6 +23,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
     private const string Host = "127.0.0.1";
 
+    // a bearer credential, RFC 6750's own example, its auth-scheme included
+    private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private readonly WebSocketTransportServer _server = new();
@@ -267,6 +270,30 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(ReadyState.Closing, _client.ReadyState);
         await closing.WaitAsync(Patience, Cancelled);
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Carries_no_credential_beside_an_envelope_and_is_secure_under_wss_or_to_a_loopback_host_judged_by_the_URL_it_was_given()
+    {
+        await using var faraway = new WebSocketTransportClient();
+        await using var secured = new WebSocketTransportClient();
+        var instant = TimeSpan.FromMilliseconds(1);
+
+        // judged from what it connects with, before its first connect from nothing
+        Assert.Equal((false, false), (_client.CarriesCredential, _client.IsSecure));
+        await _client.Connect(Target, Cancelled);
+        Assert.Equal((false, true), (_client.CarriesCredential, _client.IsSecure));
+
+        // off the machine, in the clear or under TLS, whether its connect went through or not
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return faraway.Connect(new WebSocketConnectOptions { Host = "192.0.2.1", Port = 80, Timeout = instant }, Cancelled);
+        });
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return secured.Connect(new WebSocketConnectOptions { Host = "192.0.2.1", Port = 443, Secured = true, Timeout = instant }, Cancelled);
+        });
+        Assert.Equal((false, true), (faraway.IsSecure, secured.IsSecure));
     }
 
     [Fact]
@@ -587,7 +614,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return _client.Send(new byte[] { 1 });
+            return _client.Send(new TransportMessage(new byte[] { 1 }, false));
         });
     }
 
@@ -688,12 +715,32 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
         Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return _client.Send(new byte[] { 1 });
+            return _client.Send(new TransportMessage(new byte[] { 1 }, false));
         })).Message);
 
         await _client.Connect(Target, Cancelled);
 
         Assert.Equal(ReadyState.Open, _client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Carries_no_credential_the_envelope_alone_goes()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            await _client.Send(new TransportMessage("hello"u8.ToArray(), false) { Credential = Bearer }).WaitAsync(Patience, Cancelled);
+
+            var buffer = new byte[16];
+            var received = await server.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Binary, "hello"), (received.MessageType, Encoding.ASCII.GetString(buffer, 0, received.Count)));
+        }
     }
 
     [Fact]

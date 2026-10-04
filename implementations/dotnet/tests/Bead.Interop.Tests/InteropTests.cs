@@ -338,6 +338,42 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    public async Task A_call_presenting_the_session_it_learned_runs_in_it_the_session_opened_anew_presented_anew_and_none_presented_once_it_ended(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var presenting = new RequestOptions { Credential = Credential.Opaque() };
+
+        async Task<string> Answered((string ProcedureName, string Payload) call)
+        {
+            return (await RequesterOf(client, call.ProcedureName)(JsonOf(call.Payload))(presenting).WaitAsync(Patience, Cancelled)).GetRawText();
+        }
+
+        async Task<FailureException> Refused(string procedureName)
+        {
+            return await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return RequesterOf(client, procedureName)(JsonOf("null"))(presenting).WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        var before = await Refused("login");
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (before.Code, before.Origin));
+        Assert.Equal("\"ada\"", (await RequesterOf(client, "login")(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("\"ada\"", await Answered(("whoami", "null")));
+        Assert.Equal("\"bob\"", await Answered(("login", "{\"name\":\"bob\"}")));
+        Assert.Equal("\"bob\"", await Answered(("whoami", "null")));
+        Assert.Equal("null", await Answered(("logout", "null")));
+
+        var ended = await Refused("whoami");
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (ended.Code, ended.Origin));
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
     public async Task Login_and_register_hold_a_duration_as_section_1_4_does_a_fraction_rounded_one_under_a_millisecond_or_past_2_31_minus_1_refused_with_PROCEDURE_FAILED_nothing_opened_or_registered(string transport)
     {
         await using var client = await ConnectedOver(transport);
@@ -364,6 +400,71 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Equal("\"ada\"", (await RequesterOf(client, "login")(JsonOf("{\"connectionTimeout\":2147483647,\"name\":\"ada\",\"sessionTimeout\":99.6}"))().WaitAsync(Patience, Cancelled)).GetRawText());
         await Task.Delay(400, Cancelled);
         Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(RequesterOf(client, "whoami")(JsonOf("null"))));
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task A_JWT_presented_by_default_runs_in_its_credential_s_session_whoami_answers_its_sub_and_logout_is_refused_ACCESS_DENIED(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        // an access token of the HS256 issuer for grace, an hour on the platform's clock, signed with
+        // the manifest's published key
+        var key = InteropService.CredentialsOf(TimeProvider.System).Keys.Single((held) =>
+        {
+            return held.Algorithm == JwtAlgorithm.Hs256;
+        });
+        var part = (object value) =>
+        {
+            return System.Buffers.Text.Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
+        };
+        var signingInput = $"{part(new Dictionary<string, string> { ["alg"] = "HS256", ["typ"] = "at+jwt" })}.{part(new Dictionary<string, object>
+        {
+            ["aud"] = "bead-interop",
+            ["exp"] = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds(),
+            ["iss"] = key.Issuer,
+            ["sub"] = "grace",
+        })}";
+        var signature = System.Security.Cryptography.HMACSHA256.HashData(
+            System.Buffers.Text.Base64Url.DecodeFromChars(key.Jwk.GetProperty("k").GetString()!),
+            System.Text.Encoding.ASCII.GetBytes(signingInput));
+
+        client.Router.Credential = Credential.Jwt($"{signingInput}.{System.Buffers.Text.Base64Url.EncodeToString(signature)}");
+
+        Assert.Equal("\"grace\"", (await RequesterOf(client, "whoami")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return RequesterOf(client, "logout")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.AccessDenied, FailureOrigin.Peer), (refused.Code, refused.Origin));
+        Assert.NotNull(client.Router.Credential);
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task An_ELSEWHERE_goes_over_HTTP_alone_its_Authorization_what_the_verifier_reads_whoami_answers_the_sub_it_names_over_a_WebSocket_it_fails_before_it_goes(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var whoami = RequesterOf(client, "whoami")(JsonOf("null"));
+
+        if (transport == Http)
+        {
+            Assert.Equal("\"ada\"", (await whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled)).GetRawText());
+
+            return;
+        }
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local), (refused.Code, refused.Origin));
     }
 
     /// <summary>

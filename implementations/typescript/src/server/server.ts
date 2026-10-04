@@ -9,9 +9,14 @@ import {
   SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
   UPDATED_EVENT,
 } from '../router/server/constants';
-import { createRouterServer, SERVER_FAILURES } from '../router/server/router-server';
+import {
+  createRouterServer,
+  requireSession,
+  requireSessionOrCredential,
+} from '../router/server/router-server';
 import { createSessionManager } from '../router/server/session-manager';
 import type { ISession } from '../router/server/types';
+import { connectionSessionOf } from '../router/shared/call-session';
 import { createServiceManager } from '../router/shared/service-manager';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import { assertHeld, clockOf, type TimeoutId } from '../transport/shared/clock';
@@ -23,18 +28,21 @@ import {
 } from '../transport/shared/constants';
 import { toError } from '../transport/shared/errors';
 import { gaugesOf } from '../transport/shared/gauges';
-import type { Data as TransportData } from '../transport/shared/types';
+import type { ITransportMessage } from '../transport/shared/types';
 import { healthOf, layerGaugesOf, type ServerGauges } from './health';
 import type { IServer, IServerLayers, IServerOptions, IServerTransportLike } from './types';
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   DisconnectError,
   FailureError,
   FailureScope,
   LIMIT_DEFAULTS,
   PACING_DEFAULTS,
   ProtocolCode,
+  requireSession,
+  requireSessionOrCredential,
   SERVER_FAILURES,
 } from '../router/server/router-server';
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../transport/shared/clock';
@@ -49,7 +57,9 @@ export type {
   AdmissionFailure,
   IAdmissionRequest,
   IBeforeRequest,
+  ICallSession,
   IConnectionTarget,
+  ICredentials,
   IDestination,
   IDestinationOptions,
   IDestinationRegistration,
@@ -57,10 +67,14 @@ export type {
   IRelayOptions,
   IRouterLimits,
   IRouterServerOptions,
+  ISessionRequest,
   NotificationKey,
   PacingLimitsOptions,
   RelayTarget,
+  RequestCredential,
   RouterLimitsOptions,
+  SessionIdentifier,
+  SessionOf,
   TransportServerConnectionHandle,
 } from '../router/server/router-server';
 export type { ISession, ISessionManager } from '../router/server/types';
@@ -78,7 +92,12 @@ export type { HealthStatus, IHealth, IHealthCheck, ILayerGauges, ServerGauges } 
  *
  * A session is made by a request: the resolver of the procedure that opens one — with credentials,
  * say — stores it with `sessions.set`, and the others take `requireSession` as their
- * `beforeRequest`, which refuses with SESSION_REQUIRED. A procedure that closes a session calls
+ * `beforeRequest`, which refuses a call in none with SESSION_REQUIRED. A request runs in its
+ * connection's session, its data the call's, when it presents none, or that session's token as
+ * `OPAQUE`, compared in constant time; one presenting another token is refused with
+ * SESSION_REQUIRED, whatever its procedure requires (spec 13.5). One presenting a `JWT` or an
+ * `ELSEWHERE` runs in the credential's session its options' `credentials` resolve it to, never its
+ * connection's. A procedure that closes a session calls
  * `sessions.delete` before it answers, so the next answer to go out announces the end: its own, or
  * the failure that ends one of the connection's subscriptions. Each message from a connection is
  * activity for it. When the connection timeout of a session passes, its connection is closed; when
@@ -220,7 +239,10 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
 
   // each message is activity, whatever it is and whatever the router makes of it; a connection that
   // speaks is open, even one opened before the server was built
-  const onMessage = (_: TransportData, connectionHandle: TransportServerConnectionHandle): void => {
+  const onMessage = (
+    _: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): void => {
     connections.add(connectionHandle);
 
     if (!sessions.touch(connectionHandle)) {
@@ -286,14 +308,6 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   transport.on(LISTEN_EVENT, onListen);
   transport.on(CLOSE_EVENT, onClose);
 
-  // a refusal of its own, which a composition by `&&` loses to ACCESS_DENIED; the relay's by default
-  const requireSession = Object.assign(
-    ({ connectionHandle }: { connectionHandle: TransportServerConnectionHandle }): boolean => {
-      return sessions.has(connectionHandle);
-    },
-    { refusal: SERVER_FAILURES.sessionRequired }
-  );
-
   let router: ReturnType<typeof createRouter>;
 
   // limits that do not hold together refuse the router: the server lets go of its transport
@@ -302,7 +316,22 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       clock,
       limits: options?.limits,
       pacing: options?.pacing,
-      relay: { ...options?.relay, beforeRoute: options?.relay?.beforeRoute ?? requireSession },
+      credentials: options?.credentials,
+      // a server's relay admits a call in leg A's connection's session, or one presenting a
+      // credential it forwards, by default
+      relay: {
+        ...options?.relay,
+        beforeRoute: options?.relay?.beforeRoute ?? requireSessionOrCredential,
+      },
+      // the connection's session, its data a copy the call keeps, whatever befalls the session
+      sessionOf: ({ connectionHandle, header }) => {
+        return connectionSessionOf(header.credential, {
+          dataOf: () => {
+            return sessions.get(connectionHandle)?.data;
+          },
+          token: sessions.sessionTokenOf(connectionHandle),
+        });
+      },
       sessionTokenOf: (connectionHandle) => {
         return sessions.sessionTokenOf(connectionHandle);
       },
@@ -418,6 +447,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       return healthOf(gauges());
     },
     requireSession,
+    requireSessionOrCredential,
     [Symbol.asyncDispose]: async () => {
       release();
       sessions.off(CREATED_EVENT, onSessionCreated);

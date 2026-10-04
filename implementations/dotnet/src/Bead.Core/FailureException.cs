@@ -77,7 +77,7 @@ public sealed class FailureException : Exception
     /// <summary>The side that raised it; none through a relay.</summary>
     public RouterSide? Side { get; }
 
-    /// <summary>The envelope that said it, its token left out; none for a failure raised before any.</summary>
+    /// <summary>The envelope that said it, its credential left out; none for a failure raised before any.</summary>
     public IEnvelopeHeader? Header { get; init; }
 
     /// <summary>The procedure the call asked for, which a failure envelope does not repeat.</summary>

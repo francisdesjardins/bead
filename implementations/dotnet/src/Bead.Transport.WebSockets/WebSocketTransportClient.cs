@@ -189,10 +189,39 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     }
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> to the connection; refused with a
-    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError.
+    /// A WebSocket carries no credential beside an envelope (spec 15.2): a call presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> over it fails before it goes.
     /// </summary>
-    public Task Send(ReadOnlyMemory<byte> bytes)
+    public bool CarriesCredential
+    {
+        get
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether it is secure, judged from the options of its last connect, never from what its host
+    /// resolves to (spec 13.4): <c>wss</c>, or a host on the loopback. None before its first connect.
+    /// </summary>
+    public bool IsSecure
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _lastConnectOptions is { } given && TransportSecurity.IsSecure((given.Secured, given.Host));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hands the bytes of <paramref name="message"/> to the connection, as binary; refused with a
+    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. A
+    /// WebSocket carries no credential: one given is not carried, as its router fails a call
+    /// presenting one before it goes.
+    /// </summary>
+    public Task Send(TransportMessage message)
     {
         WebSocketConnection? connection;
         ReadyState readyState;
@@ -204,7 +233,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
 
         return readyState == ReadyState.Open && connection is not null
-            ? connection.Send(bytes)
+            ? connection.Send(message.Bytes)
             : Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
     }
 

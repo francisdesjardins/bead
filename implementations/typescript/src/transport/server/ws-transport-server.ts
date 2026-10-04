@@ -60,9 +60,12 @@ export const START_DEFAULTS = Object.freeze({
  * pinged every `heartbeat`, and dropped when it left a ping unanswered: a peer gone without a word
  * — a network cut, a machine asleep — ends in a `close` rather than never.
  *
+ * A WebSocket carries no credential beside an envelope: each message delivered carries none, and a
+ * credential given to `send` is not carried.
+ *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
- * server.on('message', (data, connectionHandle) => {});
+ * server.on('message', ({ data }, connectionHandle) => {});
  * const { port } = await server.start({ findOpenPort: true });
  * await server.stop();
  */
@@ -73,6 +76,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload,
+    secure,
     WebSocketServer,
   } = options;
   const heartbeat = assertHeartbeat(givenHeartbeat);
@@ -176,12 +180,10 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         connection.lastActivity = server.clock.Date.now();
 
         // a text frame arrives as bytes whatever `binaryType` says
+        const delivered = isBinary ? (data as Data) : decoder.decode(data as ArrayBufferView);
+
         return (
-          server.emit(
-            MESSAGE_EVENT,
-            isBinary ? (data as Data) : decoder.decode(data as ArrayBufferView),
-            connectionHandle
-          ),
+          server.emit(MESSAGE_EVENT, { credential: undefined, data: delivered }, connectionHandle),
           undefined
         );
       });
@@ -194,6 +196,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     return {
       clock,
       defaults: START_DEFAULTS,
+      secure,
       type: TRANSPORT_WS,
 
       start: async ({ address, findOpenPort, port, signal }) => {
@@ -270,7 +273,9 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         return closeSocket(socket, 1000);
       },
 
-      send: (data, { socket }) => {
+      // a credential given here is not carried: the router fails a command that presents one
+      // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+      send: ({ data }, { socket }) => {
         return createPromise((resolve) => {
           // `ReadyState` keeps the WebSocket numbering, so its OPEN is the socket's
           if (socket.readyState === ReadyState.OPEN) {

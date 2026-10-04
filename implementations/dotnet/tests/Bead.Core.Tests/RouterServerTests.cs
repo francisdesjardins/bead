@@ -187,6 +187,12 @@ public sealed partial class RouterServerTests : IDisposable
         return new Envelope { Header = new CreditHeader { CallId = callId, CreditEnd = creditEnd, Paced = true } };
     }
 
+    // `request`, presenting `credential`
+    private static Envelope Presenting(Envelope request, Credential credential)
+    {
+        return new Envelope { Header = (RequestHeader)request.Header with { Credential = credential }, Payload = request.Payload };
+    }
+
     private static Envelope CancelOf(uint callId)
     {
         return new Envelope { Header = new CancelHeader { CallId = callId } };
@@ -432,6 +438,75 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_connection_s_requests_are_each_asked_their_session_of_its_sessionOf_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        var admitted = new List<object?>();
+        var asked = new List<uint>();
+
+        Start(new RouterServerOptions
+        {
+            SessionOf = (request, _) =>
+            {
+                asked.Add(request.Header.CallId);
+
+                return ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (token, "ada")));
+            },
+        });
+        Services.GetRequestResolver(
+            Echo,
+            new RequestResolverDependencies<string, string>
+            {
+                Serializer = Text,
+                BeforeRequest = new BeforeRequest((request) =>
+                {
+                    admitted.Add(request.Session?.Data);
+
+                    return true;
+                }),
+            })((request, response) =>
+            {
+                return response.Answer($"{request.Session?.Data}");
+            });
+        // one at a time: a refusal goes out in the turn its request came, before a resolver answers
+        Deliver(First, RequestOf(1));
+        await Settle();
+        Deliver(First, Presenting(RequestOf(3), token));
+        await Settle();
+        Deliver(First, Presenting(RequestOf(5), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA")));
+        await Settle();
+
+        Assert.Equal(["first result 1 ada", "first result 3 ada", "first failure 5 SessionRequired"], SentSince());
+        Assert.Equal(["ada", "ada"], admitted);
+        Assert.Equal([1u, 3u, 5u], asked);
+    }
+
+    [Fact]
+    public async Task Requests_run_in_none_without_a_sessionOf_and_one_presenting_a_credential_is_refused_SESSION_REQUIRED_or_CREDENTIAL_UNSUPPORTED()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+
+        Start(new RouterServerOptions
+        {
+            SessionTokenOf = (_) =>
+            {
+                return token;
+            },
+        });
+        EchoOf((request, response) =>
+        {
+            return response.Answer(request.Session is null ? "none" : "a session");
+        });
+        Deliver(First, RequestOf(1));
+        await Settle();
+        Deliver(First, Presenting(RequestOf(3), token));
+        Deliver(First, Presenting(RequestOf(5), Credential.Jwt("a.b.c")));
+        await Settle();
+
+        Assert.Equal(["first result 1 none", "first failure 3 SessionRequired", "first failure 5 CredentialUnsupported"], SentSince());
+    }
+
+    [Fact]
     public void Requests_refuse_a_second_resolver_for_one_procedure()
     {
         Start();
@@ -586,6 +661,36 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
+    public async Task Its_own_requests_present_OPAQUE_when_they_ask_their_connection_s_session_as_sessionTokenOf_gives_it_and_fail_before_they_go_SESSION_REQUIRED_when_it_has_none()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        SessionToken? held = null;
+
+        Start(new RouterServerOptions
+        {
+            SessionTokenOf = (_) =>
+            {
+                return held;
+            },
+        });
+        _transport.Open(First);
+
+        var presenting = CommandOf(First) with { Options = CommandOf(First).Options with { Credential = Credential.Opaque() } };
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return Router.Request(ReadOnlyMemory<byte>.Empty, presenting).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (refused.Code, refused.Origin));
+        Assert.Empty(_transport.Sent);
+
+        held = token;
+        _ = Router.Request(ReadOnlyMemory<byte>.Empty, presenting);
+        await Settle();
+        Assert.Equal(Credential.Opaque(token), Assert.IsType<RequestHeader>(Assert.Single(_transport.Sent).Envelope.Header).Credential);
+    }
+
+    [Fact]
     public async Task Commands_refuse_a_payload_too_large_here()
     {
         Start();
@@ -705,7 +810,7 @@ public sealed partial class RouterServerTests : IDisposable
             })];
         }
 
-        bool IsNotFirst(string connectionHandle)
+        bool IsNotFirst(string connectionHandle, SessionIdentifier? identifier)
         {
             return connectionHandle != First;
         }
@@ -730,7 +835,7 @@ public sealed partial class RouterServerTests : IDisposable
             return response.Answer("ok");
         });
 
-        bool Filter(string connectionHandle)
+        bool Filter(string connectionHandle, SessionIdentifier? identifier)
         {
             if (connectionHandle == Second)
             {
@@ -1001,10 +1106,13 @@ public sealed partial class RouterServerTests : IDisposable
     [Fact]
     public async Task A_subscription_s_result_too_large_for_one_envelope_is_refused_answered_as_failed_and_subscribes_nothing()
     {
-        // one byte past what a result's envelope holds whole, its session counted: a chunk's
-        // 1 MiB less its header's 8 bytes and a session's 16
-        var large = new string('x', 1_048_553);
+        // one byte past what a result's envelope holds whole, its announcement counted: a chunk's
+        // 1 MiB less its header's 8 bytes and an announcement's 20
+        var large = new string('x', 1_048_549);
 
+        Assert.Equal(
+            RouterLimits.Default.ChunkBytes + 1,
+            EnvelopeCodec.HeaderBytesOf(new ResultHeader { CallId = 1, Credential = Token }) + large.Length);
         Start();
         _transport.Open(First);
         NotifierOf(async (request, response) =>
@@ -1420,7 +1528,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal(
             [
-                (First, new FailureHeader { CallId = 1, Session = SessionAnnouncement.Ended }),
+                (First, new FailureHeader { CallId = 1, Credential = Credential.None }),
                 (First, new FailureHeader { CallId = 3 }),
             ],
             _transport.Sent.Select((entry) =>
@@ -1541,11 +1649,11 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal(
             [
-                (DebugDirection.Rx, new TracedEnvelope(First, new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 }, false)),
-                (DebugDirection.Tx, new TracedEnvelope(First, new ResultHeader { CallId = 9 }, true)),
+                (DebugDirection.Rx, new TracedEnvelope(First, new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 }, null)),
+                (DebugDirection.Tx, new TracedEnvelope(First, new ResultHeader { CallId = 9 }, CredentialScheme.Opaque)),
             ],
             seen);
-        Assert.Equal(new ResultHeader { CallId = 9, Session = Token }, _transport.Sent[0].Envelope.Header);
+        Assert.Equal(new ResultHeader { CallId = 9, Credential = Token }, _transport.Sent[0].Envelope.Header);
     }
 
     // the TypeScript side links a WebSocket client and server over the wire; the test project
@@ -1738,7 +1846,7 @@ public sealed partial class RouterServerTests : IDisposable
                 word,
                 new NotifyOptions
                 {
-                    Filter = (connectionHandle) =>
+                    Filter = (connectionHandle, _) =>
                     {
                         return connectionHandle == First;
                     },
@@ -1957,9 +2065,12 @@ public sealed partial class RouterServerTests : IDisposable
             }
         }
 
+        // what its admission refuses every request with; none admits each
+        public Failure? Refusal { get; init; }
+
         public Failure? Admit(AdmissionRequest request)
         {
-            return null;
+            return Refusal;
         }
 
         public Task Handle(RequestResolverProps props)
@@ -1968,9 +2079,11 @@ public sealed partial class RouterServerTests : IDisposable
         }
     }
 
-    // a notification as a client's router would hold it, which nothing triggers
+    // a notification as a client's router would hold it, which nothing triggers, and what dropped it
     private sealed class StandingNotification(Procedure procedure) : INotificationLike
     {
+        public List<Failure?> Dropped { get; } = [];
+
         public Procedure Procedure
         {
             get
@@ -1994,6 +2107,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         public void Drop(Failure? failure)
         {
+            Dropped.Add(failure);
         }
     }
 
@@ -2037,6 +2151,15 @@ public sealed partial class RouterServerTests : IDisposable
 
         public event Action<bool, bool>? Close;
 
+        // in memory, it never leaves the machine
+        public bool IsSecure
+        {
+            get
+            {
+                return true;
+            }
+        }
+
         public void Deliver(ReadOnlyMemory<byte> bytes)
         {
             Message?.Invoke(new TransportMessage(bytes.ToArray(), false));
@@ -2047,8 +2170,10 @@ public sealed partial class RouterServerTests : IDisposable
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             server.Deliver(First, bytes.ToArray());
 
             return Task.CompletedTask;
@@ -2081,6 +2206,15 @@ public sealed partial class RouterServerTests : IDisposable
         // the connections that carry no request of the server's, while listed
         public HashSet<string> OneWay { get; } = [];
 
+        // the connections whose transport carries no credential beside an envelope, and those not
+        // secure, while listed: in process, every other does, and is
+        public HashSet<string> Uncarrying { get; } = [];
+
+        public HashSet<string> InTheClear { get; } = [];
+
+        // what its transport carried beside each envelope sent, in order
+        public List<string?> Carried { get; } = [];
+
         // whether the router still follows its events
         public bool IsFollowed
         {
@@ -2110,13 +2244,33 @@ public sealed partial class RouterServerTests : IDisposable
             Message?.Invoke(new TransportMessage(Encoding.UTF8.GetBytes(text), true), connectionHandle);
         }
 
+        // an envelope, with what its transport carried beside it
+        public void Carrying(string connectionHandle, (byte[] Bytes, string Carried) message)
+        {
+            Message?.Invoke(new TransportMessage(message.Bytes, false) { Credential = message.Carried }, connectionHandle);
+        }
+
         public bool IsTwoWay(string connectionHandle)
         {
             return !OneWay.Contains(connectionHandle);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public bool CarriesCredential(string connectionHandle)
         {
+            return !Uncarrying.Contains(connectionHandle);
+        }
+
+        public bool IsSecure(string connectionHandle)
+        {
+            return !InTheClear.Contains(connectionHandle);
+        }
+
+        public Task Send(TransportMessage message, string connectionHandle)
+        {
+            var bytes = message.Bytes;
+
+            Carried.Add(message.Credential);
+
             var copy = bytes.ToArray();
             var envelope = EnvelopeCodec.ReadEnvelope(
                 copy,

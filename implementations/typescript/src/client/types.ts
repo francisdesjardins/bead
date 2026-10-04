@@ -6,7 +6,12 @@ import type {
   IRouterClientTransportLike,
   RouterClientConnectionHandle,
 } from '../router/client/types';
-import type { IServiceManager, RouterLimitsOptions } from '../router/shared/types';
+import type {
+  DefaultCredential,
+  ICredentials,
+  IServiceManager,
+  RouterLimitsOptions,
+} from '../router/shared/types';
 
 // interfaces
 
@@ -53,6 +58,16 @@ export interface IClientLayers<Transport extends IClientTransportLike> {
 }
 
 export interface IClientOptions {
+  /**
+   * The credential every call presents by default, which its router keeps as its `credential`: a
+   * `JWT`, or an `ELSEWHERE` with what its transport carries beside each request; none when not
+   * given.
+   */
+  credential?: DefaultCredential | undefined;
+  /**
+   * What its router resolves a command presenting a `JWT` or an `ELSEWHERE` with, as a server does.
+   */
+  credentials?: ICredentials | undefined;
   /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the client is a {@link ProgrammerError}.

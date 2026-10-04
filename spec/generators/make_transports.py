@@ -1,5 +1,8 @@
 """Writes spec/transports.json: what a transport's server does at its edge, over HTTP, with what a
 peer of the test's own sends it in exact octets."""
+import base64
+import hashlib
+import hmac
 import json
 import os
 
@@ -50,13 +53,18 @@ def cancel(call_id):
     return f'A1 16 00 02  {word(call_id, 4)}'
 
 
-def result(call_id, value, session=None):
-    return {'kind': RESULT, 'callId': call_id, 'payload': text(value), **({'session': session} if session else {})}
+# what an answer announces, by the scheme of its CREDENTIAL block: a session's token, or its end
+OPENED, ENDED = 'OPAQUE', 'NONE'
 
 
-def failure(call_id, code, scope=PROTOCOL, session=None):
-    return {'kind': FAILURE, 'callId': call_id, 'failure': {'code': code, 'scope': scope, 'relays': 0},
-            **({'session': session} if session else {})}
+def result(call_id, value, credential=None):
+    return {'kind': RESULT, 'callId': call_id, 'payload': text(value), **({'credential': credential} if credential else {})}
+
+
+def failure(call_id, code, scope=PROTOCOL, credential=None, detail=None):
+    return {'kind': FAILURE, 'callId': call_id,
+            'failure': {'code': code, 'scope': scope, 'relays': 0, **({'detail': detail} if detail is not None else {})},
+            **({'credential': credential} if credential else {})}
 
 
 def notification(call_id, value):
@@ -66,11 +74,16 @@ def notification(call_id, value):
 # ── Exchanges ───────────────────────────────────────────────────────────────────────────────────
 
 
+def pairs(fields):
+    """A request's fields in their order: a dict's, or a list of pairs, where a name may come twice."""
+    return list(fields.items()) if isinstance(fields, dict) else list(fields or [])
+
+
 def send(on, method, target='/bead', *, fields=None, body=None, host='{host}'):
     """A request of HTTP/1.1, rendered to its octets: its line, its fields in their order — its host,
     those given, its body's length when it has one or posts — and a socket closed once answered."""
     lines = [f'{method} {target} HTTP/1.1', f'host: {host}']
-    lines += [f'{name}: {value}' for name, value in (fields or {}).items()]
+    lines += [f'{name}: {value}' for name, value in pairs(fields)]
 
     if body is not None or method in ('POST', 'DELETE'):
         lines.append(f'content-length: {length_of(body or "")}')
@@ -86,7 +99,7 @@ def connect(on='connect', *, listen=False, fields=None, host='{host}', body=None
 
 
 def post(on, body, *, fields=None):
-    return send(on, 'POST', fields={'bead-connection-token': '{token}', 'content-type': BEAD, **(fields or {})}, body=body)
+    return send(on, 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD), *pairs(fields)], body=body)
 
 
 def listen(on, after, wait):
@@ -126,6 +139,17 @@ def answered(on, envelope):
 
 
 ECHO = request(1, 'echo', '"x"')
+# a bearer credential, RFC 6750's own example, its auth-scheme included
+BEARER = 'Bearer mF_9.B5f-4.1JqM'
+# what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 5)
+NO_CREDENTIAL = 'no credential came'
+
+
+def elsewhere(call_id):
+    # whoami, presenting ELSEWHERE: a CREDENTIAL block of the scheme 3 and no bytes, its credential
+    # what the transport carries beside it, which the interop server's verifier reads
+    # (interop-service.json, credentials.elsewhere)
+    return request(call_id, 'whoami', 'null', flags=0x08, words=4, tail='00 03 00 00')
 SUBSCRIBE = request(1, 'ticks', 'null', flags=0x10)
 
 
@@ -152,6 +176,29 @@ cases = [
     ('a request on a call id already waiting is refused 409, marked', ['15.5.3', '15.6.8'], None, [
         *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
         post('again', ECHO), refused('again', 409, 'call-waiting')]),
+    # 15.5: a request's Authorization, which the transport hands on with it, and two refused
+    ('a request carries its credential in its Authorization, or none in an empty one, and is handed on as any other',
+     ['15.5'], None, [
+         *drawn(), post('bearer', ECHO, fields={'authorization': BEARER}), answered('bearer', result(1, '"x"')),
+         post('empty', request(3, 'echo', '"y"'), fields={'authorization': ''}), answered('empty', result(3, '"y"'))]),
+    ('a POST with two Authorization fields is refused 400, marked, and hands the router nothing', ['15.5', '15.6.4'], None, [
+        *drawn(), post('twice', ECHO, fields=[('authorization', BEARER), ('authorization', BEARER)]),
+        refused('twice', 400, 'malformed'),
+        post('once', ECHO, fields={'authorization': BEARER}), answered('once', result(1, '"x"'))]),
+    # the verifier holds a value of its grammar alone, so whoami answers only if its auth-scheme came
+    # with it and the spaces and tabs around it went
+    ('a request presenting ELSEWHERE hands the verifier its Authorization as it came, its auth-scheme included and its surrounding whitespace removed: whoami answers the sub it names',
+     ['15.1', '15.5'], None, [
+         *drawn(), post('ada', elsewhere(1), fields={'authorization': 'Interop sub=ada'}),
+         answered('ada', result(1, '"ada"')),
+         post('bob', elsewhere(3), fields={'authorization': ' \tInterop sub=bob\t '}), answered('bob', result(3, '"bob"'))]),
+    ('a request presenting ELSEWHERE whose POST carries no Authorization, or an empty one, is answered SESSION_REQUIRED: no other exchange\'s Authorization is read',
+     ['15.1', '15.5'], None, [
+         connect(fields={'authorization': 'Interop sub=ada'}),
+         expect('connect', 201, fields={'bead-connection-token': {'capture': 'token', 'shape': 'token'}}),
+         post('none', elsewhere(1)), answered('none', failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL)),
+         post('empty', elsewhere(3), fields={'authorization': ''}),
+         answered('empty', failure(3, SESSION_REQUIRED, detail=NO_CREDENTIAL))]),
     ('a cancel that comes before its request buries its call id, and the request ends 204, never handed on',
      ['15.5'], None, [
          *drawn(), post('cancel', cancel(1)), expect('cancel', 204, body=''), until('buriedCallIds', 1),
@@ -281,14 +328,14 @@ cases = [
     ('a listen held keeps a session\'s connection from its connection timeout, which counts anew from the listen\'s end',
      ['13.7', '15.1', '15.9'], None, [
          *drawn(listening=True), post('login', request(1, 'login', '{"name":"ada","connectionTimeout":10000}')),
-         answered('login', result(1, '"ada"', 'announced')), armed(10_000), advance(4000),
+         answered('login', result(1, '"ada"', OPENED)), armed(10_000), advance(4000),
          listen('listen', 0, 20000), armed(20_000), advance(20_000), expect('listen', 204, body=''),
          armed(10_000), advance(10_000), until('connections', 0),
          post('after', request(3, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
     ('a session\'s connection outlives the server\'s own connection timeout, and once its session ends takes it, counted from the end',
      ['13.7', '15.12.10'], {'connectionInactivityTimeout': 10_000}, [
          *drawn(), post('login', request(1, 'login', '{"name":"ada","sessionTimeout":20000}')),
-         answered('login', result(1, '"ada"', 'announced')),
+         answered('login', result(1, '"ada"', OPENED)),
          armed(20_000), advance(15_000),
          post('echo', request(3, 'echo', '"x"')), answered('echo', result(3, '"x"')),
          armed(20_000), advance(20_000), armed(10_000), advance(10_000), until('connections', 0),
@@ -299,12 +346,77 @@ cases = [
      ['13.6', '13.7', '15.1'], None, [
          *drawn(listening=True), post('subscribe', SUBSCRIBE), answered('subscribe', result(1, 'null')),
          post('login', request(3, 'login', '{"name":"ada","sessionTimeout":15000}')),
-         answered('login', result(3, '"ada"', 'announced')),
+         answered('login', result(3, '"ada"', OPENED)),
          listen('first', 0, 5000), until('listens', 1), armed(5000), advance(5000), expect('first', 204, body=''),
          listen('listen', 0, 20000), until('listens', 1), armed(10_000), advance(10_000),
          expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'},
-                batch=[failure(1, SESSION_REQUIRED, session='ended')])]),
+                batch=[failure(1, SESSION_REQUIRED, credential=ENDED)])]),
 ]
+
+
+def relayed_over_http():
+    """14 and 15.9: a relay over HTTP, whose destination is a connection that listens: what it sends
+    that connection goes in a batch, which carries a credential in its block alone."""
+    # the interop service's HS256 issuer, its key RFC 7515's A.1, a published test key, and its audience
+    issuer, audience = 'https://hs256.interop.bead.example', 'bead-interop'
+    secret = 'AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow'
+    # the wall clock's start, 2026-01-01T00:00:00Z, in seconds since the epoch
+    wall = 1_767_225_600
+    destination = 12
+    destination_unreachable = 17
+
+    def base64url(data):
+        return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+    def part(value):
+        return base64url(json.dumps(value, separators=(',', ':')).encode('ascii'))
+
+    # an access token of RFC 9068's profile, signed with HMAC-SHA256 (RFC 7518 §3.2) by Python's own hmac
+    claims = {'iss': issuer, 'sub': 'carol', 'aud': audience, 'exp': wall + 3600, 'iat': wall, 'jti': 'at-relay',
+              'client_id': 'bead-client'}
+    signing_input = part({'alg': 'HS256', 'typ': 'at+jwt'}) + '.' + part(claims)
+    key = base64.urlsafe_b64decode(secret + '=' * (-len(secret) % 4))
+    token = signing_input + '.' + base64url(hmac.new(key, signing_input.encode('ascii'), hashlib.sha256).digest())
+
+    # its block: the scheme 2, its length, its characters a byte each, then zero bytes to a word
+    data = token.encode('ascii')
+    jwt_block = f'00 02 {word(len(data), 2)}  {hexadecimal(data)}' + ''.join(' 00' for _ in range(-len(data) % 4))
+    elsewhere_block = '00 03 00 00'
+
+    def relayed(call_id, block):
+        # a request that names the destination, then presents a credential, the last block
+        return request(call_id, 'echo', '"x"', flags=0x0A, words=4 + len(block.split()) // 4,
+                       tail=f'{word(destination, 4)}  {block}')
+
+    def as_device(on, method, target='/bead', body=None):
+        return send(on, method, target, fields=[('bead-connection-token', '{device}'), ('content-type', BEAD)]
+                    if method == 'POST' else {'bead-connection-token': '{device}'}, body=body)
+
+    leg_b = {'kind': REQUEST, 'callId': 2, 'flags': 0x08, 'serviceId': SERVICE_ID, 'procedureId': PROCEDURES['echo'],
+             'payload': text('"x"'), 'credential': {'scheme': 'JWT', 'token': token}}
+
+    return [
+        # the destination listens: the relay's request to it waits in its outbox for a listen, which
+        # carries no credential beside its envelopes
+        ('a relay over HTTP sends a JWT to a destination that listens in its batch, its same bytes, and answers an ELSEWHERE DESTINATION_UNREACHABLE, since a batch carries no credential',
+         ['14.2.2', '14.3.5', '15.9'], None, [
+             connect('device', listen=True), expect('device', 201, fields={
+                 'bead-connection-token': {'capture': 'device', 'shape': 'token'}, 'bead-listen': '?1'}),
+             as_device('register', 'POST', body=request(1, 'register', '{"destination":%d,"audience":"%s"}' % (destination, audience))),
+             answered('register', result(1, str(destination))),
+             *drawn(),
+             post('elsewhere', relayed(1, elsewhere_block), fields={'authorization': BEARER}),
+             answered('elsewhere', failure(1, destination_unreachable)),
+             post('jwt', relayed(3, jwt_block)),
+             as_device('listen', 'GET', '/bead?after=0&wait=60000'),
+             expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'}, batch=[leg_b]),
+             as_device('answer', 'POST', body='A1 11 00 02  00 00 00 02 | ' + text('"x"')),
+             expect('answer', 204, body=''),
+             answered('jwt', result(3, '"x"'))]),
+    ]
+
+
+cases += relayed_over_http()
 
 # ── WebSocket ───────────────────────────────────────────────────────────────────────────────────
 
@@ -315,10 +427,12 @@ CONTINUATION, BINARY = 0x0, 0x2
 NORMAL, GOING_AWAY, TOO_BIG = 1000, 1001, 1009
 
 
-def upgrade(on='socket'):
-    """An opening handshake, on a socket the exchange keeps as its WebSocket once answered 101."""
+def upgrade(on='socket', fields=None):
+    """An opening handshake, on a socket the exchange keeps as its WebSocket once answered 101, with the
+    fields given besides."""
     head = (f'GET / HTTP/1.1\r\nhost: {{host}}\r\nupgrade: websocket\r\nconnection: Upgrade\r\n'
-            f'sec-websocket-key: {KEY}\r\nsec-websocket-version: 13\r\n\r\n')
+            f'sec-websocket-key: {KEY}\r\nsec-websocket-version: 13\r\n'
+            + ''.join(f'{name}: {value}\r\n' for name, value in pairs(fields)) + '\r\n')
     return [{'send': {'head': head}, 'on': on},
             expect(on, 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT})]
 
@@ -346,6 +460,10 @@ websocket = [
         message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
     ('a message past the side\'s own limit closes its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
         *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
+    ('a WebSocket carries no credential, nor does its upgrade\'s Authorization: a request presenting ELSEWHERE is answered SESSION_REQUIRED',
+     ['15.2'], {}, [
+         *upgrade(fields={'authorization': 'Interop sub=ada'}), message('socket', binary=elsewhere(1)),
+         heard('socket', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL))]),
     ('a peer that closes with 1000 is answered 1000, the clean close', ['15.3'], {}, [
         *upgrade(), message('socket', close=NORMAL), heard('socket', close=NORMAL)]),
     ('a server that stops closes its connections with 1001', ['15.3'], {}, [
@@ -362,15 +480,15 @@ websocket = [
      ['11.7.2', '13.6', '13.7'], {}, [
          *upgrade(),
          message('socket', binary=request(1, 'login', '{"name":"ada","sessionTimeout":10000,"connectionTimeout":20000}')),
-         heard('socket', envelope=result(1, '"ada"', 'announced')),
+         heard('socket', envelope=result(1, '"ada"', OPENED)),
          message('socket', binary=request(3, 'ticks', 'null', flags=0x10)), heard('socket', envelope=result(3, 'null')),
-         armed(10_000), advance(10_000), heard('socket', envelope=failure(3, SESSION_REQUIRED, session='ended')),
+         armed(10_000), advance(10_000), heard('socket', envelope=failure(3, SESSION_REQUIRED, credential=ENDED)),
          message('socket', binary=request(5, 'whoami', 'null')), heard('socket', envelope=failure(5, SESSION_REQUIRED))]),
     ('a session\'s connection, silent past its connection timeout, is closed with 1000, each message starting it anew',
      ['13.7', '15.3'], {}, [
          *upgrade(),
          message('socket', binary=request(1, 'login', '{"name":"ada","connectionTimeout":10000}')),
-         heard('socket', envelope=result(1, '"ada"', 'announced')),
+         heard('socket', envelope=result(1, '"ada"', OPENED)),
          armed(10_000), advance(6000),
          message('socket', binary=request(3, 'echo', '"x"')), heard('socket', envelope=result(3, '"x"')),
          armed(10_000), advance(6000),
@@ -395,7 +513,7 @@ document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
         "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
-        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port and {token} the token captured; body, its octets in hexadecimal. close drops that socket.',
+        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, and {token}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. close drops that socket.',
         'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
         'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',

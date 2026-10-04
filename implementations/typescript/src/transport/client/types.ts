@@ -7,6 +7,7 @@ import type {
   EmitterListener,
   IEventIteratorOptions,
   IReadyStateMethods,
+  ITransportMessage,
   IWorkerPortLike,
 } from '../shared/types';
 import type { dispose } from './symbols';
@@ -76,8 +77,19 @@ export interface ITransportClient<
   Socket extends object = object,
   ConnectOptions extends ITransportClientConnectOptions = ITransportClientAddressOptions,
 > extends IReadyStateMethods {
+  /**
+   * Whether it carries a credential beside an envelope it sends: over HTTP, in its `POST`'s
+   * `Authorization`; a WebSocket and a worker carry none (spec 15.1).
+   */
+  readonly carriesCredential: boolean;
   /** The clock it runs on, which a layer built on it runs on too. */
   readonly clock: IClock;
+  /**
+   * Whether it is secure, judged by what it was given, never by what a name resolves to (spec 13.4):
+   * the URL of its current or last connect under TLS, `wss` or `https`, or to a loopback host; a
+   * worker, which never leaves the machine. Not before its first connect.
+   */
+  readonly isSecure: boolean;
   /** The current or last connection, possibly closed; `null` before the first and once dropped. */
   socket: Socket | null;
 
@@ -129,9 +141,10 @@ export interface ITransportClient<
    * socket has accepted it; over HTTP, on the head of its exchange's answer — the server had it — or
    * on its exchange lost, which closes the connection. Rejects with a {@link ReadyStateError} unless
    * OPEN, and over HTTP with a {@link GenericError} on a refusal the server marked, nothing tried; the
-   * socket's own error passes through.
+   * socket's own error passes through. Its credential goes over HTTP alone, in the `Authorization` of
+   * its `POST`; a socket and a worker carry none.
    */
-  send(data: Data): Promise<void>;
+  send(message: ITransportMessage): Promise<void>;
   /**
    * What `await using` calls: disconnects an open client, and drops a connecting one. A reconnection
    * in progress is not stopped by it; abort its signal.
@@ -164,11 +177,15 @@ export interface ITransportClientInternal<
 export interface ITransportClientImplementation<
   ConnectOptions extends ITransportClientConnectOptions,
 > {
+  /** Whether it carries a credential beside an envelope it sends; none, without it. */
+  readonly carriesCredential?: boolean | undefined;
   /** The clock it runs on, which the shared half waits on too; the platform's when none. */
   readonly clock?: IClock | undefined;
+  /** Whether it is secure, as its last connect was given; not, without it. */
+  readonly isSecure?: boolean | undefined;
   connect(options: ConnectOptions): Promise<void>;
   disconnect(options?: ITransportClientDisconnectOptions): Promise<void>;
-  send(data: Data): Promise<void>;
+  send(message: ITransportMessage): Promise<void>;
   [dispose](): void;
 }
 
@@ -186,8 +203,11 @@ export type TransportClientEventMap = {
    * client in this package emits it: a failure there shows as `connect` rejecting, or as `close`.
    */
   error: [error: Error];
-  /** Not emitted while the client is closing. */
-  message: [data: Data];
+  /**
+   * An envelope, and the credential carried beside it, which no client is ever given: an answer and
+   * what a listen brings back carry none. Not emitted while the client is closing.
+   */
+  message: [message: ITransportMessage];
   /**
    * A reconnection starts: what was sent on the connection it replaces will not be answered there. An
    * open connection it replaces emits no `close`, so this is the one sign of it.

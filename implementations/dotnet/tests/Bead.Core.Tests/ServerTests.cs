@@ -201,7 +201,7 @@ public sealed class ServerTests : IAsyncLifetime
 
         var answer = _transport.Read(0);
 
-        Assert.Equal(new ResultHeader { CallId = 1, Session = Server.Sessions.SessionTokenOf(Handle) }, answer.Header);
+        Assert.Equal(new ResultHeader { CallId = 1, Credential = Server.Sessions.SessionTokenOf(Handle) }, answer.Header);
 
         // the session timeout ends it, its subscription with SESSION_REQUIRED, the end announced
         await Advance(TimeSpan.FromSeconds(1));
@@ -209,7 +209,7 @@ public sealed class ServerTests : IAsyncLifetime
 
         var ended = _transport.Read(1);
 
-        Assert.Equal(new FailureHeader { CallId = 1, Session = SessionAnnouncement.Ended }, ended.Header);
+        Assert.Equal(new FailureHeader { CallId = 1, Credential = Credential.None }, ended.Header);
         Assert.Equal((ushort)ProtocolCode.SessionRequired, ended.Failure!.Code);
         Assert.Empty(_transport.Closed);
 
@@ -323,7 +323,7 @@ public sealed class ServerTests : IAsyncLifetime
         // over HTTP, the failure is what the listen held brings back
         var ended = _transport.Read(2);
 
-        Assert.Equal(new FailureHeader { CallId = 3, Session = SessionAnnouncement.Ended }, ended.Header);
+        Assert.Equal(new FailureHeader { CallId = 3, Credential = Credential.None }, ended.Header);
         Assert.Equal((ushort)ProtocolCode.SessionRequired, ended.Failure!.Code);
         Assert.False(Server.Sessions.Has(Handle));
         await Advance(TimeSpan.FromSeconds(1));
@@ -367,7 +367,7 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Empty(_transport.Sent);
 
         await Deliver(RequestOf(3, ("echo", false)));
-        Assert.Equal(new ResultHeader { CallId = 3, Session = Server.Sessions.SessionTokenOf(Handle) }, _transport.Read(0).Header);
+        Assert.Equal(new ResultHeader { CallId = 3, Credential = Server.Sessions.SessionTokenOf(Handle) }, _transport.Read(0).Header);
     }
 
     // no twin in server.test.ts: the TypeScript side shows this on its router's core and on its
@@ -379,7 +379,7 @@ public sealed class ServerTests : IAsyncLifetime
         Start(Timeout.InfiniteTimeSpan);
         _transport.Open(Handle);
         await Deliver(RequestOf(1, ("login", false), "{\"name\":\"ada\"}"));
-        Assert.NotNull(((ResultHeader)_transport.Read(0).Header).Session);
+        Assert.NotNull(((ResultHeader)_transport.Read(0).Header).Credential);
 
         // a connection of the same handle, with no session, was told nothing: its answer announces nothing
         _transport.CloseFromPeer(Handle);
@@ -403,22 +403,97 @@ public sealed class ServerTests : IAsyncLifetime
         _transport.Open(Handle);
         Server.Sessions.Set(Server.Sessions.Create(Handle) with { SessionToken = TokenOf(4) });
         await Deliver(RequestOf(1, ("echo", false)));
-        Assert.Equal(new ResultHeader { CallId = 1, Session = TokenOf(4) }, _transport.Read(0).Header);
+        Assert.Equal(new ResultHeader { CallId = 1, Credential = TokenOf(4) }, _transport.Read(0).Header);
     }
 
     [Fact]
-    public void RequireSession_refuses_a_connection_without_a_session_with_SESSION_REQUIRED()
+    public void RequireSession_refuses_a_call_in_none_with_SESSION_REQUIRED_testing_the_call_s_session_never_its_connection_s()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+        Server.Sessions.Set(Server.Sessions.Create(Handle));
+
+        var request = new AdmissionRequest(Handle, (RequestHeader)RequestOf(1, ("whoami", false)).Header);
+
+        // the call's session, never its connection's
+        Assert.False(Server.RequireSession.Admits(request));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), Server.RequireSession.Refusal);
+        Assert.True(Server.RequireSession.Admits(request with { Session = new CallSession() }));
+    }
+
+    [Fact]
+    public async Task A_request_runs_in_its_connection_s_session_presenting_none_or_its_token_as_OPAQUE_the_session_s_data_a_copy_the_call_keeps_another_token_is_refused_SESSION_REQUIRED_whatever_its_procedure_requires()
+    {
+        static Envelope Presenting(Envelope request, Credential credential)
+        {
+            return new Envelope { Header = (RequestHeader)request.Header with { Credential = credential }, Payload = request.Payload };
+        }
+
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+
+        var token = Server.Sessions.Set(Server.Sessions.Create(Handle) with { Data = "ada" }).SessionToken!.Value;
+
+        await Deliver(RequestOf(1, ("whoami", false)));
+        await Deliver(Presenting(RequestOf(3, ("whoami", false)), token));
+
+        // another token, and the token of a session drawn anew, do not hold, whatever the
+        // procedure requires
+        await Deliver(Presenting(RequestOf(5, ("echo", false)), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA")));
+        Server.Sessions.Set(Server.Sessions.Create(Handle) with { Data = "bob" });
+        await Deliver(Presenting(RequestOf(7, ("echo", false)), token));
+
+        // the call keeps the data it resolved with, whatever its session holds after
+        var released = new TaskCompletionSource();
+        var held = new Procedure { ServiceId = 2, ProcedureId = 1, ProcedureName = "held", ServiceRevision = 1 };
+
+        Server.Services.GetRequestResolver(held, new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = InteropService.Json })(async (request, response) =>
+        {
+            await released.Task;
+            await response.Answer(JsonSerializer.SerializeToElement(request.Session?.Data));
+        });
+
+        var bob = Server.Sessions.Get(Handle)!;
+
+        await Deliver(new Envelope { Header = new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 }, Payload = Encoding.UTF8.GetBytes("null") });
+        Server.Sessions.UpdateData(bob with { Data = "eve" });
+        released.SetResult();
+        await _scheduler.WhenIdle();
+
+        Assert.Equal(
+            ["1 \"ada\"", "3 \"ada\"", "5 failure 32", "7 failure 32", "9 \"bob\""],
+            Enumerable.Range(0, 5).Select((index) =>
+            {
+                var envelope = _transport.Read(index);
+
+                return envelope.Failure is { } failure
+                    ? $"{envelope.Header.CallId} failure {failure.Code}"
+                    : $"{envelope.Header.CallId} {Encoding.UTF8.GetString(envelope.Payload.Span)}";
+            }));
+    }
+
+    [Fact]
+    public async Task A_call_presenting_its_connection_s_OPAQUE_and_one_presenting_none_hold_one_subscription_to_a_procedure_the_connection_s_session_s()
     {
         Start(Timeout.InfiniteTimeSpan);
         _transport.Open(Handle);
 
-        var request = new AdmissionRequest(Handle, (RequestHeader)RequestOf(1, ("whoami", false)).Header);
+        var token = Server.Sessions.Set(Server.Sessions.Create(Handle)).SessionToken!.Value;
+        var subscribing = RequestOf(1, ("ticks", true));
 
-        Assert.False(Server.RequireSession.Admits(request));
-        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), Server.RequireSession.Refusal);
+        await Deliver(new Envelope { Header = (RequestHeader)subscribing.Header with { Credential = token }, Payload = subscribing.Payload });
+        await Deliver(RequestOf(3, ("ticks", true)));
+        await Deliver(RequestOf(5, ("tick", false), "{\"value\":7}"));
 
-        Server.Sessions.Set(Server.Sessions.Create(Handle));
-        Assert.True(Server.RequireSession.Admits(request));
+        // the second is answered, and holds nothing: the tick goes on the first's call id alone
+        Assert.Equal(
+            ["Result 1", "Result 3", "Notification 1", "Result 5"],
+            Enumerable.Range(0, _transport.Sent.Count).Select((index) =>
+            {
+                var envelope = _transport.Read(index);
+
+                return $"{envelope.Kind} {envelope.Header.CallId}";
+            }));
     }
 
     [Fact]
@@ -475,7 +550,40 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Relays_as_its_options_say_its_own_admission_and_timeout_kept_require_session_where_it_gives_none()
+    public void Admits_a_call_with_a_session_its_call_s_whatever_its_header_presents_and_refuses_one_in_none_SESSION_REQUIRED()
+    {
+        Start(new ServerOptions());
+
+        var requireSession = Server.RequireSession;
+        var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
+        var inSession = new AdmissionRequest(Handle, header) { Session = new CallSession() };
+
+        Assert.True(requireSession.Admits(inSession));
+        Assert.True(requireSession.Admits(inSession with { Header = header with { Credential = Credential.Jwt("a.b.c") } }));
+        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header)));
+        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header with { Credential = Credential.Jwt("a.b.c") })));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSession.Refusal!.Code);
+    }
+
+    [Fact]
+    public void Admits_a_call_in_a_session_or_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_any_other_in_none_SESSION_REQUIRED()
+    {
+        Start(new ServerOptions());
+
+        var requireSessionOrCredential = Server.RequireSessionOrCredential;
+        var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
+        var inNone = new AdmissionRequest(Handle, header);
+
+        Assert.True(requireSessionOrCredential.Admits(inNone with { Session = new CallSession() }));
+        Assert.True(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Jwt("not even a token") } }));
+        Assert.True(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Elsewhere() } }));
+        Assert.False(requireSessionOrCredential.Admits(inNone));
+        Assert.False(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })) } }));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSessionOrCredential.Refusal!.Code);
+    }
+
+    [Fact]
+    public async Task Relays_as_its_options_say_its_own_admission_and_timeout_kept_requireSessionOrCredential_where_it_gives_none()
     {
         const string device = "type=WS;ip=127.0.0.1;port=50002";
         var admitting = new BeforeRequest((_) =>
@@ -498,7 +606,8 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(new FailureHeader { CallId = 1 }, lost.Header);
         Assert.Equal((ushort)ProtocolCode.DestinationLost, lost.Failure!.Code);
 
-        // none of its own: the server's RequireSession
+        // none of its own: the server's RequireSessionOrCredential, which refuses a call in none, and
+        // lets a JWT by on its scheme alone, for its destination to verify — one of no audience here
         await DisposeServer();
         _transport.Sent.Clear();
         Start(new ServerOptions { Relay = new RelayOptions { Timeout = TimeSpan.FromMilliseconds(250) } });
@@ -506,10 +615,16 @@ public sealed class ServerTests : IAsyncLifetime
         _transport.Open(device);
         Server.Router.RegisterDestination(new ConnectionTarget(device), new DestinationOptions { DestinationId = 7 });
         await Deliver(RelayedOf(1));
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, Assert.Single(_transport.Sent.Select((_, index) =>
-        {
-            return _transport.Read(index).Failure!.Code;
-        })));
+
+        var jwt = RelayedOf(3);
+
+        await Deliver(new Envelope { Header = (RequestHeader)jwt.Header with { Credential = Credential.Jwt("a.b.c") }, Payload = jwt.Payload });
+        Assert.Equal(
+            [(ushort)ProtocolCode.SessionRequired, (ushort)ProtocolCode.DestinationUnreachable],
+            _transport.Sent.Select((_, index) =>
+            {
+                return _transport.Read(index).Failure!.Code;
+            }));
     }
 
     [Fact]
@@ -989,8 +1104,10 @@ public sealed class ServerTests : IAsyncLifetime
             return EnvelopeCodec.ReadEnvelope(Sent[index].Span, new EnvelopeReadOptions { Side = RouterSide.Client })!;
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             var failing = Failing;
 
             Failing = Failing.None;
@@ -1080,8 +1197,10 @@ public sealed class ServerTests : IAsyncLifetime
             }
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             return Task.CompletedTask;
         }
 

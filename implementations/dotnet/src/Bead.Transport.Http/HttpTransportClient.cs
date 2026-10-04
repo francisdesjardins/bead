@@ -82,7 +82,10 @@ public sealed record HttpConnectOptions
 /// answer comes as a message when it does; a refusal the server marks fails, nothing having been
 /// tried, and the one that says the connection is gone closes it, once that failure is heard;
 /// anything else leaves the outcome unknown: it settles, and closes the connection, as a socket
-/// that drops does.
+/// that drops does. Each send carries its credential, when it has one, in the <c>Authorization</c>
+/// field of its <c>POST</c>, as it is given; one that is no field's value — anything but visible
+/// ASCII, spaces and tabs — is refused before it goes. An answer, and what a listen brings back,
+/// carry none.
 /// </summary>
 /// <remarks>
 /// What the server sends of its own, a client that listens — the default, once the server says it
@@ -224,11 +227,40 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     /// <summary>
-    /// Posts one envelope, settling on the head of its answer; refused with a
-    /// <see cref="DisconnectException"/> unless Open. A refusal the server marks is an
-    /// <see cref="IOException"/>: nothing of it was tried.
+    /// It carries a credential beside an envelope, in the <c>Authorization</c> of its <c>POST</c>
+    /// (spec 15.5).
     /// </summary>
-    public Task Send(ReadOnlyMemory<byte> bytes)
+    public bool CarriesCredential
+    {
+        get
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether it is secure, judged from the options of its last connect, never from what its host
+    /// resolves to (spec 13.4): <c>https</c>, or a host on the loopback. None before its first connect.
+    /// </summary>
+    public bool IsSecure
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _lastConnectOptions is { } given && TransportSecurity.IsSecure((given.Secured, given.Host));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Posts one envelope, with its credential in the <c>Authorization</c> field when it has one,
+    /// settling on the head of its answer; refused with a <see cref="DisconnectException"/> unless
+    /// Open, and with an <see cref="ArgumentException"/>, its connection kept, for a credential no
+    /// field carries. A refusal the server marks is an <see cref="IOException"/>: nothing of it was
+    /// tried.
+    /// </summary>
+    public Task Send(TransportMessage message)
     {
         Drawn? connection;
         ReadyState readyState;
@@ -239,9 +271,18 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             readyState = _readyState;
         }
 
-        return readyState == ReadyState.Open && connection is not null
-            ? Posting((connection, bytes))
-            : Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+        if (readyState != ReadyState.Open || connection is null)
+        {
+            return Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+        }
+
+        // refused before it goes, the connection kept: a field could not carry it as it is
+        if (message.Credential is { } credential && !IsFieldValue(credential))
+        {
+            return Task.FromException(new ArgumentException("a credential holds visible ASCII, spaces and tabs alone", nameof(message)));
+        }
+
+        return Posting((connection, message));
     }
 
     /// <summary>
@@ -456,6 +497,16 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
 
         return new Uri($"{(options.Secured ? "https" : "http")}://{host}:{options.Port}{path}");
+    }
+
+    // what a field's value holds, and so a credential the Authorization field carries: visible
+    // ASCII, spaces and tabs (RFC 9110 §5.5)
+    private static bool IsFieldValue(string value)
+    {
+        return value.All((character) =>
+        {
+            return character is '\t' or (>= ' ' and <= '~');
+        });
     }
 
     // the media type of a response, parameters aside
@@ -708,7 +759,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     // one envelope posted, settling on the head of its answer, the answer itself read after: a
     // caller waiting on it resumes as it settles, before what follows, as a rejection's handlers run
     // before a timer of 0
-    private Task Posting((Drawn Connection, ReadOnlyMemory<byte> Bytes) sent)
+    private Task Posting((Drawn Connection, TransportMessage Message) sent)
     {
         var settled = new TaskCompletionSource();
 
@@ -725,16 +776,22 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return settled.Task;
     }
 
-    private async Task Exchanging((Drawn Connection, ReadOnlyMemory<byte> Bytes) sent, TaskCompletionSource settled)
+    private async Task Exchanging((Drawn Connection, TransportMessage Message) sent, TaskCompletionSource settled)
     {
-        var (connection, bytes) = sent;
+        var (connection, message) = sent;
         HttpResponseMessage response;
 
         try
         {
             using var request = RequestOf(connection, (HttpMethod.Post, connection.Uri));
 
-            request.Content = new ReadOnlyMemoryContent(bytes);
+            // as it is given: a header parsed would be written again its own way
+            if (message.Credential is { } credential)
+            {
+                request.Headers.TryAddWithoutValidation(Microsoft.Net.Http.Headers.HeaderNames.Authorization, credential);
+            }
+
+            request.Content = new ReadOnlyMemoryContent(message.Bytes);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
             response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
         }
@@ -893,8 +950,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
-    // an envelope an answer or a listen brought back; a listener that throws stops nothing: its throw
-    // is left to a task nobody waits on, told as an exception unobserved, and the client goes on
+    // an envelope an answer or a listen brought back, which carry no credential; a listener that
+    // throws stops nothing: its throw is left to a task nobody waits on, told as an exception
+    // unobserved, and the client goes on
     private void Hear(byte[] envelope)
     {
         try

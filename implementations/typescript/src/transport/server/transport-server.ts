@@ -14,6 +14,7 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../shared/ready-state';
+import { isLoopbackHost } from '../shared/secure';
 import type {
   ITransportServer,
   ITransportServerClientHandleInfo,
@@ -63,7 +64,7 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export type { Data, IEventIteratorOptions } from '../shared/types';
+export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
 export type {
   ITransportServer,
   ITransportServerAddress,
@@ -173,6 +174,10 @@ export const createTransportServer = <Socket extends object, Request>(
       return implementation.type;
     },
 
+    // none carries one toward its client: an answer, a batch, a message or a worker's alike
+    carriesCredential: () => {
+      return false;
+    },
     close: async (connectionHandle) => {
       const connection = connections.get(connectionHandle);
 
@@ -194,6 +199,13 @@ export const createTransportServer = <Socket extends object, Request>(
           .toArray()
       );
     },
+    // what its application says stands in front of it is believed first, whatever it listens on
+    isSecure: () => {
+      return (
+        implementation.secure ??
+        (implementation.isSecure === true || isLoopbackHost(startOptions.address))
+      );
+    },
     gauges: () => {
       return mergeGauges([
         gaugesOf({
@@ -203,11 +215,11 @@ export const createTransportServer = <Socket extends object, Request>(
         ...(implementation.gauges === undefined ? [] : [implementation.gauges()]),
       ]);
     },
-    send: async (data, connectionHandle) => {
+    send: async (message, connectionHandle) => {
       const connection = connections.get(connectionHandle);
 
       if (connection !== undefined) {
-        await implementation.send(data, connection);
+        await implementation.send(message, connection);
       }
     },
     start: async (options) => {

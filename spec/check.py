@@ -10,8 +10,9 @@ name, which a reader looking one up by name would never reach; each group of vec
 by a section of the spec, which names no other; every unit an entry cites is one of spec.md's — a
 clause, an item of its numbered list, a row of its table — and spec/uncited.txt lists exactly the
 units no entry cites; an advance follows a timer armed, and in the transports' cases ends on its due
-at the latest; and each implementation's tests read every group, the conversations, the transports'
-cases, any of which may name the row of docs/support.md it crosses, and the clock cases. Exit 1 on
+at the latest; each implementation's tests read every group, the conversations, the transports'
+cases, any of which may name the row of docs/support.md it crosses, and the clock cases; and no file
+git lists outside spec/, the tests and the interop service names a published test key. Exit 1 on
 any of them.
 
   python spec/check.py --write-uncited
@@ -20,9 +21,12 @@ writes spec/uncited.txt from the files as they stand, for a change that cites or
 
 It needs jsonschema, locked in spec/requirements.txt.
 """
+import base64
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 from jsonschema import Draft202012Validator
@@ -58,6 +62,28 @@ SIDES = {
 
 # the matrix whose rows a case that crosses a platform's difference names
 SUPPORT = os.path.join(ROOT, 'docs', 'support.md')
+
+# the published test keys the JWT verdicts use, whose private halves anyone can read: a configuration
+# that names one trusts every token its reader signs (0010). Each is found by the members that hold
+# its material, as a JWK writes them, and by its RFC 7638 thumbprint
+TEST_KEYS = {
+    "RFC 7515's A.1, an HMAC key": {'kty': 'oct', 'k': 'AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow'},
+    "RFC 7515's A.3, a P-256 key": {'kty': 'EC', 'crv': 'P-256', 'x': 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU',
+                                    'y': 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0',
+                                    'd': 'jpsQnnGQmL-YBIffH1136cspYG6-0iY7X1fCE9-E9LI'},
+    "RFC 7517's A.2, a P-256 encryption key": {'kty': 'EC', 'crv': 'P-256', 'x': 'MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4',
+                                               'y': '4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM',
+                                               'd': '870MB6gfuTJ4HtUnUvYMyJpr5eUZNP4Bk43bVdj3eAE'},
+    "RFC 7520's 3.5, an HMAC key": {'kty': 'oct', 'k': 'hJtXIZ2uSN5kbQfbtTNWbpdmhkV8FJG-Onbc6mxCcYg'},
+}
+
+# the files that may name a test key, by their path from the root: the conformance files, each side's
+# tests, and the interop service, whose credentials hold them
+TESTS = re.compile(r'spec/|(.*/)?__tests__/|implementations/[^/]+/(tests|interop)/')
+
+# the files that use every test key listed, so that a gate that matches nothing fails: the verdicts'
+# keys, and the interop service's credentials, its key set's among them
+KEYS_USED = ('spec/vectors.json', 'spec/interop-service.json')
 
 problems = []
 
@@ -322,6 +348,43 @@ else:
         problems.append(f'uncited.txt lists {unit}, which ' +
                         ('an entry cites' if unit in known else 'spec.md does not have'))
 
+# ── The published test keys stay in spec/ and the tests ─────────────────────────────────────────
+
+
+def thumbprint(jwk):
+    """A JWK's thumbprint (RFC 7638): SHA-256 over its required members, in their order, no space."""
+    required = ('crv', 'kty', 'x', 'y') if jwk['kty'] == 'EC' else ('k', 'kty')
+    canonical = json.dumps({name: jwk[name] for name in required}, separators=(',', ':')).encode('ascii')
+    return base64.urlsafe_b64encode(hashlib.sha256(canonical).digest()).rstrip(b'=').decode('ascii')
+
+
+needles = {name: {**{member: jwk[member] for member in ('k', 'd', 'x', 'y') if member in jwk}, 'thumbprint': thumbprint(jwk)}
+           for name, jwk in TEST_KEYS.items()}
+tracked = [path for path in subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True,
+                                           check=True).stdout.decode('utf-8').split('\0') if path]
+used = set()
+
+for path in tracked:
+    if not os.path.isfile(os.path.join(ROOT, path)):
+        continue
+
+    with open(os.path.join(ROOT, path), 'rb') as file:
+        content = file.read()
+
+    for name, members in needles.items():
+        for member, value in members.items():
+            if value.encode('ascii') not in content:
+                continue
+
+            if path in KEYS_USED:
+                used.add(name)
+            elif not TESTS.match(path):
+                problems.append(f'{path}: names {name}, a published test key, by its {member}: only spec/, the tests and the '
+                                'interop service name one')
+
+for name in sorted(set(TEST_KEYS) - used):
+    problems.append(f'neither {" nor ".join(KEYS_USED)} uses {name}: the test keys\' gate would match nothing of it')
+
 # ── What each implementation's tests read ───────────────────────────────────────────────────────
 
 read = {}
@@ -359,7 +422,8 @@ print(f'spec: {version}; {len(documents)} files, each under its schema; '
       f'{sum(len(vectors[group]) for group in groups)} vectors in {len(groups)} groups, each named by '
       f'the spec; {len(named["conversations"])} conversations; {len(named["transports"])} transports\' '
       f'cases; {len(named["clocks"])} clock cases; {len(units) - len(uncited)} of the '
-      f'spec\'s {len(units)} units cited, the others listed in uncited.txt.')
+      f'spec\'s {len(units)} units cited, the others listed in uncited.txt; {len(TEST_KEYS)} published test keys, '
+      f'which none of the {len(tracked)} files git lists names outside spec/, the tests and the interop service.')
 
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())
 

@@ -7,12 +7,20 @@ import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { CLOSE_EVENT, MESSAGE_EVENT, RECONNECT_EVENT } from '../../transport/shared/constants';
-import type { Data } from '../../transport/shared/types';
-import { CLIENT_FAILURES, EnvelopeKind } from '../shared/constants';
+import type { ITransportMessage } from '../../transport/shared/types';
+import { connectionSessionOf, presentedCredentialOf, uncarriedOf } from '../shared/call-session';
+import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../shared/constants';
+import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { FailureError } from '../shared/errors';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
-import type { CallId, INotificationLike, SessionToken } from '../shared/types';
+import type {
+  CallId,
+  DefaultCredential,
+  INotificationLike,
+  IRouterLimits,
+  SessionToken,
+} from '../shared/types';
 import type {
   IRouterClient,
   IRouterClientOptions,
@@ -23,6 +31,7 @@ import type {
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   EnvelopeKind,
   FailureScope,
   LIMIT_DEFAULTS,
@@ -40,29 +49,38 @@ export {
   TimeoutError,
 } from '../../transport/shared/errors';
 export type {
+  Announcement,
   CallId,
+  Credential,
   DebugFilterSource,
+  DefaultCredential,
   DestinationId,
   EnvelopeHeader,
   FailureOrigin,
   ICancelHeader,
   IChunkHeader,
   ICreditHeader,
+  ICredentials,
   IDebugFilter,
+  IElsewhereSession,
   IFailure,
   IFailureHeader,
   INotificationHeader,
   IProtocolFailure,
   IRequestHeader,
   IResultHeader,
+  ICallSession,
   IRouterResult,
   IRouterFailures,
   IRouterLimits,
   RedactedHeader,
+  RequestCredential,
   RouterLimitsOptions,
   RouterSide,
+  SessionIdentifier,
   SessionToken,
 } from '../shared/types';
+export type { IJwtKey, Jwk, JwtAlgorithm } from '../shared/jwt-verifier';
 export type {
   IRouterClient,
   IRouterClientOptions,
@@ -101,6 +119,46 @@ interface IClientPacing {
 
 /** The one peer a client has: every request reaching it comes from the server. */
 export const SERVER_CONNECTION_HANDLE: RouterClientConnectionHandle = 'server';
+
+// helpers
+
+/**
+ * `credential` as a default a client presents: a `JWT` or an `ELSEWHERE`, frozen, or none; `OPAQUE`,
+ * which a call asks for alone, or any other, is a {@link ProgrammerError}, and so is a `JWT` past
+ * what `limits` hold (spec 12.2).
+ */
+const defaultCredentialOf = (
+  credential: DefaultCredential | undefined,
+  limits: IRouterLimits
+): DefaultCredential | undefined => {
+  if (credential === undefined) {
+    return undefined;
+  }
+
+  const { scheme } = credential as { scheme: unknown };
+
+  if (scheme !== CredentialScheme.JWT && scheme !== CredentialScheme.ELSEWHERE) {
+    throw new ProgrammerError(
+      `a client presents a JWT or an ELSEWHERE by default, never scheme ${String(scheme)}: OPAQUE goes on a call that asks for it`
+    );
+  }
+
+  // what it presents is checked as a call presents it, before anything is kept
+  presentedCredentialOf(credential, { failures: CLIENT_FAILURES, token: undefined });
+
+  if (scheme === CredentialScheme.JWT) {
+    assertLimitsHoldJwt(limits);
+  }
+
+  return Object.freeze({ ...credential });
+};
+
+/** Whether two defaults are one credential: the same scheme, and the same token or value carried. */
+const isSameCredential = (first: DefaultCredential, second: DefaultCredential): boolean => {
+  return first.scheme === CredentialScheme.JWT
+    ? second.scheme === CredentialScheme.JWT && first.token === second.token
+    : second.scheme === CredentialScheme.ELSEWHERE && first.carried === second.carried;
+};
 
 // definition
 
@@ -142,6 +200,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
   // each subscription by the call id that opened it, and each notification's call id
   const subscriptions = new Map<CallId, IBoundNotification>();
   const callIds = new Map<INotificationLike, CallId>();
+
+  // what resolves a command's JWT or ELSEWHERE, on the router's clock
+  const credentials = createCredentialResolver(options?.credentials, { clock });
 
   let sessionToken: SessionToken | undefined;
 
@@ -222,6 +283,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
   const core = createRouterCore<RouterClientConnectionHandle>(
     {
+      credentialSchemes: credentials.schemes,
       failures: CLIENT_FAILURES,
 
       activity: (activity) => {
@@ -287,14 +349,25 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       },
       // the session is the server's to give: an answer announces it when it changes, and carries
       // none otherwise
-      onAnswerReceived: (header) => {
-        if (header.sessionToken !== undefined) {
-          sessionToken = header.sessionToken ?? undefined;
+      onAnswerReceived: ({ credential }) => {
+        if (credential !== undefined) {
+          sessionToken =
+            credential.scheme === CredentialScheme.OPAQUE ? credential.token : undefined;
         }
       },
       report,
-      send: (bytes) => {
-        return transport.send(bytes);
+      send: (message) => {
+        return transport.send(message);
+      },
+      // a command runs in the session this client learned, as a request runs in its connection's;
+      // one presenting a JWT or an ELSEWHERE, in the credential's session it resolves to
+      sessionOf: ({ header, transportCredential }, signal) => {
+        const { credential } = header;
+
+        return credential?.scheme === CredentialScheme.JWT ||
+          credential?.scheme === CredentialScheme.ELSEWHERE
+          ? credentials.resolve({ credential, transportCredential }, signal)
+          : connectionSessionOf(credential, { token: sessionToken });
       },
       trace: (direction, { header }) => {
         if (emitter.listenerCount('debug') > 0) {
@@ -304,6 +377,14 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     },
     { clock, limits: options?.limits }
   );
+
+  // a router that takes a JWT holds its header: its limits hold 1,024 bytes at least
+  if (credentials.takesJwt) {
+    assertLimitsHoldJwt(core.limits);
+  }
+
+  // the credential every call presents but one that gives its own, or none, until withdrawn
+  let defaultCredential = defaultCredentialOf(options?.credential, core.limits);
 
   // binds the calls of a subscription as their call ids are drawn: before the request goes out, so
   // a notification right behind its result is heard — paced, when the notification has a window, its
@@ -359,8 +440,27 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     }
   };
 
-  const onMessage = (data: Data): void => {
-    core.receive(data, SERVER_CONNECTION_HANDLE);
+  // what a transport carried beside the envelope goes with it: a command presenting ELSEWHERE
+  // stands for it
+  const onMessage = (message: ITransportMessage): void => {
+    core.receive(message, SERVER_CONNECTION_HANDLE);
+  };
+
+  // a call that presented the default, refused SESSION_REQUIRED through relays or not, withdraws it
+  // while it is still that credential by value, set again or not: later calls present none by
+  // default, and the application hears of it by its scheme alone
+  const withdraw = (reason: unknown, presented: DefaultCredential | undefined): void => {
+    if (
+      presented !== undefined &&
+      defaultCredential !== undefined &&
+      isSameCredential(presented, defaultCredential) &&
+      reason instanceof FailureError &&
+      reason.origin !== 'local' &&
+      reason.isProtocol(CLIENT_FAILURES.sessionRequired.code)
+    ) {
+      defaultCredential = undefined;
+      emitter.emit('credentialWithdrawn', presented.scheme);
+    }
   };
 
   const onClose = (): void => {
@@ -383,6 +483,12 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
     get clock() {
       return clock;
+    },
+    get credential() {
+      return defaultCredential;
+    },
+    set credential(credential) {
+      defaultCredential = defaultCredentialOf(credential, core.limits);
     },
     get failures() {
       return CLIENT_FAILURES;
@@ -421,9 +527,51 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     },
     request: (payload, { onSent, options, procedure, subscribes }) => {
       const connectionHandle = SERVER_CONNECTION_HANDLE;
+      // the call's own credential, or the default, as it is now
+      const presentedDefault = options.credential === undefined ? defaultCredential : undefined;
+      let presented: ReturnType<typeof presentedCredentialOf>;
+
+      // OPAQUE, the session this client learned, as its answers announced it; a JWT, or an
+      // ELSEWHERE beside it
+      try {
+        presented = presentedCredentialOf(options.credential ?? presentedDefault, {
+          failures: CLIENT_FAILURES,
+          token: sessionToken,
+        });
+      } catch (reason) {
+        return Promise.reject(toError(reason));
+      }
+
+      const { carried, credential } = presented;
+      // a credential its transport cannot carry fails the call before it goes: nothing was tried,
+      // and the default stays
+      const uncarried = uncarriedOf(credential, {
+        carriesCredential: transport.carriesCredential === true,
+        failures: CLIENT_FAILURES,
+        isSecure: transport.isSecure === true,
+      });
+
+      if (uncarried !== undefined) {
+        const { destinationId } = options;
+        const { procedureId, serviceId } = procedure;
+
+        return Promise.reject(
+          new FailureError(uncarried, {
+            destinationId,
+            procedureAddress: { procedureId, serviceId },
+          })
+        );
+      }
+
+      const sent = { connectionHandle, credential, onSent, options, procedure };
+      const withdrawing = (reason: unknown): never => {
+        withdraw(reason, presentedDefault);
+
+        throw reason;
+      };
 
       if (subscribes === undefined) {
-        return core.request(payload, { connectionHandle, onSent, options, procedure });
+        return core.request(payload, { ...sent, transportCredential: carried }).catch(withdrawing);
       }
 
       // only the notification held for the procedure is bound, or its notifications would reach
@@ -440,13 +588,11 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
       return core
         .request(payload, {
-          connectionHandle,
+          ...sent,
           onCallId,
-          onSent,
           opensSubscription: true,
-          options,
           paced: subscribes.window !== undefined,
-          procedure,
+          transportCredential: carried,
         })
         .then(
           (result) => {
@@ -459,7 +605,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
           (reason: unknown) => {
             release();
 
-            throw reason;
+            return withdrawing(reason);
           }
         );
     },

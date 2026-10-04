@@ -7,6 +7,7 @@ import { createPromise } from '../shared/create-promise';
 import { ConnectError, ProgrammerError, ReadyStateError, wrapReason } from '../shared/errors';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '../shared/heartbeat';
 import { noop } from '../shared/noop';
+import { isSecureUrl } from '../shared/secure';
 import {
   getReadyState,
   ReadyState,
@@ -60,13 +61,16 @@ const errorOf = (event: unknown): unknown => {
 /**
  * A transport client over one WebSocket. Over `ws`, it pings the server every `heartbeat`, and
  * closes when a ping went unanswered: a server gone without a word ends in a `close` rather than
- * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it.
+ * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it. A
+ * WebSocket carries no credential beside an envelope: one given to `send` is not carried, and its
+ * router fails a call that presents an `ELSEWHERE` before it goes. It is secure under `wss`, or to a
+ * loopback host.
  *
  * @example
  * const client = createWSTransportClient();
- * client.on('message', (data) => {});
+ * client.on('message', ({ data }) => {});
  * await client.connect({ host, port });
- * await client.send('hello');
+ * await client.send({ data: 'hello' });
  * await client.disconnect();
  */
 export const createWSTransportClient = (options?: IWSTransportClientOptions): WSTransportClient => {
@@ -89,6 +93,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
     let resolveDisconnect: ((isDropped: boolean) => void) | undefined;
     // the open socket's, when it can ping
     let beating: IHeartbeat | undefined;
+    // whether the URL of the last connect is secure
+    let isSecure = false;
 
     // a drop closes as a network does, and the open socket's `onclose` reports it
     const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
@@ -120,7 +126,11 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
     };
 
     return {
+      carriesCredential: false,
       clock,
+      get isSecure() {
+        return isSecure;
+      },
 
       connect: async (connectOptions) => {
         const {
@@ -137,6 +147,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
         const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
         const url = `${secured ? 'wss' : 'ws'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/, '/$1')}`;
         let opened: IWebSocketLike | undefined;
+
+        isSecure = isSecureUrl(url);
 
         try {
           await createPromise(
@@ -182,7 +194,10 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                     return undefined;
                   }
 
-                  return (client.emit(MESSAGE_EVENT, data as Data), undefined);
+                  return (
+                    client.emit(MESSAGE_EVENT, { credential: undefined, data: data as Data }),
+                    undefined
+                  );
                 };
 
                 socket.onclose = () => {
@@ -294,7 +309,9 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
         }
       },
 
-      send: (data) => {
+      // a credential given here is not carried: the client fails a call that presents one its
+      // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+      send: ({ data }) => {
         return createPromise((resolve, reject) => {
           const { socket } = client;
 

@@ -234,6 +234,17 @@ public sealed class TransportsTests
         return limits;
     }
 
+    // the server's credentials, the interop service's on its clock: no JWT key and no key set under
+    // limits whose chunk or envelope is under 1,024 bytes, which section 12.2 forbids beside them
+    private static Credentials CredentialsOf((RouterLimits Limits, TimeProvider Clock) server)
+    {
+        var credentials = InteropService.CredentialsOf(server.Clock);
+
+        return server.Limits.ChunkBytes < 1_024 || server.Limits.MaximumEnvelopeBytes < 1_024
+            ? credentials with { Keys = [], KeySet = null }
+            : credentials;
+    }
+
     // the server under test, of the case's transport, the interop service offered on it: on a clock
     // that settles once its router and its resolvers, which share one scheduler, are idle
     private static Served ServedOf(JsonElement entry)
@@ -256,10 +267,12 @@ public sealed class TransportsTests
     private static Served OverHttp(JsonElement entry, (SteppingClock Clock, SerialScheduler Scheduler) runsOn)
     {
         var transport = new HttpTransportServer(OptionsOf(entry) with { Clock = runsOn.Clock });
+        var limits = RouterLimits.WholeEnvelopeOf(LimitsOf(entry));
         var server = new Server<string>(transport, new ServerOptions
         {
             ConnectionInactivityTimeout = ConnectionInactivityTimeoutOf(entry),
-            Limits = RouterLimits.WholeEnvelopeOf(LimitsOf(entry)),
+            Credentials = CredentialsOf((limits, runsOn.Clock)),
+            Limits = limits,
             ResolverScheduler = runsOn.Scheduler,
             Scheduler = runsOn.Scheduler,
         });
@@ -288,9 +301,16 @@ public sealed class TransportsTests
     // its limits on its router
     private static Served OverWebSocket(JsonElement entry, (SteppingClock Clock, SerialScheduler Scheduler) runsOn)
     {
+        var limits = LimitsOf(entry);
         var server = new WebSocketServer<string>(new WebSocketServerOptions
         {
-            Server = new ServerOptions { Limits = LimitsOf(entry), ResolverScheduler = runsOn.Scheduler, Scheduler = runsOn.Scheduler },
+            Server = new ServerOptions
+            {
+                Credentials = CredentialsOf((limits, runsOn.Clock)),
+                Limits = limits,
+                ResolverScheduler = runsOn.Scheduler,
+                Scheduler = runsOn.Scheduler,
+            },
             Transport = WebSocketOptionsOf(entry) with { Clock = runsOn.Clock },
         });
         var transport = server.Transport;
@@ -444,29 +464,58 @@ public sealed class TransportsTests
         var callId = envelope.Header.CallId;
         var kind = (int)envelope.Kind;
 
-        var session = envelope.Header switch
+        // the scheme of what an answer announced, by its name: OPAQUE, a token, or NONE, its end
+        var credential = envelope.Header switch
         {
-            ResultHeader { Session: { } announced } => announced.IsEnded ? " ended" : " announced",
-            FailureHeader { Session: { } announced } => announced.IsEnded ? " ended" : " announced",
+            ResultHeader { Credential: { } announced } => $" {announced.Scheme.ToString().ToUpperInvariant()}",
+            FailureHeader { Credential: { } announced } => $" {announced.Scheme.ToString().ToUpperInvariant()}",
             _ => "",
         };
 
         if (envelope.Failure is { } failure)
         {
-            return $"{kind} {callId} failure {failure.Code} {(int)failure.Scope} through {failure.Relays}{session}";
+            return $"{kind} {callId} failure {failure.Code} {(int)failure.Scope} through {failure.Relays}{credential}";
         }
 
         return envelope.Header switch
         {
-            ResultHeader { Total: { } total } => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{session} total {total}",
-            ResultHeader or NotificationHeader => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{session}",
+            ResultHeader { Total: { } total } => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential} total {total}",
+            ResultHeader or NotificationHeader => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential}",
             ChunkHeader chunk => $"{kind} {callId} from {chunk.Offset}{(chunk.IsLast ? " last" : "")} {Convert.ToHexString(envelope.Payload.Span)}",
             CreditHeader credit => $"{kind} {callId} credit {credit.CreditEnd}",
 
-            // a command the server sends its client, with its flags, the envelope's byte 2 as sent
-            RequestHeader request => $"{kind} {callId} flags {bytes.Span[2]} {request.ServiceId}/{request.ProcedureId} {Convert.ToHexString(envelope.Payload.Span)}",
+            // a command the server sends its client, with its flags, the envelope's byte 2 as sent,
+            // and the credential it presents, as vectors.json writes a header's
+            RequestHeader request => $"{kind} {callId} flags {bytes.Span[2]} {request.ServiceId}/{request.ProcedureId} {Convert.ToHexString(envelope.Payload.Span)}"
+                + request.Credential switch
+                {
+                    { Scheme: CredentialScheme.Jwt, Token: { } token } => $" credential JWT {token}",
+                    { } presented => $" credential {presented.Scheme.ToString().ToUpperInvariant()}",
+                    null => "",
+                },
             _ => $"{kind} {callId}",
         };
+    }
+
+    // a failure's detail, as an envelope that holds one says it; none for any other
+    private static string? DetailOf(ReadOnlyMemory<byte> bytes)
+    {
+        try
+        {
+            return EnvelopeCodec.ReadEnvelope(
+                bytes.Span,
+                new EnvelopeReadOptions { Side = RouterSide.Client, MaximumEnvelopeBytes = int.MaxValue })?.Failure?.Detail;
+        }
+        catch (FailureException)
+        {
+            return null;
+        }
+    }
+
+    // the detail a case gives a failure it expects, which is compared where it gives one
+    private static string? ExpectedDetailOf(JsonElement expected)
+    {
+        return expected.TryGetProperty("failure", out var failure) && failure.TryGetProperty("detail", out var detail) ? detail.GetString() : null;
     }
 
     // what a case expects of an envelope, written as OutOf writes what was sent
@@ -475,11 +524,14 @@ public sealed class TransportsTests
         var kind = expected.GetProperty("kind").GetInt32();
         var callId = expected.GetProperty("callId").GetUInt32();
 
-        var session = expected.TryGetProperty("session", out var announced) ? $" {announced.GetString()}" : "";
+        // on an answer, the scheme it announced; on a request, the credential it presents
+        var credential = expected.TryGetProperty("credential", out var announced) && announced.ValueKind == JsonValueKind.String
+            ? $" {announced.GetString()}"
+            : "";
 
         if (expected.TryGetProperty("failure", out var failure))
         {
-            return $"{kind} {callId} failure {failure.GetProperty("code").GetInt32()} {failure.GetProperty("scope").GetInt32()} through {failure.GetProperty("relays").GetInt32()}{session}";
+            return $"{kind} {callId} failure {failure.GetProperty("code").GetInt32()} {failure.GetProperty("scope").GetInt32()} through {failure.GetProperty("relays").GetInt32()}{credential}";
         }
 
         var hexadecimal = expected.TryGetProperty("payload", out var payload)
@@ -488,7 +540,15 @@ public sealed class TransportsTests
 
         if (expected.TryGetProperty("procedureId", out var procedureId))
         {
-            return $"{kind} {callId} flags {expected.GetProperty("flags").GetInt32()} {expected.GetProperty("serviceId").GetInt32()}/{procedureId.GetInt32()} {hexadecimal}";
+            var presented = announced.ValueKind == JsonValueKind.Object
+                ? announced.GetProperty("scheme").GetString() switch
+                {
+                    "JWT" => $" credential JWT {announced.GetProperty("token").GetString()}",
+                    var scheme => $" credential {scheme}",
+                }
+                : "";
+
+            return $"{kind} {callId} flags {expected.GetProperty("flags").GetInt32()} {expected.GetProperty("serviceId").GetInt32()}/{procedureId.GetInt32()} {hexadecimal}{presented}";
         }
 
         if (expected.TryGetProperty("offset", out var offset))
@@ -503,7 +563,7 @@ public sealed class TransportsTests
 
         var total = expected.TryGetProperty("total", out var declared) ? $" total {declared.GetInt64()}" : "";
 
-        return hexadecimal is null ? $"{kind} {callId}" : $"{kind} {callId} {hexadecimal}{session}{total}";
+        return hexadecimal is null ? $"{kind} {callId}" : $"{kind} {callId} {hexadecimal}{credential}{total}";
     }
 
     // a batch's envelopes, each after its length on 4 bytes, big-endian, as OutOf writes each; a
@@ -895,8 +955,16 @@ public sealed class TransportsTests
 
             if (response.TryGetProperty("envelope", out var envelope))
             {
+                var bytes = await exchange.BodyWithin(wait);
+
                 expected.Add(ExpectedOf(envelope));
-                came.Add(await exchange.BodyWithin(wait) is { } bytes ? OutOf(bytes) : "body: cut");
+                came.Add(bytes is not null ? OutOf(bytes) : "body: cut");
+
+                if (ExpectedDetailOf(envelope) is { } detail)
+                {
+                    expected.Add($"detail {detail}");
+                    came.Add($"detail {(bytes is null ? null : DetailOf(bytes))}");
+                }
             }
 
             if (response.TryGetProperty("batch", out var batch))
@@ -928,6 +996,11 @@ public sealed class TransportsTests
             var came = await _exchanges[on].NextWithin(wait);
 
             Assert.Equal(wanted, came is null ? $"nothing within {wait.TotalMilliseconds} ms" : HeardOf((came, expected.Name)));
+
+            if (expected.Name == "envelope" && ExpectedDetailOf(expected.Value) is { } detail)
+            {
+                Assert.Equal(detail, DetailOf(came!.Bytes));
+            }
         }
 
         // a gauge of the transport, read until it has its value, within a patience

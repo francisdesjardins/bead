@@ -49,13 +49,13 @@ export const CONNECT_DEFAULTS = Object.freeze({
  *
  * A connect given up on posts `bead-close` on its end all the same, for a server that takes the port
  * later to end at once. A worker's `error` loses the connection; one terminated without a word is
- * not heard.
+ * not heard. A worker carries no credential beside an envelope: one given to `send` is not carried.
  *
  * @example
  * const client = createWorkerTransportClient({ worker });
- * client.on('message', (data) => {});
+ * client.on('message', ({ data }) => {});
  * await client.connect({});
- * await client.send(envelope);
+ * await client.send({ data: envelope });
  * await client.disconnect();
  */
 export const createWorkerTransportClient = ({
@@ -94,7 +94,9 @@ export const createWorkerTransportClient = ({
     };
 
     return {
+      carriesCredential: false,
       clock,
+      isSecure: true,
 
       connect: async ({ signal, timeout = CONNECT_DEFAULTS.timeout }) => {
         const channel = new Channel();
@@ -102,7 +104,12 @@ export const createWorkerTransportClient = ({
 
         opened.addEventListener('message', ({ data }) => {
           if (data instanceof ArrayBuffer) {
-            return (port === opened ? client.emit(MESSAGE_EVENT, data) : undefined, undefined);
+            const isHeard = port === opened;
+
+            return (
+              isHeard ? client.emit(MESSAGE_EVENT, { credential: undefined, data }) : undefined,
+              undefined
+            );
           }
 
           if (data === WORKER_MESSAGES.CLOSE) {
@@ -169,7 +176,9 @@ export const createWorkerTransportClient = ({
         return Promise.resolve();
       },
 
-      send: (data) => {
+      // a credential given here is not carried: the client fails a call that presents one its
+      // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+      send: ({ data }) => {
         const open = port;
 
         if (!client.isOpen() || open === undefined) {

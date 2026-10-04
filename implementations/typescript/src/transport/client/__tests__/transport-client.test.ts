@@ -143,7 +143,7 @@ test.describe('createTransportClient', () => {
     const { calls, client } = createStubClient();
 
     await client.connect(target);
-    await client.send('x');
+    await client.send({ data: 'x' });
     await client.disconnect();
     drop(client);
 

@@ -159,7 +159,7 @@ test.describe('createReceivingTransfers', () => {
 
   test('grants a transfer the budget starved once another gives its bytes back', () => {
     const { credits, receiving } = createReceiving({
-      bufferedBytesBudget: 20,
+      bufferedBytesBudget: 21,
       maximumPayloadBytes: 20,
     });
     const first = openedOf(
@@ -168,8 +168,9 @@ test.describe('createReceivingTransfers', () => {
 
     receiving.grant(first);
 
+    // the last byte of the budget holds the second's opening, and no credit
     const second = openedOf(
-      receiving.open(new Uint8Array(0), { call: { callId: 1, connectionHandle: 'b' }, total: 20 })
+      receiving.open(new Uint8Array(1), { call: { callId: 1, connectionHandle: 'b' }, total: 20 })
     );
 
     receiving.grant(second);
@@ -179,7 +180,7 @@ test.describe('createReceivingTransfers', () => {
 
     receiving.close(first);
 
-    expect(credits).toEqual(['a 1 20', 'b 1 16']);
+    expect(credits).toEqual(['a 1 20', 'b 1 17']);
     expect(receiving.available).toBe(4);
   });
 

@@ -4,7 +4,7 @@
 
 import { gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
-import { EnvelopeKind } from './constants';
+import { CredentialScheme, EnvelopeKind } from './constants';
 import type { IRouterCorePort, OutgoingEnvelope, SessionToken } from './types';
 
 // interfaces
@@ -65,7 +65,13 @@ export const createAnnouncements = <Handle extends string>(
 
       announced.set(connectionHandle, current);
 
-      const header = { ...envelope.header, sessionToken: current };
+      const header = {
+        ...envelope.header,
+        credential:
+          current === null
+            ? { scheme: CredentialScheme.NONE }
+            : { scheme: CredentialScheme.OPAQUE, token: current },
+      };
 
       return {
         envelope:

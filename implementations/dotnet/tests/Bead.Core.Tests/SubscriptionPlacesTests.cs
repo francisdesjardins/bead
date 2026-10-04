@@ -232,6 +232,29 @@ public sealed class SubscriptionPlacesTests
     }
 
     [Fact]
+    public void Holds_a_place_a_procedure_for_each_session_of_a_connection_and_drop_gives_a_session_s_own_its_connection_s_or_a_credential_s_by_its_identifier()
+    {
+        var (notifications, places, _) = PlacesOf();
+        var grace = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "grace" };
+        var inGrace = (uint callId) =>
+        {
+            return SubscribingOf(callId) with { Session = new CallSession { Identifier = grace } };
+        };
+
+        places.Settle(SubscribingOf(1), Subscribing);
+        places.Settle(inGrace(3), Subscribing);
+        places.Settle(inGrace(5), Subscribing with { Procedure = Other });
+
+        // a later call of a session that holds its place holds nothing more
+        places.Settle(inGrace(7), Subscribing);
+        Assert.Equal([1u, 3u, 5u], Held(notifications));
+
+        Assert.Equal([1u], places.Drop(First));
+        Assert.Equal([3u, 5u], places.Drop(new SubscriptionPlace(First, grace with { })));
+        Assert.Empty(places.Drop(new SubscriptionPlace(First, grace with { Id = "Grace" })));
+    }
+
+    [Fact]
     public void Drop_gives_the_established_and_the_waiting_never_one_in_flight_and_no_call_waits_after()
     {
         var (notifications, places, _) = PlacesOf();

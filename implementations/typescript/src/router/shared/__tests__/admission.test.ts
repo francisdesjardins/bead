@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { admissionOf, isAdmissionFailure } from '../admission';
-import { CLIENT_FAILURES, FailureScope, SERVER_FAILURES } from '../constants';
+import { CLIENT_FAILURES, CredentialScheme, FailureScope, SERVER_FAILURES } from '../constants';
+import { toSessionToken } from '../identifiers';
 import type { IAdmissionRequest, IBeforeRequest } from '../types';
 
 // helpers
@@ -73,6 +74,36 @@ test.describe('admissionOf', () => {
     expect(admissionOf(withRefusal, SERVER_FAILURES)(request)).toBe(
       SERVER_FAILURES.sessionRequired
     );
+  });
+
+  test('keeps its refusal SESSION_REQUIRED whatever the call presented, for its router to answer', () => {
+    const credentials = [
+      undefined,
+      { scheme: CredentialScheme.OPAQUE, token: toSessionToken(new Uint8Array(16).fill(1)) },
+      { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+      { scheme: CredentialScheme.ELSEWHERE },
+    ] as const;
+
+    for (const failures of [SERVER_FAILURES, CLIENT_FAILURES]) {
+      const refusal = { ...failures.sessionRequired, detail: 'sign in first' };
+      const refusing = Object.assign(
+        () => {
+          return false;
+        },
+        { refusal }
+      );
+
+      // the router answers it ACCESS_DENIED to a call that presented a credential, whatever handler
+      // refused it
+      for (const credential of credentials) {
+        const presenting = {
+          ...request,
+          header: { ...request.header, ...(credential === undefined ? {} : { credential }) },
+        };
+
+        expect(admissionOf(refusing, failures)(presenting)).toBe(refusal);
+      }
+    }
   });
 
   test('throws what the admission throws', () => {

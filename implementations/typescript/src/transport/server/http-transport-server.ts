@@ -300,6 +300,42 @@ const hasBody = (request: IHTTPRequestLike): boolean => {
   );
 };
 
+// the values of every `Authorization` field a request carries, as they came: `headers` keeps the
+// first of two, so they are counted where each stands
+const authorizationsOf = (request: IHTTPRequestLike): string[] => {
+  const values: string[] = [];
+  const { rawHeaders } = request;
+
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    if (rawHeaders[index]?.toLowerCase() === 'authorization') {
+      values.push(rawHeaders[index + 1] ?? '');
+    }
+  }
+
+  return values;
+};
+
+// the credential a field carries: its value whole, without the spaces and tabs around it (RFC 9110
+// §5.5); none when nothing is left
+const credentialOf = (value: string | undefined): string | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && (value[start] === ' ' || value[start] === '\t')) {
+    start += 1;
+  }
+
+  while (end > start && (value[end - 1] === ' ' || value[end - 1] === '\t')) {
+    end -= 1;
+  }
+
+  return start === end ? undefined : value.slice(start, end);
+};
+
 // a body of Bead's media type, parameters aside, sent as it is
 const isBeadBody = (request: IHTTPRequestLike): boolean => {
   const type = headerOf(request, 'content-type')?.split(';')[0]?.trim().toLowerCase();
@@ -384,11 +420,14 @@ const sendHead = (response: IHTTPResponseLike): void => {
  * kind and call id, and nothing else: a request's exchange waits under its call id — from its first
  * 8 bytes — for the answer the router sends on it, whose head goes out as the request is handed on,
  * so the requester knows the router has it; any other envelope is handed on and its exchange ends
- * 204. A cancel ends the exchange of its call; one that comes before its request buries that call
- * id for {@link BURIAL_MILLISECONDS}. Each refusal of the transport's own is marked in
- * `bead-refusal`. An exchange lost — its response closed before the transport ended it — closes the
- * connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and a
- * connection idle past `inactivityTimeout`.
+ * 204. A request is handed on with its credential, the `Authorization` field of its `POST` as it
+ * came, its surrounding whitespace removed, and none when the field is empty or absent; no other
+ * exchange's is read, and a `POST` with two is refused 400. An answer, and what a listen brings
+ * back, carry none. A cancel ends the exchange of its call; one that comes before its request
+ * buries that call id for {@link BURIAL_MILLISECONDS}. Each refusal of the transport's own is marked
+ * in `bead-refusal`. An exchange lost — its response closed before the transport ended it — closes
+ * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and
+ * a connection idle past `inactivityTimeout`.
  *
  * What the server sends of its own reaches a client that said at connect that it listens —
  * `bead-listen: ?1`, which the 201 says back. It waits in the connection's outbox, numbered, until a
@@ -403,7 +442,7 @@ const sendHead = (response: IHTTPResponseLike): void => {
  *
  * @example
  * const server = createHTTPTransportServer({ createServer: (listener) => createServer(listener) });
- * server.on('message', (data, connectionHandle) => {});
+ * server.on('message', ({ credential, data }, connectionHandle) => {});
  * const { port } = await server.start({ findOpenPort: true });
  */
 export const createHTTPTransportServer = (
@@ -425,6 +464,7 @@ export const createHTTPTransportServer = (
     maximumWaitingExchanges = MAXIMUM_WAITING_EXCHANGES,
     origins = [],
     pathname = PATHNAME,
+    secure,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
@@ -791,6 +831,13 @@ export const createHTTPTransportServer = (
         const { request, response } = exchange;
         const { connectionHandle } = connection;
         const declared = Number(headerOf(request, 'content-length') ?? Number.NaN);
+        const authorizations = authorizationsOf(request);
+
+        // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
+        // could be taken for the other
+        if (authorizations.length > 1) {
+          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+        }
 
         if (Number.isFinite(declared) && declared > maximumBodyBytes) {
           return (finish(exchange, { reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
@@ -979,9 +1026,12 @@ export const createHTTPTransportServer = (
 
           const envelope = body.bytes.slice(0, body.length);
 
+          // a request is handed on with the credential its exchange carried; no other envelope is
           if (kind === ENVELOPE_KINDS.REQUEST) {
+            const credential = credentialOf(authorizations[0]);
+
             state.isDelivered = true;
-            server.emit(MESSAGE_EVENT, envelope, connectionHandle);
+            server.emit(MESSAGE_EVENT, { credential, data: envelope }, connectionHandle);
 
             // still waiting — not answered as it came — its head goes now, so its client knows the
             // router has it; and it waits for its answer no longer than it may
@@ -999,7 +1049,7 @@ export const createHTTPTransportServer = (
             return undefined;
           }
 
-          server.emit(MESSAGE_EVENT, envelope, connectionHandle);
+          server.emit(MESSAGE_EVENT, { credential: undefined, data: envelope }, connectionHandle);
 
           if (kind === ENVELOPE_KINDS.CANCEL) {
             const cancelled = connection.waiting.get(callId);
@@ -1089,6 +1139,13 @@ export const createHTTPTransportServer = (
       return {
         clock,
         defaults: START_DEFAULTS,
+        // a server under TLS has its contexts, as Node's https and its HTTP/2 secure server do
+        get isSecure() {
+          return (
+            typeof (httpServer as { addContext?: unknown } | undefined)?.addContext === 'function'
+          );
+        },
+        secure,
         type: TRANSPORT_HTTP,
 
         start: async ({ address, findOpenPort, port, signal }) => {
@@ -1211,7 +1268,9 @@ export const createHTTPTransportServer = (
 
         // an answer ends the exchange of its request; anything else — a late answer too — waits for
         // a listen, when its client listens
-        send: (data, { socket }) => {
+        // neither carries a credential: the router fails a command that presents one before it
+        // goes, DESTINATION_UNREACHABLE (decision 0010)
+        send: ({ data }, { socket }) => {
           const bytes = bytesOf(data);
 
           if (bytes === undefined || bytes.length < ENVELOPE_PREFIX.bytes) {

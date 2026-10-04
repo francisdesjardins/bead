@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { CredentialScheme } from '../../shared/constants';
 import { createNotificationManager } from '../notification-manager';
 import { createSubscriptionPlaces } from '../subscription-places';
 
@@ -188,6 +189,22 @@ test.describe('createSubscriptionPlaces', () => {
     expect(held()).toEqual([]);
   });
 
+  test('holds a place a procedure for each session of a connection, and drop gives a session’s own: its connection’s, or a credential’s by its identifier', () => {
+    const { places } = createPlaces();
+    const grace = { id: 'grace', scheme: CredentialScheme.ELSEWHERE } as const;
+
+    for (const call of [
+      { callId: 21, connectionHandle: first, identifier: grace },
+      { callId: 23, connectionHandle: first },
+      { callId: 25, connectionHandle: first, identifier: { ...grace } },
+    ]) {
+      places.settle(call, subscribing);
+    }
+
+    expect(places.drop({ connectionHandle: first })).toEqual([23]);
+    expect(places.drop({ connectionHandle: first, identifier: { ...grace } })).toEqual([21]);
+  });
+
   test('drop gives the established and the waiting, never one in flight, and no call waits after', () => {
     const { held, places } = createPlaces();
     const holder = { callId: 3, connectionHandle: first };
@@ -196,8 +213,8 @@ test.describe('createSubscriptionPlaces', () => {
     places.settle({ callId: 5, connectionHandle: first }, subscribing);
     places.settle({ callId: 7, connectionHandle: first }, { ...subscribing, procedure: other });
 
-    expect(places.drop(first)).toEqual([7, 5]);
-    expect(places.drop(second)).toEqual([]);
+    expect(places.drop({ connectionHandle: first })).toEqual([7, 5]);
+    expect(places.drop({ connectionHandle: second })).toEqual([]);
 
     places.settle(holder, { ...subscribing, isFailure: true });
 

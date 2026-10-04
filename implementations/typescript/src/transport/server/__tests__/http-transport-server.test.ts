@@ -47,6 +47,9 @@ import { TLS_FIXTURE } from './tls-fixture';
 
 const host = '127.0.0.1';
 
+/** A bearer credential, RFC 6750's own example, its auth-scheme included. */
+const BEARER = 'Bearer mF_9.B5f-4.1JqM';
+
 /** An envelope as the transport reads it: its layout, its kind, its call id, and `extra` bytes. */
 const envelopeOf = (
   kind: number,
@@ -80,7 +83,7 @@ const recordOf = (server: HTTPTransportServer) => {
   server.on('connection', (...[shown, drawing, connectionHandle]) => {
     events.push(['connection', shown, drawing, connectionHandle]);
   });
-  server.on('message', (data, connectionHandle) => {
+  server.on('message', ({ data }, connectionHandle) => {
     events.push(['message', [...(data as Uint8Array)], connectionHandle]);
   });
   server.on('close', (wasClean, connectionHandle) => {
@@ -301,8 +304,14 @@ test.describe('createHTTPTransportServer', () => {
     expect(firstHead.headers.get('content-type')).toBe(BEAD_MEDIA_TYPE);
     expect(namesOf(events, 'message')).toHaveLength(2);
 
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3, extra: 1 }), connectionHandle);
-    await server.send(envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 1 }), connectionHandle);
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3, extra: 1 }) },
+      connectionHandle
+    );
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 1 }) },
+      connectionHandle
+    );
 
     expect(await bytesOf(secondHead)).toEqual([
       ...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3, extra: 1 }),
@@ -312,7 +321,7 @@ test.describe('createHTTPTransportServer', () => {
     ]);
     // an answer whose exchange ended is dropped, as one to a connection gone
     await expect(
-      server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle)
+      server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle)
     ).resolves.toBeUndefined();
   });
 
@@ -322,7 +331,10 @@ test.describe('createHTTPTransportServer', () => {
     const { connectionHandle, connectionToken } = await connect(url, server);
 
     server.on('message', () => {
-      void server.send(envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 5 }), connectionHandle);
+      void server.send(
+        { data: envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 5 }) },
+        connectionHandle
+      );
     });
 
     const response = await post(url, {
@@ -349,6 +361,114 @@ test.describe('createHTTPTransportServer', () => {
       ['message', [...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 2 })], connectionHandle],
       ['message', [...envelopeOf(0x80, { callId: 2 })], connectionHandle],
     ]);
+  });
+
+  test('hands a request on with its Authorization, whole, and any other envelope with none', async () => {
+    await using started = await startTransport();
+    const { server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const taken: unknown[] = [];
+
+    server.on('message', ({ credential, data }) => {
+      const kind = (data as Uint8Array)[1];
+
+      taken.push([kind, credential]);
+
+      if (kind === ENVELOPE_KINDS.REQUEST) {
+        void server.send(
+          { credential: BEARER, data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) },
+          connectionHandle
+        );
+      }
+    });
+
+    const answered = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+      connectionToken,
+      headers: { authorization: BEARER },
+    });
+    const cancelled = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }),
+      connectionToken,
+      headers: { authorization: BEARER },
+    });
+
+    await answered.arrayBuffer();
+
+    // an answer carries none
+    expect([answered.status, answered.headers.get('authorization'), cancelled.status]).toEqual([
+      200,
+      null,
+      204,
+    ]);
+    expect(taken).toEqual([
+      [ENVELOPE_KINDS.REQUEST, BEARER],
+      [ENVELOPE_KINDS.CANCEL, undefined],
+    ]);
+  });
+
+  test('takes an Authorization as it came, its surrounding spaces and tabs removed, an empty one carrying none', async () => {
+    const { connectScripted, exchangeOf, fake, server } = await startScripted();
+    const { connectionToken } = connectScripted();
+    const taken: unknown[] = [];
+
+    server.on('message', ({ credential }) => {
+      taken.push(credential);
+    });
+
+    for (const [callId, authorization] of [
+      [1, ' \tBearer  mF_9.B5f-4.1JqM \t'],
+      [3, 'basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=='],
+      [5, ''],
+      [7, ' \t '],
+    ] as const) {
+      fake.feed(exchangeOf(connectionToken, { authorization }).request, [
+        envelopeOf(ENVELOPE_KINDS.REQUEST, { callId }),
+      ]);
+    }
+
+    fake.feed(exchangeOf(connectionToken).request, [
+      envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 9 }),
+    ]);
+
+    expect(taken).toEqual([
+      'Bearer  mF_9.B5f-4.1JqM',
+      'basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==',
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    await server.stop();
+  });
+
+  test('refuses a POST with two Authorization fields 400, malformed, before reading its body, and hands the router nothing', async () => {
+    const { connectScripted, events, fake, server } = await startScripted();
+    const { connectionToken } = connectScripted();
+    const twice = (authorization: string[]) => {
+      const { request, response } = fake.exchange({
+        headers: {
+          authorization,
+          'content-length': '8',
+          'content-type': BEAD_MEDIA_TYPE,
+          [CONNECTION_TOKEN_HEADER]: connectionToken,
+        },
+      });
+
+      fake.feed(request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+
+      return [
+        response.status,
+        response.headers?.[REFUSAL_HEADER],
+        response.headers?.['connection'],
+      ];
+    };
+
+    expect([twice([BEARER, BEARER]), twice([BEARER, ''])]).toEqual([
+      [400, REFUSALS.MALFORMED, 'close'],
+      [400, REFUSALS.MALFORMED, 'close'],
+    ]);
+    expect(namesOf(events, 'message')).toEqual([]);
+    await server.stop();
   });
 
   test('ends the exchange a cancel names, empty, and drops a request its cancel came before', async () => {
@@ -392,7 +512,7 @@ test.describe('createHTTPTransportServer', () => {
     });
 
     expect(again.status).toBe(200);
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }), connectionHandle);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }) }, connectionHandle);
     await again.arrayBuffer();
   });
 
@@ -479,7 +599,7 @@ test.describe('createHTTPTransportServer', () => {
     );
 
     expect([first.status, again]).toEqual([200, [409, REFUSALS.CALL_WAITING]]);
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 }), connectionHandle);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 }) }, connectionHandle);
     expect(await bytesOf(first)).toEqual([...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 })]);
   });
 
@@ -543,7 +663,7 @@ test.describe('createHTTPTransportServer', () => {
     });
 
     expect([waiting.status, crowded, cancel.status]).toEqual([200, [429, REFUSALS.BUSY], 204]);
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
     await waiting.arrayBuffer();
 
     const heavy = await refusalOf(
@@ -583,7 +703,7 @@ test.describe('createHTTPTransportServer', () => {
     expect(after).toEqual([404, REFUSALS.CONNECTION_UNKNOWN]);
     // an answer for it goes nowhere
     await expect(
-      server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle)
+      server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle)
     ).resolves.toBeUndefined();
   });
 
@@ -662,15 +782,17 @@ test.describe('createHTTPTransportServer', () => {
 
     for (const kind of [EnvelopeKind.NOTIFICATION, EnvelopeKind.REQUEST, EnvelopeKind.CREDIT]) {
       await expect(
-        server.send(envelopeOf(kind, { callId: 2 }), connectionHandle),
+        server.send({ data: envelopeOf(kind, { callId: 2 }) }, connectionHandle),
         String(kind)
       ).rejects.toThrow('this connection does not listen');
     }
 
-    await expect(server.send('text', connectionHandle)).rejects.toBeInstanceOf(ProgrammerError);
-    await expect(server.send(new ArrayBuffer(4), connectionHandle)).rejects.toBeInstanceOf(
+    await expect(server.send({ data: 'text' }, connectionHandle)).rejects.toBeInstanceOf(
       ProgrammerError
     );
+    await expect(
+      server.send({ data: new ArrayBuffer(4) }, connectionHandle)
+    ).rejects.toBeInstanceOf(ProgrammerError);
   });
 
   test('stops with a client keeping its socket alive, each waiting exchange cut', async () => {
@@ -849,7 +971,10 @@ test.describe('createHTTPTransportServer, over HTTP/2', () => {
       );
 
       expect((await asking.head)[':status']).toBe(200);
-      await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle);
+      await server.send(
+        { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) },
+        connectionHandle
+      );
       expect(await asking.whole).toEqual([...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 })]);
 
       // a request waiting, its stream reset by its client: lost, and its connection with it
@@ -868,7 +993,7 @@ test.describe('createHTTPTransportServer, over HTTP/2', () => {
         .toEqual(['close', false, connectionHandle]);
       // an answer after it goes nowhere, and never hangs
       await expect(
-        server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }), connectionHandle)
+        server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }) }, connectionHandle)
       ).resolves.toBeUndefined();
     } finally {
       session.close();
@@ -931,11 +1056,11 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     });
 
     // each request answered by its result, as a router would
-    server.on('message', (data, connectionHandle) => {
+    server.on('message', ({ data }, connectionHandle) => {
       const envelope = data as Uint8Array;
       const callId = new DataView(envelope.buffer, envelope.byteOffset).getUint32(4);
 
-      void server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId }), connectionHandle);
+      void server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId }) }, connectionHandle);
     });
     session.on('error', () => {});
 
@@ -1039,6 +1164,90 @@ test.describe('createHTTPTransportServer, over TLS', () => {
 });
 
 test.describe('createHTTPTransportServer, its edges', () => {
+  test('is secure under TLS whatever it listens on, or on a loopback host alone, and carries no credential toward a connection', async () => {
+    const securedBy = async ({ address, isTls }: { address: string; isTls: boolean }) => {
+      const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
+      const server = createHTTPTransportServer({
+        createServer: (listener) => {
+          const created = fake.createServer(listener);
+
+          // a server under TLS has its contexts, as Node's https server does
+          return isTls ? Object.assign(created, { addContext: () => {} }) : created;
+        },
+      });
+      const starting = server.start({ address, port: 50_000 });
+
+      fake.listen();
+      await starting;
+
+      try {
+        const drawn = 'type=HTTP;ip=192.0.2.9;ordinal=1' as const;
+
+        return [server.carriesCredential(drawn), server.isSecure(drawn)];
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all([
+        securedBy({ address: '192.0.2.1', isTls: true }),
+        securedBy({ address: '192.0.2.1', isTls: false }),
+        securedBy({ address: '127.0.0.1', isTls: false }),
+      ])
+    ).toEqual([
+      [false, true],
+      [false, false],
+      [false, true],
+    ]);
+  });
+
+  test('is secure as its application says what stands in front of it, whatever it listens on, and by what it listens on when it says nothing', async () => {
+    const securedBy = async ({
+      address,
+      isTls = false,
+      secure,
+    }: {
+      address: string;
+      isTls?: boolean;
+      secure?: boolean;
+    }) => {
+      const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
+      const server = createHTTPTransportServer({
+        createServer: (listener) => {
+          const created = fake.createServer(listener);
+
+          return isTls ? Object.assign(created, { addContext: () => {} }) : created;
+        },
+        ...(secure === undefined ? {} : { secure }),
+      });
+      const starting = server.start({ address, port: 50_000 });
+
+      fake.listen();
+      await starting;
+
+      try {
+        return server.isSecure('type=HTTP;ip=192.0.2.9;ordinal=1');
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all([
+        securedBy({ address: '127.0.0.1' }),
+        securedBy({ address: '0.0.0.0' }),
+        // TLS terminated before it, on another host
+        securedBy({ address: '0.0.0.0', secure: true }),
+        // a proxy on the machine, or a server of its own under TLS, that serves the network in the
+        // clear
+        securedBy({ address: '127.0.0.1', secure: false }),
+        securedBy({ address: '192.0.2.1', isTls: true, secure: false }),
+        securedBy({ address: '127.0.0.1', secure: true }),
+      ])
+    ).toEqual([true, false, true, false, false, true]);
+  });
+
   test('listens on the port it was asked for, reports it when the server reports none, takes a late error as its own, and closes its sessions as it stops', async () => {
     const fake = createFakeHTTPServer({ address: null });
     const server = createHTTPTransportServer({ createServer: fake.createServer });
@@ -1358,7 +1567,10 @@ test.describe('createHTTPTransportServer, its edges', () => {
     fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
     asking.response.isFinishing = false;
 
-    const sending = server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle);
+    const sending = server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) },
+      connectionHandle
+    );
 
     asking.response.close();
 
@@ -1530,11 +1742,11 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const before = clock.armed.length;
 
     // one answered, the other still waiting: no rest yet
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }), connectionHandle);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
 
     expect(clock.armed.slice(before)).toEqual([]);
 
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }), connectionHandle);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }) }, connectionHandle);
 
     expect(
       clock.armed.slice(before).map(({ delay }) => {
@@ -1595,7 +1807,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
 
     coming.request.emit('data', request.subarray(0, 12));
-    await server.send(answer, connectionHandle);
+    await server.send({ data: answer }, connectionHandle);
 
     expect([coming.response.status, [...(coming.response.body ?? [])]]).toEqual([200, [...answer]]);
 
@@ -1655,8 +1867,8 @@ test.describe('createHTTPTransportServer, listening', () => {
       '?1',
       true,
     ]);
-    await server.send(first, connectionHandle);
-    await server.send(second, connectionHandle);
+    await server.send({ data: first }, connectionHandle);
+    await server.send({ data: second }, connectionHandle);
 
     const brought = await listen('after=0&wait=0');
 
@@ -1704,7 +1916,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     const held = listenOf(connectionToken, 'after=0&wait=500');
     const envelope = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
 
-    await server.send(envelope, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
 
     expect([
       held.response.status,
@@ -1731,7 +1943,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     const envelope = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
 
     second.response.isFinishing = false;
-    await server.send(envelope, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
     second.response.close();
 
     const third = listenOf(connectionToken, 'after=0&wait=0');
@@ -1745,7 +1957,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     const dropped = listenOf(connectionToken, 'after=1&wait=20000');
 
     dropped.response.close();
-    await server.send(envelope, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
 
     expect(dropped.response.status).toBeUndefined();
     expect(namesOf(events, 'close')).toEqual([]);
@@ -1762,7 +1974,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     });
 
     for (const envelope of envelopes) {
-      await server.send(envelope, connectionHandle);
+      await server.send({ data: envelope }, connectionHandle);
     }
 
     // past the body limit together, and one alone: a batch is read as it comes, each bounded alone
@@ -1788,10 +2000,10 @@ test.describe('createHTTPTransportServer, listening', () => {
     const late = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
     const command = envelopeOf(EnvelopeKind.REQUEST, { callId: 2 });
 
-    await server.send(late, listening.connectionHandle);
-    await server.send(command, listening.connectionHandle);
-    await expect(server.send(late, deaf.connectionHandle)).resolves.toBeUndefined();
-    await expect(server.send(command, deaf.connectionHandle)).rejects.toThrow(
+    await server.send({ data: late }, listening.connectionHandle);
+    await server.send({ data: command }, listening.connectionHandle);
+    await expect(server.send({ data: late }, deaf.connectionHandle)).resolves.toBeUndefined();
+    await expect(server.send({ data: command }, deaf.connectionHandle)).rejects.toThrow(
       'this connection does not listen: an envelope of kind 0x10 goes nowhere'
     );
 
@@ -1951,24 +2163,24 @@ test.describe('createHTTPTransportServer, listening', () => {
     const envelope = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1, extra: 2 });
 
     // 10 bytes, then 20: held
-    await server.send(envelope, connectionHandle);
-    await server.send(envelope, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
 
     expect(namesOf(events, 'close')).toEqual([]);
 
     // acknowledged, 10 bytes again; then 30: past it
     listenOf(connectionToken, 'after=2&wait=0');
-    await server.send(envelope, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
 
     const held = listenOf(connectionToken, 'after=3&wait=20000');
 
-    await server.send(envelope, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
     held.response.isFinishing = true;
 
     expect(held.response.status).toBe(200);
 
-    await server.send(envelope, connectionHandle);
-    await server.send(envelope, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
+    await server.send({ data: envelope }, connectionHandle);
 
     expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
 
@@ -2005,14 +2217,14 @@ test.describe('createHTTPTransportServer, listening', () => {
 
       // its response closes later, as a real one does
       held.response.isFinishing = false;
-      await server.send(first, connectionHandle);
-      await server.send(second, connectionHandle);
+      await server.send({ data: first }, connectionHandle);
+      await server.send({ data: second }, connectionHandle);
 
       expect([...(held.response.body ?? [])]).toEqual(batchOf(first));
       expect(clock.cleared).toContain(clock.armed[0]?.handle);
 
       // what waits is a copy: changed after its send, it goes as it was
-      await server.send(changing, connectionHandle);
+      await server.send({ data: changing }, connectionHandle);
       changing.fill(0);
 
       expect([...(listenOf(connectionToken, 'after=1&wait=0').response.body ?? [])]).toEqual(
@@ -2048,7 +2260,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     const notification = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
 
     fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
-    await server.send(notification, connectionHandle);
+    await server.send({ data: notification }, connectionHandle);
 
     expect([asking.response.status, asking.response.body]).toEqual([200, undefined]);
     expect([...(listenOf(connectionToken, 'wait=0').response.body ?? [])]).toEqual(
@@ -2102,7 +2314,10 @@ test.describe('createHTTPTransportServer, listening', () => {
     // its wait alone, no rest
     expect(delays()).toEqual([20_000]);
 
-    await server.send(envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }), connectionHandle);
+    await server.send(
+      { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }) },
+      connectionHandle
+    );
 
     // answered: the connection rests
     expect([held.response.status, delays()]).toEqual([200, [20_000, 2_000]]);
@@ -2138,15 +2353,15 @@ test.describe('createHTTPTransportServer, listening', () => {
     coming.request.emit('data', Uint8Array.of(0xa1, 0x10, 0, 0));
     listenOf(listening.connectionToken, 'wait=20000');
     await server.send(
-      envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }),
+      { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }) },
       queued.connectionHandle
     );
     await server.send(
-      envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 3, extra: 4 }),
+      { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 3, extra: 4 }) },
       queued.connectionHandle
     );
     await server.send(
-      envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 5 }),
+      { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 5 }) },
       smaller.connectionHandle
     );
 

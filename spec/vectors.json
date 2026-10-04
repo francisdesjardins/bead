@@ -3,12 +3,13 @@
   "$comment": [
     "Bead's conformance vectors: the bytes of envelopes and what they say, written once and read by every implementation's tests.",
     "Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.",
-    "A header is the fields an envelope's header carries; sessionToken is the token in base64url, or null for the end of a session.",
+    "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
     "kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.",
     "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
     "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
     "side is the side that reads: a failure says which side raised it.",
-    "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
+    "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
+    "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it."
   ],
   "specVersion": "0.1.0",
   "headers": [
@@ -90,59 +91,255 @@
       }
     },
     {
-      "name": "a result with a session",
-      "clauses": [
-        "4.1",
-        "4.2.2",
-        "4.4"
-      ],
-      "bytes": "A1 11 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "header": {
-        "callId": 3,
-        "kind": 17,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
-      }
-    },
-    {
-      "name": "a result that ends the session",
-      "clauses": [
-        "4.4"
-      ],
-      "bytes": "A1 11 01 06  00 00 00 03  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-      "header": {
-        "callId": 3,
-        "kind": 17,
-        "sessionToken": null
-      }
-    },
-    {
-      "name": "a failure that ends the session",
-      "clauses": [
-        "4.2.3",
-        "4.4"
-      ],
-      "bytes": "A1 12 01 06  00 00 00 03  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-      "header": {
-        "callId": 3,
-        "kind": 18,
-        "sessionToken": null
-      }
-    },
-    {
-      "name": "a request with a session and a destination",
+      "name": "a request presenting an opaque token",
       "clauses": [
         "4.1",
         "4.4",
+        "4.4.2"
+      ],
+      "bytes": "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a result announcing a session",
+      "clauses": [
+        "4.1",
+        "4.2.2",
+        "4.4.2",
+        "13.3"
+      ],
+      "bytes": "A1 11 08 07  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
+        "kind": 17
+      }
+    },
+    {
+      "name": "a result announcing that its session ended",
+      "clauses": [
+        "4.4.1",
+        "13.3"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 00 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "NONE"
+        },
+        "kind": 17
+      }
+    },
+    {
+      "name": "a failure announcing a session",
+      "clauses": [
+        "4.2.3",
+        "4.4.2"
+      ],
+      "bytes": "A1 12 08 07  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
+        "kind": 18
+      }
+    },
+    {
+      "name": "a failure announcing that its session ended",
+      "clauses": [
+        "4.2.3",
+        "4.4.1"
+      ],
+      "bytes": "A1 12 08 03  00 00 00 03  00 00 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "NONE"
+        },
+        "kind": 18
+      }
+    },
+    {
+      "name": "a request with a destination, presenting an opaque token after it",
+      "clauses": [
+        "4.1",
+        "4.4.2",
         "4.5"
       ],
-      "bytes": "A1 10 03 08  00 00 00 07  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 0C",
+      "bytes": "A1 10 0A 09  00 00 00 07  00 02 00 01  00 00 00 0C  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
       "header": {
         "callId": 7,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
         "destinationId": 12,
         "kind": 16,
         "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a JWT, padded with one zero byte to its word",
+      "clauses": [
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 31  00 00 00 03  00 02 00 01  00 02 00 B3  65 79 4A 30 65 58 41 69 4F 69 4A 4B 56 31 51 69 4C 41 30 4B 49 43 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 71 62 32 55 69 4C 41 30 4B 49 43 4A 6C 65 48 41 69 4F 6A 45 7A 4D 44 41 34 4D 54 6B 7A 4F 44 41 73 44 51 6F 67 49 6D 68 30 64 48 41 36 4C 79 39 6C 65 47 46 74 63 47 78 6C 4C 6D 4E 76 62 53 39 70 63 31 39 79 62 32 39 30 49 6A 70 30 63 6E 56 6C 66 51 2E 64 42 6A 66 74 4A 65 5A 34 43 56 50 2D 6D 42 39 32 4B 32 37 75 68 62 55 4A 55 31 70 31 72 5F 77 57 31 67 46 57 46 4F 45 6A 58 6B  00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a JWT of one byte, the least, padded with three",
+      "clauses": [
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "JWT",
+          "token": "a"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a JWT of 1,004 bytes, the most its header leaves",
+      "clauses": [
+        "4.3",
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 FF  00 00 00 03  00 02 00 01  00 02 03 EC  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 2E 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJhbGciOiJIUzI1NiJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request with a destination and a total, presenting a JWT after them",
+      "clauses": [
+        "4.1",
+        "4.4.3",
+        "4.5",
+        "4.6"
+      ],
+      "bytes": "A1 10 0E 34  00 00 00 09  00 02 00 07  00 00 00 05  00 00 00 00 00 00 10 00  00 02 00 B3  65 79 4A 30 65 58 41 69 4F 69 4A 4B 56 31 51 69 4C 41 30 4B 49 43 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 71 62 32 55 69 4C 41 30 4B 49 43 4A 6C 65 48 41 69 4F 6A 45 7A 4D 44 41 34 4D 54 6B 7A 4F 44 41 73 44 51 6F 67 49 6D 68 30 64 48 41 36 4C 79 39 6C 65 47 46 74 63 47 78 6C 4C 6D 4E 76 62 53 39 70 63 31 39 79 62 32 39 30 49 6A 70 30 63 6E 56 6C 66 51 2E 64 42 6A 66 74 4A 65 5A 34 43 56 50 2D 6D 42 39 32 4B 32 37 75 68 62 55 4A 55 31 70 31 72 5F 77 57 31 67 46 57 46 4F 45 6A 58 6B  00",
+      "header": {
+        "callId": 9,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        },
+        "destinationId": 5,
+        "kind": 16,
+        "procedureId": 7,
         "serviceId": 2,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
+        "total": 4096
+      }
+    },
+    {
+      "name": "a request with a destination and a total, presenting a JWT of 992 bytes, the most its header leaves",
+      "clauses": [
+        "4.3",
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 0E FF  00 00 00 09  00 02 00 07  00 00 00 05  00 00 00 00 00 00 10 00  00 02 03 E0  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 2E 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42",
+      "header": {
+        "callId": 9,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJhbGciOiJIUzI1NiJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        },
+        "destinationId": 5,
+        "kind": 16,
+        "procedureId": 7,
+        "serviceId": 2,
+        "total": 4096
+      }
+    },
+    {
+      "name": "a request presenting ELSEWHERE, nothing in its block",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  00 03 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "ELSEWHERE"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a scheme to come, read whole and padded with two",
+      "clauses": [
+        "4.4.5"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 04 00 06  01 02 03 04 05 06  00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": 4,
+          "bytes": "01 02 03 04 05 06"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting the last scheme to come, with no byte",
+      "clauses": [
+        "1.1",
+        "4.4.5"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  FF FF 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": 65535,
+          "bytes": ""
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
       }
     },
     {
@@ -176,22 +373,25 @@
       }
     },
     {
-      "name": "a request that opens a subscription, with a session and a destination",
+      "name": "a request that opens a subscription, with a destination, presenting an opaque token",
       "clauses": [
         "4.1",
-        "4.4",
+        "4.4.2",
         "4.5",
         "4.8"
       ],
-      "bytes": "A1 10 13 08  00 00 00 07  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 0C",
+      "bytes": "A1 10 1A 09  00 00 00 07  00 02 00 01  00 00 00 0C  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
       "header": {
         "callId": 7,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
         "destinationId": 12,
         "kind": 16,
         "opensSubscription": true,
         "procedureId": 1,
-        "serviceId": 2,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
+        "serviceId": 2
       }
     },
     {
@@ -226,17 +426,20 @@
       }
     },
     {
-      "name": "a result with a session that opens a transfer",
+      "name": "a result that opens a transfer, announcing a session after its total",
       "clauses": [
         "4.1",
-        "4.4",
+        "4.4.2",
         "4.6"
       ],
-      "bytes": "A1 11 05 08  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 00 00 00 10 00",
+      "bytes": "A1 11 0C 09  00 00 00 03  00 00 00 00 00 00 10 00  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
       "header": {
         "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
         "kind": 17,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw",
         "total": 4096
       }
     },
@@ -578,13 +781,34 @@
       "code": 1
     },
     {
-      "name": "the reserved bit 0x08 on a request",
+      "name": "the kept bit 0x01 on a request, 16 bytes after its procedure",
       "clauses": [
         "4.1",
         "4.2.1"
       ],
-      "bytes": "A1 10 08 03  00 00 00 03  00 02 00 01",
-      "code": 1
+      "bytes": "A1 10 01 07  00 00 00 03  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x10 envelope carries no flag 0x01"
+    },
+    {
+      "name": "the kept bit 0x01 on a result, 16 bytes after its prefix",
+      "clauses": [
+        "4.1",
+        "4.2.2"
+      ],
+      "bytes": "A1 11 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x11 envelope carries no flag 0x01"
+    },
+    {
+      "name": "the kept bit 0x01 on a failure, 16 bytes after its prefix",
+      "clauses": [
+        "4.1",
+        "4.2.3"
+      ],
+      "bytes": "A1 12 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x12 envelope carries no flag 0x01"
     },
     {
       "name": "the bit 0x40 on a request",
@@ -663,12 +887,13 @@
       "code": 1
     },
     {
-      "name": "a session on a cancel",
+      "name": "a credential on a cancel",
       "clauses": [
         "4.2.7"
       ],
-      "bytes": "A1 16 01 06  00 00 00 05  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "code": 1
+      "bytes": "A1 16 08 07  00 00 00 05  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x16 envelope carries no flag 0x08"
     },
     {
       "name": "a destination on a cancel",
@@ -719,12 +944,22 @@
       "code": 1
     },
     {
-      "name": "a session on a chunk",
+      "name": "a credential on a chunk",
       "clauses": [
         "4.2.5"
       ],
-      "bytes": "A1 14 01 08  00 00 00 07  00 00 00 00 00 00 00 00  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "code": 1
+      "bytes": "A1 14 08 09  00 00 00 07  00 00 00 00 00 00 00 00  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x14 envelope carries no flag 0x08"
+    },
+    {
+      "name": "a credential on a credit",
+      "clauses": [
+        "4.2.6"
+      ],
+      "bytes": "A1 15 08 09  00 00 00 07  00 00 00 00 00 00 00 00  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x15 envelope carries no flag 0x08"
     },
     {
       "name": "a total on a credit",
@@ -743,13 +978,14 @@
       "code": 1
     },
     {
-      "name": "the reserved bit 0x08 on a chunk",
+      "name": "the kept bit 0x01 on a chunk",
       "clauses": [
         "4.1",
         "4.2.5"
       ],
-      "bytes": "A1 14 08 04  00 00 00 07  00 00 00 00 00 00 00 00",
-      "code": 1
+      "bytes": "A1 14 01 04  00 00 00 07  00 00 00 00 00 00 00 00",
+      "code": 1,
+      "detail": "a 0x14 envelope carries no flag 0x01"
     },
     {
       "name": "PACED on a chunk",
@@ -840,12 +1076,13 @@
       "code": 1
     },
     {
-      "name": "a session on a notification",
+      "name": "a credential on a notification",
       "clauses": [
         "4.2.4"
       ],
-      "bytes": "A1 13 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "code": 1
+      "bytes": "A1 13 08 07  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x13 envelope carries no flag 0x08"
     },
     {
       "name": "a destination on a notification",
@@ -920,12 +1157,237 @@
       "code": 1
     },
     {
-      "name": "a request presenting an ended session",
+      "name": "NONE on a request",
+      "clauses": [
+        "4.4",
+        "4.4.1"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  00 00 00 00",
+      "code": 1,
+      "detail": "a request presents a credential, never NONE"
+    },
+    {
+      "name": "a JWT on a result",
+      "clauses": [
+        "4.4.3"
+      ],
+      "bytes": "A1 11 08 04  00 00 00 03  00 02 00 01  61  00 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not JWT"
+    },
+    {
+      "name": "a JWT on a failure",
+      "clauses": [
+        "4.4.3"
+      ],
+      "bytes": "A1 12 08 04  00 00 00 03  00 02 00 01  61  00 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not JWT"
+    },
+    {
+      "name": "ELSEWHERE on a result",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 03 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not ELSEWHERE"
+    },
+    {
+      "name": "ELSEWHERE on a failure",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 12 08 03  00 00 00 03  00 03 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not ELSEWHERE"
+    },
+    {
+      "name": "the first scheme to come on a result",
+      "clauses": [
+        "4.4.5"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 04 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not scheme 4"
+    },
+    {
+      "name": "the last scheme to come on a failure, with bytes",
+      "clauses": [
+        "4.4.5"
+      ],
+      "bytes": "A1 12 08 04  00 00 00 03  FF FF 00 02  01 02  00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not scheme 65535"
+    },
+    {
+      "name": "an opaque token of 16 zero bytes on a request",
+      "clauses": [
+        "4.4",
+        "4.4.2",
+        "13.2"
+      ],
+      "bytes": "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 10  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is never all zero"
+    },
+    {
+      "name": "an opaque token of 16 zero bytes on a result",
+      "clauses": [
+        "4.4.2",
+        "13.2"
+      ],
+      "bytes": "A1 11 08 07  00 00 00 03  00 01 00 10  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is never all zero"
+    },
+    {
+      "name": "an opaque token of 15 bytes",
+      "clauses": [
+        "4.4.2"
+      ],
+      "bytes": "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 0F  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00",
+      "code": 1,
+      "detail": "an OPAQUE token is 16 bytes, not 15"
+    },
+    {
+      "name": "an opaque token of 17 bytes",
+      "clauses": [
+        "4.4.2"
+      ],
+      "bytes": "A1 10 08 09  00 00 00 03  00 02 00 01  00 01 00 11  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11  00 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is 16 bytes, not 17"
+    },
+    {
+      "name": "an opaque token of no byte, on a result",
+      "clauses": [
+        "4.4.2"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 01 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is 16 bytes, not 0"
+    },
+    {
+      "name": "a JWT of no byte",
+      "clauses": [
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  00 02 00 00",
+      "code": 1,
+      "detail": "a JWT is 1 byte at least"
+    },
+    {
+      "name": "ELSEWHERE with 4 bytes",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 03 00 04  01 02 03 04",
+      "code": 1,
+      "detail": "ELSEWHERE holds no byte, not 4"
+    },
+    {
+      "name": "NONE with 4 bytes, on a result",
+      "clauses": [
+        "4.4.1"
+      ],
+      "bytes": "A1 11 08 04  00 00 00 03  00 00 00 04  00 00 00 00",
+      "code": 1,
+      "detail": "NONE holds no byte, not 4"
+    },
+    {
+      "name": "a JWT whose padding is not zero",
       "clauses": [
         "4.4"
       ],
-      "bytes": "A1 10 01 07  00 00 00 03  00 02 00 01  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-      "code": 1
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 01",
+      "code": 1,
+      "detail": "a credential's padding is zero bytes"
+    },
+    {
+      "name": "a scheme to come whose padding is not zero",
+      "clauses": [
+        "4.4"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 04 00 05  01 02 03 04 05  80 00 00",
+      "code": 1,
+      "detail": "a credential's padding is zero bytes"
+    },
+    {
+      "name": "CREDENTIAL on a request whose message ends before its block",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 03  00 00 00 03  00 02 00 01",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 holds its credential's head: 16 bytes at least, not 12"
+    },
+    {
+      "name": "a block whose head the header's length does not hold, though the message does",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 03  00 00 00 03  00 02 00 01 | 00 03 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 holds its credential's head: 16 bytes at least, not 12"
+    },
+    {
+      "name": "a JWT running past the message",
+      "clauses": [
+        "4.3",
+        "4.4"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 64  61 62 63 64  65 66 67 68",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 116 bytes, not 24 of 24"
+    },
+    {
+      "name": "a JWT running past the header's length, within the message",
+      "clauses": [
+        "4.3",
+        "4.4"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 20  61 62 63 64 65 66 67 68 | 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 30 31 32 33 34 35",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 48 bytes, not 24 of 48"
+    },
+    {
+      "name": "a JWT past the 1,020 bytes a header holds",
+      "clauses": [
+        "4.3",
+        "4.4"
+      ],
+      "bytes": "A1 10 08 FF  00 00 00 03  00 02 00 01  00 02 03 ED  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 2E 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 | 42  00 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 1024 bytes, not 1020 of 1024"
+    },
+    {
+      "name": "a header a word longer than its block's padded end",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00  00 00 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 20 bytes, not 24 of 24"
+    },
+    {
+      "name": "a block whose stated length leaves byte 3 a word short",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 05  61 62 63 64 | 65 00 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 24 bytes, not 20 of 24"
+    },
+    {
+      "name": "an announcement whose header is a word short of its block",
+      "clauses": [
+        "4.3",
+        "4.4.2"
+      ],
+      "bytes": "A1 11 08 06  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B | 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x11 header of flags 0x08 is 28 bytes, not 24 of 28"
     }
   ],
   "envelopes": [
@@ -1087,6 +1549,52 @@
           "total": 0
         },
         "payload": ""
+      }
+    },
+    {
+      "name": "a request presenting a JWT, its payload after the padding",
+      "clauses": [
+        "4.4.3",
+        "6.1"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00 | 68 69",
+      "envelope": {
+        "kind": 16,
+        "header": {
+          "callId": 3,
+          "credential": {
+            "scheme": "JWT",
+            "token": "a"
+          },
+          "kind": 16,
+          "procedureId": 1,
+          "serviceId": 2
+        },
+        "payload": "68 69"
+      }
+    },
+    {
+      "name": "a failure announcing that its session ended, its record after the block",
+      "clauses": [
+        "4.4.1",
+        "6.2"
+      ],
+      "bytes": "A1 12 08 03  00 00 00 03  00 00 00 00 | 00 20 00 00  6E 6F 20 73 65 73 73 69 6F 6E",
+      "envelope": {
+        "kind": 18,
+        "header": {
+          "callId": 3,
+          "credential": {
+            "scheme": "NONE"
+          },
+          "kind": 18
+        },
+        "failure": {
+          "code": 32,
+          "detail": "no session",
+          "relays": 0,
+          "scope": 0
+        }
       }
     },
     {
@@ -1368,6 +1876,1664 @@
       ],
       "record": "00 13 00 03",
       "code": 1
+    }
+  ],
+  "jwtVerdicts": [
+    {
+      "name": "an ID token, typed JWT by its issuer",
+      "clauses": [
+        "13.8.3"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJhdXRoX3RpbWUiOjE3OTEwMjg3NDAsIm5vbmNlIjoibi0wUzZfV3pBMk1qIn0.afdHHFBG13xzIyaj7YYD8hRyhoiOC5dYkgTJmuEGGgiNBiXgVoNSKtF0kH4PSrFUQGf9m31rY0yO-1IhmwXWDA",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "typ"
+      }
+    },
+    {
+      "name": "its twin, typed at+jwt",
+      "clauses": [
+        "13.8",
+        "13.8.3"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJhdXRoX3RpbWUiOjE3OTEwMjg3NDAsIm5vbmNlIjoibi0wUzZfV3pBMk1qIn0.EnvKoA_KfmlqnXT-sR3E-WbhRWZ_JIOLD5fsQNz1DOjjsrjezokrClVqBoqytK0Rjcg68wvAFG3tKvI-KEyybw",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://issuer.example",
+          "sub": "alice"
+        },
+        "claims": {
+          "iss": "https://issuer.example",
+          "sub": "alice",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "auth_time": 1791028740,
+          "nonce": "n-0S6_WzA2Mj"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "typed application/at+jwt, its media type written whole",
+      "clauses": [
+        "13.8.3"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImFwcGxpY2F0aW9uL2F0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.86omxlIxvwz7UTwuNzjgeYq-y7Esdm_TD3K1LN9V5xQ",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "typed AT+JWT, a value RFC 9068 does not name",
+      "clauses": [
+        "13.8.3"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkFUK0pXVCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.YIp7fTPEbmkhFA-tq4vielnnEMIBXXmIEacjkhBUjhk",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "typ"
+      }
+    },
+    {
+      "name": "with no typ",
+      "clauses": [
+        "13.8.3"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.-km5Q3kdqWyAiu2LyTwjLqYNMpkhyaovO6xo2j0Upyw",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "typ"
+      }
+    },
+    {
+      "name": "an ES256 token found by its kid, its key's thumbprint",
+      "clauses": [
+        "13.8",
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6Im9LSXl3dkdVcFRWVHl4TVEzYndJSWVRVXVkZnJfQ2tMTWpDRTE5RUNELVUifQ.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.WiY3sfvUEgIK1ZLd-SQn5jTcqNyDDNFSDihxQnJtkt7GslcL3JPGN05kUz-mmcvDhj1yfBVmCd5ZoBSbS3Bliw",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        },
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+            "kid": "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://issuer.example",
+          "sub": "alice"
+        },
+        "claims": {
+          "iss": "https://issuer.example",
+          "sub": "alice",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0001",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "an HS256 token found by its kid, among two issuers' keys",
+      "clauses": [
+        "13.8",
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6InlfeDNnQ0puTDZvS0dCQklYU2NhYmR1d3hUVnkyV2QyYnpSVkVVYmRVemMifQ.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.96jb57kHbHJ6NoDxw1ddNGs7re4RO5TSIr0SjVD1j5g",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "y_x3gCJnL6oKGBBIXScabduwxTVy2Wd2bzRVEUbdUzc"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "two issuers' keys under one kid, the token's issuer's taken",
+      "clauses": [
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6ImsxIn0.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.uNSFantVBPPLuMnwy8WuYW93Iv6gpuamUCBDFyXJm3Q",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+            "kid": "k1"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "a kid that names no key, while the issuer's one key would verify",
+      "clauses": [
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6IjIwMjYtMTAifQ.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.FRMoxYau2SZ6eYewa4qhAoI1bLnoXuDDlbAWFvg11jFxoiu23ff1agki1OkJzOAntiXBmI2LpFA4CxRbLiiv-g",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "kid"
+      }
+    },
+    {
+      "name": "a token without a kid, whose issuer has two keys",
+      "clauses": [
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "y_x3gCJnL6oKGBBIXScabduwxTVy2Wd2bzRVEUbdUzc"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "kid"
+      }
+    },
+    {
+      "name": "a token carrying its own key in jwk, which is never read",
+      "clauses": [
+        "13.8.2",
+        "13.8.7"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImp3ayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6Ik1LQkNUTkljS1VTRGlpMTF5U3MzNTI2aURaOEFpVG83VHU2S1BBcXY3RDQiLCJ5IjoiNEV0bDZTUlcyWWlMVXJONXZmdlZIdWhwN3g4UHhsdG1XV2xiYk00SUZ5TSJ9fQ.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.cRVKc-oghK1S2kelPyrGpIOweCc8_FfZU2o79-fgbJIYlVqp-wZvevmBj2yPEWDLYbhPFcgZ7RHk-hgBrznv2w",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "signature"
+      }
+    },
+    {
+      "name": "a token with crit",
+      "clauses": [
+        "13.8.2"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImNyaXQiOlsidXJuOmV4YW1wbGU6Ym91bmQiXSwidXJuOmV4YW1wbGU6Ym91bmQiOnRydWV9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.G5D26fIMJnXL2jTDrrvWV2qSBiDiHVPIH94XrWHI4gY",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "crit"
+      }
+    },
+    {
+      "name": "an ES256 token met by an HS256 key",
+      "clauses": [
+        "13.8.5"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJhdXRoX3RpbWUiOjE3OTEwMjg3NDAsIm5vbmNlIjoibi0wUzZfV3pBMk1qIn0.EnvKoA_KfmlqnXT-sR3E-WbhRWZ_JIOLD5fsQNz1DOjjsrjezokrClVqBoqytK0Rjcg68wvAFG3tKvI-KEyybw",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "alg"
+      }
+    },
+    {
+      "name": "an HS256 token met by an ES256 key",
+      "clauses": [
+        "13.8.5"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYm9iIiwiYXVkIjoiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.w5g7KN2YApWcvmv-R6enBg_aFyo3jUxfKoyIjszfo8c",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "alg"
+      }
+    },
+    {
+      "name": "an HS256 token keyed with an ES256 key's public bytes, its PEM",
+      "clauses": [
+        "13.8.5"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYm9iIiwiYXVkIjoiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.mW451EwIH2usWXigwZK2_XXwejcDnYzn4inYllB3xBo",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "alg"
+      }
+    },
+    {
+      "name": "an HS256 token keyed with an ES256 key's public bytes, its DER",
+      "clauses": [
+        "13.8.5"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYm9iIiwiYXVkIjoiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.Ak2QnqJAcDD0HUo1i9xSP7J2GejmKBx7nwvY20B86Kg",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "alg"
+      }
+    },
+    {
+      "name": "an HS256 token keyed with an ES256 key's public bytes, its JWK's JSON",
+      "clauses": [
+        "13.8.5"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYm9iIiwiYXVkIjoiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.kcGdiJcp2eLvXz56I4nFIkHd6Khw1cJdF-Bzm0jwzvc",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "alg"
+      }
+    },
+    {
+      "name": "an RS256 token",
+      "clauses": [
+        "13.8.5"
+      ],
+      "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.BdUqfQft_6sxQFjVnnTMpSC41R61RM90O2KtrtRfZiD_DKySmzsYRvN70gCzsykaWJkxVzybNFn6LPmxXd6VR_LG-uFH7-Lr7VWhylDBgpxMzAQBBwn01WpqL_bb9SDEOfuIlE0Dy94Kcgb6MfxJ-BDghGtaN5Qsp2uLd3dp_V1jpMkcF9f-OlO2aTD4x0wQ4vVmiA7bvVG8Q5ltmi3zDjMCWLGoR6cul2q-aJyKsGm6gyV1L-pPZteCWq47cdr7EpBCllLeh0abrhCd12yawTpflkj-u4JzDcZ127BATNOZZZwEFZ7wdjYKtnJYF_-sKydyNFqJTWumdJ3O5j8xAg",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "alg"
+      }
+    },
+    {
+      "name": "alg none, with no signature",
+      "clauses": [
+        "13.8.5"
+      ],
+      "token": "eyJhbGciOiJub25lIiwidHlwIjoiYXQrand0In0.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "alg"
+      }
+    },
+    {
+      "name": "a key whose JWK names its algorithm, its use and its key_ops",
+      "clauses": [
+        "13.8",
+        "13.8.6"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "alg": "HS256",
+            "use": "sig",
+            "key_ops": [
+              "verify"
+            ]
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "a token under a key set's encryption key",
+      "clauses": [
+        "13.8.6"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6IjEifQ.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAxIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.hq3cHkJJ-joFclVGnVCxbJCqzlW9eg8TuU6voNQnWI_2Rb0bfuYVMFjz9FVSZZ-BGTz-MPYA1247frXhTwrjIQ",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+            "y": "4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+            "use": "enc",
+            "kid": "1"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "key"
+      }
+    },
+    {
+      "name": "a key whose key_ops leave verify out",
+      "clauses": [
+        "13.8.6"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "key_ops": [
+              "sign"
+            ]
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "key"
+      }
+    },
+    {
+      "name": "a key whose JWK names another algorithm",
+      "clauses": [
+        "13.8.6"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "alg": "HS512"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "key"
+      }
+    },
+    {
+      "name": "an ES256 signature with a byte changed",
+      "clauses": [
+        "13.8.7"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJhdXRoX3RpbWUiOjE3OTEwMjg3NDAsIm5vbmNlIjoibi0wUzZfV3pBMk1qIn0.E3vKoA_KfmlqnXT-sR3E-WbhRWZ_JIOLD5fsQNz1DOjjsrjezokrClVqBoqytK0Rjcg68wvAFG3tKvI-KEyybw",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "signature"
+      }
+    },
+    {
+      "name": "an ES256 signature written in DER, never converted",
+      "clauses": [
+        "13.8.7"
+      ],
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYWxpY2UiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJhdXRoX3RpbWUiOjE3OTEwMjg3NDAsIm5vbmNlIjoibi0wUzZfV3pBMk1qIn0.MEUCIBJ7yqAPyn5pap10_rEdxPlm4UVmfySDiw-X7EDc9QzoAiEA47K43s6JKwpVagaKsrStEY3IOvMLwBRt7SryPihMsm8",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "signature"
+      }
+    },
+    {
+      "name": "an HS256 signature with a byte changed",
+      "clauses": [
+        "13.8.7"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jzLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "signature"
+      }
+    },
+    {
+      "name": "the right key and audience under a foreign iss",
+      "clauses": [
+        "13.8.8"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6InlfeDNnQ0puTDZvS0dCQklYU2NhYmR1d3hUVnkyV2QyYnpSVkVVYmRVemMifQ.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwic3ViIjoiYm9iIiwiYXVkIjoiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.MkffIr-9T2DdtQloqy97UtrHC7jqSaDLW0GZaOXCmFA",
+      "keys": [
+        {
+          "issuer": "https://issuer.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "y_x3gCJnL6oKGBBIXScabduwxTVy2Wd2bzRVEUbdUzc"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "iss"
+      }
+    },
+    {
+      "name": "no iss, its key found by its kid",
+      "clauses": [
+        "13.8.8"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6InlfeDNnQ0puTDZvS0dCQklYU2NhYmR1d3hUVnkyV2QyYnpSVkVVYmRVemMifQ.eyJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.6xWfKrTT7lSPGHDUfqE9zkvkvr7Ii49mDYSchnxcNlw",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "y_x3gCJnL6oKGBBIXScabduwxTVy2Wd2bzRVEUbdUzc"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "iss"
+      }
+    },
+    {
+      "name": "exp plus 60,000 less 1, the last millisecond it holds",
+      "clauses": [
+        "13.8",
+        "13.8.9"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T13:00:59.999Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "exp plus 60,000, the first millisecond it does not hold",
+      "clauses": [
+        "13.8.9"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T13:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "exp"
+      }
+    },
+    {
+      "name": "nbf less 60,000, the first millisecond it holds",
+      "clauses": [
+        "13.8",
+        "13.8.10"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJuYmYiOjE3OTEwMjg4MDB9.Q_P6sKgYPkcxFDjZFVOlz_FhuV9qRBbsKUGYtNk6Si4",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T11:59:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client",
+          "nbf": 1791028800
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "nbf less 60,001, the last millisecond it does not hold",
+      "clauses": [
+        "13.8.10"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJuYmYiOjE3OTEwMjg4MDB9.Q_P6sKgYPkcxFDjZFVOlz_FhuV9qRBbsKUGYtNk6Si4",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T11:58:59.999Z",
+      "verdict": {
+        "holds": false,
+        "reason": "nbf"
+      }
+    },
+    {
+      "name": "a fraction of exp, rounded up to its millisecond",
+      "clauses": [
+        "13.8",
+        "13.8.9"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMC4wMDA1LCJpYXQiOjE3OTEwMjg4MDAsImp0aSI6ImF0LTAwMDIiLCJjbGllbnRfaWQiOiJiZWFkLWNsaWVudCJ9.IGxhjfn4CL6UnYMrnG1pJaY00jZ-lL3GGgn5pbwMLxY",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T13:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400.0005,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460001
+      }
+    },
+    {
+      "name": "no exp",
+      "clauses": [
+        "13.8.9"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.Q4QaPN30JBhouHac7e0huxpSaglHoAExqM7izdExNq4",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "exp"
+      }
+    },
+    {
+      "name": "exp a string",
+      "clauses": [
+        "13.8.9"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6IjE3OTEwMzI0MDAiLCJpYXQiOjE3OTEwMjg4MDAsImp0aSI6ImF0LTAwMDIiLCJjbGllbnRfaWQiOiJiZWFkLWNsaWVudCJ9.A_I1Rh__eqoqlu2X-QwNaa2x93WQFFaXjlY6ghR1E7s",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "exp"
+      }
+    },
+    {
+      "name": "an exp whose end is 2^53 - 1 at most",
+      "clauses": [
+        "13.8",
+        "13.8.9"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6OTAwNzE5OTI1NDY4MCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.qO7cFMgmkvr-eefZGSNzN0o8zcZSKxN9q3sOFdmSCW0",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 9007199254680,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 9007199254740000
+      }
+    },
+    {
+      "name": "an exp a second later, whose end passes 2^53 - 1",
+      "clauses": [
+        "13.8.9"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6OTAwNzE5OTI1NDY4MSwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.Pcd337SCEo__R5KK51J5sMBZ46ABs-SJF1WOqrxpcSo",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "exp"
+      }
+    },
+    {
+      "name": "nbf a string",
+      "clauses": [
+        "13.8.10"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJuYmYiOiIxNzkxMDI4ODAwIn0.yd1DCbu9j_LLQWGF2NMZnnbv2ECo8lUSNnOJ6O41IWw",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "nbf"
+      }
+    },
+    {
+      "name": "an nbf whose milliseconds pass -(2^53 - 1)",
+      "clauses": [
+        "13.8.10"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJuYmYiOi05MDA3MTk5MjU0NzQxfQ.xwj2oV7etkl8sp-cfaT2uFyHT3axIpHwvt6Vlsd-U3Q",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "nbf"
+      }
+    },
+    {
+      "name": "aud an array naming the audience among others",
+      "clauses": [
+        "13.8",
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOlsiaHR0cHM6Ly9vdGhlci5leGFtcGxlIiwiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiXSwiZXhwIjoxNzkxMDMyNDAwLCJpYXQiOjE3OTEwMjg4MDAsImp0aSI6ImF0LTAwMDIiLCJjbGllbnRfaWQiOiJiZWFkLWNsaWVudCJ9.X7jpIs5rqKGWIRaAXx9auihjkrZibXni6bkcun6fB6c",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": [
+            "https://other.example",
+            "https://bead.example"
+          ],
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "aud naming another audience",
+      "clauses": [
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL290aGVyLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.JDEb6V_IH-QMcCo1lu_Edb9rG4O-zAwGHaygSaGcu_s",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "aud"
+      }
+    },
+    {
+      "name": "no aud",
+      "clauses": [
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.Z8bPN5BAYVv0oQHlLC1QXnNX2mI3lwfrkxfT-bwm-Y8",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "aud"
+      }
+    },
+    {
+      "name": "aud an array holding a number beside the audience",
+      "clauses": [
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOlsiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLDddLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.PiBsoufZJPDNgcf39IS5RvzzSLvBz4Dv4fc9yRXCaRc",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "aud"
+      }
+    },
+    {
+      "name": "sid against sub, named by sid",
+      "clauses": [
+        "13.8",
+        "13.8.12"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJzaWQiOiJzLTIwMjYifQ.EJtccmG_WLDSzDgqfAeTdiS8i3UF3yV0uqZL7HmxxnE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sid": "s-2026"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client",
+          "sid": "s-2026"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "sub alone, named by sub",
+      "clauses": [
+        "13.8",
+        "13.8.13"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "sid a number",
+      "clauses": [
+        "13.8.12"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJzaWQiOjd9.Ecle6rlOvOKNHC7ATg4J6E1mrAdnpRoAXBF682qVE14",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "sid"
+      }
+    },
+    {
+      "name": "neither sid nor sub",
+      "clauses": [
+        "13.8.13"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.4dtyHDrVDgGGipeWlywVOrKxGUqx_qhXylufoexTSgY",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "sub"
+      }
+    },
+    {
+      "name": "a sub holding a lone surrogate, which names nothing",
+      "clauses": [
+        "13.8.13"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJcdWQ4MDAiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.853cjfC5pICGxVVOWVdsm5rT3zcjn94K2grChpLSX0o",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "sub"
+      }
+    },
+    {
+      "name": "a token of two parts",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a signature padded as base64 is",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE=",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a signature whose last character sets a bit past its bytes",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeF",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a header opening with a byte order mark",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "77u_eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.br-sKayvqoQ3F_FL3lRkqHREspwXD4O3v7VTLiHG2-g",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a claims set holding a byte that is not UTF-8",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC3_IiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.Jn_qkdobmSaTYZxq-C-OH3GfZtVyX5I64bj3Uywid6s",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a claims set that is an array",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.W3siaXNzIjoiaHR0cHM6Ly90cnVzdC5leGFtcGxlIiwic3ViIjoiYm9iIiwiYXVkIjoiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In1d.4nWS6K4ESHndJuWwFUGezIrhOKLblXMjGhrkbiyBrdI",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a claims set naming aud twice",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL290aGVyLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50IiwiYXVkIjoiaHR0cHM6Ly9iZWFkLmV4YW1wbGUifQ.dB1lkjeD6z2zmmaxy6XVUwSNKvFrq9hNJwVHQiD7nbw",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a header naming alg twice, once escaped",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJub25lIiwidHlwIjoiYXQrand0IiwiXHUwMDYxbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.ZdVR3mrKAiZaeGkO7wlMmw2GBI2k3UMDqSZmWVaFGgk",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a claims set naming a member by a lone surrogate",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJcdWRjMDAiOjF9.AdacE74RctwbkHefmfOEVAq3w3uguSsAf7fvmKFVzyU",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "aud an array naming one of a set of audiences",
+      "clauses": [
+        "13.8",
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOlsiaHR0cHM6Ly90aGlyZC5leGFtcGxlIiwiaHR0cHM6Ly9vdGhlci5leGFtcGxlIl0sImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.F2pv3XisnPAFbkSwI9YsYiT729dkTWWQtPGPglP59Pk",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": [
+        "https://bead.example",
+        "https://other.example"
+      ],
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": [
+            "https://third.example",
+            "https://other.example"
+          ],
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "aud naming none of a set of audiences",
+      "clauses": [
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL3RoaXJkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0._d8chpNd8YJbgTUQySQyPqMa3UmrNH5Zm2yD_OcxGkk",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": [
+        "https://bead.example",
+        "https://other.example"
+      ],
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "aud"
+      }
     }
   ]
 }

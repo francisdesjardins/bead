@@ -14,6 +14,7 @@ import type {
   IEventIteratorOptions,
   IGauges,
   IReadyStateMethods,
+  ITransportMessage,
   IWorkerMessageEventLike,
   IWorkerPortLike,
 } from '../shared/types';
@@ -93,9 +94,22 @@ export interface ITransportServer<
   readonly port: number;
   readonly type: TRANSPORTS;
 
+  /**
+   * Whether it carries a credential beside an envelope it sends a connection: none of this package's
+   * does — an answer, a listen's batch, a WebSocket's message, a worker's — so its router fails a
+   * command presenting an `ELSEWHERE` before it goes, and its relay sends none on it (spec 13.4).
+   */
+  carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean;
   /** Closes one connection. Resolves `false` for an unknown handle, otherwise `true` once it closed. */
   close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
   closeAll(): Promise<boolean[]>;
+  /**
+   * Whether a connection is secure (spec 13.4): as its application says what stands in front of
+   * the server, when it says, whatever the server listens on; otherwise by what the server listens
+   * on, never by what a name resolves to — under TLS, on a loopback host, or never leaving the
+   * machine, as a worker.
+   */
+  isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
   emit<K extends TRANSPORT_SERVER_EVENTS>(
     event: K,
     ...params: TransportServerEventMap<Socket, Request>[K]
@@ -128,9 +142,13 @@ export interface ITransportServer<
    * dropped and resolves: the loss shows as that connection's `close`. A socket carries any message.
    * Over HTTP, an answer goes to the exchange of its request, and anything else waits for its client
    * to listen; a connection whose client does not listen rejects all but an answer with a
-   * {@link GenericError} — bytes that are no envelope with a {@link ProgrammerError}.
+   * {@link GenericError} — bytes that are no envelope with a {@link ProgrammerError}. No server
+   * carries a credential: an answer and what a listen brings back carry none, nor does a socket.
    */
-  send(data: Data, connectionHandle: TransportServerConnectionHandle): Promise<void>;
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
   /**
    * Listens. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, a
    * {@link CancelError}, or the system's own error — `EADDRINUSE` for a port taken — ending CLOSED.
@@ -154,12 +172,23 @@ export interface ITransportServer<
 export interface ITransportServerImplementation<Socket = unknown> {
   /** The clock it runs on; the platform's when none. */
   readonly clock?: IClock | undefined;
+  /**
+   * Whether it is secure whatever it listens on: under TLS, or never leaving the machine, as a
+   * worker; when not, it is so on a loopback host alone.
+   */
+  readonly isSecure?: boolean | undefined;
+  /**
+   * What its application says stands in front of it, believed before what it listens on and
+   * {@link ITransportServerImplementation.isSecure}: `true` for TLS terminated before it, `false`
+   * for a proxy that serves the network in the clear; nothing, when it says nothing.
+   */
+  readonly secure?: boolean | undefined;
   readonly defaults: TransportServerResolvedStartOptions;
   readonly type: TRANSPORTS;
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;
   /** What the transport keeps of its connections besides the registry, counted; none, when nothing. */
   gauges?(): IGauges<TransportServerConnectionHandle>;
-  send(data: Data, connection: ITransportServerClientAware<Socket>): Promise<void>;
+  send(message: ITransportMessage, connection: ITransportServerClientAware<Socket>): Promise<void>;
   start(
     options: TransportServerResolvedStartOptions & { signal?: AbortSignal | undefined }
   ): Promise<ITransportServerAddress>;
@@ -208,7 +237,8 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
    * no listen never emits it.
    */
   listen: [isHeld: boolean, connectionHandle: TransportServerConnectionHandle];
-  message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+  /** An envelope, and the credential carried beside it: over HTTP alone, with a request. */
+  message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
 };
 
 /** The events a server emits, named by the table that types them. */
@@ -294,6 +324,13 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * larger one with 1009. `ws`'s own default when not given.
    */
   maxPayload?: number | undefined;
+  /**
+   * What stands in front of it, which it cannot tell (spec 13.4): `true` for TLS terminated before
+   * it, which makes each connection secure; `false` for a proxy that serves the network in the
+   * clear, which leaves each in the clear, a loopback listener among them. When not given, a
+   * connection is secure as the server listens on a loopback host alone.
+   */
+  secure?: boolean | undefined;
   /** `ws`'s `WebSocketServer`: there is no global one to default to. */
   WebSocketServer: IWebSocketServerConstructor;
 }
@@ -327,6 +364,11 @@ export interface IHTTPRequestLike {
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
   readonly httpVersionMajor: number;
   readonly method?: string | undefined;
+  /**
+   * Its fields as they came, each name before its value: what counts an `Authorization` given
+   * twice, which `headers` keeps once.
+   */
+  readonly rawHeaders: readonly string[];
   readonly socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
@@ -450,6 +492,14 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   origins?: readonly string[] | undefined;
   /** The path the transport answers on; anything else is 404. Defaults to {@link PATHNAME}. */
   pathname?: string | undefined;
+  /**
+   * What stands in front of it, which it cannot tell (spec 13.4): `true` for TLS terminated before
+   * it, which makes each connection secure; `false` for a proxy that serves the network in the
+   * clear, which leaves each in the clear, a loopback listener or a server of its own under TLS
+   * among them. When not given, a connection is secure as the server is under TLS or listens on a
+   * loopback host.
+   */
+  secure?: boolean | undefined;
 }
 
 // types

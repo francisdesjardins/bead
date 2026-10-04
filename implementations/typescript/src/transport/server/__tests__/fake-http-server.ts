@@ -141,6 +141,12 @@ export const createFakeHTTPServer = (options?: {
       socket = { remoteAddress: '10.0.0.1', remotePort: 40_000 },
     } = options;
     const url = 'url' in options ? options.url : '/bead';
+    // each field as it came, a field given twice twice: its name, then its value
+    const rawHeaders = Object.entries(headers).flatMap(([name, value]) => {
+      return (Array.isArray(value) ? value : [value]).flatMap((each) => {
+        return [name, each];
+      });
+    });
     const request = Object.assign(new EventEmitter(), {
       destroy: () => {
         request.isDestroyed = true;
@@ -149,6 +155,7 @@ export const createFakeHTTPServer = (options?: {
       httpVersionMajor,
       isDestroyed: false,
       method,
+      rawHeaders,
       socket,
       url,
     }) as unknown as IFakeRequest;

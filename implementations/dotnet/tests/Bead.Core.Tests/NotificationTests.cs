@@ -542,8 +542,10 @@ public sealed class NotificationTests : IDisposable
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             Peer!.Deliver(bytes);
 
             return Task.CompletedTask;
@@ -587,8 +589,10 @@ public sealed class NotificationTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             Peer!.Deliver(bytes);
 
             return Task.CompletedTask;

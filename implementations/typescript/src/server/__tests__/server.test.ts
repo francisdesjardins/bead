@@ -2,12 +2,17 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createRouterServer } from '../../router/server/router-server';
 import { createSessionManager } from '../../router/server/session-manager';
-import { EnvelopeKind } from '../../router/shared/constants';
+import { CredentialScheme, EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf, readEnvelope } from '../../router/shared/envelope';
 import { toSessionToken } from '../../router/shared/identifiers';
 import { createServiceManager } from '../../router/shared/service-manager';
 import type { IRouterServerOptions } from '../../router/server/types';
-import type { Envelope, IProcedure, IServiceManagerOptions } from '../../router/shared/types';
+import type {
+  Credential,
+  Envelope,
+  IProcedure,
+  IServiceManagerOptions,
+} from '../../router/shared/types';
 import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
 import {
   createTestClock,
@@ -19,7 +24,7 @@ import { LONGEST_TIMER } from '../../transport/shared/clock';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
-import type { Data } from '../../transport/shared/types';
+import type { ITransportMessage } from '../../transport/shared/types';
 import {
   CLIENT_FAILURES,
   createServer,
@@ -67,7 +72,7 @@ const createScriptedTransport = () => {
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [socket: unknown, request: unknown, connectionHandle: Handle];
     listen: [isHeld: boolean, connectionHandle: Handle];
-    message: [data: Data, connectionHandle: Handle];
+    message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
   const sent: { connectionHandle: Handle; envelope: Envelope | undefined }[] = [];
   // the client's call ids, odd, one after the other
@@ -95,7 +100,7 @@ const createScriptedTransport = () => {
 
       return control.closeResult;
     },
-    send: (data, connectionHandle) => {
+    send: ({ data }, connectionHandle) => {
       sent.push({
         connectionHandle,
         envelope: readEnvelope(bytesOf(data), {
@@ -113,25 +118,34 @@ const createScriptedTransport = () => {
     },
   };
 
-  /** A request for `procedure` from `connectionHandle`, on the next of the client's call ids. */
-  // a request of `procedure`'s, one that opens a subscription when `opensSubscription` says so
+  /**
+   * A request for `procedure` from `connectionHandle`, on the next of the client's call ids,
+   * presenting `credential`; one that opens a subscription when `opensSubscription` says so.
+   */
   const ask = (
     connectionHandle: Handle,
-    { opensSubscription, procedure }: { opensSubscription?: true; procedure: IProcedure }
+    {
+      credential,
+      opensSubscription,
+      procedure,
+    }: { credential?: Credential; opensSubscription?: true; procedure: IProcedure }
   ) => {
     emitter.emit(
       'message',
-      envelopeOf({
-        header: {
-          callId: nextCallId(),
+      {
+        data: envelopeOf({
+          header: {
+            callId: nextCallId(),
+            credential,
+            kind: EnvelopeKind.REQUEST,
+            opensSubscription,
+            procedureId: procedure.procedureId,
+            serviceId: procedure.serviceId,
+          },
           kind: EnvelopeKind.REQUEST,
-          opensSubscription,
-          procedureId: procedure.procedureId,
-          serviceId: procedure.serviceId,
-        },
-        kind: EnvelopeKind.REQUEST,
-        payload: text.encode('hi'),
-      }),
+          payload: text.encode('hi'),
+        }),
+      },
       connectionHandle
     );
   };
@@ -227,7 +241,7 @@ test.describe('createServer', () => {
     expect(built).toEqual([['sessions'], ['router', true], ['services', true]]);
     // the router is built with the server's limits, and relays to a session alone unless told
     expect(routerOptions?.limits).toEqual({ maximumPayloadBytes: 8 });
-    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireSession });
+    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireSessionOrCredential });
     expect(server.router).toBe(builtRouter);
     expect(server.sessions).toBe(sessions);
     expect(server.transport).toBe(transport);
@@ -274,7 +288,14 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [{ callId: 1, kind: EnvelopeKind.FAILURE }, ProtocolCode.SESSION_REQUIRED],
-      [{ callId: 3, kind: EnvelopeKind.RESULT, sessionToken }, sessionToken],
+      [
+        {
+          callId: 3,
+          credential: { scheme: CredentialScheme.OPAQUE, token: sessionToken },
+          kind: EnvelopeKind.RESULT,
+        },
+        sessionToken,
+      ],
       [{ callId: 5, kind: EnvelopeKind.RESULT }, 'hi'],
     ]);
   });
@@ -309,26 +330,33 @@ test.describe('createServer', () => {
     expect(replaced).not.toBe(opened);
     expect(
       sent.map(({ envelope }) => {
-        const header = envelope?.header as { sessionToken?: unknown } | undefined;
+        const header = envelope?.header as { credential?: unknown } | undefined;
 
-        return header !== undefined && 'sessionToken' in header ? header.sessionToken : 'none';
+        return header !== undefined && 'credential' in header ? header.credential : 'none';
       })
-    ).toEqual([opened, replaced, null, 'none']);
+    ).toEqual([
+      { scheme: CredentialScheme.OPAQUE, token: opened },
+      { scheme: CredentialScheme.OPAQUE, token: replaced },
+      { scheme: CredentialScheme.NONE },
+      'none',
+    ]);
   });
 
-  test('requireSession refuses a connection without a session, with SESSION_REQUIRED', async () => {
+  test("requireSession refuses a call in none with SESSION_REQUIRED, testing the call's session, never its connection's", async () => {
     const { open, transport } = createScriptedTransport();
 
     await using server = createServer({ transport });
 
     open(first);
 
-    expect(server.requireSession({ connectionHandle: first })).toBe(false);
+    expect(server.requireSession({})).toBe(false);
     expect(server.requireSession.refusal).toBe(server.router.failures.sessionRequired);
 
     server.sessions.set({ ...server.sessions.create(first), ...forever });
 
-    expect(server.requireSession({ connectionHandle: first })).toBe(true);
+    // the connection's session is no call's until the call resolves to it
+    expect(server.requireSession({ session: undefined })).toBe(false);
+    expect(server.requireSession({ session: Object.freeze({ data: undefined }) })).toBe(true);
   });
 
   test('each message is activity: a connection that speaks keeps going, a silent one is closed', async () => {
@@ -352,7 +380,7 @@ test.describe('createServer', () => {
     // the same, each stopping the connection's timer and setting another going
     for (let count = 0; count < 3; count += 1) {
       if (count === 1) {
-        emitter.emit('message', Uint8Array.of(0x0a, 0x02), first);
+        emitter.emit('message', { data: Uint8Array.of(0x0a, 0x02) }, first);
       } else {
         ask(first, { procedure: unknown });
       }
@@ -435,6 +463,99 @@ test.describe('createServer', () => {
     expect(closed).toEqual([first]);
   });
 
+  test("a request runs in its connection's session, presenting none or its token as OPAQUE, the session's data a copy the call keeps; another token is refused SESSION_REQUIRED, whatever its procedure requires", async () => {
+    const { ask, sent, server: sessionServer } = createSessionServer(forever);
+    const whoami: IProcedure = { ...echo, procedureId: 4, procedureName: 'whoami' };
+    const held: unknown[] = [];
+
+    await using server = sessionServer;
+
+    // a procedure that requires nothing: the session it runs in, or none
+    server.services.getRequestResolver(whoami, { serializer: text })((request, response) => {
+      held.push(request.session);
+
+      return response('');
+    });
+    ask(first, { procedure: whoami });
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const token = server.sessions.sessionTokenOf(first);
+    const stored = server.sessions.get(first);
+
+    if (token === undefined || stored === undefined) {
+      throw new Error('no session opened');
+    }
+
+    server.sessions.updateData({ ...stored, data: { name: 'ada' } });
+    ask(first, { procedure: whoami });
+    ask(first, { credential: { scheme: CredentialScheme.OPAQUE, token }, procedure: whoami });
+    ask(first, {
+      credential: {
+        scheme: CredentialScheme.OPAQUE,
+        token: toSessionToken(new Uint8Array(16).fill(9)),
+      },
+      procedure: whoami,
+    });
+    await sleep(0);
+    // what the call keeps is its own copy
+    server.sessions.updateData({ ...stored, data: { name: 'bob' } });
+
+    expect(held).toEqual([undefined, { data: { name: 'ada' } }, { data: { name: 'ada' } }]);
+    expect(Object.isFrozen(held[1])).toBe(true);
+    expect(
+      sent.flatMap(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [[envelope.header.callId, envelope.failure.code]]
+          : [];
+      })
+    ).toEqual([[9, ProtocolCode.SESSION_REQUIRED]]);
+  });
+
+  test("a call presenting its connection's OPAQUE and one presenting none hold one subscription to a procedure, the connection's session's", async () => {
+    const { ask, sent, server: sessionServer } = createSessionServer(forever);
+    const news: IProcedure = { ...echo, procedureId: 5, procedureName: 'news' };
+
+    await using server = sessionServer;
+
+    server.services.getNotificationResolver(news, {
+      beforeRequest: server.requireSession,
+      serializer: { ...text, encodeNotification: text.encode },
+    })((_request, response) => {
+      return response('');
+    });
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const token = server.sessions.sessionTokenOf(first);
+
+    if (token === undefined) {
+      throw new Error('no session opened');
+    }
+
+    ask(first, { opensSubscription: true, procedure: news });
+    ask(first, {
+      credential: { scheme: CredentialScheme.OPAQUE, token },
+      opensSubscription: true,
+      procedure: news,
+    });
+    await sleep(0);
+
+    // both answered; the first holds the place
+    expect(
+      sent.map(({ envelope }) => {
+        return [envelope?.kind, envelope?.header.callId];
+      })
+    ).toEqual([
+      [EnvelopeKind.RESULT, 1],
+      [EnvelopeKind.RESULT, 3],
+      [EnvelopeKind.RESULT, 5],
+    ]);
+    expect(server.router.notifications.subscriptions()).toEqual([
+      { callId: 3, connectionHandle: first, procedureId: 5, serviceId: 1 },
+    ]);
+  });
+
   test('a session that ended takes its connection’s subscriptions: nothing more reaches it', async () => {
     const clock = createTestClock();
     const {
@@ -461,7 +582,11 @@ test.describe('createServer', () => {
     ask(first, { opensSubscription: true, procedure: news });
     await sleep(0);
 
-    expect([...server.router.notifications.candidates(news).keys()]).toEqual([first]);
+    expect(
+      server.router.notifications.candidates(news).map(({ connectionHandle }) => {
+        return connectionHandle;
+      })
+    ).toEqual([first]);
     expect(delaysOn(clock)).toEqual([30]);
 
     clock.tick(30);
@@ -476,7 +601,7 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [
-        { callId: 3, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        { callId: 3, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
         ProtocolCode.SESSION_REQUIRED,
       ],
     ]);
@@ -663,7 +788,7 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [
-        { callId: 3, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        { callId: 3, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
         ProtocolCode.SESSION_REQUIRED,
       ],
     ]);
@@ -700,7 +825,7 @@ test.describe('createServer', () => {
 
     open(first);
 
-    expect(server.requireSession({ connectionHandle: first })).toBe(false);
+    expect(server.sessions.has(first)).toBe(false);
   });
 
   test('a close that finds the connection gone already takes its session all the same', async () => {
@@ -738,15 +863,15 @@ test.describe('createServer', () => {
 
       return close(connectionHandle);
     };
-    transport.send = (data, connectionHandle) => {
-      const envelope = readEnvelope(bytesOf(data), {
+    transport.send = (message, connectionHandle) => {
+      const envelope = readEnvelope(bytesOf(message.data), {
         failures: CLIENT_FAILURES,
         maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
       });
 
       order.push(envelope?.kind === EnvelopeKind.CANCEL ? 'cancel' : 'other');
 
-      return send(data, connectionHandle);
+      return send(message, connectionHandle);
     };
 
     await using server = createServer({ transport }, { closeOnCommandTimeout: true });
@@ -918,7 +1043,7 @@ test.describe('createServer', () => {
     expect(inner.getAll()).toEqual([]);
   });
 
-  test('relays as its options say, its own admission and timeout kept, requireSession where it gives none', async () => {
+  test('relays as its options say, its own admission and timeout kept, requireSessionOrCredential where it gives none', async () => {
     const beforeRoute = () => {
       return true;
     };
@@ -942,7 +1067,7 @@ test.describe('createServer', () => {
 
     expect(relays).toEqual([
       { beforeRoute, timeout: 250 },
-      { beforeRoute: timed.requireSession, timeout: 250 },
+      { beforeRoute: timed.requireSessionOrCredential, timeout: 250 },
     ]);
     expect(server.router.destinations()).toEqual([]);
   });

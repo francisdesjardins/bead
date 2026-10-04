@@ -46,7 +46,7 @@ public sealed partial class RouterCoreTests
             Reports.Add(reason);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
             return Task.CompletedTask;
         }
@@ -449,7 +449,7 @@ public sealed partial class RouterCoreTests
     {
         var client = new Peer(RouterSide.Client)
         {
-            SessionOf = (_) =>
+            TokenOf = (_) =>
             {
                 throw new InvalidOperationException("a request asks no session");
             },
@@ -656,7 +656,7 @@ public sealed partial class RouterCoreTests
         var held = new List<TaskCompletionSource>();
         var server = new Peer(RouterSide.Server)
         {
-            SessionOf = (_) =>
+            TokenOf = (_) =>
             {
                 return current;
             },
@@ -693,8 +693,8 @@ public sealed partial class RouterCoreTests
             .WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal(
             [
-                new ResultHeader { CallId = 1, Session = token },
-                new ResultHeader { CallId = 3, Session = other },
+                new ResultHeader { CallId = 1, Credential = token },
+                new ResultHeader { CallId = 3, Credential = other },
                 new ResultHeader { CallId = 5 },
             ],
             server.Sent.Select((envelope) =>
@@ -709,7 +709,7 @@ public sealed partial class RouterCoreTests
         var unknown = new InvalidOperationException("no session to tell");
         var server = new Peer(RouterSide.Server)
         {
-            SessionOf = (_) =>
+            TokenOf = (_) =>
             {
                 throw unknown;
             },
@@ -724,24 +724,25 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Traces_what_goes_out_and_what_comes_in_without_its_session_token()
+    public async Task Traces_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone()
     {
         var token = SessionToken.FromBytes(PatternOf(16));
         var server = new Peer(RouterSide.Server) { Session = token };
         var resolver = server.Resolve();
 
-        await server.Deliver(new Envelope { Header = RequestOf(1) with { SessionToken = token }, Payload = new byte[] { 1 } });
-        await resolver.Answer(0, new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        // a JWT, which this side takes none of, is refused, its refusal announcing the session
+        await server.Deliver(new Envelope { Header = RequestOf(1) with { Credential = Credential.Jwt("a.b.c") }, Payload = new byte[] { 1 } });
+        Assert.Empty(resolver.Requests);
         Assert.Equal(
             [
-                (DebugDirection.Rx, (IEnvelopeHeader)RequestOf(1), true),
-                (DebugDirection.Tx, new ResultHeader { CallId = 1 }, true),
+                (DebugDirection.Rx, (IEnvelopeHeader)RequestOf(1), (CredentialScheme?)CredentialScheme.Jwt),
+                (DebugDirection.Tx, new FailureHeader { CallId = 1 }, CredentialScheme.Opaque),
             ],
             server.Traces.Select((trace) =>
             {
-                return (trace.Direction, trace.Envelope.Header, trace.Envelope.HasSessionToken);
+                return (trace.Direction, trace.Envelope.Header, trace.Envelope.CredentialScheme);
             }));
-        Assert.Equal(token, ((ResultHeader)server.Sent[0].Header).Session!.Value.Token);
+        Assert.Equal(token, ((FailureHeader)server.Sent[0].Header).Credential!.Value.SessionToken);
     }
 
     [Fact]
@@ -1183,7 +1184,7 @@ public sealed partial class RouterCoreTests
             return server.Sent[^1].Failure!.Detail;
         }
 
-        Assert.Equal(36, (await AnsweredOf(RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 })).Length);
+        Assert.Equal(32, (await AnsweredOf(RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 })).Length);
         Assert.Equal(10, (await AnsweredOf(RouterLimits.Default with { MaximumDetailBytes = 10 })).Length);
 
         // what comes in is cut to its own limit too
@@ -1227,16 +1228,16 @@ public sealed partial class RouterCoreTests
             return ((RequestHeader)envelope.Header).Total;
         }));
 
-        // a result's room counts the session it may announce
+        // a result's room counts the 20 bytes of the announcement it may carry
         var server = new Peer(RouterSide.Server, small);
         var resolver = server.Resolve();
 
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
         await server.Deliver(new Envelope { Header = RequestOf(3), Payload = new byte[] { 1 } });
-        await resolver.Answer(0, new byte[40]).WaitAsync(Patience, TestContext.Current.CancellationToken);
-        _ = resolver.Answer(1, new byte[41]);
+        await resolver.Answer(0, new byte[36]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        _ = resolver.Answer(1, new byte[37]);
         await server.Settle();
-        Assert.Equal([null, 41L], server.Sent.Select((envelope) =>
+        Assert.Equal([null, 37L], server.Sent.Select((envelope) =>
         {
             return ((ResultHeader)envelope.Header).Total;
         }));

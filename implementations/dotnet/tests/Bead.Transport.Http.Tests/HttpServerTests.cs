@@ -1,5 +1,7 @@
+using System.Buffers.Text;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
@@ -502,6 +504,41 @@ public sealed class HttpServerTests
     }
 
     [Fact]
+    public async Task Writes_the_Authorization_of_a_relayed_request_to_leg_B_as_it_came_over_HTTP()
+    {
+        await using var listener = new Listener();
+        await using var connected = await ConnectHttp();
+        await using var legB = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = false } });
+
+        // leg B, an HTTP client on the loopback — secure, and carrying a credential — to a
+        // destination that verifies an audience
+        await legB.Connect(new HttpConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        connected.Server.Router.RegisterDestination(legB.Router, new DestinationOptions { Audience = "bead-interop", DestinationId = 7 });
+
+        var echoing = TextRequester(connected.Client.Services, Echo);
+
+        // an ELSEWHERE: leg A's Authorization written to leg B's as it came, the block holding nothing
+        var elsewhere = echoing("hi")(new RequestOptions { Credential = Credential.Elsewhere("Interop  sub=ada"), DestinationId = 7 });
+        var (authorization, body) = await listener.Posted.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        var header = (RequestHeader)EnvelopeCodec.ReadEnvelope(body, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = int.MaxValue })!.Header;
+
+        Assert.Equal("Interop  sub=ada", authorization);
+        Assert.Equal((Credential.Elsewhere(), (uint?)null), (header.Credential!.Value, header.DestinationId));
+        Assert.Equal("hi", await elsewhere.WaitAsync(Patience, Cancelled));
+
+        // a JWT: its same bytes in the block, and no Authorization, which leg A's never had
+        var token = $"{Base64Url.EncodeToString("""{"alg":"HS256","typ":"at+jwt"}"""u8)}.{Base64Url.EncodeToString("""{"aud":"bead-interop"}"""u8)}.c2ln";
+        var jwt = echoing("ho")(new RequestOptions { Credential = Credential.Jwt(token), DestinationId = 7 });
+
+        (authorization, body) = await listener.Posted.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        header = (RequestHeader)EnvelopeCodec.ReadEnvelope(body, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = int.MaxValue })!.Header;
+
+        Assert.Null(authorization);
+        Assert.Equal(Credential.Jwt(token), header.Credential);
+        Assert.Equal("ho", await jwt.WaitAsync(Patience, Cancelled));
+    }
+
+    [Fact]
     public async Task Refuse_a_body_past_the_envelope_its_router_takes_413_before_the_router_reads_any_of_it()
     {
         await using var connected = await ConnectHttp(new ServerOptions { Limits = RouterLimits.Default with { MaximumEnvelopeBytes = 1_024 } });
@@ -638,6 +675,146 @@ public sealed class HttpServerTests
         public byte[] Decode(ReadOnlyMemory<byte> payload)
         {
             return payload.ToArray();
+        }
+    }
+
+    // a listener of the test's own on the loopback, playing a Bead server over HTTP at the octet
+    // level, one exchange a socket: a connect drawn, a DELETE done, and each POST that carries a
+    // request answered with its payload as the result, the Authorization it came with recorded as
+    // its field gave it, with its envelope
+    private sealed class Listener : IAsyncDisposable
+    {
+        private readonly TcpListener _tcp = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _stopping = new();
+        private readonly Task _accepting;
+
+        public Listener()
+        {
+            _tcp.Start();
+            _accepting = Accept();
+        }
+
+        public int Port
+        {
+            get
+            {
+                return ((IPEndPoint)_tcp.LocalEndpoint).Port;
+            }
+        }
+
+        // each POST that carried a request: its Authorization, none when it had none, and its body
+        public Channel<(string? Authorization, byte[] Body)> Posted { get; } = Channel.CreateUnbounded<(string?, byte[])>();
+
+        public async ValueTask DisposeAsync()
+        {
+            await _stopping.CancelAsync();
+            _tcp.Stop();
+
+            try
+            {
+                await _accepting;
+            }
+            catch (Exception reason) when (reason is OperationCanceledException or SocketException or ObjectDisposedException)
+            {
+                // stopped as it accepted
+            }
+
+            _stopping.Dispose();
+        }
+
+        // a head's fields, by their name in lower case, each its value without the spaces around it
+        private static Dictionary<string, string> FieldsOf(string head)
+        {
+            return head.Split("\r\n").Skip(1).Where((line) =>
+            {
+                return line.Contains(':', StringComparison.Ordinal);
+            }).ToDictionary(
+                (line) =>
+                {
+                    return line[..line.IndexOf(':', StringComparison.Ordinal)].ToLowerInvariant();
+                },
+                (line) =>
+                {
+                    return line[(line.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim(' ', '\t');
+                });
+        }
+
+        // a result on the call a request opened, carrying the request's payload
+        private static byte[] ResultOf(byte[] request)
+        {
+            var headerBytes = request[3] * 4;
+
+            return [0xA1, 0x11, 0x00, 0x02, .. request.AsSpan(4, 4), .. request.AsSpan(headerBytes)];
+        }
+
+        private async Task Accept()
+        {
+            while (!_stopping.IsCancellationRequested)
+            {
+                var socket = await _tcp.AcceptTcpClientAsync(_stopping.Token);
+
+                _ = Serve(socket);
+            }
+        }
+
+        private async Task Serve(TcpClient socket)
+        {
+            using (socket)
+            {
+                var stream = socket.GetStream();
+                var read = new List<byte>();
+                var buffer = new byte[4_096];
+                int end;
+
+                while ((end = Encoding.ASCII.GetString([.. read]).IndexOf("\r\n\r\n", StringComparison.Ordinal)) < 0)
+                {
+                    var count = await stream.ReadAsync(buffer, _stopping.Token);
+
+                    if (count == 0)
+                    {
+                        return;
+                    }
+
+                    read.AddRange(buffer.AsSpan(0, count));
+                }
+
+                var head = Encoding.ASCII.GetString([.. read], 0, end);
+                var fields = FieldsOf(head);
+                var length = int.Parse(fields.GetValueOrDefault("content-length", "0"), System.Globalization.CultureInfo.InvariantCulture);
+
+                while (read.Count < end + 4 + length)
+                {
+                    var count = await stream.ReadAsync(buffer, _stopping.Token);
+
+                    if (count == 0)
+                    {
+                        return;
+                    }
+
+                    read.AddRange(buffer.AsSpan(0, count));
+                }
+
+                var body = read.Skip(end + 4).Take(length).ToArray();
+                byte[] response;
+
+                if (!fields.ContainsKey(HttpTransport.ConnectionTokenHeader))
+                {
+                    response = Encoding.ASCII.GetBytes($"HTTP/1.1 201 Created\r\n{HttpTransport.ConnectionTokenHeader}: {new string('T', 22)}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                }
+                else if (head.StartsWith("POST ", StringComparison.Ordinal) && body.Length > 0)
+                {
+                    var result = ResultOf(body);
+
+                    Posted.Writer.TryWrite((fields.GetValueOrDefault("authorization"), body));
+                    response = [.. Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\ncontent-type: {HttpTransport.MediaType}\r\ncontent-length: {result.Length}\r\nconnection: close\r\n\r\n"), .. result];
+                }
+                else
+                {
+                    response = Encoding.ASCII.GetBytes("HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n");
+                }
+
+                await stream.WriteAsync(response, _stopping.Token);
+            }
         }
     }
 

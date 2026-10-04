@@ -9,8 +9,9 @@ import {
   stopServer,
 } from '../../transport/shared/__tests__/fixtures';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
+import { CredentialScheme } from '../../router/shared/constants';
 import { toSessionToken } from '../../router/shared/identifiers';
-import type { Envelope, IFailure, OutgoingEnvelope, SessionToken } from '../../router/shared/types';
+import type { Announcement, Envelope, IFailure, OutgoingEnvelope } from '../../router/shared/types';
 import {
   createWSClient,
   DisconnectError,
@@ -95,13 +96,13 @@ const startEnvelopeServer = async () => {
 const answerTo = (
   { envelope }: IReceivedEnvelope,
   {
+    credential,
     failure,
     payload = new Uint8Array(0),
-    sessionToken,
-  }: { failure?: IFailure; payload?: Uint8Array; sessionToken?: SessionToken }
+  }: { credential?: Announcement; failure?: IFailure; payload?: Uint8Array }
 ): OutgoingEnvelope => {
   const { callId } = envelope.header;
-  const session = sessionToken === undefined ? {} : { sessionToken };
+  const session = credential === undefined ? {} : { credential };
 
   return failure === undefined
     ? { header: { callId, kind: 0x11, ...session }, kind: 0x11, payload }
@@ -156,7 +157,10 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
       envelopes.send(
         request.socket,
-        answerTo(request, { payload: text.encode('HELLO'), sessionToken: TOKEN })
+        answerTo(request, {
+          credential: { scheme: CredentialScheme.OPAQUE, token: TOKEN },
+          payload: text.encode('HELLO'),
+        })
       );
 
       await expect(answering).resolves.toBe('HELLO');

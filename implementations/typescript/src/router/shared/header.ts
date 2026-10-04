@@ -1,16 +1,23 @@
 // dependencies
 
 import { ProgrammerError } from '../../transport/shared/errors';
-import { EnvelopeFlag, EnvelopeKind, EnvelopeLayout, SESSION_TOKEN_BYTES } from './constants';
+import {
+  CredentialScheme,
+  EnvelopeFlag,
+  EnvelopeKind,
+  EnvelopeLayout,
+  SESSION_TOKEN_BYTES,
+} from './constants';
 import { FailureError } from './errors';
 import { isSessionToken, toSessionToken, toSessionTokenBytes } from './identifiers';
 import type {
+  Announcement,
   CallId,
+  Credential,
   DestinationId,
   EnvelopeHeader,
   IEnvelopePrefix,
   IRouterFailures,
-  SessionToken,
 } from './types';
 
 // interfaces
@@ -52,12 +59,26 @@ const LAYOUTS = Object.freeze({ first: EnvelopeLayout.FIRST, last: 0xaf });
 const KINDS = Object.freeze({ first: EnvelopeKind.REQUEST, advisory: 0x80 });
 const KINDS_READ: ReadonlySet<number> = new Set(Object.values(EnvelopeKind));
 
-// each block's length, in the order of its bit: a session, a destination, a transfer's total
+// each block of a fixed length, in the order of its bit: a destination, a transfer's total; the
+// credential's, whose length varies, comes after them
 const BLOCK_BYTES: readonly (readonly [flag: number, bytes: number])[] = Object.freeze([
-  [EnvelopeFlag.SESSION, SESSION_TOKEN_BYTES],
   [EnvelopeFlag.DESTINATION, 4],
   [EnvelopeFlag.TRANSFER, 8],
 ]);
+
+// a credential's head, as a TLS extension's (RFC 8446 §4.2): its scheme, then its length, 2 bytes
+// each
+const CREDENTIAL_HEAD_BYTES = 4;
+
+// the 255 words a header's fourth byte counts
+const MAXIMUM_HEADER_BYTES = 1_020;
+
+// each credential scheme's name, for a detail
+const SCHEME_NAMES: ReadonlyMap<number, string> = new Map(
+  Object.entries(CredentialScheme).map(([name, scheme]) => {
+    return [scheme, name];
+  })
+);
 
 // what follows the prefix before the blocks: a request's service and procedure, a chunk's offset,
 // a credit's end
@@ -70,15 +91,15 @@ const KIND_PART_BYTES: Readonly<Record<number, number>> = Object.freeze({
 // the flags each kind may carry; any other bit makes the envelope malformed
 const ALLOWED_FLAGS: Readonly<Record<EnvelopeKind, number>> = Object.freeze({
   [EnvelopeKind.REQUEST]:
-    EnvelopeFlag.SESSION |
     EnvelopeFlag.DESTINATION |
     EnvelopeFlag.TRANSFER |
+    EnvelopeFlag.CREDENTIAL |
     EnvelopeFlag.SUBSCRIPTION |
     EnvelopeFlag.PACED,
   // an answer names its call alone: a destination means something to its relay only, and the
   // requester knows where its call went
-  [EnvelopeKind.RESULT]: EnvelopeFlag.SESSION | EnvelopeFlag.TRANSFER,
-  [EnvelopeKind.FAILURE]: EnvelopeFlag.SESSION,
+  [EnvelopeKind.RESULT]: EnvelopeFlag.TRANSFER | EnvelopeFlag.CREDENTIAL,
+  [EnvelopeKind.FAILURE]: EnvelopeFlag.CREDENTIAL,
   [EnvelopeKind.NOTIFICATION]: 0,
   [EnvelopeKind.CHUNK]: EnvelopeFlag.MORE,
   // a credit counts a subscription's notifications, or a transfer's bytes
@@ -106,14 +127,58 @@ const hexadecimalOf = (value: number): string => {
   return `0x${value.toString(16).padStart(2, '0')}`;
 };
 
-/** How long a header of `kind` with `flags` is: the prefix, the kind's own part, then each block. */
-const sizeOf = (kind: number, flags: number): number => {
+const isZero = (bytes: Uint8Array): boolean => {
+  return bytes.every((byte) => {
+    return byte === 0;
+  });
+};
+
+/** A credential scheme's name, or its number for a scheme to come. */
+const schemeNameOf = (scheme: number): string => {
+  return SCHEME_NAMES.get(scheme) ?? `scheme ${String(scheme)}`;
+};
+
+/**
+ * How far a header of `kind` with `flags` runs before its credential: the prefix, the kind's own
+ * part, then each block of a fixed length.
+ */
+const fixedSizeOf = (kind: number, flags: number): number => {
   return BLOCK_BYTES.reduce(
     (bytes, [flag, blockBytes]) => {
       return (flags & flag) === 0 ? bytes : bytes + blockBytes;
     },
     PREFIX_BYTES + (KIND_PART_BYTES[kind] ?? 0)
   );
+};
+
+/** `length` bytes and the zero bytes that pad them to the next 4-byte word, which byte 3 counts. */
+const paddedOf = (length: number): number => {
+  return length + ((4 - (length % 4)) % 4);
+};
+
+/**
+ * Bytes as text, one character per byte, as ISO 8859-1 maps them: `TextDecoder` reads `latin1` as
+ * windows-1252, which maps 0x80 to 0x9f elsewhere.
+ */
+const latin1Of = (bytes: Uint8Array): string => {
+  return String.fromCharCode(...bytes);
+};
+
+/** The bytes `text` spells, one per character; `undefined` for a character past U+00FF. */
+const latin1BytesOf = (text: string): Uint8Array | undefined => {
+  const bytes = new Uint8Array(text.length);
+
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+
+    if (code > 0xff) {
+      return undefined;
+    }
+
+    bytes[index] = code;
+  }
+
+  return bytes;
 };
 
 /** A {@link ProgrammerError} when `value` is not an integer from 1 to its field's maximum. */
@@ -153,25 +218,21 @@ const writeUint53 = (
 };
 
 /**
- * The flags `header` writes: the blocks it carries — a session, a destination, a transfer's total —
- * which its kind must allow; whether it opens a subscription, which only a request does; whether it
+ * The flags `header` writes: the blocks it carries — a destination, a transfer's total, a credential
+ * — which its kind must allow; whether it opens a subscription, which only a request does; whether it
  * is paced, which only a request that opens one is, or a credit; and, for a chunk, whether more
  * follow it.
  */
 const flagsOf = (header: EnvelopeHeader): number => {
-  const { destinationId, isLast, opensSubscription, paced, sessionToken, total } = header as {
+  const { credential, destinationId, isLast, opensSubscription, paced, total } = header as {
+    credential?: unknown;
     destinationId?: unknown;
     isLast?: unknown;
     opensSubscription?: unknown;
     paced?: unknown;
-    sessionToken?: unknown;
     total?: unknown;
   };
   let flags = 0;
-
-  if (sessionToken !== undefined) {
-    flags |= EnvelopeFlag.SESSION;
-  }
 
   if (destinationId !== undefined) {
     flags |= EnvelopeFlag.DESTINATION;
@@ -179,6 +240,10 @@ const flagsOf = (header: EnvelopeHeader): number => {
 
   if (total !== undefined) {
     flags |= EnvelopeFlag.TRANSFER;
+  }
+
+  if (credential !== undefined) {
+    flags |= EnvelopeFlag.CREDENTIAL;
   }
 
   // a caller without types may name a kind the table does not have
@@ -219,6 +284,125 @@ const flagsOf = (header: EnvelopeHeader): number => {
   }
 
   return flags;
+};
+
+/**
+ * The scheme and the bytes `credential` writes on a header of `kind`, which carries one. Throws a
+ * {@link ProgrammerError} for a scheme its kind does not take — `NONE` on a request, any but
+ * `OPAQUE` and `NONE` on an answer — or what its scheme does not hold: an `OPAQUE` that is no session
+ * token, a `JWT` of no character or of one past U+00FF, and bytes beside a scheme from 0 to 3.
+ */
+const credentialOf = (
+  credential: unknown,
+  kind: EnvelopeKind
+): { bytes: Uint8Array; scheme: number } => {
+  // a caller without types may give anything
+  const { bytes, scheme, token } = (
+    typeof credential === 'object' && credential !== null ? credential : {}
+  ) as { bytes?: unknown; scheme?: unknown; token?: unknown };
+
+  if (typeof scheme !== 'number' || !Number.isInteger(scheme) || scheme < 0 || scheme > 0xffff) {
+    throw new ProgrammerError(
+      `a credential's scheme is an integer from 0 to 65535, got ${typeof scheme === 'number' ? String(scheme) : typeof scheme}`
+    );
+  }
+
+  if (kind === EnvelopeKind.REQUEST && scheme === CredentialScheme.NONE) {
+    throw new ProgrammerError('a request presents a credential, never NONE');
+  }
+
+  if (kind !== EnvelopeKind.REQUEST && scheme > CredentialScheme.OPAQUE) {
+    throw new ProgrammerError(`an answer announces OPAQUE or NONE, not ${schemeNameOf(scheme)}`);
+  }
+
+  if (scheme <= CredentialScheme.ELSEWHERE && bytes !== undefined) {
+    throw new ProgrammerError(`${schemeNameOf(scheme)} holds no bytes: a scheme to come does`);
+  }
+
+  switch (scheme) {
+    case CredentialScheme.NONE:
+    case CredentialScheme.ELSEWHERE:
+      return { bytes: new Uint8Array(0), scheme };
+    case CredentialScheme.OPAQUE:
+      if (!isSessionToken(token)) {
+        throw new ProgrammerError(
+          'an OPAQUE token is a session token: 16 bytes in unpadded base64url, not all zero'
+        );
+      }
+
+      return { bytes: toSessionTokenBytes(token), scheme };
+    case CredentialScheme.JWT: {
+      const written =
+        typeof token === 'string' && token.length > 0 ? latin1BytesOf(token) : undefined;
+
+      if (written === undefined) {
+        throw new ProgrammerError(
+          'a JWT is 1 character at least, each from U+0000 to U+00FF, a byte each'
+        );
+      }
+
+      return { bytes: written, scheme };
+    }
+    default:
+      if (!(bytes instanceof Uint8Array)) {
+        throw new ProgrammerError(`${schemeNameOf(scheme)} holds its bytes, in a Uint8Array`);
+      }
+
+      return { bytes, scheme };
+  }
+};
+
+/**
+ * How `header` is laid out: its flags, its credential as written, and its length, to the end of
+ * the credential's padding. Throws a {@link ProgrammerError} for a kind this layout does not write,
+ * a block its kind does not carry, a credential {@link credentialOf} refuses, and a header past
+ * 1,020 bytes.
+ */
+const layoutOf = (
+  header: EnvelopeHeader
+): {
+  credential: { bytes: Uint8Array; scheme: number } | undefined;
+  flags: number;
+  headerBytes: number;
+} => {
+  const flags = flagsOf(header);
+  const given = (header as { credential?: unknown }).credential;
+  const credential = given === undefined ? undefined : credentialOf(given, header.kind);
+  const headerBytes =
+    fixedSizeOf(header.kind, flags) +
+    (credential === undefined ? 0 : CREDENTIAL_HEAD_BYTES + paddedOf(credential.bytes.length));
+
+  if (headerBytes > MAXIMUM_HEADER_BYTES) {
+    throw new ProgrammerError(
+      `a header is ${String(MAXIMUM_HEADER_BYTES)} bytes at most, not ${String(headerBytes)}`
+    );
+  }
+
+  return { credential, flags, headerBytes };
+};
+
+/**
+ * Why `held`, the bytes of a credential of `scheme`, are not its scheme's: a length not its own,
+ * or an `OPAQUE` of 16 zero bytes; `undefined` when they are.
+ */
+const brokenRuleOf = (scheme: number, held: Uint8Array): string | undefined => {
+  switch (scheme) {
+    case CredentialScheme.NONE:
+    case CredentialScheme.ELSEWHERE:
+      return held.length === 0
+        ? undefined
+        : `${schemeNameOf(scheme)} holds no byte, not ${String(held.length)}`;
+    case CredentialScheme.OPAQUE:
+      if (held.length !== SESSION_TOKEN_BYTES) {
+        return `an OPAQUE token is ${String(SESSION_TOKEN_BYTES)} bytes, not ${String(held.length)}`;
+      }
+
+      return isZero(held) ? 'an OPAQUE token is never all zero' : undefined;
+    case CredentialScheme.JWT:
+      return held.length === 0 ? 'a JWT is 1 byte at least' : undefined;
+    default:
+      return undefined;
+  }
 };
 
 // definition
@@ -299,7 +483,8 @@ const checkPrefix = (
 
 /**
  * The flags of a header of `kind`, and its length. Throws for a flag its kind does not carry, then
- * for a length that is not its blocks', or that runs past the message.
+ * for a length that is not its blocks', to the end of its credential's padding, or that runs past
+ * the message.
  */
 const checkLength = (
   bytes: Uint8Array,
@@ -317,47 +502,108 @@ const checkLength = (
   }
 
   const headerBytes = view.getUint8(3) * 4;
-  const expected = sizeOf(kind, flags);
-
-  if (headerBytes !== expected || headerBytes > bytes.length) {
-    throw malformedOf(
+  const fixedBytes = fixedSizeOf(kind, flags);
+  const hasCredential = (flags & EnvelopeFlag.CREDENTIAL) !== 0;
+  const lengthOf = (expected: number): FailureError => {
+    return malformedOf(
       failures,
       `a ${hexadecimalOf(kind)} header of flags ${hexadecimalOf(flags)} is ${String(expected)} bytes, not ${String(headerBytes)} of ${String(bytes.length)}`
     );
+  };
+
+  if (!hasCredential && (headerBytes !== fixedBytes || headerBytes > bytes.length)) {
+    throw lengthOf(fixedBytes);
+  }
+
+  if (hasCredential) {
+    if (headerBytes > bytes.length) {
+      throw malformedOf(
+        failures,
+        `a ${hexadecimalOf(kind)} header of ${String(headerBytes)} bytes runs past its message of ${String(bytes.length)}`
+      );
+    }
+
+    // the credential's head states its length, which the header's own must hold before it is read
+    if (headerBytes < fixedBytes + CREDENTIAL_HEAD_BYTES) {
+      throw malformedOf(
+        failures,
+        `a ${hexadecimalOf(kind)} header of flags ${hexadecimalOf(flags)} holds its credential's head: ${String(fixedBytes + CREDENTIAL_HEAD_BYTES)} bytes at least, not ${String(headerBytes)}`
+      );
+    }
+
+    const expected = fixedBytes + CREDENTIAL_HEAD_BYTES + paddedOf(view.getUint16(fixedBytes + 2));
+
+    if (headerBytes !== expected) {
+      throw lengthOf(expected);
+    }
   }
 
   return { flags, headerBytes };
 };
 
 /**
- * The blocks a header of `kind` carries, in the order of their bits: its session, its destination,
- * then a transfer's total. Throws for the end of a session on a request, for a destination of 0,
- * and for a total of 2⁵³ or more.
+ * The credential a header of `kind` carries from `offset`, its length checked with the header's.
+ * Throws for a scheme its kind does not take — `NONE` on a request, any but `OPAQUE` and `NONE` on
+ * an answer — for bytes that are not its scheme's, and for padding that is not zero.
+ */
+const readCredential = (
+  bytes: Uint8Array,
+  { failures, kind, offset }: { failures: ReadFailures; kind: EnvelopeKind; offset: number }
+): Credential => {
+  const view = viewOf(bytes);
+  const scheme = view.getUint16(offset);
+  const start = offset + CREDENTIAL_HEAD_BYTES;
+  const length = view.getUint16(offset + 2);
+  const held = bytes.subarray(start, start + length);
+
+  if (kind === EnvelopeKind.REQUEST && scheme === CredentialScheme.NONE) {
+    throw malformedOf(failures, 'a request presents a credential, never NONE');
+  }
+
+  if (kind !== EnvelopeKind.REQUEST && scheme > CredentialScheme.OPAQUE) {
+    throw malformedOf(failures, `an answer announces OPAQUE or NONE, not ${schemeNameOf(scheme)}`);
+  }
+
+  const brokenRule = brokenRuleOf(scheme, held);
+
+  if (brokenRule !== undefined) {
+    throw malformedOf(failures, brokenRule);
+  }
+
+  if (!isZero(bytes.subarray(start + length, start + paddedOf(length)))) {
+    throw malformedOf(failures, "a credential's padding is zero bytes");
+  }
+
+  switch (scheme) {
+    case CredentialScheme.NONE:
+      return { scheme: CredentialScheme.NONE };
+    case CredentialScheme.OPAQUE:
+      return { scheme: CredentialScheme.OPAQUE, token: toSessionToken(held) };
+    // a relay passes the same bytes on, whatever they are: a token past ASCII never verifies
+    case CredentialScheme.JWT:
+      return { scheme: CredentialScheme.JWT, token: latin1Of(held) };
+    case CredentialScheme.ELSEWHERE:
+      return { scheme: CredentialScheme.ELSEWHERE };
+    default:
+      // a copy: the message's buffer may be a pool's
+      return { bytes: held.slice(), scheme };
+  }
+};
+
+/**
+ * The blocks a header of `kind` carries, in the order of their bits: its destination, a transfer's
+ * total, then its credential. Throws for a destination of 0, for a total of 2⁵³ or more, and for a
+ * credential {@link readCredential} refuses.
  */
 const readBlocks = (
   bytes: Uint8Array,
   { failures, flags, kind }: { failures: ReadFailures; flags: number; kind: EnvelopeKind }
-): { destinationId?: DestinationId; sessionToken?: SessionToken | null; total?: number } => {
+): { credential?: Credential; destinationId?: DestinationId; total?: number } => {
   const view = viewOf(bytes);
   let offset = PREFIX_BYTES + (KIND_PART_BYTES[kind] ?? 0);
-  let sessionToken: SessionToken | null | undefined;
+  let credential: Credential | undefined;
   let destinationId: DestinationId | undefined;
   let total: number | undefined;
-
-  if ((flags & EnvelopeFlag.SESSION) !== 0) {
-    const token = bytes.subarray(offset, offset + SESSION_TOKEN_BYTES);
-    const isEnded = token.every((byte) => {
-      return byte === 0;
-    });
-
-    // 16 zero bytes announce that a session ended, which only an answer does
-    if (isEnded && kind === EnvelopeKind.REQUEST) {
-      throw malformedOf(failures, 'a request presents no ended session');
-    }
-
-    sessionToken = isEnded ? null : toSessionToken(token);
-    offset += SESSION_TOKEN_BYTES;
-  }
 
   if ((flags & EnvelopeFlag.DESTINATION) !== 0) {
     destinationId = view.getUint32(offset);
@@ -375,11 +621,17 @@ const readBlocks = (
     if (total === undefined) {
       throw malformedOf(failures, 'a total is below 2⁵³');
     }
+
+    offset += 8;
+  }
+
+  if ((flags & EnvelopeFlag.CREDENTIAL) !== 0) {
+    credential = readCredential(bytes, { failures, kind, offset });
   }
 
   return {
+    ...(credential === undefined ? {} : { credential }),
     ...(destinationId === undefined ? {} : { destinationId }),
-    ...(sessionToken === undefined ? {} : { sessionToken }),
     ...(total === undefined ? {} : { total }),
   };
 };
@@ -411,7 +663,7 @@ const headerOf = (
   switch (kind) {
     case EnvelopeKind.REQUEST: {
       const procedureId = view.getUint16(PREFIX_BYTES + 2);
-      const { destinationId, sessionToken, total } = blocks;
+      const { credential, destinationId, total } = blocks;
 
       if (procedureId === 0) {
         throw malformedOf(failures, 'a procedure id is never 0');
@@ -430,27 +682,28 @@ const headerOf = (
         ...(destinationId === undefined ? {} : { destinationId }),
         ...((flags & EnvelopeFlag.SUBSCRIPTION) === 0 ? {} : { opensSubscription: true }),
         ...((flags & EnvelopeFlag.PACED) === 0 ? {} : { paced: true }),
-        // a request's token is never the end of a session, refused with its blocks
-        ...(sessionToken === undefined || sessionToken === null ? {} : { sessionToken }),
         ...(total === undefined ? {} : { total }),
+        ...(credential === undefined ? {} : { credential }),
       };
     }
     case EnvelopeKind.RESULT: {
-      // a result carries no destination: its flag is refused with the others
-      const { sessionToken, total } = blocks;
+      // a result carries no destination: its flag is refused with the others; and announces
+      // `OPAQUE` or `NONE` alone, any other scheme refused with its blocks
+      const { credential, total } = blocks as { credential?: Announcement; total?: number };
 
       return {
         callId,
         kind,
-        ...(sessionToken === undefined ? {} : { sessionToken }),
         ...(total === undefined ? {} : { total }),
+        ...(credential === undefined ? {} : { credential }),
       };
     }
     case EnvelopeKind.FAILURE: {
-      // a failure carries no destination and no total: their flags are refused with the others
-      const { sessionToken } = blocks;
+      // a failure carries no destination and no total: their flags are refused with the others; and
+      // announces as a result does
+      const { credential } = blocks as { credential?: Announcement };
 
-      return { callId, kind, ...(sessionToken === undefined ? {} : { sessionToken }) };
+      return { callId, kind, ...(credential === undefined ? {} : { credential }) };
     }
     case EnvelopeKind.NOTIFICATION:
       return { callId, kind };
@@ -487,8 +740,8 @@ const headerOf = (
  * skipped. Read in the order `writeHeader` writes it — the prefix, the flags and the length, the
  * blocks, then the header — and checked in that order, so the failure raised is the first one met:
  * a layout it does not read, a kind it does not take, or a header that does not hold together — a
- * call id of 0, a flag its kind does not carry, a length that is not its blocks', or a field that
- * names nothing.
+ * call id of 0, a flag its kind does not carry, a length that is not its blocks', a credential that
+ * is not its scheme's or its kind's, or a field that names nothing.
  */
 export const readHeader = (bytes: Uint8Array, failures: ReadFailures): IReadHeader | undefined => {
   const prefix = checkPrefix(bytes, failures);
@@ -504,26 +757,24 @@ export const readHeader = (bytes: Uint8Array, failures: ReadFailures): IReadHead
   return { header: headerOf(bytes, { blocks, callId, failures, flags, kind }), headerBytes };
 };
 
-/** How long `header` is once written. Throws as {@link writeHeader} does for a block its kind lacks. */
+/**
+ * How long `header` is once written. Throws as {@link writeHeader} does for a block its kind lacks,
+ * a credential that is not one, or a header past 1,020 bytes.
+ */
 export const headerBytesOf = (header: EnvelopeHeader): number => {
-  return sizeOf(header.kind, flagsOf(header));
+  return layoutOf(header).headerBytes;
 };
 
 /**
  * Writes `header` at the start of `bytes`, and gives its length. Throws a {@link ProgrammerError},
  * before anything is written, for a kind this layout does not write, a block its kind does not
  * carry, a field that is not an integer from 1 to its maximum — from 0 to 2⁵³ − 1 for an offset, an
- * end or a total — or a token that is not one — a `null` token, the end of a session, only on an
- * answer.
+ * end or a total — a credential of a scheme its kind does not take or that its scheme does not hold,
+ * or a header past 1,020 bytes.
  */
 export const writeHeader = (header: EnvelopeHeader, bytes: Uint8Array): number => {
-  const flags = flagsOf(header);
-  const headerBytes = sizeOf(header.kind, flags);
-  const { destinationId, sessionToken, total } = header as {
-    destinationId?: number;
-    sessionToken?: SessionToken | null;
-    total?: number;
-  };
+  const { credential, flags, headerBytes } = layoutOf(header);
+  const { destinationId, total } = header as { destinationId?: number; total?: number };
 
   assertField('callId', header.callId);
 
@@ -546,17 +797,6 @@ export const writeHeader = (header: EnvelopeHeader, bytes: Uint8Array): number =
 
   if (total !== undefined) {
     assertUint53('total', total);
-  }
-
-  if (
-    sessionToken !== undefined &&
-    !(sessionToken === null ? header.kind !== EnvelopeKind.REQUEST : isSessionToken(sessionToken))
-  ) {
-    throw new ProgrammerError(
-      sessionToken === null
-        ? 'only an answer announces that a session ended'
-        : 'a session token is 16 bytes in unpadded base64url'
-    );
   }
 
   if (bytes.length < headerBytes) {
@@ -590,16 +830,6 @@ export const writeHeader = (header: EnvelopeHeader, bytes: Uint8Array): number =
     offset += 8;
   }
 
-  if (sessionToken !== undefined) {
-    bytes.set(
-      sessionToken === null
-        ? new Uint8Array(SESSION_TOKEN_BYTES)
-        : toSessionTokenBytes(sessionToken),
-      offset
-    );
-    offset += SESSION_TOKEN_BYTES;
-  }
-
   if (destinationId !== undefined) {
     view.setUint32(offset, destinationId);
     offset += 4;
@@ -607,6 +837,17 @@ export const writeHeader = (header: EnvelopeHeader, bytes: Uint8Array): number =
 
   if (total !== undefined) {
     writeUint53(view, { offset, value: total });
+    offset += 8;
+  }
+
+  if (credential !== undefined) {
+    const start = offset + CREDENTIAL_HEAD_BYTES;
+
+    view.setUint16(offset, credential.scheme);
+    view.setUint16(offset + 2, credential.bytes.length);
+    bytes.set(credential.bytes, start);
+    // a pooled buffer holds what it held before: the padding is written, never assumed
+    bytes.fill(0, start + credential.bytes.length, headerBytes);
   }
 
   return headerBytes;

@@ -17,6 +17,12 @@ internal sealed class AnsweringCall
     /// <summary>What it receives of its payload as a transfer; none once the call leaves.</summary>
     public RequestReceiving? Receiving { get; set; }
 
+    /// <summary>The call's session, once its credential resolved; none for a call in none.</summary>
+    public CallSession? Session { get; set; }
+
+    /// <summary>What its transport carried beside its request, kept for one presenting ELSEWHERE alone.</summary>
+    public string? TransportCredential { get; set; }
+
     /// <summary>What hears, on the router's scheduler, that the call ended before its answer went: a result going as a transfer.</summary>
     public Action<Exception>? OnAbort { get; set; }
 }

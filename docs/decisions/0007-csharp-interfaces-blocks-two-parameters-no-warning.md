@@ -79,17 +79,18 @@ values, as `ChunkOutcome.Refused` does. A send on a connection not open throws a
 `ArgumentException`, or an `InvalidOperationException` where the state, not an argument, is wrong,
 and a failure a `FailureException`. Data alike, which the TypeScript side compares by their
 structure, is the data's own `Equals`, or the comparer `SessionManagerOptions.DataComparer` names. A
-field that may be absent, `null` or a value, as an answer's session, none, ended or a token, is a
-nullable `SessionAnnouncement`, which holds a nullable `SessionToken`; the C# side names a header's
-two sessions by their type, `SessionToken` on a request and `Session` on an answer, as one field
-cannot be two types. Names stay the TypeScript side's, in PascalCase, but where .NET names
-otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and the HTTP client is `BeadHttpClient`, as
-.NET's own is `HttpClient`. A time in milliseconds is a `TimeSpan`, and the clock a layer takes and
-exposes, the TypeScript side's `IClock`, is a `TimeProvider`, named `Clock`
-([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), so a test moves it itself. A
-synchronous question of a router's state is a `Task`, since the state is on the router's scheduler.
-A callable that carries members, a requester or a notification, is a delegate or an interface: a
-request is made in three calls, as on the TypeScript side,
+field that may be absent, `null` or a value, as a header's credential, is a nullable `Credential`, a
+record of its `CredentialScheme` and what that scheme holds — an `OPAQUE` one's `SessionToken`, a
+`JWT`'s token, a scheme to come's bytes — where the TypeScript side's is a union of its schemes;
+both name the field `credential`, `Credential`, on a request and on an answer alike
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). Names stay the TypeScript side's, in
+PascalCase, but where .NET names otherwise: a `[Flags]` enum is plural, `EnvelopeFlags`, and the
+HTTP client is `BeadHttpClient`, as .NET's own is `HttpClient`. A time in milliseconds is a
+`TimeSpan`, and the clock a layer takes and exposes, the TypeScript side's `IClock`, is a
+`TimeProvider`, named `Clock` ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)),
+so a test moves it itself. A synchronous question of a router's state is a `Task`, since the state
+is on the router's scheduler. A callable that carries members, a requester or a notification, is a
+delegate or an interface: a request is made in three calls, as on the TypeScript side,
 `GetRequest(procedure, dependencies)(payload)(options)`, and a notification registers with
 `Register(payload, callback)(options)`.
 
@@ -145,8 +146,14 @@ test ran. CI's `dotnet` job runs both, then the interop
   JavaScript `Map` keeps the older one's place.
 - An instant a side reports — a transport server client's and a session's `LastActivity`, a trace's
   `StartedAt` — is a `DateTimeOffset` its clock's wall reading gives, and a trace's `Duration` a
-  `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
+    `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
   for an instant.
+- A credential's session's end is a `long` of milliseconds since the epoch, as on the TypeScript
+  side, never a `DateTimeOffset`: section 13.8 lets an end run to 2⁵³ − 1 ms, past what a
+  `DateTimeOffset` holds.
+- A `Credential` writes its scheme alone as its string, so no credential reaches a log through
+  `ToString`; a TypeScript credential is a plain object with no string of its own, and both sides
+  redact what they trace.
 - A stop over HTTP lets the exchanges under way write their end, and Kestrel put it on the wire, a
   second at most, before it cuts what it holds: Node writes a 404 into its socket as the stop ends
   the exchange, where Kestrel's handler writes it a moment later, and a cut that comes first loses

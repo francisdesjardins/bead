@@ -52,7 +52,7 @@ public sealed class DebugFilterTests
 
     private static (DebugDirection, TracedEnvelope) EnvelopeOf(IEnvelopeHeader header, DebugDirection direction)
     {
-        return (direction, new TracedEnvelope("a", header, false));
+        return (direction, new TracedEnvelope("a", header, null));
     }
 
     // what a listener the filter made hears of the events given: each one's name, direction and type

@@ -5,7 +5,8 @@ import { createTestClock, durationsOf } from '../../../transport/shared/__tests_
 import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { CancelError, TimeoutError } from '../../../transport/shared/errors';
 import { createSessionManager } from '../../server/session-manager';
-import { failureTableOf } from '../constants';
+import { CredentialScheme, failureTableOf } from '../constants';
+import type { SessionIdentifier } from '../types';
 import {
   CLIENT_FAILURES,
   createServiceManager,
@@ -108,7 +109,7 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
   const notifications = new Map<string, INotificationLike>();
   const calls = {
     notify: [] as {
-      filter: ((connectionHandle: string) => boolean) | undefined;
+      filter: ((connectionHandle: string, identifier?: SessionIdentifier) => boolean) | undefined;
       key: NotificationKey | undefined;
       payload: IText;
       procedure: IProcedureAddress;
@@ -399,6 +400,33 @@ test.describe('createServiceManager', () => {
       expect(calls.request[0]?.request.options.connectionHandle).toBe(connectionHandle);
     });
 
+    test('hands its router the credential a call presents and leaves it out of its trace', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const jwt = { scheme: CredentialScheme.JWT, token: 'a.secret.token' } as const;
+      const elsewhere = { carried: 'Bearer secret', scheme: CredentialScheme.ELSEWHERE } as const;
+
+      for (const credential of [{ scheme: CredentialScheme.OPAQUE } as const, jwt, elsewhere]) {
+        await manager.getRequest(echo, { serializer })({ text: 'a' })({ credential });
+      }
+
+      await manager.getRequest(echo, { serializer })({ text: 'b' })();
+
+      expect(
+        calls.request.map(({ request }) => {
+          return request.options.credential;
+        })
+      ).toEqual([{ scheme: CredentialScheme.OPAQUE }, jwt, elsewhere, undefined]);
+      expect(seen).toHaveLength(8);
+      expect(
+        seen.every(({ info }) => {
+          return info.options !== undefined && !('credential' in info.options);
+        })
+      ).toBe(true);
+      expect(JSON.stringify(seen)).not.toContain('secret');
+    });
+
     test('rethrows what the router rejects with, and tells debug its failure, and only a failure’s', async () => {
       const { control, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -659,7 +687,7 @@ test.describe('createServiceManager', () => {
         cause: expect.any(SyntaxError),
         code: ProtocolCode.PAYLOAD_UNDECODABLE,
         destinationId: 4,
-        header: { callId: 7, hasSessionToken: false, kind: 0x11 },
+        header: { callId: 7, kind: 0x11 },
         origin: 'local',
         procedureAddress: { procedureId: 1, serviceId: 2 },
         scope: FailureScope.PROTOCOL,
@@ -840,8 +868,8 @@ test.describe('createServiceManager', () => {
 
       expect(reached).toEqual(['allowed']);
       expect(seen).toEqual([
-        ['connectionHandle', 'header'],
-        ['connectionHandle', 'header'],
+        ['connectionHandle', 'header', 'session'],
+        ['connectionHandle', 'header', 'session'],
       ]);
       expect(calls.respond[0]?.response).toEqual({ failure: SERVER_FAILURES.accessDenied });
     });
@@ -1395,9 +1423,49 @@ test.describe('createServiceManager', () => {
 
       expect(
         calls.notify.map(({ filter }) => {
-          return filter === undefined ? 'each' : handles.filter(filter);
+          return filter === undefined
+            ? 'each'
+            : handles.filter((handle) => {
+                return filter(handle);
+              });
         })
       ).toEqual(['each', ['a', 'c'], ['b', 'c'], ['b']]);
+    });
+
+    test('hands the filter the identifier of the session holding each subscription, beside its connection', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const resolver = manager.getNotificationResolver(echo, { serializer: serverSerializer })(
+        () => {
+          return Promise.resolve();
+        }
+      );
+      const grace = { id: 'grace', scheme: CredentialScheme.ELSEWHERE } as const;
+      const seen: unknown[] = [];
+
+      await resolver.notify(
+        { text: 'news' },
+        {
+          exclude: 'b',
+          filter: (handle, identifier) => {
+            seen.push([handle, identifier]);
+
+            return identifier !== undefined;
+          },
+        }
+      );
+
+      const [{ filter } = { filter: undefined }] = calls.notify;
+
+      expect([filter?.('a', grace), filter?.('a'), filter?.('b', grace)]).toEqual([
+        true,
+        false,
+        false,
+      ]);
+      expect(seen).toEqual([
+        ['a', grace],
+        ['a', undefined],
+      ]);
     });
 
     test('tells the router what a notification is about, for a paced subscription to keep its latest', async () => {
@@ -2175,6 +2243,38 @@ test.describe('createServiceManager', () => {
       }).toThrow(thrown);
     });
 
+    test('reads the call’s session its router resolved, and so does the callback, whoever asks it', async () => {
+      const { router } = createFakeRouter();
+      const session = Object.freeze({ data: 'ada' });
+      const read: unknown[] = [];
+      const resolver = createServiceManager(router).getRequestResolver(echo, {
+        beforeRequest: (request) => {
+          read.push(['admission', request.session]);
+
+          return request.session !== undefined;
+        },
+        serializer: serverSerializer,
+      })((request, response) => {
+        read.push(['callback', request.session]);
+
+        return response(request.payload);
+      });
+
+      // asked by its router, then by itself, for a router that asks nothing
+      expect(resolver.admit?.({ connectionHandle, header, session })).toBeUndefined();
+      await resolver({ ...propsOf(encode({ text: 'hi' })), isAdmitted: true, session });
+      await resolver({ ...propsOf(encode({ text: 'hi' })), session });
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(read).toEqual([
+        ['admission', session],
+        ['callback', session],
+        ['admission', session],
+        ['callback', session],
+        ['admission', undefined],
+      ]);
+    });
+
     test('is not asked again of a request its router admitted', async () => {
       const { calls, router } = createFakeRouter();
       const asked: number[] = [];
@@ -2196,7 +2296,7 @@ test.describe('createServiceManager', () => {
 
       expect(asked).toEqual([]);
       // the callback is handed the request, and nothing of its admission
-      expect(handed).toEqual([['connectionHandle', 'header', 'payload', 'signal']]);
+      expect(handed).toEqual([['connectionHandle', 'header', 'payload', 'session', 'signal']]);
       expect(calls.respond[0]?.response).toEqual({ payload: encode({ text: 'hi' }) });
     });
 

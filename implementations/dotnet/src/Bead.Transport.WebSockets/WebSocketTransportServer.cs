@@ -45,6 +45,14 @@ public sealed record WebSocketTransportServerOptions
     /// message; the system's clock when none.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// What stands in front of it, which it cannot tell (spec 13.4): true for TLS terminated before
+    /// it, which makes its connections secure; false for a proxy that serves the network in the
+    /// clear, which leaves them in the clear; none to judge by the address it listens on. Believed
+    /// whatever it listens on.
+    /// </summary>
+    public bool? Secure { get; init; }
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -77,6 +85,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // its ready state, and the guards around its start and its stop, as every transport server's
     private readonly TransportServerLife _life = new();
     private WebApplication? _application;
+
+    // whether its connections are secure: as its application says what stands in front of it, or,
+    // when it says nothing, bound to the loopback as it starts, since it takes no TLS of its own
+    private volatile bool _isSecure;
     // how many connections came, which ranks each: the dictionary keeps no order
     private long _arrivals;
 
@@ -94,6 +106,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportServerOptions.CloseTimeout)),
         };
         _clock = _options.Clock ?? TimeProvider.System;
+        _isSecure = _options.Secure ?? false;
     }
 
     /// <inheritdoc/>
@@ -244,6 +257,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
             bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
+            _isSecure = _options.Secure ?? TransportSecurity.IsSecure((false, start.Address));
         }
         catch
         {
@@ -291,13 +305,32 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return Stop();
     }
 
+    /// <summary>
+    /// A WebSocket carries no credential beside an envelope (spec 15.2): a command presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes.
+    /// </summary>
+    public bool CarriesCredential(string connectionHandle)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a connection is secure (spec 13.4): as <see cref="WebSocketTransportServerOptions.Secure"/>
+    /// says, when given; otherwise judged from its listener, never from what a name resolves to,
+    /// bound to a loopback address, since it takes no TLS of its own.
+    /// </summary>
+    public bool IsSecure(string connectionHandle)
+    {
+        return _isSecure;
+    }
+
     /// <inheritdoc/>
-    public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+    public Task Send(TransportMessage message, string connectionHandle)
     {
         // as the TypeScript side's: what goes to a connection not open goes nowhere, and says nothing,
         // for the router refuses what is for a connection it does not hold itself
         return _connections.TryGetValue(connectionHandle, out var held) && held.Connection.Socket.State == WebSocketState.Open
-            ? held.Connection.Send(bytes)
+            ? held.Connection.Send(message.Bytes)
             : Task.CompletedTask;
     }
 

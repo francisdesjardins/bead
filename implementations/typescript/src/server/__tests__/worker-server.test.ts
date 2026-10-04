@@ -1,7 +1,13 @@
 import { expect, test } from '@playwright/test';
+import { createHmac, randomBytes } from 'node:crypto';
 import { createWorkerClient } from '../../client/worker-client';
-import type { INotifyOptions, IProcedure } from '../../router/shared/types';
-import { createWorkerServer, ProtocolCode, type PacingLimitsOptions } from '../worker-server';
+import type { ICredentials, INotifyOptions, IProcedure } from '../../router/shared/types';
+import {
+  CredentialScheme,
+  createWorkerServer,
+  ProtocolCode,
+  type PacingLimitsOptions,
+} from '../worker-server';
 import { expectAtRest } from './fixtures';
 
 // helpers
@@ -34,6 +40,7 @@ const echo = procedureOf(1, 'echo');
 const news = procedureOf(2, 'news');
 const ping = procedureOf(3, 'ping');
 const upload = procedureOf(4, 'upload');
+const whoami = procedureOf(5, 'whoami');
 
 // envelopes of 1 KiB, so 8 KiB goes as a transfer; 64 KiB at most
 const limits = {
@@ -43,13 +50,40 @@ const limits = {
   windowBytes: 4_096,
 };
 
+// an HS256 key of the test's own, drawn as it runs
+const SECRET = randomBytes(32);
+
+/** An access token for `sub`, signed with {@link SECRET}, holding a minute on the platform's clock. */
+const tokenOf = (sub: string): string => {
+  const part = (value: object): string => {
+    return Buffer.from(JSON.stringify(value)).toString('base64url');
+  };
+  const now = Math.floor(Date.now() / 1_000);
+  const signingInput = `${part({ alg: 'HS256', typ: 'at+jwt' })}.${part({
+    aud: 'worker',
+    exp: now + 60,
+    iat: now,
+    iss: 'https://issuer.example',
+    sub,
+  })}`;
+
+  return `${signingInput}.${createHmac('sha256', SECRET).update(signingInput).digest('base64url')}`;
+};
+
 /**
  * A server in a worker's scope — a port of a `MessageChannel` — and a client to it through the other
  * end, as a page holds its worker; `await using` takes them apart once the server keeps nothing.
  */
-const connectWorker = async (pacing?: PacingLimitsOptions) => {
+const connectWorker = async (
+  options: { credentials?: ICredentials; pacing?: PacingLimitsOptions } = {}
+) => {
   const scope = new MessageChannel();
-  const server = createWorkerServer({ limits, pacing, transport: { scope: scope.port1 } });
+  const server = createWorkerServer({
+    credentials: options.credentials,
+    limits,
+    pacing: options.pacing,
+    transport: { scope: scope.port1 },
+  });
   const client = createWorkerClient({
     limits,
     transport: {
@@ -175,7 +209,7 @@ test.describe('a server in a worker, and a client to it', () => {
   });
 
   test('end a paced subscription whose queue goes past the bounds its server was given, and say why', async () => {
-    await using connected = await connectWorker({ maximumQueuedNotifications: 1 });
+    await using connected = await connectWorker({ pacing: { maximumQueuedNotifications: 1 } });
     const { client } = connected;
     const heard: string[] = [];
     const dropped: unknown[] = [];
@@ -219,5 +253,35 @@ test.describe('a server in a worker, and a client to it', () => {
     await expect(uploading(new Uint8Array(65_537))()).rejects.toMatchObject({
       code: ProtocolCode.PAYLOAD_TOO_LARGE,
     });
+  });
+
+  test('verify a JWT with the credentials it is given, and run its call in the session it resolves to', async () => {
+    await using connected = await connectWorker({
+      credentials: {
+        audience: 'worker',
+        keys: [
+          {
+            algorithm: 'HS256',
+            issuer: 'https://issuer.example',
+            jwk: { k: SECRET.toString('base64url'), kty: 'oct' },
+          },
+        ],
+      },
+    });
+    const { client, server } = connected;
+
+    server.services.getRequestResolver(whoami, {
+      beforeRequest: server.requireSession,
+      serializer: text,
+    })((request, response) => {
+      return response(String((request.session?.data as { sub?: unknown } | undefined)?.sub));
+    });
+
+    const asking = client.services.getRequest(whoami, { serializer: text });
+
+    await expect(
+      asking('')({ credential: { scheme: CredentialScheme.JWT, token: tokenOf('alice') } })
+    ).resolves.toBe('alice');
+    await expect(asking('')()).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
   });
 });

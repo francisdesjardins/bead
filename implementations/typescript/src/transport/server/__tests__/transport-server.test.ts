@@ -161,6 +161,52 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
     ).toBe(clocks.PLATFORM_CLOCK);
   });
 
+  test('carries no credential toward a connection, and is secure on a loopback host it listens on, or as its transport says', async () => {
+    const securedBy = async (address: string, isSecure?: true) => {
+      const server = createTransportServer<object, undefined>(() => {
+        return {
+          defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
+          ...(isSecure === undefined ? {} : { isSecure }),
+          type: 'WS',
+          close: () => {
+            return Promise.resolve();
+          },
+          send: () => {
+            return Promise.resolve();
+          },
+          start: ({ port }) => {
+            return Promise.resolve({ address, port });
+          },
+          stop: () => {
+            return Promise.resolve();
+          },
+        };
+      });
+
+      await server.start({ address });
+
+      return [server.carriesCredential(A), server.isSecure(A)];
+    };
+
+    expect(
+      await Promise.all([
+        securedBy('127.0.0.1'),
+        securedBy('::1'),
+        securedBy('localhost'),
+        securedBy('0.0.0.0'),
+        securedBy('192.0.2.1'),
+        securedBy('192.0.2.1', true),
+      ])
+    ).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, false],
+      [false, false],
+      [false, true],
+    ]);
+  });
+
   test('names a connection by its type, address and port', () => {
     expect(generateHandle({ ip: '127.0.0.1', port: 50_000, type: 'WS' })).toBe(
       'type=WS;ip=127.0.0.1;port=50000'
@@ -373,8 +419,8 @@ test.describe('createTransportServer', () => {
     await server.start();
     register(A);
 
-    await server.send('x', B);
-    await server.send('x', A);
+    await server.send({ data: 'x' }, B);
+    await server.send({ data: 'x' }, A);
     expect(calls).toEqual(['start', `send:${A}`]);
   });
 

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Bead.Interop;
 
@@ -20,6 +22,24 @@ public static class InteropService
     private static readonly TimeSpan ClockTimeout = TimeSpan.FromSeconds(10);
 
     private static readonly JsonPayloads Payloads = new();
+
+    // what the ELSEWHERE verifier holds, by credentials.elsewhere's grammar: its auth-scheme
+    // case-insensitive (RFC 9110 §11.1), one space, then its parameters, case-sensitive (RFC 7405)
+    private static readonly Regex Carried = new(
+        "^[Ii][Nn][Tt][Ee][Rr][Oo][Pp] (?:sub=(?<sub>[a-z]{1,32})(?:, after=(?<after>[1-9][0-9]{0,9}))?(?:, end=(?<end>[1-9][0-9]{0,15}))?|fail=true(?:, after=(?<failingAfter>[1-9][0-9]{0,9}))?)\\z",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture);
+
+    // the bounds of an after and an end, 2³¹ − 1 (spec 1.4) and 2⁵³ − 1 (spec 1.2)
+    private const long LongestAfter = int.MaxValue;
+    private const long LatestEnd = (1L << 53) - 1;
+
+    // how long the key set takes to answer, on the server's clock, so a conversation sees each ask
+    private static readonly TimeSpan KeySetWait = TimeSpan.FromMilliseconds(1_000);
+
+    // the issuers whose key set answers as their words say: its keys at its first ask alone, and
+    // never; any other it names answers its keys at every ask
+    private const string RotatedIssuer = "https://rotated.interop.bead.example";
+    private const string StalledIssuer = "https://stalled.interop.bead.example";
 
     /// <summary>What the interop service's payloads are, to answer: JSON, in UTF-8. What is not JSON throws.</summary>
     public static IRequestSerializerServer<JsonElement, JsonElement> Json
@@ -71,6 +91,195 @@ public static class InteropService
                 procedure.TryGetProperty("offeredBy", out var side) && side.GetString() == "client");
         })];
 
+    /// <summary>
+    /// The interop service's credentials, <c>credentials.jwt</c> and <c>credentials.elsewhere</c>,
+    /// on <paramref name="clock"/>, the clock its server is given (decision 0011): the two
+    /// issuers' published test keys and their audience; the key set, given with the issuers it
+    /// answers for and the most calls that wait for one issuer's keys at once, which answers each
+    /// as its words say, on that clock whatever its signal, and fails at once for any other, its
+    /// rotated issuer's asks counted for this key set alone; and the ELSEWHERE verifier, by its
+    /// grammar, which settles on that clock whatever its signal.
+    /// </summary>
+    public static Credentials CredentialsOf(TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+
+        var jwt = Manifest.GetProperty("credentials").GetProperty("jwt");
+        var keySet = jwt.GetProperty("keySet");
+        var answered = keySet.GetProperty("issuers").EnumerateArray().ToDictionary(
+            (named) =>
+            {
+                return named.GetProperty("issuer").GetString()!;
+            },
+            (named) =>
+            {
+                return (IReadOnlyList<JwtSetKey>)[.. named.GetProperty("keys").EnumerateArray().Select((key) =>
+                {
+                    return new JwtSetKey { Algorithm = AlgorithmOf(key), Jwk = key.GetProperty("jwk").Clone() };
+                })];
+            },
+            StringComparer.Ordinal);
+        var rotatedAsks = 0;
+
+        return new Credentials
+        {
+            Audience = jwt.GetProperty("audience").GetString(),
+            Keys = [.. jwt.GetProperty("keys").EnumerateArray().Select((key) =>
+            {
+                return new JwtKey { Issuer = key.GetProperty("issuer").GetString()!, Algorithm = AlgorithmOf(key), Jwk = key.GetProperty("jwk").Clone() };
+            })],
+            KeySet = new JwtKeySet
+            {
+                Issuers = [.. answered.Keys],
+                Ask = (issuer, _) =>
+                {
+                    if (!answered.TryGetValue(issuer, out var keys))
+                    {
+                        return ValueTask.FromException<IReadOnlyList<JwtSetKey>>(
+                            new InvalidOperationException($"the interop key set names no issuer {issuer}"));
+                    }
+
+                    // ! never settles, and arms no timer: its ask fails at its deadline alone
+                    if (issuer == StalledIssuer)
+                    {
+                        return new ValueTask<IReadOnlyList<JwtSetKey>>(new TaskCompletionSource<IReadOnlyList<JwtSetKey>>().Task);
+                    }
+
+                    var isWithdrawn = issuer == RotatedIssuer && Interlocked.Increment(ref rotatedAsks) > 1;
+
+                    return Answer((isWithdrawn ? [] : keys, clock));
+                },
+                MaximumWaitingCalls = keySet.GetProperty("maximumWaitingCalls").GetInt32(),
+            },
+            Verify = (carried, _) =>
+            {
+                return Verify((carried, clock));
+            },
+        };
+    }
+
+    // the key set's answer, once 1,000 ms passed on the server's clock, whatever its signal
+    private static async ValueTask<IReadOnlyList<JwtSetKey>> Answer((IReadOnlyList<JwtSetKey> Keys, TimeProvider Clock) answering)
+    {
+        await Task.Delay(KeySetWait, answering.Clock);
+
+        return answering.Keys;
+    }
+
+    // a key's one algorithm, as the manifest names it
+    private static JwtAlgorithm AlgorithmOf(JsonElement key)
+    {
+        return key.GetProperty("algorithm").GetString() switch
+        {
+            "ES256" => JwtAlgorithm.Es256,
+            "HS256" => JwtAlgorithm.Hs256,
+            var other => throw new ArgumentException($"the interop service names no algorithm {other}", nameof(key)),
+        };
+    }
+
+    // credentials.elsewhere's verifier: a value of holding settles with its session, its id its sub,
+    // its data {"sub":sub}, its end when it gives one; a value of failing rejects; either once its
+    // after passed on the server's clock — whatever the call's signal, so its settling may come once
+    // its call ended — or at once; any other value holds nothing
+    private static async ValueTask<ElsewhereSession?> Verify((string Carried, TimeProvider Clock) asked)
+    {
+        var (carried, clock) = asked;
+        var match = Carried.Match(carried);
+        var after = match.Groups["after"].Success ? match.Groups["after"] : match.Groups["failingAfter"];
+        var end = match.Groups["end"];
+
+        if (!match.Success
+            || (after.Success && long.Parse(after.Value, CultureInfo.InvariantCulture) > LongestAfter)
+            || (end.Success && long.Parse(end.Value, CultureInfo.InvariantCulture) > LatestEnd))
+        {
+            return null;
+        }
+
+        if (after.Success)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(long.Parse(after.Value, CultureInfo.InvariantCulture)), clock);
+        }
+
+        if (!match.Groups["sub"].Success)
+        {
+            throw new InvalidOperationException("this verifier fails, on purpose");
+        }
+
+        var sub = match.Groups["sub"].Value;
+
+        return new ElsewhereSession
+        {
+            Data = JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["sub"] = sub }),
+            End = end.Success ? long.Parse(end.Value, CultureInfo.InvariantCulture) : null,
+            Id = sub,
+        };
+    }
+
+    // the name a call's session holds: the one login gave its connection's session, or the sub of
+    // its credential's data, a JWT's claims set or what the ELSEWHERE verifier gave
+    private static string? NameOf(CallSession? session)
+    {
+        return session?.Data switch
+        {
+            string name => name,
+            JsonElement { ValueKind: JsonValueKind.Object } data when data.TryGetProperty("sub", out var sub) && sub.ValueKind == JsonValueKind.String => sub.GetString(),
+            _ => null,
+        };
+    }
+
+    // a credential's session's identifier, as endSession takes it: an object of these members alone,
+    // each a string — {"issuer","sub"} or {"issuer","sid"}, a JWT's; {"id"}, an ELSEWHERE's
+    private static SessionIdentifier IdentifierOf(JsonElement request)
+    {
+        var members = request.ValueKind == JsonValueKind.Object
+            ? request.EnumerateObject().ToDictionary(
+                (member) =>
+                {
+                    return member.Name;
+                },
+                (member) =>
+                {
+                    return member.Value;
+                },
+                StringComparer.Ordinal)
+            : [];
+
+        if (members.Values.Any((value) =>
+        {
+            return value.ValueKind != JsonValueKind.String;
+        }))
+        {
+            throw new ArgumentException("endSession names a credential's session by strings alone", nameof(request));
+        }
+
+        string StringOf(string name)
+        {
+            return members[name].GetString()!;
+        }
+
+        return members.Keys.Order(StringComparer.Ordinal).ToList() switch
+        {
+            ["issuer", "sub"] => new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = StringOf("issuer"), Sub = StringOf("sub") },
+            ["issuer", "sid"] => new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = StringOf("issuer"), Sid = StringOf("sid") },
+            ["id"] => new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = StringOf("id") },
+            _ => throw new ArgumentException("endSession names a credential's session by {issuer, sub}, {issuer, sid} or {id}", nameof(request)),
+        };
+    }
+
+    // the issuer endSessionsOf takes: an object of this member alone, a string — {"issuer"}
+    internal static string IssuerOf(JsonElement request)
+    {
+        if (request.ValueKind != JsonValueKind.Object
+            || request.EnumerateObject().Count() != 1
+            || !request.TryGetProperty("issuer", out var issuer)
+            || issuer.ValueKind != JsonValueKind.String)
+        {
+            throw new ArgumentException("endSessionsOf names an issuer by {issuer}, a string, alone", nameof(request));
+        }
+
+        return issuer.GetString()!;
+    }
+
     /// <summary>The procedure of the interop service named <paramref name="procedureName"/>.</summary>
     public static Procedure ProcedureOf(string procedureName)
     {
@@ -96,10 +305,14 @@ public static class InteropService
     /// <summary>
     /// Registers the interop service's resolvers on <paramref name="server"/>. The calls to
     /// <c>slow</c> each connection cancelled are counted per connection, for
-    /// <c>cancellations</c> to answer; a session holds the name its <c>login</c> gave. A connection
-    /// registers itself as a destination of the server's relay by <c>register</c>; the destination
+    /// <c>cancellations</c> to answer; a session holds the name its <c>login</c> gave, which
+    /// <c>whoami</c> answers from its call's session, as it answers a credential's <c>sub</c>; the
+    /// ticks of <c>ticks</c> and <c>tick</c> are held per connection and per session, its call's. A connection
+    /// registers itself as a destination of the server's relay by <c>register</c>, with the audience
+    /// it verifies; the destination
     /// it registered last is kept by its handle, once it closed too, for <c>unregister</c> to take
-    /// out.
+    /// out. <c>endSession</c> ends a credential's session on every connection that keeps it, and
+    /// nothing else; <c>endSessionsOf</c>, every credential's session of an issuer alike.
     /// </summary>
     public static void Offer(Server<string> server)
     {
@@ -121,7 +334,9 @@ public static class InteropService
         ArgumentNullException.ThrowIfNull(router);
 
         var cancellations = new ConcurrentDictionary<string, int>();
-        var holds = new Dictionary<string, List<Hold>>();
+
+        // by connection and session, its call's — none for its connection's — the ticks held
+        var holds = new Dictionary<(string ConnectionHandle, SessionIdentifier? Session), List<Hold>>();
 
         // by connection, the destination it registered last: kept once it closed, so whoever
         // connects under its handle next takes it out
@@ -153,10 +368,12 @@ public static class InteropService
 
                 lock (holds)
                 {
-                    if (!holds.TryGetValue(request.ConnectionHandle, out var connectionHolds))
+                    var place = (request.ConnectionHandle, request.Session?.Identifier);
+
+                    if (!holds.TryGetValue(place, out var connectionHolds))
                     {
                         connectionHolds = [];
-                        holds[request.ConnectionHandle] = connectionHolds;
+                        holds[place] = connectionHolds;
                     }
 
                     connectionHolds.Add(new Hold(
@@ -181,10 +398,12 @@ public static class InteropService
                 }
             });
 
-        // notifies its own connection, then lets the ticks it was the last for answer, before it does
+        // notifies the subscription its call's session holds on its own connection, then lets the
+        // ticks of that session it was the last for answer, before it does
         services.GetRequestResolver(ProcedureOf("tick"), dependencies)(async (request, response) =>
         {
             var connectionHandle = request.ConnectionHandle;
+            var session = request.Session?.Identifier;
             var key = request.Payload.TryGetProperty("key", out var given) ? given.GetString() : null;
             var due = new List<Hold>();
 
@@ -192,16 +411,16 @@ public static class InteropService
                 request.Payload.GetProperty("value"),
                 new NotifyOptions
                 {
-                    Filter = (handle) =>
+                    Filter = (handle, identifier) =>
                     {
-                        return handle == connectionHandle;
+                        return handle == connectionHandle && identifier == session;
                     },
                     Key = key,
                 });
 
             lock (holds)
             {
-                foreach (var held in holds.GetValueOrDefault(connectionHandle) ?? [])
+                foreach (var held in holds.GetValueOrDefault((connectionHandle, session)) ?? [])
                 {
                     held.Remaining -= 1;
 
@@ -211,7 +430,7 @@ public static class InteropService
                     }
                 }
 
-                holds.GetValueOrDefault(connectionHandle)?.RemoveAll((held) =>
+                holds.GetValueOrDefault((connectionHandle, session))?.RemoveAll((held) =>
                 {
                     return held.Remaining == 0;
                 });
@@ -224,8 +443,8 @@ public static class InteropService
             await response.Answer(Null);
         });
 
-        // a new session each time, as the one it replaces ends: its token is drawn anew. A timeout not
-        // given is left out, for the sessions' default, without end
+        // a new session each time, as the one it replaces ends: its token is drawn anew, whatever its
+        // call presents. A timeout not given is left out, for the sessions' default, without end
         services.GetRequestResolver(ProcedureOf("login"), dependencies)((request, response) =>
         {
             var name = request.Payload.GetProperty("name").GetString();
@@ -240,17 +459,41 @@ public static class InteropService
             return response.Answer(JsonSerializer.SerializeToElement(name));
         });
 
-        // ended before it answers, so its answer — or the failure ending a subscription — announces it
+        // ended before it answers, so its answer — or the failure ending a subscription — announces it.
+        // A call in a credential's session is refused ACCESS_DENIED, never SESSION_REQUIRED, which
+        // would have its client withdraw a credential that holds
         services.GetRequestResolver(ProcedureOf("logout"), dependencies with { BeforeRequest = requireSession })((request, response) =>
         {
+            if (request.Session?.Identifier is not null)
+            {
+                return response.Fail(Failure.OfProtocol(ProtocolCode.AccessDenied, "logout ends its connection's session, which this call does not run in"));
+            }
+
             sessionManager.Delete(request.ConnectionHandle);
 
             return response.Answer(Null);
         });
 
+        // the name its call's session holds, which may be another than its connection's holds now
         services.GetRequestResolver(ProcedureOf("whoami"), dependencies with { BeforeRequest = requireSession })((request, response) =>
         {
-            return response.Answer(JsonSerializer.SerializeToElement(sessionManager.Get(request.ConnectionHandle)?.Data));
+            return response.Answer(JsonSerializer.SerializeToElement(NameOf(request.Session)));
+        });
+
+        // a credential's session ended by its identifier, on every connection that keeps it, and
+        // nothing else: a credential that still holds opens it anew
+        services.GetRequestResolver(ProcedureOf("endSession"), dependencies)(async (request, response) =>
+        {
+            await router.EndSession(IdentifierOf(request.Payload));
+            await response.Answer(Null);
+        });
+
+        // every credential's session of an issuer ended by that issuer, on every connection that
+        // keeps one, and nothing else: a credential that still holds opens its session anew
+        services.GetRequestResolver(ProcedureOf("endSessionsOf"), dependencies)(async (request, response) =>
+        {
+            await router.EndSessionsOf(IssuerOf(request.Payload));
+            await response.Answer(Null);
         });
 
         // the server asks its client back, by a command, before it answers
@@ -337,6 +580,7 @@ public static class InteropService
         {
             var destinationId = request.Payload.GetProperty("destination").GetUInt32();
             var timeout = DurationOf(request.Payload, "timeout");
+            var audience = request.Payload.TryGetProperty("audience", out var verified) ? verified.GetString() : null;
             bool isTaken;
 
             lock (registered)
@@ -350,7 +594,7 @@ public static class InteropService
                 {
                     registered[request.ConnectionHandle] = router.RegisterDestination(
                         new ConnectionTarget(request.ConnectionHandle),
-                        new DestinationOptions { DestinationId = destinationId, Timeout = timeout });
+                        new DestinationOptions { Audience = audience, DestinationId = destinationId, Timeout = timeout });
                 }
             }
 

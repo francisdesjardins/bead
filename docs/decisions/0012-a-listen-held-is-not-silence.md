@@ -50,8 +50,9 @@ timeout for an HTTP server, `connectionInactivityTimeout`, 30 s, so a server dra
 
 **A timeout not given is without end.** A session stored without its timeouts holds both without
 end, as one made by `create` does; an application that authenticates gives its own, and the session
-manager's documentation names ASVS's values. With the typed credential
-([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), a session also ends with its token.
+manager's documentation names ASVS's values. A credential's session
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)) has no timeout: it ends with its
+credential.
 
 **The interop service follows.** `login` takes `sessionTimeout` and `connectionTimeout`, in
 milliseconds, and `register` its timeout, each held as spec 1.4 holds a duration, by the assertion of

@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { EnvelopeKind, LIMIT_DEFAULTS, ProtocolCode, SERVER_FAILURES } from '../constants';
+import {
+  CredentialScheme,
+  EnvelopeKind,
+  LIMIT_DEFAULTS,
+  ProtocolCode,
+  SERVER_FAILURES,
+} from '../constants';
 import { writeEnvelope } from '../envelope';
 import { headerBytesOf } from '../header';
 import {
@@ -9,7 +15,7 @@ import {
   createOutgoingTransfer,
   type IIncomingTransfer,
 } from '../transfer';
-import type { IProtocolFailure } from '../types';
+import type { EnvelopeHeader, IProtocolFailure, SessionToken } from '../types';
 
 // helpers
 
@@ -83,12 +89,38 @@ test.describe('chunkPayloadBytes', () => {
     expect(CHUNK_HEADER_BYTES).toBe(16);
     expect(chunkPayloadBytes(limits, CHUNK_HEADER_BYTES)).toBe(1_048_560);
     expect(chunkPayloadBytes({ ...limits, chunkBytes: 1_024 }, CHUNK_HEADER_BYTES)).toBe(1_008);
-    // an opening: a request, with and without a destination, and an answer with its session
+    // an opening: a request, without and with a destination, and a result announcing a session
+    const openings = (
+      [
+        { callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 1, total: 0 },
+        {
+          callId: 1,
+          destinationId: 1,
+          kind: EnvelopeKind.REQUEST,
+          procedureId: 1,
+          serviceId: 1,
+          total: 0,
+        },
+        {
+          callId: 2,
+          credential: {
+            scheme: CredentialScheme.OPAQUE,
+            token: 'AAECAwQFBgcICQoLDA0ODw' as SessionToken,
+          },
+          kind: EnvelopeKind.RESULT,
+          total: 0,
+        },
+      ] satisfies EnvelopeHeader[]
+    ).map((header) => {
+      return headerBytesOf(header);
+    });
+
+    expect(openings).toEqual([20, 24, 36]);
     expect(
-      [20, 24, 32].map((bytes) => {
+      openings.map((bytes) => {
         return chunkPayloadBytes(limits, bytes);
       })
-    ).toEqual([1_048_556, 1_048_552, 1_048_544]);
+    ).toEqual([1_048_556, 1_048_552, 1_048_540]);
     expect(chunkPayloadBytes({ chunkBytes: 4_096, maximumEnvelopeBytes: 1_024 }, 16)).toBe(1_008);
   });
 });
@@ -246,18 +278,24 @@ test.describe('createOutgoingTransfer', () => {
 });
 
 test.describe('createIncomingTransfer', () => {
-  test('refuses an opening that holds its whole total, and takes one without a byte', () => {
-    const refused = createIncomingTransfer(patternOf(4), {
-      failures: SERVER_FAILURES,
-      limits: { maximumChunkRuns: 4, windowBytes: 8 },
-      payloadBytesPerChunk: 1,
-      total: 4,
-    });
+  test('refuses an opening that holds its whole total, and one without a byte of its payload', () => {
+    for (const opening of [patternOf(4), new Uint8Array(0)]) {
+      const refused = createIncomingTransfer(opening, {
+        failures: SERVER_FAILURES,
+        limits: { maximumChunkRuns: 4, windowBytes: 8 },
+        payloadBytesPerChunk: 1,
+        total: 4,
+      });
 
-    expect(refused).toMatchObject({ code: ProtocolCode.CHUNK_INVALID, side: 'server' });
-    expect(incomingOf(new Uint8Array(0), { total: 4 })).toMatchObject({
-      contiguous: 0,
-      creditEnd: 0,
+      expect(refused, String(opening.length)).toMatchObject({
+        code: ProtocolCode.CHUNK_INVALID,
+        side: 'server',
+      });
+    }
+
+    expect(incomingOf(patternOf(1), { total: 4 })).toMatchObject({
+      contiguous: 1,
+      creditEnd: 1,
       total: 4,
     });
   });

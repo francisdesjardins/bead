@@ -95,6 +95,23 @@ public sealed class RelayTests
         };
     }
 
+    // a JWT read without verifying it, its aud the one given; its signature none verifies
+    private static Credential JwtFor(string audience)
+    {
+        var part = (string json) =>
+        {
+            return System.Buffers.Text.Base64Url.EncodeToString(System.Text.Encoding.UTF8.GetBytes(json));
+        };
+
+        return Credential.Jwt($"{part("{\"alg\":\"HS256\",\"typ\":\"at+jwt\"}")}.{part("{\"aud\":\"" + audience + "\"}")}.c2ln");
+    }
+
+    // an OPAQUE's token, any
+    private static Credential Opaque()
+    {
+        return Credential.Opaque(SessionToken.FromBytes(Enumerable.Repeat((byte)7, SessionToken.Bytes).ToArray()));
+    }
+
     private static Task Handled(IRequestHandler? handler, RequestResolverProps props)
     {
         Assert.NotNull(handler);
@@ -118,6 +135,128 @@ public sealed class RelayTests
     }
 
     // definition
+
+    [Fact]
+    public void Takes_the_audience_each_destination_verifies_gives_the_set_of_them_and_refuses_one_not_of_well_formed_Unicode()
+    {
+        var relay = new TestRelay().Relay;
+
+        relay.Register(new RecordingTarget(), Seven with { Audience = "bead-interop" });
+        relay.Register(new RecordingTarget(), new DestinationOptions { Audience = "bead-other", DestinationId = 8 });
+        relay.Register(new RecordingTarget(), new DestinationOptions { Audience = "bead-interop", DestinationId = 9 });
+        relay.Register(new RecordingTarget(), new DestinationOptions { DestinationId = 10 });
+
+        Assert.Equal(["bead-interop", "bead-other"], relay.Audiences());
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return relay.Register(new RecordingTarget(), new DestinationOptions { Audience = "\ud800", DestinationId = 11 });
+        });
+        Assert.Equal(4, relay.Destinations().Count);
+    }
+
+    [Fact]
+    public void Forwards_a_credential_unresolved_unless_it_verifies_as_each_of_its_handlers_says_to_a_destination_registered_or_not()
+    {
+        var forwarding = new TestRelay().Relay;
+        var verifying = new TestRelay(Admitting with { Verifies = true }).Relay;
+
+        forwarding.Register(new RecordingTarget(), Seven);
+        verifying.Register(new RecordingTarget(), Seven);
+
+        Assert.True(forwarding.HandlerOf(7)!.ForwardsCredentials);
+        Assert.True(forwarding.HandlerOf(99)!.ForwardsCredentials);
+        Assert.False(verifying.HandlerOf(7)!.ForwardsCredentials);
+        Assert.False(verifying.HandlerOf(99)!.ForwardsCredentials);
+    }
+
+    [Fact]
+    public void Answers_a_call_leg_B_cannot_carry_DESTINATION_UNREACHABLE_nothing_tried_a_JWT_whose_aud_names_not_its_destination_s_audience_or_to_one_of_none_an_ELSEWHERE_to_one_of_none_or_over_a_leg_B_that_carries_none_either_in_the_clear()
+    {
+        var relay = new TestRelay().Relay;
+        var interop = JwtFor("bead-interop");
+
+        relay.Register(new RecordingTarget(), Seven with { Audience = "bead-other" });
+        relay.Register(new RecordingTarget(), new DestinationOptions { DestinationId = 8 });
+        relay.Register(new RecordingTarget { CarriesCredential = false }, new DestinationOptions { Audience = "bead-interop", DestinationId = 9 });
+        relay.Register(new RecordingTarget { IsSecure = false }, new DestinationOptions { Audience = "bead-interop", DestinationId = 10 });
+        relay.Register(new RecordingTarget(), new DestinationOptions { Audience = "bead-interop", DestinationId = 11 });
+
+        ushort? CodeOf((uint DestinationId, Credential? Credential) call)
+        {
+            var header = HeaderOf(1, call.DestinationId) with { Credential = call.Credential };
+
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header))?.Code;
+        }
+
+        // a JWT whose aud names another, or none, or that does not read
+        Assert.All(
+            new (uint, Credential?)[]
+            {
+                (7, interop),
+                (8, interop),
+                (8, Credential.Elsewhere()),
+                (9, Credential.Elsewhere()),
+                (10, interop),
+                (10, Credential.Elsewhere()),
+                (11, Credential.Jwt("a.b.c")),
+            },
+            (call) =>
+            {
+                Assert.Equal((ushort)ProtocolCode.DestinationUnreachable, CodeOf(call));
+            });
+
+        // what it can carry goes on; none and OPAQUE cross any leg B
+        Assert.All(
+            new (uint, Credential?)[] { (11, interop), (11, Credential.Elsewhere()), (9, interop), (8, null), (10, Opaque()) },
+            (call) =>
+            {
+                Assert.Null(CodeOf(call));
+            });
+    }
+
+    [Fact]
+    public async Task Presents_on_leg_B_what_leg_A_does_a_JWT_s_same_bytes_an_ELSEWHERE_with_what_leg_A_s_transport_carried_none_for_none_or_OPAQUE()
+    {
+        var test = new TestRelay();
+        var target = new RecordingTarget();
+        var interop = JwtFor("bead-interop");
+
+        test.Relay.Register(target, Seven with { Audience = "bead-interop" });
+
+        foreach (var (callId, credential) in new (uint, Credential?)[] { (1, interop), (3, Credential.Elsewhere()), (5, null), (7, Opaque()) })
+        {
+            var header = HeaderOf(callId) with { Credential = credential };
+
+            await Handled(test.Relay.HandlerOf(header), PropsOf(header) with { TransportCredential = "Interop sub=ada" });
+        }
+
+        Assert.Equal(
+            [interop, Credential.Elsewhere("Interop sub=ada"), Credential.None, Credential.None],
+            target.Asked.Select((asked) =>
+            {
+                return asked.Options.Credential!.Value;
+            }));
+    }
+
+    [Fact]
+    public void Holds_a_payload_to_what_one_envelope_holds_behind_leg_B_s_header_with_its_credential_call_by_call_for_a_target_that_takes_no_transfer()
+    {
+        var relay = new TestRelay().Relay;
+        var whole = new RouterLimits { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_024, MaximumTransfers = 0, WindowBytes = 2_048 };
+
+        relay.Register(new RecordingTarget(whole), Seven);
+
+        int? LimitOf(Credential? credential)
+        {
+            return relay.HandlerOf(HeaderOf(1) with { Credential = credential })!.MaximumPayloadBytes;
+        }
+
+        // 12 bytes of header; a JWT's block, 4 and its token padded to a word; an ELSEWHERE's, 4
+        Assert.Equal(1_012, LimitOf(null));
+        Assert.Equal(1_012, LimitOf(Opaque()));
+        Assert.Equal(1_024 - 316, LimitOf(Credential.Jwt(new string('a', 300))));
+        Assert.Equal(1_008, LimitOf(Credential.Elsewhere()));
+    }
 
     [Fact]
     public void Relays_nothing_while_no_destination_is_registered_and_every_destination_once_one_is()
@@ -292,7 +431,8 @@ public sealed class RelayTests
 
         var asked = Assert.Single(target.Asked);
 
-        Assert.Equal(new ResolvedRequestOptions { CancellationToken = source.Token, Timeout = Infinite }, asked.Options);
+        // presenting none, as leg A did, whatever its target presents by default
+        Assert.Equal(new ResolvedRequestOptions { CancellationToken = source.Token, Credential = Credential.None, Timeout = Infinite }, asked.Options);
         Assert.Equal(new byte[] { 4, 5 }, asked.Payload.ToArray());
         Assert.Equal(
             new Procedure
@@ -325,7 +465,7 @@ public sealed class RelayTests
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)) with { Signal = source.Token });
 
         Assert.Equal(
-            new ResolvedRequestOptions { CancellationToken = source.Token, ConnectionHandle = Device, Timeout = Infinite },
+            new ResolvedRequestOptions { CancellationToken = source.Token, ConnectionHandle = Device, Credential = Credential.None, Timeout = Infinite },
             Assert.Single(test.Own).Options);
 
         // a relay told nothing of what its connections take passes a request on to any
@@ -789,6 +929,11 @@ public sealed class RelayTests
     private sealed class RecordingTarget(RouterLimits? limits = null) : IRouterTarget
     {
         public RouterLimits Limits { get; } = limits ?? RouterLimits.Default;
+
+        // in process: it carries a credential, and is secure, unless a test says otherwise
+        public bool CarriesCredential { get; init; } = true;
+
+        public bool IsSecure { get; init; } = true;
 
         public List<Asked> Asked { get; } = [];
 

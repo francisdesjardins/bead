@@ -45,6 +45,34 @@ public sealed class NotificationManagerTests
     // definition
 
     [Fact]
+    public void Holds_one_subscription_a_procedure_for_each_session_of_a_connection_its_connection_s_and_each_credential_s_by_its_identifier_octet_for_octet()
+    {
+        var notifications = new NotificationManager(PacingLimits.Default);
+        var grace = new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = "https://a.example", Sub = "grace" };
+        var inSession = (uint callId, SessionIdentifier identifier) =>
+        {
+            return CallOf(callId, First) with { Session = new CallSession { Identifier = identifier } };
+        };
+
+        Assert.Equal(1u, notifications.Register(ProcedureOf(10, 1), CallOf(1, First)));
+        Assert.Equal(3u, notifications.Register(ProcedureOf(10, 1), inSession(3, grace)));
+        Assert.Equal(5u, notifications.Register(ProcedureOf(10, 1), inSession(5, grace with { Issuer = "https://b.example" })));
+        Assert.Equal(7u, notifications.Register(ProcedureOf(10, 1), inSession(7, grace with { Sub = "Grace" })));
+
+        // one identifier, given anew, is one session, which holds its place already
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            return notifications.Register(ProcedureOf(10, 1), inSession(9, grace with { }));
+        });
+
+        Assert.Equal(1u, notifications.SubscriptionOf(ProcedureOf(10, 1), First));
+        Assert.Equal(3u, notifications.SubscriptionOf(ProcedureOf(10, 1), new SubscriptionPlace(First, grace with { })));
+        Assert.Equal([(First, 1u), (First, 3u), (First, 5u), (First, 7u)], notifications.Candidates(ProcedureOf(10, 1)));
+        Assert.Equal(grace, notifications.SubscriptionAt(3, First)!.Value.Session);
+        Assert.Null(notifications.SubscriptionAt(1, First)!.Value.Session);
+    }
+
+    [Fact]
     public void Registers_each_subscription_under_the_call_id_of_the_request_that_made_it()
     {
         var notifications = new NotificationManager(PacingLimits.Default);

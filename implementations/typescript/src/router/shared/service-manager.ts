@@ -44,6 +44,7 @@ import type {
   ResolverFailure,
   RouterAnswer,
   ServiceManagerEventMap,
+  SessionIdentifier,
 } from './types';
 
 // interfaces
@@ -167,18 +168,23 @@ export const resolveRequestOptions = (
   return closeOnTimeout === undefined ? { ...rest, timeout } : { ...rest, closeOnTimeout, timeout };
 };
 
-/** Whether a notification goes to a connection, as `options` say; `undefined` when each gets it. */
+/**
+ * Whether a notification goes to a subscription, by its connection and the session holding it, as
+ * `options` say; `undefined` when each gets it.
+ */
 const filterOf = <Handle extends string>(
   options?: INotifyOptions<Handle>
-): ((connectionHandle: Handle) => boolean) | undefined => {
+): ((connectionHandle: Handle, identifier?: SessionIdentifier) => boolean) | undefined => {
   const { exclude, filter } = options ?? {};
 
   if (exclude === undefined && filter === undefined) {
     return undefined;
   }
 
-  return (connectionHandle) => {
-    return connectionHandle !== exclude && (filter === undefined || filter(connectionHandle));
+  return (connectionHandle, identifier) => {
+    return (
+      connectionHandle !== exclude && (filter === undefined || filter(connectionHandle, identifier))
+    );
   };
 };
 
@@ -271,11 +277,14 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     }
 
     const { direction, error = null, isAnswered = false, options, rx, started, tx, type } = step;
+    // ! the credential a call presents stays out of what is told: its token, or what its transport
+    // carries, never reaches a listener
+    const { credential: _credential, ...told } = options ?? {};
 
     emitter.emit(DEBUG_EVENT, error, {
       direction,
       duration: isAnswered ? Math.trunc(clock.performance.now() - started.timestamp) : undefined,
-      options: options === undefined ? undefined : { ...options },
+      options: options === undefined ? undefined : (told as IResolvedRequestOptions),
       procedureId: procedure.procedureId,
       procedureName: procedure.procedureName,
       rx: snapshot(rx),
@@ -474,7 +483,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     };
 
     const resolver = nameAfter(async (props: IRequestResolverProps<Handle>): Promise<void> => {
-      const { connectionHandle, header, signal } = props;
+      const { connectionHandle, header, session, signal } = props;
       // the call starts as it arrives: its admission and its decoding count in its duration
       const started = startedNow();
       const target = { connectionHandle, header };
@@ -489,7 +498,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         let refusal: AdmissionFailure | undefined;
 
         try {
-          refusal = admit(target);
+          refusal = admit({ ...target, session });
         } catch (reason) {
           await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
 
@@ -510,11 +519,12 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
       trace(procedure, { direction: 'rx', rx: requestPayload, started, type });
 
-      // the callback is handed the request, decoded, and no more
+      // the callback is handed the request, decoded, its call's session, and no more
       const request: IRequestProps<RequestPayload, Handle> = Object.freeze({
         connectionHandle,
         header,
         payload: requestPayload,
+        session,
         signal,
       });
       const answer = async (payload: ResponsePayload | null, failure?: Failure) => {
@@ -557,7 +567,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
             throw new ProgrammerError(`${procedure.procedureName} subscribes before it answers`);
           }
 
-          return router.subscribe(target);
+          return router.subscribe({ ...target, session });
         },
       });
 
@@ -711,6 +721,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   DEBUG_EVENT,
   DEPRECATED_EVENT,
   DROPPED_EVENT,
@@ -731,8 +742,10 @@ export { ProgrammerError } from '../../transport/shared/errors';
 export type { IEventIteratorOptions } from '../../transport/shared/types';
 export type {
   AdmissionFailure,
+  Announcement,
   CallId,
   ConnectionHandle,
+  Credential,
   DebugDirection,
   DebugFilterSource,
   DebugType,

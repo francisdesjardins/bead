@@ -141,9 +141,9 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
     /// Opens a transfer on its call from its opening, or gives the failure that refuses it:
     /// <c>PAYLOAD_TOO_LARGE</c> when this side takes no transfer, for a total of 0 or past the
     /// payload's limit; <c>CAPACITY_EXCEEDED</c> when the connection holds its transfers already, or
-    /// the budget cannot hold the opening; <c>CHUNK_INVALID</c> for an opening that holds its whole
-    /// total. Given <c>OnStall</c>, a timer hears the transfer stall when nothing comes for the
-    /// inactivity allowed.
+    /// the budget cannot hold the opening; <c>CHUNK_INVALID</c> for an opening that carries no byte
+    /// of its payload, or holds its whole total. Given <c>OnStall</c>, a timer hears the transfer
+    /// stall when nothing comes for the inactivity allowed.
     /// </summary>
     public (Receiving? Receiving, Failure? Refusal) Open(
         ReadOnlyMemory<byte> opening,

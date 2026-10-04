@@ -24,6 +24,9 @@ internal sealed class PendingRequest
 
     public Action<bool>? OnSent { get; init; }
 
+    /// <summary>What its transport carries beside its request, a call's presenting ELSEWHERE; none for any other.</summary>
+    public string? Carried { get; init; }
+
     public bool IsSent { get; set; }
 
     public ITimer? Timer { get; set; }

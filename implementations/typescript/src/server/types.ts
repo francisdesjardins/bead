@@ -10,13 +10,14 @@ import type { IRouterServer, IRouterServerTransportLike } from '../router/server
 import type {
   AdmissionFailure,
   IAdmissionRequest,
+  ICredentials,
   IServiceManager,
   IServiceManagerOptions,
   RouterLimitsOptions,
 } from '../router/shared/types';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import type { IClock } from '../transport/shared/clock';
-import type { Data, EmitterListener, IGauges } from '../transport/shared/types';
+import type { EmitterListener, IGauges, ITransportMessage } from '../transport/shared/types';
 import type { IHealth, ServerGauges } from './health';
 
 // interfaces
@@ -55,13 +56,24 @@ export interface IServer<
    */
   health(): IHealth;
   /**
-   * A `beforeRequest` that lets through only a connection with a session: what every procedure but
-   * the one that makes the session asks for. It refuses with its `refusal`, SESSION_REQUIRED. A
-   * composition by `&&` loses that refusal and answers ACCESS_DENIED; a caller that wants to keep
-   * SESSION_REQUIRED puts `refusal` on its own function.
+   * A `beforeRequest` that lets through only a call with a session, its call's, never its
+   * connection's (spec 13.5): what every procedure but the one that makes the session asks for. It
+   * refuses with its `refusal`, SESSION_REQUIRED, which its router answers a call that presented a
+   * credential with ACCESS_DENIED (spec 9.2, step 5). A composition by `&&` loses that refusal and
+   * answers ACCESS_DENIED; a caller that wants to keep SESSION_REQUIRED puts `refusal` on its own
+   * function.
    */
   requireSession: ((
-    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'connectionHandle'>
+    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>
+  ) => boolean) & { readonly refusal: AdmissionFailure };
+  /**
+   * A relay's `beforeRoute`, its server's by default (spec 14.3, step 1): a call in leg A's
+   * connection's session, or one whose header presents a `JWT`, or an `ELSEWHERE` its transport
+   * carried, which the relay forwards for its destination to verify. It refuses any other, a call in
+   * none that presented none, with its `refusal`, SESSION_REQUIRED.
+   */
+  requireSessionOrCredential: ((
+    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'header' | 'session'>
   ) => boolean) & { readonly refusal: AdmissionFailure };
   /**
    * What `await using` calls: the layers come apart in the reverse of the order they were built in
@@ -108,6 +120,12 @@ export interface IServerOptions {
    */
   clock?: IClock | undefined;
   /**
+   * What its router resolves a request presenting a `JWT` or an `ELSEWHERE` with: a `JWT`'s keys,
+   * audience and key set, an `ELSEWHERE`'s verifier. A scheme it is given nothing for is refused,
+   * CREDENTIAL_UNSUPPORTED.
+   */
+  credentials?: ICredentials | undefined;
+  /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the server is a {@link ProgrammerError}.
    */
@@ -132,7 +150,8 @@ export interface IServerOptions {
   pacing?: PacingLimitsOptions | undefined;
   /**
    * How the router relays a request that names a destination registered in it. Its `beforeRoute`
-   * is `requireSession` when not given: a relay is a door to what is behind it.
+   * is `requireSessionOrCredential` when not given: a relay is a door to what is behind it, which a
+   * credential it forwards opens for its destination to verify.
    */
   relay?: IRelayOptions | undefined;
 }
@@ -168,7 +187,9 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   ): unknown;
   off(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
   on(
     event: 'close',
@@ -189,7 +210,9 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   ): unknown;
   on(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
   stop(): Promise<void>;
 }

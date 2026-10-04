@@ -6,8 +6,10 @@ import type {
   EmitterListener,
   IEventIteratorOptions,
   IGauges,
+  ITransportMessage,
 } from '../../transport/shared/types';
 import type {
+  CredentialScheme,
   DEBUG_EVENT,
   DEPRECATED_EVENT,
   DROPPED_EVENT,
@@ -16,6 +18,7 @@ import type {
   FailureScope,
   ProtocolCode,
 } from './constants';
+import type { IJwtKey, Jwk, JwtAlgorithm } from './jwt-verifier';
 
 // declarations
 
@@ -90,13 +93,13 @@ export interface IFailure {
 }
 
 /**
- * A failure's header: its call, and the block an answer may carry — the session, announced when it
- * changes, `null` once it ended. An answer names its call alone: never a destination.
+ * A failure's header: its call, and the block an answer may carry — its connection's session,
+ * announced when it changes. An answer names its call alone: never a destination.
  */
 export interface IFailureHeader {
   callId: CallId;
+  credential?: Announcement | undefined;
   kind: typeof EnvelopeKind.FAILURE;
-  sessionToken?: SessionToken | null | undefined;
 }
 
 /** A notification's header: the call id of the subscription it belongs to, and nothing more. */
@@ -121,19 +124,19 @@ export interface IReceivedFailure extends IFailure {
 
 /**
  * A request's header: its call, the procedure it asks for, and its blocks — where it goes behind
- * the peer, the session it presents, which a router that holds connections reads and ignores, and
- * the `total` of a payload it opens a transfer for: its own payload is then the transfer's first
- * bytes. `opensSubscription` says the call subscribes to the procedure's notifications: a server
+ * the peer, the `total` of a payload it opens a transfer for, its own payload then the transfer's
+ * first bytes, and the credential it presents, which its receiver resolves to the call's session.
+ * `opensSubscription` says the call subscribes to the procedure's notifications: a server
  * subscribes the requester of no other request. `paced` asks for them as the requester credits
  * them, the first credited already.
  */
 export interface IRequestHeader extends IProcedureAddress {
   callId: CallId;
+  credential?: Credential | undefined;
   destinationId?: DestinationId | undefined;
   kind: typeof EnvelopeKind.REQUEST;
   opensSubscription?: true | undefined;
   paced?: true | undefined;
-  sessionToken?: SessionToken | undefined;
   total?: number | undefined;
 }
 
@@ -143,8 +146,8 @@ export interface IRequestHeader extends IProcedureAddress {
  */
 export interface IResultHeader {
   callId: CallId;
+  credential?: Announcement | undefined;
   kind: typeof EnvelopeKind.RESULT;
-  sessionToken?: SessionToken | null | undefined;
   total?: number | undefined;
 }
 
@@ -201,14 +204,41 @@ export interface IProcedureAddress {
 
 // types
 
+/** What an answer announces of its connection's session: `OPAQUE`, its token; `NONE`, its end. */
+export type Announcement =
+  | { scheme: typeof CredentialScheme.NONE }
+  | { scheme: typeof CredentialScheme.OPAQUE; token: SessionToken };
+
 /**
  * The call an envelope belongs to, from 1 to 0xffffffff: odd when a client opened it, even when a
  * server did. A subscription's notifications carry the call id of the request that subscribed.
  */
 export type CallId = number;
 
+/**
+ * A `CREDENTIAL` block: its scheme, and what it holds — an announcement's; a `JWT`'s token, one
+ * character per byte, as a relay passes it on; nothing, for `ELSEWHERE`; a scheme to come's bytes,
+ * read whole. Tell them apart by `token` or `bytes` first: a scheme to come is any number.
+ */
+export type Credential =
+  | Announcement
+  | { scheme: typeof CredentialScheme.JWT; token: string }
+  | { scheme: typeof CredentialScheme.ELSEWHERE }
+  | { bytes: Uint8Array; scheme: number };
+
 /** What a request is for behind the peer that takes it, from 1 to 0xffffffff; none, the peer. */
 export type DestinationId = number;
+
+/**
+ * A credential's session's identifier (spec 13.9): a record of its credential scheme and its claim —
+ * a `JWT`'s `iss` with its `sid`, else with its `sub`; an `ELSEWHERE`'s verifier's `id`. Two are one
+ * when their scheme, their claim's name and their values are equal, octet for octet, so one `sub`
+ * under two issuers names two sessions.
+ */
+export type SessionIdentifier =
+  | Readonly<{ id: string; scheme: typeof CredentialScheme.ELSEWHERE }>
+  | Readonly<{ issuer: string; scheme: typeof CredentialScheme.JWT; sid: string }>
+  | Readonly<{ issuer: string; scheme: typeof CredentialScheme.JWT; sub: string }>;
 
 /**
  * An envelope as it was read: its kind, its header, and its payload — a failure's record, read,
@@ -252,18 +282,20 @@ export type OutgoingEnvelope =
   | { header: IResultHeader; kind: typeof EnvelopeKind.RESULT; payload: Uint8Array };
 
 /**
- * A header fit to be traced or thrown: a copy, its session token left out, and whether it had one
- * said instead.
+ * A header fit to be traced or thrown: a copy, its credential left out, and its scheme said instead
+ * when it had one.
  */
-export type RedactedHeader = WithoutSessionToken<EnvelopeHeader> & { hasSessionToken: boolean };
+export type RedactedHeader = WithoutCredential<EnvelopeHeader> & {
+  credentialScheme?: number | undefined;
+};
 
 /** One entry per protocol failure a router raises, each keeping its own code. */
 type RouterFailureEntries = {
   readonly [Key in keyof FAILURE_KEYS]: IProtocolFailure<FAILURE_KEYS[Key]>;
 };
 
-/** Each header of `Header` without its session token, kept apart by kind. */
-type WithoutSessionToken<Header> = Header extends unknown ? Omit<Header, 'sessionToken'> : never;
+/** Each header of `Header` without its credential, kept apart by kind. */
+type WithoutCredential<Header> = Header extends unknown ? Omit<Header, 'credential'> : never;
 
 /** Which side of a connection a router is on: the one that connects, or the one that accepts. */
 export type RouterSide = 'client' | 'server';
@@ -282,10 +314,38 @@ export type SessionToken = string & { readonly [sessionTokenBrand]: 'SessionToke
 
 // interfaces
 
-/** A request as its admission sees it: where it came from, and its header — never its payload. */
+/**
+ * A request as its admission sees it: where it came from, its header — never its payload — and the
+ * session its call runs in.
+ */
 export interface IAdmissionRequest<Handle extends string = ConnectionHandle> {
   connectionHandle: Handle;
   header: Readonly<IRequestHeader>;
+  /** The call's session, its credential resolved (spec 13.1); none when the call runs in none. */
+  session?: ICallSession | undefined;
+}
+
+/**
+ * The session a call runs in, its credential resolved (spec 13.1): its connection's session, for a
+ * call presenting none or that session's `OPAQUE`; a credential's session, for one presenting a
+ * `JWT` or an `ELSEWHERE`. Frozen: the call keeps the session it resolved to, whatever befalls its
+ * connection's meanwhile.
+ */
+export interface ICallSession {
+  /**
+   * What the session holds: a connection's session's data, as its server keeps it; a credential's,
+   * the data of the credential the call presented — a `JWT`'s claims set, frozen to its depth, or
+   * what an `ELSEWHERE`'s verifier gave.
+   */
+  readonly data: unknown;
+  /**
+   * A credential's session's end, in whole milliseconds since the epoch (spec 13.9): the end its
+   * connection keeps for its identifier, when it keeps one, else its own; none for a connection's
+   * session, and for an `ELSEWHERE` whose verifier gave none.
+   */
+  readonly end?: number | undefined;
+  /** A credential's session's identifier; none for a connection's session. */
+  readonly identifier?: SessionIdentifier | undefined;
 }
 
 /**
@@ -326,6 +386,14 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
    */
   closeOnTimeout?: boolean | undefined;
   /**
+   * The credential the call presents, for this call alone: `OPAQUE`, the session its router
+   * learned — a server's, its connection's — so the call is refused rather than run in another
+   * should that one end or be opened anew. None by default: the call runs in whatever session its
+   * connection holds. A router that knows no session fails the call before it goes, with
+   * `SESSION_REQUIRED`.
+   */
+  credential?: RequestCredential | undefined;
+  /**
    * The connection the request goes to, for a router with more than one: a server's names its
    * client; a client's has one peer, and names none.
    */
@@ -359,10 +427,19 @@ export interface IRequestHandler<Handle extends string = ConnectionHandle> {
   /**
    * Whether a request may reach the handler, asked on its header before its payload is read — or
    * comes, for one that opens a transfer: `undefined` admits it; a failure refuses it, and the router
-   * answers with that failure; one that throws refuses it as failed, `PROCEDURE_FAILED`, and is
-   * reported. A router that asks says so with `isAdmitted`, so it is asked once.
+   * answers with that failure, but for `SESSION_REQUIRED` to a request that presented a credential,
+   * which it answers `ACCESS_DENIED`, its detail kept, since the credential may hold and its requester
+   * would withdraw it (spec 9.2, step 5); one that throws refuses it as failed, `PROCEDURE_FAILED`,
+   * and is reported. A router that asks says so with `isAdmitted`, so it is asked once.
    */
   admit?(request: IAdmissionRequest<Handle>): IFailure | undefined;
+  /**
+   * Whether it forwards a credential unresolved — a relay's that does not verify (spec 14.3, step
+   * 1): a request presenting a `JWT`, or an `ELSEWHERE` its transport carried, reaches its
+   * admission in none, every scheme the protocol names taken, and `sessionOf` is not asked; one
+   * presenting none or `OPAQUE` resolves as any other.
+   */
+  forwardsCredentials?: boolean | undefined;
   /**
    * The bytes a payload it takes or answers holds at most, whole or as a transfer: a whole number
    * above 0, and the router's own limit where that one is smaller. The router's alone when not
@@ -385,11 +462,18 @@ export interface IRequestResolverProps<Handle extends string = ConnectionHandle>
   /** Set by a router that asked the resolver's `admit` already: the resolver asks nothing again. */
   isAdmitted?: true | undefined;
   payload: Uint8Array;
+  /** The call's session, as its admission read it; none when the call runs in none. */
+  session?: ICallSession | undefined;
   /**
    * Aborted when the call ends before its answer: with a {@link CancelError} when its requester
    * cancels it, with a {@link DisconnectError} when its connection closes or the router is disposed.
    */
   signal: AbortSignal;
+  /**
+   * What its transport carried beside it, which a relay moves to leg B for an `ELSEWHERE`; none when
+   * nothing was carried. Never handed to a resolver's callback.
+   */
+  transportCredential?: string | undefined;
 }
 
 /** The options of a request, with the manager's defaults applied. */
@@ -444,9 +528,11 @@ export interface IRouterCore<Handle extends string> {
    * neither being answered nor in use, is answered; an answer of this layout ends the call it
    * answers, and a chunk the transfer it was for, while its payload is not whole; anything else is
    * reported, save an answer or a chunk of this layout on a call id reserved, or a chunk on a call
-   * abandoned, which is late and dropped in silence.
+   * abandoned, which is late and dropped in silence. Given as a transport hands it on, the envelope
+   * comes with the credential its transport carried beside it, which a request presenting
+   * `ELSEWHERE` stands for (spec 15.1); given alone, it came with none.
    */
-  receive(data: Data, connectionHandle: Handle): void;
+  receive(message: Data | ITransportMessage, connectionHandle: Handle): void;
   /**
    * Registers a resolver; a second one for its procedure, an address that is not an integer from 1
    * to 65535, or a payload's limit that is not a whole number above 0, is a
@@ -467,11 +553,14 @@ export interface IRouterCore<Handle extends string> {
    * for that subscription's notifications as they are credited. `onCallId` hears
    * the call id before the request goes out. `onSent` hears `true` as it is handed to the transport
    * — its transfer's opening, for one — and `false` should the transport refuse it: before `true`,
-   * or after `false`, nothing of it was tried. None is drawn once `signal` aborted. A payload too
-   * large for one envelope goes as a transfer, as the peer's credit lets it, and a result may come
-   * as one; the payload is read until the call settles, and must not change meanwhile. Rejects with
-   * a {@link FailureError} for a failure answered, a payload too large — past its procedure's limit
-   * or the router's, or a transfer where this side sends none — or every call id taken; with a
+   * or after `false`, nothing of it was tried. None is drawn once `signal` aborted. Its header
+   * presents `credential`, as its side resolved what its options ask, and its transport carries
+   * `transportCredential` beside it — beside its opening, for a transfer. A payload too large for one
+   * envelope goes as a transfer, as the peer's credit lets it, and a result may come as one; the
+   * payload is read until the call settles, and must not change meanwhile. Rejects with a
+   * {@link FailureError} for a failure answered, a payload too large — past its procedure's limit
+   * or the router's, or a transfer where this side sends none — a header that leaves a transfer's
+   * opening no byte, `ENVELOPE_TOO_LARGE`, or every call id taken; with a
    * {@link ProgrammerError}, drawing nothing, for a procedure's limit that is not a whole number
    * above 0, or a timeout no timer holds. Ended once it went out — its timeout passed, a transfer
    * silent too long, its signal aborted, a chunk that cannot go out — it cancels its call, before
@@ -481,12 +570,14 @@ export interface IRouterCore<Handle extends string> {
     payload: Uint8Array,
     request: {
       connectionHandle: Handle;
+      credential?: Credential | undefined;
       onCallId?: ((callId: CallId) => void) | undefined;
       onSent?: ((isHanded: boolean) => void) | undefined;
       opensSubscription?: boolean | undefined;
       options: IResolvedRequestOptions;
       paced?: boolean | undefined;
       procedure: Pick<IProcedure, 'maximumPayloadBytes' | 'procedureId' | 'serviceId'>;
+      transportCredential?: string | undefined;
     }
   ): Promise<IRouterResult>;
   /**
@@ -550,7 +641,8 @@ export interface IRouterCoreOptions {
  *
  * The core calls it in this order. An envelope that reads is traced, then dispatched by kind: a
  * request asks `isCallIdInUse`, then — one that names a destination — `handlerOfDestination`, then
- * its handler's `admit`, then — one that opens a subscription — `isTwoWay`, then goes to its handler
+ * — its credential of a scheme the side takes — `sessionOf`, then its handler's `admit`, on the
+ * call's session, then — one that opens a subscription — `isTwoWay`, then goes to its handler
  * once its payload is whole; a result or a failure
  * is shown to `onAnswerReceived`, then paired with its request, and a failure no call waits on is
  * offered to `onUnpairedFailure`; a notification goes to `onNotification`; a cancel to `onCancel`.
@@ -564,6 +656,12 @@ export interface IRouterCoreOptions {
  * they hold beyond the core's.
  */
 export interface IRouterCorePort<Handle extends string> {
+  /**
+   * The credential schemes the side takes besides `OPAQUE`, which it always does: `JWT`,
+   * `ELSEWHERE`, each resolved by `sessionOf` in a later turn. None when not given: a request
+   * presenting any other is refused with `CREDENTIAL_UNSUPPORTED`, whose detail names those taken.
+   */
+  readonly credentialSchemes?: readonly CredentialScheme[] | undefined;
   readonly failures: IRouterFailures;
 
   /** What the router did: sent a request, or took the response to one. */
@@ -587,14 +685,16 @@ export interface IRouterCorePort<Handle extends string> {
    */
   isTwoWay?(connectionHandle: Handle): boolean;
   /**
-   * An answer about to be written — a failure or not — and the handler its request was routed to;
-   * what it returns undoes what it did, should the answer not go out.
+   * An answer about to be written — a failure or not — the handler its request was routed to, and
+   * the call's session its admission read; what it returns undoes what it did, should the answer
+   * not go out.
    */
   beforeAnswer?(answer: {
     connectionHandle: Handle;
     header: IRequestHeader;
     isFailure: boolean;
     resolver: IRequestHandler<Handle> | undefined;
+    session: ICallSession | undefined;
   }): (() => void) | undefined;
   /**
    * A cancel from `connectionHandle`, once the call it cancels, if open, is forgotten and before its
@@ -626,8 +726,23 @@ export interface IRouterCorePort<Handle extends string> {
   ): boolean;
   /** What went wrong that no call waits on. */
   report(error: Error, connectionHandle: Handle): void;
-  /** Hands `bytes` over to the transport, for `connectionHandle`. */
-  send(bytes: Uint8Array, connectionHandle: Handle): Promise<unknown>;
+  /**
+   * Hands an envelope's bytes over to the transport, for `connectionHandle`, with the credential it
+   * carries beside them, when it carries one.
+   */
+  send(
+    message: { credential?: string | undefined; data: Uint8Array },
+    connectionHandle: Handle
+  ): Promise<unknown>;
+  /**
+   * The call's session a request's credential resolves to, asked once per request, its call id
+   * held, as {@link SessionOf} says — never for an `ELSEWHERE` its transport carried nothing beside,
+   * which no credential came for — but for a rejection with a {@link CapacityError}, a bound of the
+   * side's own, which the router answers `CAPACITY_EXCEEDED` and reports nowhere. None when not
+   * given: a request presenting none runs in none, and one presenting a credential is refused with
+   * `SESSION_REQUIRED`.
+   */
+  sessionOf?(request: ISessionRequest<Handle>, signal: AbortSignal): ReturnType<SessionOf<Handle>>;
   /**
    * The session of `connectionHandle`, which its next answer announces when it changed; `undefined`
    * for none. Asked for each answer only; what it throws fails that answer. None when not given.
@@ -656,8 +771,11 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   notify(
     payload: Uint8Array,
     notification: {
-      /** Whether a connection subscribed gets it; each does when not given. */
-      filter?: ((connectionHandle: Handle) => boolean) | undefined;
+      /**
+       * Whether a subscription gets it, by its connection and the session that holds it — a
+       * credential's, by its identifier; its connection's, none; each does when not given.
+       */
+      filter?: ((connectionHandle: Handle, identifier?: SessionIdentifier) => boolean) | undefined;
       /** What it replaces, queued for a paced subscription: the one of the same key. */
       key?: NotificationKey | undefined;
       procedure: IProcedureAddress;
@@ -683,13 +801,16 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
     request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>
   ): Promise<void>;
   /**
-   * Subscribes the connection a request came from to that request's procedure, and gives the call id
-   * of the subscription: a server's router does; a client's, which notifies nobody, cannot. A
-   * request that opens no subscription is a {@link ProgrammerError}: its requester asked for an
-   * answer alone. A connection closed, or a router disposed, is a {@link DisconnectError}; a call its
-   * requester cancelled, or one answered already, a {@link CancelError}.
+   * Subscribes the connection a request came from to that request's procedure, in the call's
+   * session, which bounds it, and gives the call id of the subscription: a server's router does; a
+   * client's, which notifies nobody, cannot. A request that opens no subscription is a
+   * {@link ProgrammerError}: its requester asked for an answer alone. A connection closed, or a
+   * router disposed, is a {@link DisconnectError}; a call its requester cancelled, or one answered
+   * already, a {@link CancelError}.
    */
-  subscribe(request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>): CallId;
+  subscribe(
+    request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header' | 'session'>
+  ): CallId;
   /**
    * Unregisters a notification, and unbinds the call it is bound to: unless `cancel` is `false` — its
    * subscription taken away already, acknowledged — the peer is sent a cancel, so it holds nothing
@@ -708,6 +829,20 @@ export interface ICallAddress<Handle extends string = ConnectionHandle> {
   connectionHandle: Handle;
 }
 
+/**
+ * A request as `sessionOf` resolves its credential: where it came from, its header — the credential
+ * it presents among it — and the credential its transport carried beside it.
+ */
+export interface ISessionRequest<Handle extends string = ConnectionHandle> {
+  connectionHandle: Handle;
+  header: Readonly<IRequestHeader>;
+  /**
+   * What its transport carried beside it, which an `ELSEWHERE` stands for (spec 15.1): over HTTP,
+   * its `POST`'s `Authorization`, as it came; none when nothing was carried.
+   */
+  transportCredential?: string | undefined;
+}
+
 // types
 
 /** Who a request came from, as the router names it. */
@@ -723,6 +858,114 @@ export type RouterLimitsOptions = { [Key in keyof IRouterLimits]?: IRouterLimits
 
 /** What a router did: sent or took a request, a response, or a notification. */
 export type RouterActivity = 'notification' | 'request' | 'response';
+
+/**
+ * The credential a call presents, among its options: `NONE`, none whatever the default; `OPAQUE`,
+ * the session its router learned; a `JWT`, its token; an `ELSEWHERE`, what its transport carries
+ * beside the request — over HTTP, its `Authorization` — its header writing the scheme alone.
+ */
+export type RequestCredential =
+  | DefaultCredential
+  | Readonly<{ scheme: typeof CredentialScheme.NONE }>
+  | Readonly<{ scheme: typeof CredentialScheme.OPAQUE }>;
+
+/**
+ * A credential a client presents by default (spec 13.4): a `JWT`, or an `ELSEWHERE` with what its
+ * transport carries beside each request. Never `OPAQUE`, which a call asks for alone.
+ */
+export type DefaultCredential =
+  | Readonly<{ carried: string; scheme: typeof CredentialScheme.ELSEWHERE }>
+  | Readonly<{ scheme: typeof CredentialScheme.JWT; token: string }>;
+
+/**
+ * What an `ELSEWHERE`'s verifier settles with for a credential that holds (spec 13.10): its `id`,
+ * which names its session with the scheme, its data, which the call carries, and its end, in
+ * milliseconds since the epoch, held rounded up to a whole one; none for a session without one.
+ */
+export interface IElsewhereSession {
+  readonly data?: unknown;
+  readonly end?: number | undefined;
+  readonly id: string;
+}
+
+/**
+ * What a side resolves a request's `JWT` and `ELSEWHERE` with (spec 9.2, step 5): a `JWT`'s keys,
+ * each with its issuer and its one algorithm, its audience, and the key set the side asks for the
+ * keys of an issuer it names; an `ELSEWHERE`'s verifier. The side takes a `JWT` once given keys or a
+ * key set, and an `ELSEWHERE` once given its verifier; it verifies on the clock it runs on.
+ */
+export interface ICredentials {
+  /**
+   * The audience a `JWT` names for this side (RFC 7519 §4.1.3); one that names none is refused.
+   * Given with keys or a key set, whatever the side's relay does: keys without one are a
+   * {@link ProgrammerError}, as the side is built, since a request to the side itself would hold its
+   * token to no audience.
+   */
+  readonly audience?: string | undefined;
+  /** The keys a `JWT` is verified with (spec 13.8), held for good. */
+  readonly keys?: readonly IJwtKey[] | undefined;
+  /** The key set the side asks for the keys of the issuers it names (spec 13.8). */
+  readonly keySet?: IJwtKeySet | undefined;
+  /**
+   * The `ELSEWHERE` verifier: given what its call's transport carried, whole, and its call's signal,
+   * it settles with the credential's session, or with none when the credential does not hold. Asked
+   * once per request whose transport carried a credential, in a later turn. One that throws or
+   * rejects, or settles with an `id` that is no string or an `end` that is no number within
+   * ±(2⁵³ − 1), fails the call, reported.
+   */
+  readonly verify?:
+    | ((
+        carried: string,
+        signal: AbortSignal
+      ) => IElsewhereSession | undefined | PromiseLike<IElsewhereSession | undefined>)
+    | undefined;
+}
+
+/**
+ * A key set (RFC 7517 §5), the application's to fetch, given with the issuers it answers for, one at
+ * least: the side asks it for no other, compared octet for octet, so a token whose `iss` it does not
+ * name is judged at once by the keys there are. Asked once a minute at most for an issuer, when a
+ * token's `kid` names none of its issuer's keys that serve — or, without a `kid`, when none of its
+ * issuer's keys serve — its answer is held for that issuer ten minutes, in place of the last. An
+ * ask's signal aborts at its deadline, a minute after it went, on the monotonic reading. One that
+ * throws or rejects, answers what is not keys shaped for their algorithms, or is unsettled as its
+ * deadline is reached fails the calls that wait on it, and replaces no key held. A call past the
+ * `maximumWaitingCalls` that wait for one issuer's deadline is refused `CAPACITY_EXCEEDED`, and
+ * nothing is reported (spec 13.8).
+ */
+export interface IJwtKeySet {
+  /** Asked for one of its issuers, with a signal, that issuer's keys, which it may wait for. */
+  readonly ask: (issuer: string, signal: AbortSignal) => PromiseLike<readonly IJwtSetKey[]>;
+  /** The issuers it answers for, one at least, each a string. */
+  readonly issuers: readonly string[];
+  /**
+   * The most calls that wait for one issuer's deadline at once, each issuer's apart, a call on its
+   * ask under way never counted: a whole number from 1 to 2³¹ − 1, 64 when not given. Any other is a
+   * {@link ProgrammerError}, as the side is built.
+   */
+  readonly maximumWaitingCalls?: number | undefined;
+}
+
+/** A key a key set answers for the issuer it was asked for: a JWK, and its one algorithm. */
+export interface IJwtSetKey {
+  readonly algorithm: JwtAlgorithm;
+  readonly jwk: Jwk;
+}
+
+/**
+ * The call's session a request's credential resolves to (spec 9.2, step 5): its connection's
+ * session, for none or that session's `OPAQUE`, compared in constant time, in the turn the request
+ * came, never a promise; a credential's, for a `JWT` or an `ELSEWHERE`, which may wait, and is
+ * waited on in a later turn whether it waits or not. `undefined` runs a call presenting none in
+ * none, and refuses one presenting a credential with `SESSION_REQUIRED`; what throws or rejects
+ * refuses it with `PROCEDURE_FAILED`, reported. `signal` is aborted once the call ends while its
+ * credential resolves — its requester cancelled it, its connection closed — so a verifier stops:
+ * what it settles to then is dropped.
+ */
+export type SessionOf<Handle extends string = ConnectionHandle> = (
+  request: ISessionRequest<Handle>,
+  signal: AbortSignal
+) => ICallSession | undefined | PromiseLike<ICallSession | undefined>;
 
 /**
  * What a call of a procedure takes after its payload: options a server's router must have, naming
@@ -916,8 +1159,11 @@ export interface IRequestDependencies<RequestPayload, ResponsePayload> {
 export interface INotifyOptions<Handle extends string = ConnectionHandle> {
   /** A connection left out: the one whose request made the change, say. */
   exclude?: Handle | undefined;
-  /** Whether a connection gets it: those of one user, say. */
-  filter?: ((connectionHandle: Handle) => boolean) | undefined;
+  /**
+   * Whether a subscription gets it, by its connection and the session that holds it — a
+   * credential's, by its identifier; its connection's, none: those of one user, say.
+   */
+  filter?: ((connectionHandle: Handle, identifier?: SessionIdentifier) => boolean) | undefined;
   /**
    * What it is about — the entity whose state it carries, say — for a paced subscription: queued
    * past its credit, it replaces the one queued under the same key, in its place. None, it is queued
@@ -942,6 +1188,8 @@ export interface IRequestProps<Payload, Handle extends string = ConnectionHandle
   connectionHandle: Handle;
   header: Readonly<IRequestHeader>;
   payload: Readonly<Payload>;
+  /** The call's session, as its admission read it; none when the call runs in none. */
+  session?: ICallSession | undefined;
   /**
    * Aborted when the call ends before its answer — its requester cancelled it, its connection closed
    * — so the callback may stop: its answer would go nowhere, and what it throws then is no one's to

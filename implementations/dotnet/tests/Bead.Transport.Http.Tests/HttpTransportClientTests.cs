@@ -18,6 +18,9 @@ public sealed class HttpTransportClientTests
 
     private const string Host = "127.0.0.1";
 
+    // a bearer credential, RFC 6750's own example, its auth-scheme included
+    private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static readonly TimeSpan Millisecond = TimeSpan.FromMilliseconds(1);
@@ -413,6 +416,7 @@ public sealed class HttpTransportClientTests
             Uri = request.RequestUri?.ToString() ?? "";
             ConnectionToken = HeaderOf(request, HttpTransport.ConnectionTokenHeader);
             Listen = HeaderOf(request, HttpTransport.ListenHeader);
+            Authorization = HeaderOf(request, "Authorization");
             _token = cancellationToken;
 
             if (request.Content is { } content)
@@ -432,6 +436,8 @@ public sealed class HttpTransportClientTests
         public string? ConnectionToken { get; }
 
         public string? Listen { get; }
+
+        public string? Authorization { get; }
 
         public byte[]? Body { get; }
 
@@ -738,6 +744,30 @@ public sealed class HttpTransportClientTests
 
     // definition
 
+    [Theory]
+    [InlineData("http://bead.example", false)]
+    [InlineData("https://bead.example", true)]
+    [InlineData("http://localhost", true)]
+    [InlineData("http://127.0.0.1", true)]
+    [InlineData("http://[::1]", true)]
+    public async Task Carries_a_credential_beside_an_envelope_in_its_POST_s_Authorization_and_is_secure_under_https_or_to_a_loopback_host_judged_by_the_URL_it_was_given(string url, bool isSecure)
+    {
+        var target = new Uri(url);
+        var (host, isTls) = (target.Host.Trim('[', ']'), target.Scheme == "https");
+        var fetch = new Fetch();
+
+        await using var faked = new Faked(new HttpTransportClient(NotListening with { Handler = fetch }), fetch);
+
+        // judged from what it connects with, before its first connect from nothing
+        Assert.Equal((true, false), (faked.Client.CarriesCredential, faked.Client.IsSecure));
+
+        var connecting = faked.Client.Connect(new HttpConnectOptions { Host = host, Port = 8_080, Secured = isTls }, Cancelled);
+
+        (await fetch.CallOf(0)).Answer(DrawnOf(false));
+        await connecting.WaitAsync(Patience, Cancelled);
+        Assert.Equal((true, isSecure), (faked.Client.CarriesCredential, faked.Client.IsSecure));
+    }
+
     [Fact]
     public async Task Draws_its_connection_sends_an_envelope_settled_on_the_head_of_its_answer_and_hears_the_answer_as_a_message()
     {
@@ -756,16 +786,16 @@ public sealed class HttpTransportClientTests
         Assert.Equal(ReadyState.Open, client.ReadyState);
 
         // settled once the server has it, before any answer
-        await client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0))).WaitAsync(Patience, Cancelled);
+        await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
 
         Assert.True(heard.Reader.Count == 0);
 
-        await started.Server.Send(EnvelopeOf(EnvelopeKind.Result, (1, 2)), connectionHandle).WaitAsync(Patience, Cancelled);
+        await started.Server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, (1, 2)), false), connectionHandle).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(EnvelopeOf(EnvelopeKind.Result, (1, 2)), await Next(heard));
 
         // a cancel ends empty: nothing is heard
-        await client.Send(EnvelopeOf(EnvelopeKind.Cancel, (1, 0))).WaitAsync(Patience, Cancelled);
+        await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Cancel, (1, 0)), false)).WaitAsync(Patience, Cancelled);
         await client.CloseConnection().WaitAsync(Patience, Cancelled);
 
         Assert.True(heard.Reader.Count == 0);
@@ -782,10 +812,61 @@ public sealed class HttpTransportClientTests
         // a request on the server's own parity
         Assert.Equal("the server refused the exchange: 400 malformed", (await Assert.ThrowsAsync<IOException>(() =>
         {
-            return client.Send(EnvelopeOf(EnvelopeKind.Request, (2, 0))).WaitAsync(Patience, Cancelled);
+            return client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (2, 0)), false)).WaitAsync(Patience, Cancelled);
         })).Message);
         Assert.Equal(ReadyState.Open, client.ReadyState);
         await client.CloseConnection().WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
+    public async Task Carries_its_credential_in_the_Authorization_of_its_POST_which_the_server_hands_on_with_the_request_and_hears_the_answer_with_none()
+    {
+        await using var started = await Started.Start();
+        await using var client = new HttpTransportClient(NotListening);
+        var taken = Channel.CreateUnbounded<string?>();
+        var heard = Channel.CreateUnbounded<TransportMessage>();
+
+        started.Server.Message += (message, connectionHandle) =>
+        {
+            taken.Writer.TryWrite(message.Credential);
+            _ = started.Server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, (1, 0)), false) { Credential = Bearer }, connectionHandle);
+        };
+        client.Message += (message) =>
+        {
+            heard.Writer.TryWrite(message);
+        };
+        await client.Connect(started.Target(), Cancelled);
+        await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false) { Credential = Bearer }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal((Bearer, (string?)null), (await Next(taken), (await Next(heard)).Credential));
+        await client.CloseConnection().WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
+    public async Task Writes_Authorization_only_with_a_credential_and_refuses_one_no_field_carries_before_it_goes_its_connection_kept()
+    {
+        await using var faked = await ConnectFake(NotListening);
+        var carrying = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false) { Credential = Bearer });
+
+        (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 204 });
+        await carrying.WaitAsync(Patience, Cancelled);
+
+        var bare = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Cancel, (1, 0)), false));
+
+        (await faked.Fetch.CallOf(2)).Answer(new Answer { Status = 204 });
+        await bare.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal((Bearer, (string?)null), (faked.Fetch.Calls[1].Authorization, faked.Fetch.Calls[2].Authorization));
+
+        foreach (var credential in new[] { "Bearer a\r\nb", "Bearer é", "Bearer \0" })
+        {
+            Assert.StartsWith("a credential holds visible ASCII, spaces and tabs alone", (await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (3, 0)), false) { Credential = credential });
+            })).Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal((3, ReadyState.Open), (faked.Fetch.Calls.Count, faked.Client.ReadyState));
     }
 
     [Fact]
@@ -813,7 +894,7 @@ public sealed class HttpTransportClientTests
         });
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return client.Send(new byte[8]);
+            return client.Send(new TransportMessage(new byte[8], false));
         });
     }
 
@@ -821,7 +902,7 @@ public sealed class HttpTransportClientTests
     public async Task Closes_once_the_server_says_the_connection_is_gone_after_rejecting_the_exchange_that_learned_it()
     {
         await using var faked = await ConnectFake(NotListening);
-        var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
         var closed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // where the TypeScript side's caller hears the rejection before the close, a caller here
@@ -847,7 +928,7 @@ public sealed class HttpTransportClientTests
     public async Task Closes_and_tells_the_server_when_the_server_is_lost_under_an_exchange_which_counts_as_handed_over()
     {
         await using var faked = await ConnectFake(NotListening);
-        var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
         (await faked.Fetch.CallOf(1)).Fail();
 
@@ -867,7 +948,7 @@ public sealed class HttpTransportClientTests
         foreach (var status in new[] { 404, 502, 504 })
         {
             await using var faked = await ConnectFake(NotListening);
-            var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+            var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
             (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = status });
 
@@ -882,7 +963,7 @@ public sealed class HttpTransportClientTests
     public async Task Rejects_a_refusal_the_server_marked_and_keeps_its_connection()
     {
         await using var faked = await ConnectFake(NotListening);
-        var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
         (await faked.Fetch.CallOf(1)).Answer(RefusalOf(429, HttpRefusals.Busy));
 
@@ -904,7 +985,7 @@ public sealed class HttpTransportClientTests
         })
         {
             await using var faked = await ConnectFake(NotListening with { MaximumBodyBytes = 8 });
-            var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+            var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
             (await faked.Fetch.CallOf(1)).Answer(answer);
             await sending.WaitAsync(Patience, Cancelled);
@@ -939,7 +1020,7 @@ public sealed class HttpTransportClientTests
         })
         {
             await using var faked = await ConnectFake(NotListening with { MaximumBodyBytes = 16 });
-            var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+            var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
             (await faked.Fetch.CallOf(1)).Answer(answer);
             await sending.WaitAsync(Patience, Cancelled);
@@ -965,19 +1046,19 @@ public sealed class HttpTransportClientTests
         await using var faked = await ConnectFake(NotListening);
 
         // cancelled: its exchange ends with no body
-        var cancelled = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        var cancelled = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
         (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 200, Headers = Bead });
         await cancelled.WaitAsync(Patience, Cancelled);
 
         var later = new TaskCompletionSource<byte[]>();
-        var coming = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (3, 0)));
+        var coming = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (3, 0)), false));
 
         (await faked.Fetch.CallOf(2)).Answer(new Answer { Status = 200, Headers = Bead, Later = later.Task });
         await coming.WaitAsync(Patience, Cancelled);
 
         // another exchange lost: the connection goes, and the answer still coming with it
-        var lost = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (5, 0)));
+        var lost = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (5, 0)), false));
 
         (await faked.Fetch.CallOf(3)).Fail();
         await lost.WaitAsync(Patience, Cancelled);
@@ -1013,7 +1094,7 @@ public sealed class HttpTransportClientTests
 
         try
         {
-            var sent = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+            var sent = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
             (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 200, Headers = Bead, Body = EnvelopeOf(EnvelopeKind.Result, (1, 0)) });
             await sent.WaitAsync(Patience, Cancelled);
@@ -1042,8 +1123,8 @@ public sealed class HttpTransportClientTests
     public async Task Closes_once_telling_the_server_once_however_many_exchanges_learn_it_is_lost_tells_a_server_that_said_it_is_gone_nothing()
     {
         await using var faked = await ConnectFake(NotListening);
-        var first = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
-        var second = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (3, 0)));
+        var first = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+        var second = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (3, 0)), false));
 
         (await faked.Fetch.CallOf(1)).Fail();
         (await faked.Fetch.CallOf(2)).Fail();
@@ -1056,7 +1137,7 @@ public sealed class HttpTransportClientTests
         })));
 
         await using var told = await ConnectFake(NotListening);
-        var refused = told.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        var refused = told.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
         (await told.Fetch.CallOf(1)).Answer(RefusalOf(404, HttpRefusals.ConnectionUnknown));
 
@@ -1083,7 +1164,7 @@ public sealed class HttpTransportClientTests
         })
         {
             await using var faked = await ConnectFake(NotListening);
-            var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+            var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
             (await faked.Fetch.CallOf(1)).Answer(answer);
             await sending.WaitAsync(Patience, Cancelled);
@@ -1169,7 +1250,7 @@ public sealed class HttpTransportClientTests
             }
         };
 
-        await faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0))).WaitAsync(Patience, Cancelled);
+        await faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
 
         lock (heard)
         {
@@ -1258,7 +1339,7 @@ public sealed class HttpTransportClientTests
     public async Task A_drop_aborts_what_is_in_flight_tells_the_server_and_a_dispose_while_connecting_rejects_the_connect()
     {
         await using var faked = await ConnectFake(NotListening);
-        var sending = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
         var inFlight = await faked.Fetch.CallOf(1);
 
         await faked.Client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
@@ -1336,6 +1417,13 @@ public sealed class HttpTransportClientTests
         var first = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
         var second = EnvelopeOf(EnvelopeKind.Request, (2, 2));
         var listen = await faked.Fetch.CallOf(1);
+        var credentials = Channel.CreateUnbounded<string?>();
+
+        // what a listen brings back carries no credential
+        faked.Client.Message += (message) =>
+        {
+            credentials.Writer.TryWrite(message.Credential);
+        };
 
         Assert.Equal("?1", faked.Fetch.Calls[0].Listen);
         Assert.Equal(
@@ -1346,6 +1434,7 @@ public sealed class HttpTransportClientTests
 
         Assert.Contains("?after=2&", (await faked.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
         Assert.Equal([first, second], faked.Heard);
+        Assert.Equal([null, null], new[] { await Next(credentials), await Next(credentials) });
 
         // nothing, and it listens again at the same point
         (await faked.Fetch.CallOf(2)).Answer(new Answer { Status = 204 });
@@ -1701,7 +1790,7 @@ public sealed class HttpTransportClientTests
         await faked.Fetch.CallOf(2);
 
         // gone while it listens: what its listen brings back is heard by nobody, and it listens no more
-        var lost = faked.Client.Send(EnvelopeOf(EnvelopeKind.Request, (1, 0)));
+        var lost = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
         (await faked.Fetch.CallOf(3)).Fail();
         await lost.WaitAsync(Patience, Cancelled);
