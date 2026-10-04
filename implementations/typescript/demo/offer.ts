@@ -9,17 +9,9 @@ import { createDebugStatistics, filterDebug } from '../src/router/shared/service
 import type { IAdmissionRequest, IBeforeRequest } from '../src/router/shared/types';
 import type { IServer, IServerTransportLike } from '../src/server/types';
 import type { TransportServerConnectionHandle } from '../src/transport/server/types';
-import {
-  answererOf,
-  askerOf,
-  BURST_CHANGES,
-  CALLS,
-  type IClaims,
-  NOTIFICATIONS,
-  type Role,
-} from './procedures';
+import { answererOf, askerOf, BURST_CHANGES, CALLS, NOTIFICATIONS, type Role } from './procedures';
 import { drawGlyph } from './glyph';
-import { issueToken, verifyToken } from './token';
+import { issueToken } from './token';
 
 // constants
 
@@ -27,13 +19,13 @@ import { issueToken, verifyToken } from './token';
 const SLOW_MILLISECONDS = 5_000;
 
 /**
- * How long a connection may stay silent before it is closed, with a session or without: a page that
+ * How long a connection may stay silent before it is closed, whatever its calls present: a page that
  * stays reads the server's statistics, so only a page gone without a word — a tab closed before it
  * could say so — falls silent this long.
  */
 export const SILENCE_MILLISECONDS = 120_000;
 
-/** The code of the failures the demo's procedures answer with themselves: a login refused, say. */
+/** The code of the failures the demo's procedures answer with themselves: a role unknown, say. */
 const REFUSED = 1;
 
 // helpers
@@ -72,59 +64,51 @@ const increment = (): Promise<void>[] => {
 };
 
 /**
- * The demo's procedures, on one server: each transport's server has its own router and sessions, so
- * a login over HTTP opens no session over WebSocket, and the procedures are offered on each.
+ * The demo's procedures, on one server: each transport's server has its own router, which verifies
+ * the token each call presents with the credentials it was given, so the procedures are offered on
+ * each.
  */
-export const offer = <Transport extends IServerTransportLike>(
-  server: IServer<Transport, IClaims>,
-  key: Promise<CryptoKey>
-): void => {
-  const { services, sessions } = server;
+export const offer = <Transport extends IServerTransportLike>(server: IServer<Transport>): void => {
+  const { router, services } = server;
   // how long this server took to answer its last calls, those that read the statistics aside
   const statistics = createDebugStatistics();
 
   services.on('debug', filterDebug(statistics.listener, 'd(tx), -stats'));
 
-  // a write needs a call whose session holds the write permission: in none, it is refused alike
+  // a write needs a call whose session's scope holds `write`, its token's claims as the server
+  // verified them, never its payload: in none, it is refused alike
   const requireWrite: IBeforeRequest<TransportServerConnectionHandle> = Object.assign(
     ({ session }: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>) => {
-      return (session?.data as IClaims | undefined)?.permissions.includes('write') === true;
+      const scope = (session?.data as { scope?: unknown } | undefined)?.scope;
+
+      return typeof scope === 'string' && scope.split(' ').includes('write');
     },
     {
       refusal: {
-        ...server.router.failures.accessDenied,
-        detail: 'a write needs a session that holds the write permission',
+        ...router.failures.accessDenied,
+        detail: 'a write needs a token whose scope holds write',
       },
     }
   );
 
-  // the token checked, its claims kept in a session of the connection: the session has no timeout,
-  // so the demo waits for its reader, and its connection is closed only once gone silent
-  services.getRequestResolver(CALLS.login.procedure, { serializer: answererOf(CALLS.login) })(
-    async (request, response) => {
-      const verified = await verifyToken(request.payload, await key);
+  services.getRequestResolver(CALLS.whoami.procedure, {
+    beforeRequest: server.requireSession,
+    serializer: answererOf(CALLS.whoami),
+  })((request, response) => {
+    return response(JSON.stringify({ claims: request.session?.data, end: request.session?.end }));
+  });
 
-      if ('refusal' in verified) {
-        return response(null, { code: REFUSED, detail: verified.refusal });
-      }
-
-      sessions.set({
-        ...sessions.create(request.connectionHandle),
-        connectionInactivityTimeout: SILENCE_MILLISECONDS,
-        data: verified,
-        sessionInactivityTimeout: Infinity,
-      });
-
-      return response(JSON.stringify(verified));
-    }
-  );
-
-  // deleted before the answer, so the answer announces the session's end
+  // ended by its identifier before the answer, so the subscriptions it bounds end first, each with
+  // a failure; the token still holds, and a call that presents it again opens the session anew
   services.getRequestResolver(CALLS.logout.procedure, {
     beforeRequest: server.requireSession,
     serializer: answererOf(CALLS.logout),
-  })((request, response) => {
-    sessions.delete(request.connectionHandle);
+  })(async (request, response) => {
+    const identifier = request.session?.identifier;
+
+    if (identifier !== undefined) {
+      await router.endSession(identifier);
+    }
 
     return response('');
   });
@@ -265,7 +249,7 @@ export const offer = <Transport extends IServerTransportLike>(
  * a worker: a role in, a token out, no session needed.
  */
 export const offerIdentity = <Transport extends IServerTransportLike>(
-  server: IServer<Transport, IClaims>,
+  server: IServer<Transport>,
   key: Promise<CryptoKey>
 ): void => {
   server.services.getRequestResolver(CALLS.token.procedure, {

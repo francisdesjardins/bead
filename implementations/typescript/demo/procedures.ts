@@ -6,16 +6,33 @@ import type { IProcedure } from '../src/router/shared/types';
 
 // interfaces
 
-/** What a token says of whoever holds it, as the demo's identity provider issues it. */
+/**
+ * What an access token says of whoever holds it, as the demo's identity provider issues it: the
+ * claims RFC 9068 §2.2 requires, the role's scope and its sign-in. A server that verified it holds
+ * them as the data of the call's session.
+ */
 export interface IClaims {
-  /** When the token stops being good, in seconds since the epoch. */
+  /** Who the token is for: the demo's Bead servers. */
+  aud: string;
+  /** The client it was handed to: the demo's page. */
+  client_id: string;
+  /** When the token stops holding, in seconds since the epoch. */
   exp: number;
   /** When it was issued, in seconds since the epoch. */
   iat: number;
-  /** What the holder may do: the server's checks read these, never the role. */
-  permissions: Permission[];
-  /** A label for people: a writer is given `write`. */
-  role: Role;
+  /** Who issued it: the demo's identity provider. */
+  iss: string;
+  /** The token's own identifier. */
+  jti: string;
+  /** A label for people (RFC 9068 §2.2.3.1): a writer's scope holds `write`. */
+  roles: Role[];
+  /**
+   * What the holder may do, separated by spaces (RFC 8693 §4.2): the server's checks read it, never
+   * the roles.
+   */
+  scope: string;
+  /** The sign-in it was issued for, which names its session at a server, under its issuer. */
+  sid: string;
   sub: string;
 }
 
@@ -34,6 +51,7 @@ export interface ICall<Request, Result> {
 
 // types
 
+/** What a scope may hold. */
 export type Permission = 'read' | 'write';
 
 export type Role = 'reader' | 'writer';
@@ -87,8 +105,9 @@ export const answererOf = <Request, Result>({ request, result }: ICall<Request, 
 // definition
 
 /**
- * The demo's one service. `login` takes a token and opens a session; a read needs a session, a
- * write the `write` permission; `ask` makes the server ask the client back, by a command.
+ * The demo's one service. Each call presents the client's token, a `JWT`, and runs in the session
+ * the server makes of it: a read needs a session, a write one whose scope holds `write`; `ask` makes
+ * the server ask the client back, by a command.
  */
 export const CALLS = Object.freeze({
   /** The server asks the client its time, and answers with what the client said. */
@@ -113,8 +132,10 @@ export const CALLS = Object.freeze({
   fail: callOf(procedureOf(9, 'fail'), { request: TEXT, result: TEXT }),
   /** Adds one to the counter, and tells the subscribers; `write` only. */
   increment: callOf(procedureOf(4, 'increment'), { request: TEXT, result: TEXT }),
-  /** A token in, the claims it carries out; the one procedure that needs no session. */
-  login: callOf(procedureOf(1, 'login'), { request: TEXT, result: TEXT }),
+  /**
+   * Ends the call's session, and the subscriptions it holds, on every connection: its token still
+   * holds, so its client forgets it.
+   */
   logout: callOf(procedureOf(2, 'logout'), { request: TEXT, result: TEXT }),
   /** The counter's value; a session is enough. */
   read: callOf(procedureOf(3, 'read'), { request: TEXT, result: TEXT }),
@@ -125,10 +146,18 @@ export const CALLS = Object.freeze({
    * of the calls it answered. No session needed: nothing in it names a connection.
    */
   stats: callOf(procedureOf(15, 'stats'), { request: TEXT, result: TEXT }),
-  /** A role in, a token out: the identity provider, where no HTTP server stands beside it. */
+  /**
+   * A role in, a token out: the identity provider, where no HTTP server stands beside it. Called
+   * with no credential: one that no longer holds would have it refused.
+   */
   token: callOf(procedureOf(12, 'token'), { request: TEXT, result: TEXT }),
   /** A glyph's pixels to the server, as a transfer, and the digest it computed; `write` only. */
   upload: callOf(procedureOf(6, 'upload'), { request: BYTES, result: TEXT }),
+  /**
+   * Who the call's session says its caller is: the claims of the token it presented, as the server
+   * verified them, and when that session ends.
+   */
+  whoami: callOf(procedureOf(1, 'whoami'), { request: TEXT, result: TEXT }),
 });
 
 /** The changes a burst makes at once. */

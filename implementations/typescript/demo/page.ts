@@ -4,6 +4,7 @@
 
 import {
   CancelError,
+  CredentialScheme,
   createWSClient,
   FailureError,
   FailureScope,
@@ -17,7 +18,7 @@ import type { IWorkerLike } from '../src/transport/client/worker-transport-clien
 import type { IRouterDebugInfo } from '../src/router/client/types';
 import { EnvelopeKind } from '../src/router/shared/constants';
 import type { IDurationSummary } from '../src/router/shared/debug-statistics';
-import type { INotificationRegistration } from '../src/router/shared/types';
+import type { INotificationRegistration, IReceivedFailure } from '../src/router/shared/types';
 import type { IHealth, ServerGauges } from '../src/server/health';
 import {
   answererOf,
@@ -27,11 +28,19 @@ import {
   type ICall,
   type IClaims,
   NOTIFICATIONS,
+  type Role,
 } from './procedures';
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
 import { createQuietCalls, watchDebug } from './debug';
 
 // interfaces
+
+/** What the `whoami` procedure answers, read: the claims of the call's session, and its end. */
+interface IIdentity {
+  claims: IClaims;
+  /** When the session ends, in milliseconds since the epoch: the token's `exp`, and its leeway. */
+  end: number;
+}
 
 /** What the `stats` procedure answers, read. */
 interface IServerStats {
@@ -66,7 +75,11 @@ const CODE_NAMES: Readonly<Record<number, string>> = Object.fromEntries(
   })
 );
 
-const ROLE_NAMES = Object.freeze({ reader: 'reader', writer: 'writer' });
+const SCHEME_NAMES: Readonly<Record<number, string>> = Object.fromEntries(
+  Object.entries(CredentialScheme).map(([name, scheme]) => {
+    return [scheme, name];
+  })
+);
 
 /** The demo's procedures by id, so an envelope, which carries none of their names, shows one. */
 const PROCEDURE_NAMES: Readonly<Record<number, string>> = Object.fromEntries(
@@ -173,6 +186,13 @@ const envelopeLineOf = ({ direction, header }: IRouterDebugInfo): string => {
     );
   }
 
+  // the credential block, by its scheme alone: its bytes are never traced
+  if (header.credentialScheme !== undefined) {
+    parts.push(
+      `credential ${SCHEME_NAMES[header.credentialScheme] ?? String(header.credentialScheme)}`
+    );
+  }
+
   return parts.join(' ');
 };
 
@@ -198,6 +218,16 @@ const reasonOf = (reason: unknown): string => {
   return String(reason);
 };
 
+/** Why the server ended a subscription, as a person reads it. */
+const failureOf = ({ code, detail, scope }: IReceivedFailure): string => {
+  const name =
+    scope === FailureScope.APPLICATION
+      ? `the procedure's code ${String(code)}`
+      : (CODE_NAMES[code] ?? `code ${String(code)}`);
+
+  return detail === '' ? name : `${name} — ${detail}`;
+};
+
 const base64urlOf = (text: string): string => {
   return btoa(String.fromCharCode(...new TextEncoder().encode(text)))
     .replaceAll('+', '-')
@@ -218,18 +248,25 @@ const textOf = (part: string): string => {
 /** A reader's token made to say it writes, its signature kept: what a forger would try. */
 const forgedOf = (token: string): string => {
   const [header = '', payload = '', signature = ''] = token.split('.');
-  const claims = { ...(JSON.parse(textOf(payload)) as IClaims), permissions: ['read', 'write'] };
+  const claims: IClaims = {
+    ...(JSON.parse(textOf(payload)) as IClaims),
+    roles: ['writer'],
+    scope: 'read write',
+  };
 
-  return `${header}.${base64urlOf(JSON.stringify({ ...claims, role: 'writer' }))}.${signature}`;
+  return `${header}.${base64urlOf(JSON.stringify(claims))}.${signature}`;
 };
 
 /**
  * A token from the demo's identity provider: a service of its own, over HTTP — or, with no server,
- * a procedure of the worker's.
+ * a procedure of the worker's, called with no credential, so one that no longer holds keeps nobody
+ * from logging in again.
  */
-const tokenOf = async (role: keyof typeof ROLE_NAMES): Promise<string> => {
+const tokenOf = async (role: Role): Promise<string> => {
   if (workerClient !== undefined) {
-    return services.getRequest(CALLS.token.procedure, { serializer: askerOf(CALLS.token) })(role)();
+    return services.getRequest(CALLS.token.procedure, { serializer: askerOf(CALLS.token) })(role)({
+      credential: { scheme: CredentialScheme.NONE },
+    });
   }
 
   const reply = await fetch(`/token?role=${role}`);
@@ -358,12 +395,12 @@ const calls = {
   download: requestOf(CALLS.download),
   fail: requestOf(CALLS.fail),
   increment: requestOf(CALLS.increment),
-  login: requestOf(CALLS.login),
   logout: requestOf(CALLS.logout),
   read: requestOf(CALLS.read),
   slow: requestOf(CALLS.slow),
   stats: requestOf(CALLS.stats),
   upload: requestOf(CALLS.upload),
+  whoami: requestOf(CALLS.whoami),
 };
 // the counter's state, paced: the next value comes once the last one is shown
 const subscribe = services.getNotification(CALLS.counter.procedure, {
@@ -376,7 +413,8 @@ const subscribeChanged = services.getNotification(CALLS.changed.procedure, {
 });
 // what the counter's subscription and the signal's brought, since the last burst
 const heard = { reads: 0, signals: 0, values: 0 };
-let registrations: INotificationRegistration[] = [];
+// the subscriptions held, by procedure, until the page or the server ends them
+const registrations = new Map<number, INotificationRegistration>();
 let slowCall: AbortController | undefined;
 
 const showHeard = (): void => {
@@ -481,22 +519,37 @@ const showGlyph = (pixels: Uint8Array, caption: string): void => {
   shown.glyphCaption.textContent = caption;
 };
 
-// who this connection is, as its session says; nothing once it ends
-const showIdentity = (claims: IClaims | undefined): void => {
-  const token = client.router.sessionToken;
+// who the calls are made as, as the server read the token's claims; why not, once logged out
+const showIdentity = (identity: IIdentity | string): void => {
+  if (typeof identity === 'string') {
+    shown.identity.textContent = identity;
 
-  shown.identity.textContent =
-    claims === undefined || token === undefined
-      ? 'no session'
-      : `${claims.sub}, ${ROLE_NAMES[claims.role]} (${claims.permissions.join(', ')}) — session ${token.slice(0, 8)}…`;
+    return;
+  }
+
+  const { claims, end } = identity;
+
+  shown.identity.textContent = `${claims.sub}, ${claims.roles.join(', ')} (${claims.scope}) — session ${claims.sid.slice(0, 8)}…, until ${new Date(end).toLocaleTimeString('en-CA')}`;
 };
 
-const login = async (token: string): Promise<string> => {
-  const claims = JSON.parse(await calls.login(token)()) as IClaims;
+// the token presented by every call from now on, in its header, and the server asked what it read
+const logIn = async (token: string): Promise<string> => {
+  client.router.credential = { scheme: CredentialScheme.JWT, token };
 
-  showIdentity(claims);
+  const identity = JSON.parse(await calls.whoami('')()) as IIdentity;
 
-  return `session open, as a ${ROLE_NAMES[claims.role]}`;
+  showIdentity(identity);
+
+  return `logged in as ${identity.claims.sub}: each call presents the token, which the server verifies`;
+};
+
+// a subscription the page holds no longer, however it ended
+const forget = (procedureId: number): void => {
+  registrations.delete(procedureId);
+
+  if (registrations.size === 0) {
+    shown.subscribe.textContent = 'Subscribe (value + signal)';
+  }
 };
 
 /** What each button does, and what it says once done. */
@@ -510,7 +563,7 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
 
     const value = await calls.burst('')();
 
-    return registrations.length === 0
+    return registrations.size === 0
       ? `${String(BURST_CHANGES)} increments, counter at ${value}: subscribe to see what comes of them`
       : `${String(BURST_CHANGES)} increments at once, counter at ${value}`;
   },
@@ -530,22 +583,23 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
     return calls.fail('')();
   },
   forged: async () => {
-    return login(forgedOf(await tokenOf('reader')));
+    return logIn(forgedOf(await tokenOf('reader')));
   },
   increment: async () => {
     return `counter at ${await calls.increment('')()}`;
   },
   logout: async () => {
     await calls.logout('')();
-    showIdentity(undefined);
+    client.router.credential = undefined;
+    showIdentity('logged out');
 
-    return 'session closed';
+    return 'logged out: the server ended the session and its subscriptions, and the page forgot its token';
   },
   read: async () => {
     return `counter at ${await calls.read('')()}`;
   },
   reader: async () => {
-    return login(await tokenOf('reader'));
+    return logIn(await tokenOf('reader'));
   },
   slow: async () => {
     const controller = new AbortController();
@@ -557,19 +611,21 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
     return `answered after ${numbers.format(Number(waited))} ms`;
   },
   subscribe: async () => {
-    if (registrations.length > 0) {
+    if (registrations.size > 0) {
+      const held = [...registrations.values()];
+
+      registrations.clear();
+      shown.subscribe.textContent = 'Subscribe (value + signal)';
       await Promise.all(
-        registrations.map((registration) => {
+        held.map((registration) => {
           return registration.unregister();
         })
       );
-      registrations = [];
-      shown.subscribe.textContent = 'Subscribe (value + signal)';
 
       return 'unsubscribed';
     }
 
-    registrations = await Promise.all([
+    const [values, signals] = await Promise.all([
       subscribe('', (value) => {
         heard.values += 1;
         shown.counter.textContent = value;
@@ -581,6 +637,9 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
         readChanged();
       })(),
     ]);
+
+    registrations.set(CALLS.counter.procedure.procedureId, values);
+    registrations.set(CALLS.changed.procedure.procedureId, signals);
     shown.subscribe.textContent = 'Unsubscribe';
 
     return 'subscribed: to the counter, paced, and to its signal, which the page merges';
@@ -605,7 +664,7 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
     return `the server received the same glyph, ${numbers.format(payload.length)} bytes, SHA-256 ${mine.slice(0, 16)}…`;
   },
   writer: async () => {
-    return login(await tokenOf('writer'));
+    return logIn(await tokenOf('writer'));
   },
 });
 
@@ -643,6 +702,21 @@ client.router.on('debug', (info) => {
   }
 });
 
+// a token the server refused, SESSION_REQUIRED, is presented no more: the page signs in again
+client.router.on('credentialWithdrawn', () => {
+  showIdentity('logged out: the server refused the token — log in again');
+});
+
+// a subscription the server ended — its session at its end, or ended by a logout — is held no more,
+// and the log says why: over HTTP, it may come after the answer of the call that ended it
+services.on('dropped', (procedure, failure) => {
+  forget(procedure.procedureId);
+
+  if (failure !== undefined) {
+    log(shown.calls, `← dropped ${procedure.procedureName} ${failureOf(failure)}`);
+  }
+});
+
 // a developer's own, to the console, as the `localStorage` of the page says, the statistics aside
 watchDebug(client, { quiet: [CALLS.stats.procedure] });
 
@@ -654,7 +728,7 @@ document
 client.transport.on('close', () => {
   shown.connection.dataset['state'] = 'closed';
   shown.connection.textContent = 'closed: reload the page';
-  showIdentity(undefined);
+  showIdentity('logged out');
 });
 
 // a page that goes tells the server at once, rather than leaving its connection to time out

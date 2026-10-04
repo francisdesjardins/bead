@@ -136,6 +136,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   settles.
 - The interop service's `whoami` answers from its call's session, and `login` opens its
   connection's session whatever its call presents.
+- The demo's tokens are access tokens of RFC 9068's profile, typed `at+jwt` and signed HS256: the
+  page presents its token as a `JWT` on every call, the servers verify it through their
+  `credentials`, `whoami` answers the call's session and `logout` ends it; `DEMO_KEY` gives the
+  demo its key, in base64url, 32 bytes at least, and a key published with its RFC is refused.
 - A listen held over HTTP holds its connection's timeouts — the server's own, and a session's
   connection timeout — silence counting anew from its end, by a new optional event of the
   transport's, `listen` and `Listen`; a session's session timeout and `lastActivity` count messages
