@@ -94,7 +94,9 @@ export const createWorkerTransportClient = ({
     };
 
     return {
+      carriesCredential: false,
       clock,
+      isSecure: true,
 
       connect: async ({ signal, timeout = CONNECT_DEFAULTS.timeout }) => {
         const channel = new Channel();
@@ -174,7 +176,7 @@ export const createWorkerTransportClient = ({
         return Promise.resolve();
       },
 
-      // TODO a credential given here is not carried: the client fails a call that presents one its
+      // a credential given here is not carried: the client fails a call that presents one its
       // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
       send: ({ data }) => {
         const open = port;

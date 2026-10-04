@@ -72,6 +72,7 @@ export const createWSServer = <Data = unknown>(options: IWSServerOptions<Data>):
     {
       closeOnCommandTimeout: options.closeOnCommandTimeout,
       connectionInactivityTimeout: options.connectionInactivityTimeout,
+      credentials: options.credentials,
       limits: options.limits,
       pacing: options.pacing,
       relay: options.relay,

@@ -75,12 +75,25 @@ public sealed class JwtVerifierTests
         return instant.ToUnixTimeMilliseconds();
     }
 
+    // the audience a vector gives, or its set, an array
+    private static List<string> AudiencesOf(JsonElement vector)
+    {
+        var audience = vector.GetProperty("audience");
+
+        return audience.ValueKind == JsonValueKind.Array
+            ? [.. audience.EnumerateArray().Select((name) =>
+            {
+                return name.GetString()!;
+            })]
+            : [audience.GetString()!];
+    }
+
     private static VerifyJwtProps PropsOf(JsonElement vector)
     {
         return new VerifyJwtProps
         {
             Keys = KeysOf(vector),
-            Audience = vector.GetProperty("audience").GetString()!,
+            Audiences = AudiencesOf(vector),
             Now = MillisecondsOf(vector),
         };
     }
@@ -172,7 +185,7 @@ public sealed class JwtVerifierTests
     public async Task Throws_for_an_audience_that_is_not_well_formed_Unicode()
     {
         var vector = Vectors.Of("jwtVerdicts", Holding);
-        var props = PropsOf(vector) with { Audience = "\ud800" };
+        var props = PropsOf(vector) with { Audiences = ["\ud800"] };
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
         {

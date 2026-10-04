@@ -119,7 +119,7 @@ export const createLoopback = ({
       report: (error) => {
         recorded[side].reported.push(error);
       },
-      send: (bytes) => {
+      send: ({ data: bytes }) => {
         // the kind is an envelope's second byte, whatever its layout
         const kind = bytes[1] ?? 0;
         const isLoose = kind === EnvelopeKind.CHUNK || kind === EnvelopeKind.CREDIT;
@@ -237,12 +237,15 @@ export const createPipedTransports = ({
     return (deliver(), undefined);
   };
 
+  // in process, never leaving it: a credential is carried both ways, as it is given
   const clientTransport: IRouterClientTransportLike = {
+    carriesCredential: true,
+    isSecure: true,
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: client.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: client.on,
-    send: ({ data }) => {
+    send: ({ credential, data }) => {
       if (!isOpen) {
         return Promise.reject(new Error(`${connectionHandle} is not open`));
       }
@@ -251,18 +254,24 @@ export const createPipedTransports = ({
 
       sent.client.push(bytes);
       hand(() => {
-        server.emit('message', { data: bytes }, connectionHandle);
+        server.emit('message', { credential, data: bytes }, connectionHandle);
       });
 
       return Promise.resolve();
     },
   };
   const serverTransport: IRouterServerTransportLike = {
+    carriesCredential: () => {
+      return true;
+    },
+    isSecure: () => {
+      return true;
+    },
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: server.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: server.on,
-    send: ({ data }, handle) => {
+    send: ({ credential, data }, handle) => {
       if (!isOpen || handle !== connectionHandle) {
         return Promise.reject(new Error(`${handle} is not open`));
       }
@@ -271,7 +280,7 @@ export const createPipedTransports = ({
 
       sent.server.push(bytes);
       hand(() => {
-        client.emit('message', { data: bytes });
+        client.emit('message', { credential, data: bytes });
       });
 
       return Promise.resolve();

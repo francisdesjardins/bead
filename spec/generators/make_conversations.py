@@ -1,7 +1,11 @@
 """Writes spec/conversations.json: what a server of the interop service does with what a client sends."""
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
+from datetime import datetime
 
 from spec_version import spec_version
 
@@ -134,11 +138,12 @@ TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 # what an answer announces, by the scheme of its CREDENTIAL block: a session's token, or its end
 OPENED, ENDED = 'OPAQUE', 'NONE'
 
-# the schemes the interop server takes, which code 36's detail names (9.2, step 5): a request that
-# presents none is always taken, and names no scheme
-# TODO the later phases, which give the interop server its JWT keys and its ELSEWHERE verifier,
-# widen it with each scheme they give, in the order of their numbers: OPAQUE, JWT, ELSEWHERE
-SCHEMES_TAKEN = 'OPAQUE'
+# the schemes the interop server takes, which code 36's detail names (9.2, step 5), in the order of
+# their numbers: a request that presents none is always taken, and names no scheme
+SCHEMES_TAKEN = 'OPAQUE, JWT, ELSEWHERE'
+
+# what SESSION_REQUIRED's detail says of a credential that does not resolve (9.2, step 5)
+NO_CREDENTIAL, DOES_NOT_HOLD = 'no credential came', 'the credential does not hold'
 
 
 def presenting(call_id, procedure, value, block):
@@ -209,6 +214,292 @@ def chunk_out(call_id, offset, data, last):
 
 ECHOED = json_string(100).encode('utf-8')
 LONG = json_string(300).encode('utf-8')
+
+# ── 13.8 and 13.9: a JWT's session, its end, and the key set ────────────────────────────────────
+
+# where the server's wall clock starts, and the second it is
+WALL_CLOCK = '2026-01-01T00:00:00Z'
+START = int(datetime.fromisoformat(WALL_CLOCK.replace('Z', '+00:00')).timestamp())
+
+# what the interop server verifies a JWT with, its test keys among it
+CREDENTIALS = SERVICE['credentials']['jwt']
+AUDIENCE = CREDENTIALS['audience']
+ISSUERS = {key['algorithm']: key['issuer'] for key in CREDENTIALS['keys']}
+HS_KEY = next(key['jwk'] for key in CREDENTIALS['keys'] if key['algorithm'] == 'HS256')
+KEY_SET = CREDENTIALS['keySet']
+SET_KEY = KEY_SET['keys'][0]['jwk']
+
+# how long the key set takes to answer, on the server's clock, as its words say
+KEY_SET_WAIT = 1_000
+
+LEEWAY = 60_000
+HOUR, DAY = 3_600, 86_400
+
+
+def base64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def unbase64url(text):
+    return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
+
+
+def compact(value):
+    """JSON as a token carries it: no space, its members in the order written, ASCII escaped."""
+    return json.dumps(value, separators=(',', ':')).encode('ascii')
+
+
+def access(issuer=ISSUERS['HS256'], *, exp=START + HOUR, iat=START, jti, aud=AUDIENCE, sub='grace'):
+    """An access token's claims (RFC 9068 §2.2), exp and iat in seconds since the epoch."""
+    return {'iss': issuer, 'sub': sub, 'aud': aud, 'exp': exp, 'iat': iat, 'jti': jti, 'client_id': 'bead-interop-client'}
+
+
+def hs256(claims, jwk=HS_KEY):
+    """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac, typed at+jwt, and named
+    by its key's kid when the key has one."""
+    header = {'alg': 'HS256', 'typ': 'at+jwt', **({'kid': jwk['kid']} if 'kid' in jwk else {})}
+    signing_input = base64url(compact(header)) + '.' + base64url(compact(claims))
+    signature = hmac.new(unbase64url(jwk['k']), signing_input.encode('ascii'), hashlib.sha256).digest()
+    return signing_input + '.' + base64url(signature)
+
+
+def jwt(token):
+    # a JWT block: the scheme 2, the token's length, its characters, then zero bytes to the next word
+    data = token.encode('ascii')
+    return f'00 02 {word(len(data), 2)}  {hexadecimal(data + bytes(-len(data) % 4))}'
+
+
+def subscribing(call_id, block):
+    # a request to ticks that opens a subscription, presenting a credential: SUBSCRIPTION and CREDENTIAL
+    return json_request(call_id, 'ticks', 'null', flags=0x18, words=3 + len(block.split()) // 4, tail=block)
+
+
+def ticked(call_id, value, block):
+    return presenting(call_id, 'tick', '{"value":%d}' % value, block)
+
+
+def wall(milliseconds):
+    return {'wall': milliseconds}
+
+
+# an ES256 token is a constant, by choice: signed once under RFC 7515's A.3 key, verified with its
+# public half before it was written here. Its claims: the ES256 issuer's, for grace, issued at the wall
+# clock's start, expiring an hour later
+ES_GRACE = (
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2VzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiZ3JhY2UiLC'
+    'JhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtZXMyNTYtMDAwMSIsImNsaWVudF9pZCI6ImJlYW'
+    'QtaW50ZXJvcC1jbGllbnQifQ.6NqV2v1wyZaEZsGSXU7imZm9zUu5Gsz21sxFIERvcEVzVJqKM9itRJcY5TgeSoaQrZgk25S-8pie9bxFcudB8g')
+assert json.loads(unbase64url(ES_GRACE.split('.')[1])) == access(ISSUERS['ES256'], jti='at-es256-0001')
+
+# the HS256 issuer's tokens for grace: one ending an hour after the wall clock's start, one two hours
+# after, one at the start, one 30 days after, and one for another audience
+HS_GRACE = hs256(access(jti='at-hs256-0001'))
+HS_RENEWED = hs256(access(exp=START + 2 * HOUR, jti='at-hs256-0002'))
+HS_AT_START = hs256(access(exp=START, iat=START - HOUR, jti='at-hs256-0003'))
+HS_30_DAYS = hs256(access(exp=START + 30 * DAY, jti='at-hs256-0004'))
+HS_OTHER_AUDIENCE = hs256(access(aud='bead-other', jti='at-hs256-0005'))
+
+# the key set's issuer's tokens, under its one key: one its kid names, and one whose kid no key names,
+# which that key would verify
+SET_GRACE = hs256(access(KEY_SET['issuer'], jti='at-keys-0001'), SET_KEY)
+SET_UNNAMED = hs256(access(KEY_SET['issuer'], jti='at-keys-0002'), {**SET_KEY, 'kid': '2026-01'})
+
+# the ends these tokens give their sessions, from the wall clock's start, in milliseconds
+HOUR_END = HOUR * 1000 + LEEWAY
+assert HOUR_END == 3_660_000
+assert 30 * DAY * 1000 + LEEWAY - (2 ** 31 - 1) == 444_576_353
+
+# the identifier HS_GRACE resolves to, which revoke ends
+GRACE = '{"issuer":"%s","sub":"grace"}' % ISSUERS['HS256']
+
+
+def jwt_conversations():
+    """A JWT taken and refused, its session kept while it bounds a subscription, timed to its end,
+    renewed, ended by its identifier, and its key found through the key set."""
+    return [
+        ('a request presenting a JWT that verifies runs in its credential\'s session, never its connection\'s',
+         ['9.2.5', '13.1', '13.5', '13.8'], None, [
+             login(1, 'ada'), result(1, '"ada"', OPENED),
+             presenting(3, 'whoami', 'null', jwt(HS_GRACE)), result(3, '"grace"'),
+             presenting(5, 'whoami', 'null', jwt(ES_GRACE)), result(5, '"grace"'),
+             json_request(7, 'whoami', 'null'), result(7, '"ada"')]),
+        # its exp at the wall clock's start: it holds 60 s past it, and not a millisecond more; echo admits
+        # anyone, so its refusal is the credential's
+        ('a JWT holds while the server\'s wall clock is before its exp plus 60 s, a millisecond either side',
+         ['9.2.5', '13.8.9', '13.9.1'], None, [
+             presenting(1, 'whoami', 'null', jwt(HS_AT_START)), result(1, '"grace"'),
+             wall(LEEWAY - 1),
+             presenting(3, 'whoami', 'null', jwt(HS_AT_START)), result(3, '"grace"'),
+             wall(1),
+             presenting(5, 'echo', '"x"', jwt(HS_AT_START)), failure(5, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
+        ('a JWT for another audience is refused SESSION_REQUIRED, whatever its procedure requires', ['9.2.5', '13.8.11'], None, [
+            presenting(1, 'echo', '"x"', jwt(HS_OTHER_AUDIENCE)), failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
+            presenting(3, 'echo', '"y"', jwt(HS_GRACE)), result(3, '"y"')]),
+        ('logout, in a credential\'s session, is refused ACCESS_DENIED, and its connection\'s session stays',
+         ['9.2.5', '13.5'], None, [
+             login(1, 'ada'), result(1, '"ada"', OPENED),
+             presenting(3, 'logout', 'null', jwt(HS_GRACE)), failure(3, ACCESS_DENIED),
+             json_request(5, 'whoami', 'null'), result(5, '"ada"')]),
+        # one subscription per procedure and per session: none, two issuers' sessions, and a later request
+        # of one of them, which holds nothing
+        ('sessions of one connection subscribing to one procedure each hold their own: its connection\'s, and each credential\'s',
+         ['11.3', '13.9'], None, [
+             subscribe(1), result(1, 'null'),
+             subscribing(3, jwt(HS_GRACE)), result(3, 'null'),
+             subscribing(5, jwt(ES_GRACE)), result(5, 'null'),
+             subscribing(7, jwt(HS_GRACE)), result(7, 'null'),
+             tick(9, 1), notification(1, '1'), result(9, 'null'),
+             ticked(11, 2, jwt(HS_GRACE)), notification(3, '2'), result(11, 'null'),
+             ticked(13, 3, jwt(ES_GRACE)), notification(5, '3'), result(13, 'null')]),
+        # one sub under two issuers names two sessions: the second, ending later, moves nothing of the
+        # first's end, and its tick reaches no subscription of the first's
+        ('two issuers presenting one sub are two sessions: the second moves nothing of the first\'s subscription',
+         ['11.3', '13.9'], None, [
+             subscribing(1, jwt(ES_GRACE)), result(1, 'null'),
+             presenting(3, 'whoami', 'null', jwt(HS_RENEWED)), result(3, '"grace"'),
+             ticked(5, 1, jwt(HS_RENEWED)), result(5, 'null'),
+             ticked(7, 2, jwt(ES_GRACE)), notification(1, '2'), result(7, 'null'),
+             armed(HOUR_END), advance(HOUR_END), failure(1, SESSION_REQUIRED)]),
+        # renewed by whoami under the same identifier, its end moves to the later token's, its timer armed
+        # anew from a fresh reading: the first token no longer holds, and its subscription does
+        ('a JWT renewed under a subscription keeps it past the first token\'s end, until the renewed one\'s',
+         ['11.3', '13.6', '13.9', '13.9.3'], None, [
+             subscribing(1, jwt(HS_GRACE)), result(1, 'null'),
+             armed(HOUR_END),
+             presenting(3, 'whoami', 'null', jwt(HS_RENEWED)), result(3, '"grace"'),
+             armed(HOUR_END + HOUR * 1000), advance(HOUR_END),
+             presenting(5, 'whoami', 'null', jwt(HS_GRACE)), failure(5, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
+             ticked(7, 1, jwt(HS_RENEWED)), notification(1, '1'), result(7, 'null'),
+             armed(HOUR * 1000), advance(HOUR * 1000), failure(1, SESSION_REQUIRED)]),
+        ('a credential\'s session whose end lies past a timer\'s ceiling is timed in two steps, the wall clock read again at each',
+         ['13.9', '13.9.3'], None, [
+             subscribing(1, jwt(HS_30_DAYS)), result(1, 'null'),
+             armed(2 ** 31 - 1), advance(2 ** 31 - 1),
+             ticked(3, 1, jwt(HS_30_DAYS)), notification(1, '1'), result(3, 'null'),
+             armed(444_576_353), advance(444_576_353), failure(1, SESSION_REQUIRED)]),
+        # the wall clock set back takes effect at the next due, which reads it again and arms what is left
+        ('a wall clock set by hand takes effect at the next due: a credential\'s session\'s end is read again, never counted down',
+         ['13.9.2', '13.9.3'], None, [
+             subscribing(1, jwt(HS_GRACE)), result(1, 'null'),
+             armed(HOUR_END), wall(-1_000_000), advance(HOUR_END),
+             armed(1_000_000), advance(1_000_000), failure(1, SESSION_REQUIRED)]),
+        # revoke, on a connection of its own, ends grace's session under the HS256 issuer on both
+        # connections that keep it, and nothing of the ES256 issuer's; the token still holds, and opens
+        # it anew
+        ('a credential\'s session ended by its identifier ends on every connection that keeps it, and a credential that still holds opens it anew',
+         ['13.6', '13.9'], None, [
+             opened('client'), opened('other'), opened('admin'),
+             on(subscribing(1, jwt(HS_GRACE)), 'client'), on(result(1, 'null'), 'client'),
+             on(subscribing(3, jwt(ES_GRACE)), 'client'), on(result(3, 'null'), 'client'),
+             on(subscribing(1, jwt(HS_GRACE)), 'other'), on(result(1, 'null'), 'other'),
+             on(json_request(1, 'revoke', GRACE), 'admin'), on(result(1, 'null'), 'admin'),
+             on(failure(1, SESSION_REQUIRED), 'client'), on(failure(1, SESSION_REQUIRED), 'other'),
+             on(ticked(5, 1, jwt(HS_GRACE)), 'client'), on(result(5, 'null'), 'client'),
+             on(subscribing(7, jwt(HS_GRACE)), 'client'), on(result(7, 'null'), 'client'),
+             on(ticked(9, 2, jwt(HS_GRACE)), 'client'), on(notification(7, '2'), 'client'), on(result(9, 'null'), 'client'),
+             on(ticked(11, 3, jwt(ES_GRACE)), 'client'), on(notification(3, '3'), 'client'), on(result(11, 'null'), 'client')]),
+        # the key set answers on the server's clock: a call presenting none, sent meanwhile, is answered first
+        ('a call presenting none, sent while a JWT call resolves, is answered first', ['9.2'], None, [
+            presenting(1, 'whoami', 'null', jwt(SET_GRACE)),
+            json_request(3, 'echo', '"x"'), result(3, '"x"'),
+            armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"')]),
+        # each ask waits on the server's clock: a call that finds the kid among the keys held asks
+        # nothing, and is answered at once; a kid none names asks once the minute passed, slow's 90 s
+        ('a key set is asked once a minute at most for an issuer: a kid only it names is taken from its answer, then from the keys held; a kid none names is refused, and asks again past the minute',
+         ['13.8', '13.8.4'], None, [
+             presenting(1, 'whoami', 'null', jwt(SET_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
+             presenting(3, 'whoami', 'null', jwt(SET_GRACE)), result(3, '"grace"'),
+             presenting(5, 'echo', '"x"', jwt(SET_UNNAMED)), failure(5, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
+             json_request(7, 'slow', '{"milliseconds":90000}'), armed(90_000), advance(90_000), result(7, '90000'),
+             presenting(9, 'echo', '"y"', jwt(SET_UNNAMED)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             failure(9, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
+             presenting(11, 'whoami', 'null', jwt(SET_GRACE)), result(11, '"grace"')]),
+    ]
+
+
+# the wall clock's start in milliseconds since the epoch, which an ELSEWHERE's end is written against
+EPOCH = START * 1000
+
+# an ELSEWHERE's block: the scheme 3 and no bytes, its credential what its transport carried
+ELSEWHERE_BLOCK = '00 03 00 00'
+
+
+def elsewhere(call_id, procedure, value, carried=None):
+    # a request presenting ELSEWHERE, beside which its transport carried that credential, or none
+    return {**presenting(call_id, procedure, value, ELSEWHERE_BLOCK), **({'carried': carried} if carried else {})}
+
+
+def carrying(step, carried):
+    # a send beside which its transport carried a credential, whatever its envelope presents
+    return {**step, 'carried': carried}
+
+
+def elsewhere_opening(call_id, procedure, data, total, carried):
+    # a request that opens a transfer and presents ELSEWHERE: TRANSFER, the total on 8 bytes, then the
+    # CREDENTIAL block, the last; its first bytes after
+    return carrying(request(call_id, procedure, hexadecimal(data), flags=0x0C, words=6,
+                            tail=f'{word(total, 8)}  {ELSEWHERE_BLOCK}'), carried)
+
+
+def elsewhere_conversations():
+    """9.2, step 5, 10.2 and 13.10: an ELSEWHERE, which the interop server's verifier resolves from what
+    its transport carried (interop-service.json, credentials.elsewhere): at once, or once the timer a
+    value asks for fires on the server's clock, whatever its call's signal, so that a settling can
+    come once its call ended. None subscribes, so no credential's session is kept past its call."""
+    return [
+        # an auth-scheme is compared case-insensitively (RFC 9110 §11.1), and a call presenting none
+        # runs in its connection's session, whatever its transport carried
+        ('an ELSEWHERE is resolved by the server\'s verifier from what its transport carried, and its call runs in that credential\'s session, never announced: whoami answers the sub it names',
+         ['9.2.5', '13.1', '13.10', '15.1'], None, [
+             elsewhere(1, 'whoami', 'null', 'Interop sub=ada'), result(1, '"ada"'),
+             elsewhere(3, 'whoami', 'null', 'interop sub=bob'), result(3, '"bob"'),
+             carrying(json_request(5, 'whoami', 'null'), 'Interop sub=ada'), failure(5, SESSION_REQUIRED)]),
+        # echo admits anyone: a credential that does not hold is refused all the same. The first is a
+        # bearer token, RFC 6750's own example, of which the verifier's grammar holds nothing
+        ('an ELSEWHERE its verifier does not hold is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying the credential does not hold',
+         ['9.2.5', '13.5', '13.10'], None, [
+             elsewhere(1, 'echo', '"x"', 'Bearer mF_9.B5f-4.1JqM'), failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
+             elsewhere(3, 'echo', '"y"', 'Interop sub=Ada'), failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
+        ('an ELSEWHERE whose verifier fails is answered PROCEDURE_FAILED, and reported, never SESSION_REQUIRED',
+         ['9.2.5', '13.10'], None, [
+             elsewhere(1, 'whoami', 'null', 'Interop fail=true'), failure(1, PROCEDURE_FAILED), report('exception')]),
+        # the first timer is armed before the cancel goes, so its verifier was asked; the second call on
+        # call id 1 still resolves when the first one's settling comes, which must not answer it
+        ('a verifier that settles late, its call cancelled meanwhile: the call is answered nothing, its call id is free again at once, and the late settling is dropped in silence',
+         ['9.4', '10.2', '13.10'], None, [
+             elsewhere(1, 'whoami', 'null', 'Interop sub=ada, after=1000'), armed(1000), cancel(1),
+             elsewhere(1, 'whoami', 'null', 'Interop sub=bob, after=2000'), armed(2000), advance(1000),
+             armed(1000), advance(1000), result(1, '"bob"')]),
+        ('a verifier that fails late, its call cancelled meanwhile, is dropped in silence: neither answered nor reported',
+         ['10.2'], None, [
+             elsewhere(1, 'whoami', 'null', 'Interop fail=true, after=1000'), armed(1000), cancel(1),
+             armed(1000), advance(1000), json_request(3, 'echo', '"y"'), result(3, '"y"')]),
+        ('a connection that closes while a credential resolves ends its call, and its verifier\'s late failure is dropped in silence',
+         ['9.10'], None, [
+             elsewhere(1, 'whoami', 'null', 'Interop fail=true, after=1000'), armed(1000), {'close': True},
+             advance(1000)]),
+        # 9.2: a resolution holds back no other call of its connection
+        ('a call presenting none, sent while an ELSEWHERE call resolves, is answered first', ['9.2'], None, [
+            elsewhere(1, 'whoami', 'null', 'Interop sub=ada, after=1000'), armed(1000),
+            json_request(3, 'echo', '"y"'), result(3, '"y"'),
+            armed(1000), advance(1000), result(1, '"ada"')]),
+        # an opening of 64 bytes carries 40 of its payload behind 24 of header; nothing goes out before
+        # the echo's answer, no credit among it
+        ('a transfer\'s opening presenting ELSEWHERE gets no credit until its verifier settles', ['12.3', '12.3.1'], CHUNKED, [
+            elsewhere_opening(1, 'echo', ECHOED[:40], 100, 'Interop sub=ada, after=1000'), armed(1000),
+            json_request(3, 'echo', '"y"'), result(3, '"y"'),
+            armed(1000), advance(1000), credited(1, 100),
+            chunk_in(1, 40, ECHOED[40:88], False), chunk_in(1, 88, ECHOED[88:], True),
+            result_opening(1, ECHOED[:28], 100),
+            credit_in(1, 100), chunk_out(1, 28, ECHOED[28:76], False), chunk_out(1, 76, ECHOED[76:], True)]),
+        # the second comes while its end lies a second ahead, and settles as the wall clock reaches it
+        ('an ELSEWHERE whose end the wall clock has reached as its verifier settles does not hold, and one a millisecond short of it holds',
+         ['13.10'], None, [
+             elsewhere(1, 'whoami', 'null', f'Interop sub=ada, after=1000, end={EPOCH + 1001}'), armed(1000),
+             advance(1000), result(1, '"ada"'),
+             elsewhere(3, 'whoami', 'null', f'Interop sub=bob, after=1000, end={EPOCH + 2000}'), armed(1000),
+             advance(1000), failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
+    ]
 
 conversations = [
     # 9.2: a request routed, admitted and answered
@@ -322,6 +613,8 @@ conversations = [
         login(1, 'ada'), result(1, '"ada"', OPENED), subscribe(3), result(3, 'null'),
         json_request(5, 'logout', 'null'), failure(3, SESSION_REQUIRED, credential=ENDED), result(5, 'null'),
         tick(7, 1), result(7, 'null')]),
+    # 13.8 and 13.9: a JWT's session, kept while it bounds a subscription, and its end
+    *jwt_conversations(),
     # 9.2, step 5: a request's credential resolves to its call's session, which its admission reads
     ('a request presenting its connection\'s OPAQUE is taken, and runs in that session', ['9.2.5', '13.1', '13.4'], None, [
         login(1, 'ada'), named(result(1, '"ada"', OPENED), 'ada'),
@@ -362,15 +655,17 @@ conversations = [
          presenting(3, 'whoami', 'null', 'FF FF 00 02  01 02  00 00'),
          failure(3, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN),
          presenting(5, 99, '{}', '00 07 00 00'), failure(5, PROCEDURE_UNKNOWN)]),
-    # TODO the phase that gives the interop server its JWT keys moves this one: a JWT is then
-    # resolved, and refused SESSION_REQUIRED when it does not hold
-    ('a JWT, to a server with no key, is answered CREDENTIAL_UNSUPPORTED', ['9.2.5'], None, [
-        presenting(1, 'echo', '"x"', '00 02 00 05  61 2E 62 2E 63  00 00 00'),
-        failure(1, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN)]),
-    # TODO the phase that gives the interop server its ELSEWHERE verifier moves this one: an
-    # ELSEWHERE is then resolved, and refused SESSION_REQUIRED when its transport carried nothing
-    ('an ELSEWHERE, to a server with no verifier, is answered CREDENTIAL_UNSUPPORTED', ['9.2.5'], None, [
-        presenting(1, 'echo', '"x"', '00 03 00 00'), failure(1, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN)]),
+    # a.b.c reads as no token (13.8, step 1): a credential that came and does not hold
+    ('a JWT that does not verify is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying one came and did not hold',
+     ['9.2.5', '13.8.1'], None, [
+         presenting(1, 'echo', '"x"', '00 02 00 05  61 2E 62 2E 63  00 00 00'),
+         failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
+    # echo admits anyone: an ELSEWHERE that carried nothing is refused all the same, and its verifier
+    # is never asked
+    ('an ELSEWHERE whose transport carried nothing is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying no credential came',
+     ['9.2.5', '15.1'], None, [
+         elsewhere(1, 'echo', '"x"'), failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL)]),
+    *elsewhere_conversations(),
     # 9.2, steps 1 and 2: what would answer another call
     ('a request on the server\'s own parity is reported, never answered', ['9.2.1'], None, [
         json_request(2, 'echo', 'null'), report(MALFORMED)]),
@@ -588,6 +883,193 @@ conversations += [
         on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')]),
 ]
 
+# the relay's options a conversation sets, by its name
+RELAY_OPTIONS = {}
+
+
+def credentials_through_a_relay():
+    """14: what a relay does with the credential a request presents — its table, its first step, the
+    route it cannot carry, and leg B's header — with the interop service's HS256 issuer and audience."""
+    # the interop service's audience, and another a destination may be registered with, which no
+    # credential names
+    audience, other = AUDIENCE, 'bead-other'
+    taken = SCHEMES_TAKEN
+    # a credential its transport carried: RFC 6750's own example, its auth-scheme included
+    bearer = 'Bearer mF_9.B5f-4.1JqM'
+    elsewhere = '00 03 00 00'
+
+    def as_jwt(token):
+        return {'scheme': 'JWT', 'token': token}
+
+    as_elsewhere = {'scheme': 'ELSEWHERE'}
+
+    def to(call_id, value, block, destination=DEVICE, carried=None, procedure='echo'):
+        # a request that names a destination, then presents a credential: its DESTINATION block, then
+        # its CREDENTIAL block, the last; a token named between angle brackets stands for its 16 bytes
+        length = sum(16 if piece.startswith('<') else 1 for piece in block.split())
+        step = json_request(call_id, procedure, value, flags=0x0A, words=4 + length // 4,
+                            tail=f'{word(destination, 4)}  {block}')
+        return on({**step, **({'carried': carried} if carried else {})}, 'client')
+
+    def leg_b_presenting(call_id, value, credential=None, carried=None, connection='device', procedure='echo'):
+        # the request leg B sends: what it presents in its CREDENTIAL block, and what its transport
+        # carried beside it
+        step = command(call_id, procedure, value)
+        step['expect'].update({'flags': 0x08, 'credential': credential} if credential else {})
+        return {**on(step, connection), **({'carried': carried} if carried else {})}
+
+    def crosses(call_id, leg_b_call_id, value, *leg_b, connection='device', answer_value=None):
+        # leg B's request expected, then answered by its destination, and that answer crossing back
+        answered = value if answer_value is None else answer_value
+        return [*leg_b, on(answer(leg_b_call_id, answered), connection), on(result(call_id, answered), 'client')]
+
+    def registered_as(destination, audience_=None, connection='device', call_id=1):
+        value = json.dumps({'destination': destination, **({'audience': audience_} if audience_ else {})},
+                           separators=(',', ':'))
+        return [on(json_request(call_id, 'register', value), connection), on(result(call_id, str(destination)), connection)]
+
+    def logged_in_as_ada(call_id=1):
+        return [on(login(call_id, 'ada'), 'client'), on(named(result(call_id, '"ada"', OPENED), 'ada'), 'client')]
+
+    def opened_as(connection, **declared):
+        return {'open': connection, **declared}
+
+    def refused_with(call_id, code, detail=None):
+        return on(failure(call_id, code, detail=detail), 'client')
+
+    def with_relay(options, conversation):
+        # a conversation whose server's relay takes these options
+        RELAY_OPTIONS[conversation[0]] = options
+        return conversation
+
+    # the HS256 issuer's tokens for carol: one that holds, and one an hour expired
+    token = hs256(access(sub='carol', jti='at-relay-0001'))
+    expired = hs256(access(sub='carol', exp=START - HOUR, iat=START - 2 * HOUR, jti='at-relay-0002'))
+    # a JWT whose parts do not read: its aud names nothing
+    unreadable = '00 02 00 05  61 2E 62 2E 63  00 00 00'
+    no_credential_came, does_not_hold = NO_CREDENTIAL, DOES_NOT_HOLD
+
+    # leg B's header with this token: the prefix, the service and the procedure, then its CREDENTIAL
+    # block; the largest payload an envelope of 1,024 bytes holds behind it
+    leg_b_header = 12 + 4 + len(token) + -len(token) % 4
+    fits = 1024 - leg_b_header
+    assert 12 + fits + 1 <= 1024, 'a payload a byte past it fits behind a header that presents none'
+
+    relayed_conversations = [
+        # 14.2's table, row by row
+        ('a call presenting none or OPAQUE crosses a relay to leg B presenting none, over any leg B, what its transport carried staying at the relay',
+         ['14.2.1', '14.3.1', '14.7'], None, [
+             opened('client'), opened('device'), opened_as('plain', carries=False, secure=False),
+             *logged_in_as_ada(), *registered_as(DEVICE), *registered_as(13, connection='plain'),
+             on({**relayed(3, 'echo', '"x"'), 'carried': bearer}, 'client'),
+             *crosses(3, 2, '"x"', leg_b_presenting(2, '"x"')),
+             to(5, '"y"', opaque('<ada>')), *crosses(5, 4, '"y"', leg_b_presenting(4, '"y"')),
+             on(relayed(7, 'echo', '"z"', destination=13), 'client'),
+             *crosses(7, 6, '"z"', leg_b_presenting(6, '"z"', connection='plain'), connection='plain')]),
+        ('an OPAQUE no session holds is answered SESSION_REQUIRED at a relay\'s first step, before its destination is looked up',
+         ['14.3.1'], None, [
+             opened('client'), opened('device'), *logged_in_as_ada(), *registered_as(DEVICE),
+             to(3, '"x"', opaque(TOKEN_BYTES)), refused_with(3, SESSION_REQUIRED, does_not_hold),
+             to(5, '"x"', opaque(TOKEN_BYTES), destination=99), refused_with(5, SESSION_REQUIRED, does_not_hold)]),
+        ('a JWT crosses a relay, its same bytes, to a destination whose audience its aud names, read without verifying it: one expired crosses too, for its destination to verify',
+         ['14.1', '14.2.2', '14.3.1', '14.3.5'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', jwt(token), carried=bearer),
+             *crosses(1, 2, '"x"', leg_b_presenting(2, '"x"', as_jwt(token))),
+             to(3, '"y"', jwt(expired)), *crosses(3, 4, '"y"', leg_b_presenting(4, '"y"', as_jwt(expired)))]),
+        ('a JWT to a destination of another audience, or of none, is answered DESTINATION_UNREACHABLE: its credential may hold, and its route does not',
+         ['14.1', '14.3.5'], None, [
+             opened('client'), opened('device'), opened('other'),
+             *registered_as(DEVICE, other), *registered_as(13, connection='other'),
+             to(1, '"x"', jwt(token)), refused_with(1, DESTINATION_UNREACHABLE),
+             to(3, '"x"', jwt(token), destination=13), refused_with(3, DESTINATION_UNREACHABLE)]),
+        ('a JWT passes the default admission of a relay that does not verify on its scheme alone: one whose aud does not read learns which destinations exist, and none takes it',
+         ['14.3.1', '14.3.2', '14.3.5'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', unreadable, destination=99), refused_with(1, DESTINATION_UNKNOWN),
+             to(3, '"x"', unreadable), refused_with(3, DESTINATION_UNREACHABLE)]),
+        ('an ELSEWHERE its transport carried crosses a relay to a destination registered with an audience, its credential moved to leg B\'s transport as it came',
+         ['14.2.3', '14.3.1', '14.3.5'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', elsewhere, carried=bearer),
+             *crosses(1, 2, '"x"', leg_b_presenting(2, '"x"', as_elsewhere, carried=bearer))]),
+        ('an ELSEWHERE over a leg B whose transport carries none, or to a destination registered with no audience, is answered DESTINATION_UNREACHABLE, where a JWT crosses in its block',
+         ['14.2.2', '14.3.5'], None, [
+             opened('client'), opened_as('device', carries=False), opened('other'),
+             *registered_as(DEVICE, audience), *registered_as(13, connection='other'),
+             to(1, '"x"', elsewhere, carried=bearer), refused_with(1, DESTINATION_UNREACHABLE),
+             to(3, '"x"', elsewhere, destination=13, carried=bearer), refused_with(3, DESTINATION_UNREACHABLE),
+             to(5, '"y"', jwt(token)), *crosses(5, 2, '"y"', leg_b_presenting(2, '"y"', as_jwt(token)))]),
+        ('a JWT or an ELSEWHERE to a leg B in the clear off the machine is answered DESTINATION_UNREACHABLE, nothing tried, where a call presenting none crosses',
+         ['14.2.1', '14.3.5'], None, [
+             opened('client'), opened_as('device', secure=False), *logged_in_as_ada(), *registered_as(DEVICE, audience),
+             to(3, '"x"', jwt(token)), refused_with(3, DESTINATION_UNREACHABLE),
+             to(5, '"x"', elsewhere, carried=bearer), refused_with(5, DESTINATION_UNREACHABLE),
+             on(relayed(7, 'echo', '"y"'), 'client'), *crosses(7, 2, '"y"', leg_b_presenting(2, '"y"'))]),
+        # 14.3, step 1: what the relay neither resolves nor forwards, before its destination is looked up
+        ('a credential scheme to come is answered CREDENTIAL_UNSUPPORTED at a relay\'s first step, before its admission and its destination, its detail naming the schemes it takes',
+         ['14.3.1'], None, [
+             opened('client'), opened('device'), *logged_in_as_ada(), *registered_as(DEVICE, audience),
+             to(3, '"x"', '00 04 00 00'), refused_with(3, CREDENTIAL_UNSUPPORTED, taken),
+             to(5, '"x"', 'FF FF 00 02  01 02  00 00', destination=99), refused_with(5, CREDENTIAL_UNSUPPORTED, taken)]),
+        ('an ELSEWHERE whose transport carried nothing is answered SESSION_REQUIRED at a relay\'s first step, whatever leg A\'s connection\'s session',
+         ['14.3.1'], None, [
+             opened('client'), opened('device'), *logged_in_as_ada(), *registered_as(DEVICE, audience),
+             to(3, '"x"', elsewhere), refused_with(3, SESSION_REQUIRED, no_credential_came),
+             to(5, '"x"', elsewhere, destination=99), refused_with(5, SESSION_REQUIRED, no_credential_came)]),
+        # 14.3, step 6: leg B's header, with the token's block, leaves an envelope of 1,024 bytes `fits`
+        # bytes of payload, and 4 more without it; leg A's request comes whole, past chunkBytes and
+        # within maximumEnvelopeBytes, since the server takes no transfer
+        ('leg B\'s header counts its credential, call by call, against the smaller of the two legs\' limits, once its route holds',
+         ['14.3.5', '14.3.6'], {'maximumEnvelopeBytes': 2048, 'chunkBytes': 1024, 'maximumTransfers': 0}, [
+             opened('client'), opened('device'), opened('other'), *logged_in_as_ada(),
+             *registered_as(DEVICE, audience), *registered_as(13, other, connection='other'),
+             to(3, json_string(fits), jwt(token)),
+             *crosses(3, 2, json_string(fits), leg_b_presenting(2, json_string(fits), as_jwt(token)), answer_value='"ok"'),
+             to(5, json_string(fits + 1), jwt(token)), refused_with(5, PAYLOAD_TOO_LARGE),
+             on(relayed(7, 'echo', json_string(fits + 1)), 'client'),
+             *crosses(7, 4, json_string(fits + 1), leg_b_presenting(4, json_string(fits + 1)), answer_value='"ok"'),
+             to(9, json_string(fits + 1), jwt(token), destination=13), refused_with(9, DESTINATION_UNREACHABLE)]),
+        # 14.3: a relay that verifies, at its first step, against its destinations' audiences
+        with_relay({'verifies': True}, ('a relay that verifies answers a JWT that does not hold SESSION_REQUIRED at its first step, before its destination is looked up, and forwards one that holds',
+         ['14.3.1'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', jwt(expired)), refused_with(1, SESSION_REQUIRED, does_not_hold),
+             to(3, '"x"', unreadable, destination=99), refused_with(3, SESSION_REQUIRED, does_not_hold),
+             to(5, '"y"', jwt(token)), *crosses(5, 2, '"y"', leg_b_presenting(2, '"y"', as_jwt(token)))])),
+        with_relay({'verifies': True}, ('a relay that verifies answers a JWT that names none of its destinations\' audiences SESSION_REQUIRED, its server\'s own audience not among them until a destination holds it',
+         ['13.8.11', '14.3.1'], None, [
+             opened('client'), opened('device'), opened('other'), *registered_as(DEVICE, other),
+             to(1, '"x"', jwt(token)), refused_with(1, SESSION_REQUIRED, does_not_hold),
+             *registered_as(13, audience, connection='other'),
+             to(3, '"y"', jwt(token), destination=13),
+             *crosses(3, 2, '"y"', leg_b_presenting(2, '"y"', as_jwt(token), connection='other'), connection='other')])),
+        with_relay({'verifies': True}, ('a relay that verifies holds the aud it verified to its destination\'s own audience: another is answered DESTINATION_UNREACHABLE',
+         ['14.3.5'], None, [
+             opened('client'), opened('device'), opened('other'),
+             *registered_as(DEVICE, audience), *registered_as(13, other, connection='other'),
+             to(1, '"x"', jwt(token), destination=13), refused_with(1, DESTINATION_UNREACHABLE),
+             to(3, '"y"', jwt(token)), *crosses(3, 2, '"y"', leg_b_presenting(2, '"y"', as_jwt(token)))])),
+        # 14.3, step 1: the admission reads the call's session, which a relay that verifies resolves
+        with_relay({'verifies': True, 'beforeRoute': 'requireSession'}, ('a relay that verifies hands its admission the credential\'s session: requireSession admits a JWT that holds, and refuses a call in none',
+         ['14.3.1'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', jwt(token)), *crosses(1, 2, '"x"', leg_b_presenting(2, '"x"', as_jwt(token))),
+             on(relayed(3, 'echo', '"y"'), 'client'), refused_with(3, SESSION_REQUIRED)])),
+        with_relay({'beforeRoute': 'requireSession'}, ('a relay whose admission is requireSession refuses every credential it forwards without verifying, whatever leg A\'s connection\'s session',
+         ['13.5', '14.3.1'], None, [
+             opened('client'), opened('device'), *logged_in_as_ada(), *registered_as(DEVICE, audience),
+             to(3, '"x"', jwt(token)), refused_with(3, SESSION_REQUIRED),
+             to(5, '"x"', elsewhere, carried=bearer), refused_with(5, SESSION_REQUIRED),
+             to(7, '"y"', opaque('<ada>')), *crosses(7, 2, '"y"', leg_b_presenting(2, '"y"')),
+             on(relayed(9, 'echo', '"z"'), 'client'), *crosses(9, 4, '"z"', leg_b_presenting(4, '"z"'))])),
+    ]
+
+    return relayed_conversations
+
+
+conversations += credentials_through_a_relay()
+
 # a token a send presents is one an earlier step named
 for name, _, _, *rest in conversations:
     tokens = set()
@@ -603,20 +1085,23 @@ document = {
     '$comment': [
         "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
+        'carried, beside a send, is the credential the client\'s transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization\'s value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination\'s connection, what leg B\'s transport carried beside it. Absent, it carried none.',
         'token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.',
-        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
+        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
-        'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.',
+        'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket\'s or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
-        'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.',
+        'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireSessionOrCredential by default, or requireSession.',
+        'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set, which answers on the server\'s clock as its words say; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),
-    'wallClock': '2026-01-01T00:00:00Z',
+    'wallClock': WALL_CLOCK,
     'conversations': [
         {'name': name, 'clauses': clauses, **({'limits': limits} if limits else {}),
-         **({'pacing': rest[0]} if len(rest) > 1 else {}), 'steps': rest[-1]}
+         **({'pacing': rest[0]} if len(rest) > 1 else {}), **({'relay': RELAY_OPTIONS[name]} if name in RELAY_OPTIONS else {}),
+         'steps': rest[-1]}
         for name, clauses, limits, *rest in conversations
     ],
 }

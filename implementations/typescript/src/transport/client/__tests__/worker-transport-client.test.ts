@@ -113,6 +113,13 @@ test.describe('createWorkerTransportClient', () => {
     expect(CONNECT_DEFAULTS.timeout).toBe(10_000);
   });
 
+  test('says it carries no credential beside an envelope, and is secure, never leaving the machine, before any connect', async () => {
+    await using started = await startWorker();
+    const client = createWorkerTransportClient({ worker: started.worker });
+
+    expect([client.carriesCredential, client.isSecure]).toEqual([false, true]);
+  });
+
   test('closes as its server closes it, or as its worker errs, and connects again', async () => {
     await using started = await startWorker();
     const { errorListeners, server, worker } = started;

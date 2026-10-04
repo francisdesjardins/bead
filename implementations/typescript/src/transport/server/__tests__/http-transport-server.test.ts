@@ -1164,6 +1164,44 @@ test.describe('createHTTPTransportServer, over TLS', () => {
 });
 
 test.describe('createHTTPTransportServer, its edges', () => {
+  test('is secure under TLS whatever it listens on, or on a loopback host alone, and carries no credential toward a connection', async () => {
+    const securedBy = async ({ address, isTls }: { address: string; isTls: boolean }) => {
+      const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
+      const server = createHTTPTransportServer({
+        createServer: (listener) => {
+          const created = fake.createServer(listener);
+
+          // a server under TLS has its contexts, as Node's https server does
+          return isTls ? Object.assign(created, { addContext: () => {} }) : created;
+        },
+      });
+      const starting = server.start({ address, port: 50_000 });
+
+      fake.listen();
+      await starting;
+
+      try {
+        const drawn = 'type=HTTP;ip=192.0.2.9;ordinal=1' as const;
+
+        return [server.carriesCredential(drawn), server.isSecure(drawn)];
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all([
+        securedBy({ address: '192.0.2.1', isTls: true }),
+        securedBy({ address: '192.0.2.1', isTls: false }),
+        securedBy({ address: '127.0.0.1', isTls: false }),
+      ])
+    ).toEqual([
+      [false, true],
+      [false, false],
+      [false, true],
+    ]);
+  });
+
   test('listens on the port it was asked for, reports it when the server reports none, takes a late error as its own, and closes its sessions as it stops', async () => {
     const fake = createFakeHTTPServer({ address: null });
     const server = createHTTPTransportServer({ createServer: fake.createServer });

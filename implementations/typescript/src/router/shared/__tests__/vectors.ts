@@ -18,7 +18,7 @@ import type { Credential, EnvelopeHeader, IReceivedFailure, RouterSide } from '.
  * A credential as the vectors write it: its scheme by name, or by number for a scheme to come; a
  * `JWT`'s token as it is; the bytes of an `OPAQUE` and of a scheme to come in hexadecimal.
  */
-interface IVectorCredential {
+export interface IVectorCredential {
   bytes?: string;
   scheme: keyof typeof CredentialScheme | number;
   token?: string;
@@ -57,11 +57,11 @@ export interface IEnvelopeVector {
 }
 
 /**
- * A `JWT`, the keys, the audience and the wall clock's reading, an RFC 3339 instant, it is verified
+ * A `JWT`, the keys, the audience or a set of them and the wall clock's reading, an RFC 3339 instant, it is verified
  * against, and the verdict every side gives.
  */
 export interface IJwtVerdictVector {
-  audience: string;
+  audience: string | string[];
   keys: IJwtKey[];
   name: string;
   now: string;

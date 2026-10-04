@@ -61,9 +61,16 @@ public sealed record ServerOptions
     public SessionManagerOptions? Sessions { get; init; }
 
     /// <summary>
+    /// What its router resolves a request's <see cref="CredentialScheme.Jwt"/> and
+    /// <see cref="CredentialScheme.Elsewhere"/> with, on the server's clock; it takes no other when
+    /// none (spec 9.2, step 5).
+    /// </summary>
+    public Credentials? Credentials { get; init; }
+
+    /// <summary>
     /// How the router relays a request that names a destination registered in it. Its
-    /// <see cref="RelayOptions.BeforeRoute"/> is <see cref="Server{TData}.RequireSession"/> when none:
-    /// a relay is a door to what is behind it.
+    /// <see cref="RelayOptions.BeforeRoute"/> is <see cref="Server{TData}.RequireSessionOrCredential"/>
+    /// when none: a relay is a door to what is behind it.
     /// </summary>
     public RelayOptions? Relay { get; init; }
 
@@ -151,6 +158,12 @@ public sealed class Server<TData> : IAsyncDisposable
                 return request.Session is not null;
             },
             Failure.OfProtocol(ProtocolCode.SessionRequired));
+        RequireSessionOrCredential = new BeforeRequest(
+            (request) =>
+            {
+                return request.Session is not null || request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
+            },
+            Failure.OfProtocol(ProtocolCode.SessionRequired));
 
         // before the router's own, in the order handlers run: a resolver that stores a session as
         // the router reads the envelope finds its connection open already
@@ -166,9 +179,10 @@ public sealed class Server<TData> : IAsyncDisposable
                 transport,
                 new RouterServerOptions
                 {
+                    Credentials = options?.Credentials,
                     Limits = options?.Limits,
                     Pacing = options?.Pacing,
-                    Relay = (options?.Relay ?? new RelayOptions()) with { BeforeRoute = options?.Relay?.BeforeRoute ?? RequireSession },
+                    Relay = (options?.Relay ?? new RelayOptions()) with { BeforeRoute = options?.Relay?.BeforeRoute ?? RequireSessionOrCredential },
                     ResolverScheduler = options?.ResolverScheduler,
                     Scheduler = options?.Scheduler,
                     SessionTokenOf = Sessions.SessionTokenOf,
@@ -269,9 +283,19 @@ public sealed class Server<TData> : IAsyncDisposable
 
     /// <summary>
     /// The admission of a procedure that needs a session: a call in none — its call's session, never
-    /// its connection's — is refused with SESSION_REQUIRED.
+    /// its connection's — is refused with SESSION_REQUIRED. A relay's in its place refuses every
+    /// credential it forwards without verifying, which resolves to no session there.
     /// </summary>
     public BeforeRequest RequireSession { get; }
+
+    /// <summary>
+    /// A relay's admission by default (spec 14.3, step 1): a call in leg A's connection's session, or
+    /// one whose header presents a <see cref="CredentialScheme.Jwt"/>, or an
+    /// <see cref="CredentialScheme.Elsewhere"/> its transport carried, read from its credential
+    /// scheme alone — a credential the relay may forward, which its destination verifies; any other
+    /// is refused with SESSION_REQUIRED.
+    /// </summary>
+    public BeforeRequest RequireSessionOrCredential { get; }
 
     /// <summary>Follows its transport no more, disposes its router and its sessions, then stops its transport.</summary>
     public async ValueTask DisposeAsync()

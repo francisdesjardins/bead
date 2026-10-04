@@ -95,8 +95,20 @@ export interface ITransportServer<
   readonly type: TRANSPORTS;
 
   /** Closes one connection. Resolves `false` for an unknown handle, otherwise `true` once it closed. */
+  /**
+   * Whether it carries a credential beside an envelope it sends a connection: none of this package's
+   * does — an answer, a listen's batch, a WebSocket's message, a worker's — so its router fails a
+   * command presenting an `ELSEWHERE` before it goes, and its relay sends none on it (spec 13.4).
+   */
+  carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean;
   close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
   closeAll(): Promise<boolean[]>;
+  /**
+   * Whether a connection is secure, judged by what the server listens on, never by what a name
+   * resolves to (spec 13.4): under TLS, on a loopback host, or never leaving the machine, as a
+   * worker.
+   */
+  isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
   emit<K extends TRANSPORT_SERVER_EVENTS>(
     event: K,
     ...params: TransportServerEventMap<Socket, Request>[K]
@@ -159,6 +171,11 @@ export interface ITransportServer<
 export interface ITransportServerImplementation<Socket = unknown> {
   /** The clock it runs on; the platform's when none. */
   readonly clock?: IClock | undefined;
+  /**
+   * Whether it is secure whatever it listens on: under TLS, or never leaving the machine, as a
+   * worker; when not, it is so on a loopback host alone.
+   */
+  readonly isSecure?: boolean | undefined;
   readonly defaults: TransportServerResolvedStartOptions;
   readonly type: TRANSPORTS;
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;

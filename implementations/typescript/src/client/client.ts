@@ -66,7 +66,12 @@ export const createClient = <Transport extends IClientTransportLike>(
   options?: IClientOptions
 ): IClient<Transport> => {
   const { clock } = transport;
-  const router = createRouter(transport, { clock, limits: options?.limits });
+  const router = createRouter(transport, {
+    clock,
+    credential: options?.credential,
+    credentials: options?.credentials,
+    limits: options?.limits,
+  });
 
   // a router a builder made on another clock comes apart, refused
   try {

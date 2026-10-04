@@ -1045,6 +1045,14 @@ public sealed partial class RouterCoreTests
 
         public int TwoWayAsked { get; private set; }
 
+        // whether its transport carries a credential beside an envelope, and is secure: in process
+        public bool IsCarrying { get; set; } = true;
+
+        public bool IsSecureConnection { get; set; } = true;
+
+        // what its transport was handed beside each envelope, in order
+        public List<string?> Carried { get; } = [];
+
         // what the transport does as it is handed an envelope, before its send settles
         public Func<Envelope, Task>? OnSend { get; set; }
 
@@ -1127,10 +1135,22 @@ public sealed partial class RouterCoreTests
             Reports.Add(reason);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public bool CarriesCredential(string connectionHandle)
         {
+            return IsCarrying;
+        }
+
+        public bool IsSecure(string connectionHandle)
+        {
+            return IsSecureConnection;
+        }
+
+        public Task Send(TransportMessage message, string connectionHandle)
+        {
+            Carried.Add(message.Credential);
+
             var envelope = EnvelopeCodec.ReadEnvelope(
-                bytes.Span,
+                message.Bytes.Span,
                 new EnvelopeReadOptions { Side = CallIds.PeerOf(Side), MaximumEnvelopeBytes = int.MaxValue })!;
 
             Sent.Add(envelope);
@@ -1270,9 +1290,9 @@ public sealed partial class RouterCoreTests
                 link.Reports.Add(reason);
             }
 
-            public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+            public Task Send(TransportMessage message, string connectionHandle)
             {
-                link.Queue(side, bytes);
+                link.Queue(side, message.Bytes);
 
                 return Task.CompletedTask;
             }

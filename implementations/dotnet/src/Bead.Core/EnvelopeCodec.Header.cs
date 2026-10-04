@@ -394,7 +394,7 @@ public static partial class EnvelopeCodec
         return scheme switch
         {
             CredentialScheme.None => Credential.None,
-            CredentialScheme.Elsewhere => Credential.Elsewhere,
+            CredentialScheme.Elsewhere => Credential.Elsewhere(),
             CredentialScheme.Opaque => Credential.Opaque(SessionToken.FromBytes(credential)),
 
             // a byte a character, whatever the byte: a relay passes on the very bytes it read

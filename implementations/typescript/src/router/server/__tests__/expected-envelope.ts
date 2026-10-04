@@ -7,7 +7,8 @@
 
 import { readEnvelope } from '../../shared/envelope';
 import { toSessionTokenBytes } from '../../shared/identifiers';
-import type { Envelope } from '../../shared/types';
+import type { Credential, Envelope } from '../../shared/types';
+import type { IVectorCredential } from '../../shared/__tests__/vectors';
 import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../router-server';
 
 // interfaces
@@ -19,7 +20,11 @@ export interface IExpected {
   isLast?: boolean;
   offset?: number;
   total?: number;
-  credential?: 'NONE' | 'OPAQUE';
+  /**
+   * An answer's, the scheme of what it announced; a request's, the credential it presents, as the
+   * vectors write a header's.
+   */
+  credential?: 'NONE' | 'OPAQUE' | IVectorCredential;
   /** Its detail only where a conversation gives one: informative elsewhere. */
   failure?: { code: number; detail?: string | undefined; relays: number; scope: number };
   flags?: number | undefined;
@@ -52,6 +57,26 @@ const announcementOf = (envelope: Envelope): Pick<IExpected, 'credential'> => {
   }
 
   return { credential: credential.scheme === CredentialScheme.NONE ? 'NONE' : 'OPAQUE' };
+};
+
+/** The credential a request presents, as the vectors write a header's: a `JWT`'s token as it is. */
+const presentedOf = (credential: Credential): IVectorCredential => {
+  if (credential.scheme === CredentialScheme.JWT && 'token' in credential) {
+    return { scheme: 'JWT', token: credential.token };
+  }
+
+  if (credential.scheme === CredentialScheme.ELSEWHERE) {
+    return { scheme: 'ELSEWHERE' };
+  }
+
+  if (credential.scheme === CredentialScheme.OPAQUE && 'token' in credential) {
+    return { bytes: hexadecimalOf(toSessionTokenBytes(credential.token)), scheme: 'OPAQUE' };
+  }
+
+  return {
+    bytes: 'bytes' in credential ? hexadecimalOf(credential.bytes) : '',
+    scheme: credential.scheme,
+  };
 };
 
 /** An envelope sent, read as a client reads it. */
@@ -133,9 +158,9 @@ export const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
     return { callId, creditEnd: envelope.header.creditEnd, kind: envelope.kind };
   }
 
-  // a command the server sends its client, its flags the byte after its kind
+  // a command the server sends its client, or a relay's leg B, its flags the byte after its kind
   if (envelope.kind === EnvelopeKind.REQUEST) {
-    const { procedureId, serviceId } = envelope.header;
+    const { credential, procedureId, serviceId } = envelope.header;
 
     return {
       callId,
@@ -144,6 +169,7 @@ export const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
       payload: hexadecimalOf(envelope.payload),
       procedureId,
       serviceId,
+      ...(credential === undefined ? {} : { credential: presentedOf(credential) }),
     };
   }
 

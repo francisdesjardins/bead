@@ -12,9 +12,10 @@ import { createServer as createNodeServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
-import { type InteropServer, offerInterop } from '../../../../interop/offer';
+import { interopCredentialsOf, type InteropServer, offerInterop } from '../../../../interop/offer';
 import {
   expectedOf,
+  failureDetailOf,
   hexadecimalOf,
   type IExpected,
 } from '../../../router/server/__tests__/expected-envelope';
@@ -186,17 +187,29 @@ const canonicalOf = (text: string): string => {
   return hexadecimalOf(fromHexadecimal(text));
 };
 
-/** A body's one envelope, as a case expects it, or its bytes when they are none. */
-const envelopeOf = (bytes: Uint8Array): IExpected | string => {
+/**
+ * A body's one envelope, as a case expects it — a failure's detail where `expected` gives one,
+ * informative elsewhere — or its bytes when they are none.
+ */
+const envelopeOf = (bytes: Uint8Array, expected?: IExpected | string): IExpected | string => {
+  let actual: IExpected | string;
+
   try {
-    return expectedOf(bytes) ?? hexadecimalOf(bytes);
+    actual = expectedOf(bytes) ?? hexadecimalOf(bytes);
   } catch {
     return hexadecimalOf(bytes);
   }
+
+  return typeof actual === 'object' &&
+    actual.failure !== undefined &&
+    typeof expected === 'object' &&
+    expected.failure?.detail !== undefined
+    ? { ...actual, failure: { ...actual.failure, detail: failureDetailOf(bytes) } }
+    : actual;
 };
 
-/** A batch's envelopes, each after its length on 4 bytes, big-endian. */
-const batchOf = (bytes: Uint8Array): (IExpected | string)[] => {
+/** A batch's envelopes, each after its length on 4 bytes, big-endian, as `expected` writes them. */
+const batchOf = (bytes: Uint8Array, expected?: (IExpected | string)[]): (IExpected | string)[] => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const envelopes: (IExpected | string)[] = [];
   let at = 0;
@@ -204,7 +217,9 @@ const batchOf = (bytes: Uint8Array): (IExpected | string)[] => {
   while (at + 4 <= bytes.length) {
     const length = view.getUint32(at);
 
-    envelopes.push(envelopeOf(bytes.subarray(at + 4, at + 4 + length)));
+    envelopes.push(
+      envelopeOf(bytes.subarray(at + 4, at + 4 + length), expected?.[envelopes.length])
+    );
     at += 4 + length;
   }
 
@@ -274,8 +289,10 @@ const seenOf = (
     status: response.status,
     ...(expectation.fields === undefined ? {} : { fields: Object.fromEntries(fields) }),
     ...(expectation.body === undefined ? {} : { body: hexadecimalOf(body) }),
-    ...(expectation.envelope === undefined ? {} : { envelope: envelopeOf(body) }),
-    ...(expectation.batch === undefined ? {} : { batch: batchOf(body) }),
+    ...(expectation.envelope === undefined
+      ? {}
+      : { envelope: envelopeOf(body, expectation.envelope) }),
+    ...(expectation.batch === undefined ? {} : { batch: batchOf(body, expectation.batch) }),
   };
 };
 
@@ -287,7 +304,7 @@ const heardOf = (
   if ('binary' in heard) {
     return expectation.envelope === undefined
       ? { binary: hexadecimalOf(heard.binary) }
-      : { envelope: envelopeOf(heard.binary) };
+      : { envelope: envelopeOf(heard.binary, expectation.envelope) };
   }
 
   return 'ping' in heard ? { ping: true } : heard;
@@ -322,8 +339,9 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
 /**
  * A server of the interop service as each side's interop server builds one for its transport, the
  * case's options on the transport and its limits on the router, every layer on the transport's
- * `clock`. Over HTTP, its transport is given them as they are, `maximumBodyBytes` among them, which
- * `createHTTPServer` sets itself; its server layer, its own connection timeout.
+ * `clock`, given the interop service's credentials. Over HTTP, its transport is given them as they
+ * are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself; its server layer, its own
+ * connection timeout.
  */
 const serverOf = (
   { limits, options = {}, transport }: ICase,
@@ -333,6 +351,7 @@ const serverOf = (
 
   if (transport === 'websocket') {
     return createWSServer<string>({
+      credentials: interopCredentialsOf(clock, limits),
       limits,
       transport: { clock, heartbeat, maxPayload: maximumMessageBytes, WebSocketServer },
     });
@@ -350,6 +369,7 @@ const serverOf = (
     },
     {
       connectionInactivityTimeout: connectionInactivityTimeout ?? CONNECTION_INACTIVITY_TIMEOUT,
+      credentials: interopCredentialsOf(clock, wholeEnvelopeLimitsOf(limits)),
       limits: wholeEnvelopeLimitsOf(limits),
     }
   );

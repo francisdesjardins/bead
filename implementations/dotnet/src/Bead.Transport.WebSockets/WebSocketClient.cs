@@ -8,6 +8,15 @@ public sealed record WebSocketClientOptions
 
     /// <summary>What its router reads, writes and holds by.</summary>
     public RouterLimits? Limits { get; init; }
+    /// <summary>
+    /// The credential every call presents by default, which its router keeps as its
+    /// <see cref="RouterClient.Credential"/>: a JWT, or an ELSEWHERE with what its transport carries
+    /// beside each request; none when not given.
+    /// </summary>
+    public Credential? Credential { get; init; }
+
+    /// <summary>What its router resolves a command presenting a JWT or an ELSEWHERE with, as a server does.</summary>
+    public Credentials? Credentials { get; init; }
 }
 
 /// <summary>
@@ -40,7 +49,7 @@ public sealed class WebSocketClient : IAsyncDisposable
         }
 
         Transport = new WebSocketTransportClient(transport with { MaximumMessageBytes = maximumMessageBytes });
-        Router = new RouterClient(Transport, new RouterClientOptions { Limits = limits });
+        Router = new RouterClient(Transport, new RouterClientOptions { Credential = options?.Credential, Credentials = options?.Credentials, Limits = limits });
         Services = new ServiceManager(Router);
     }
 

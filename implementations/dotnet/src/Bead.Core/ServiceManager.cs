@@ -193,11 +193,14 @@ public interface IResponse<TPayload>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
 public delegate Task RequestResolverCallback<TRequest, TResponse>(RequestProps<TRequest> request, IResponse<TResponse> response);
 
-/// <summary>What a notification goes to: its procedure, which connections, and its key.</summary>
+/// <summary>What a notification goes to: its procedure, which subscriptions, and its key.</summary>
 /// <param name="Procedure">The procedure that notifies.</param>
-/// <param name="Filter">Whether a connection subscribed gets it; each does when none.</param>
+/// <param name="Filter">
+/// Whether a subscription gets it, by its connection and the session that holds it — a
+/// credential's, by its identifier; its connection's, none; each does when none.
+/// </param>
 /// <param name="Key">What it replaces, queued for a paced subscription: the one of the same key.</param>
-public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, bool>? Filter, object? Key);
+public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, SessionIdentifier?, bool>? Filter, object? Key);
 
 /// <summary>Who a notification goes to, as its code says: the connections, and what it is about.</summary>
 public sealed record NotifyOptions
@@ -205,8 +208,11 @@ public sealed record NotifyOptions
     /// <summary>A connection left out: the one whose request made the change, say.</summary>
     public string? Exclude { get; init; }
 
-    /// <summary>Whether a connection gets it: those of one user, say.</summary>
-    public Func<string, bool>? Filter { get; init; }
+    /// <summary>
+    /// Whether a subscription gets it, by its connection and the session that holds it — a
+    /// credential's, by its identifier; its connection's, none: those of one user, say.
+    /// </summary>
+    public Func<string, SessionIdentifier?, bool>? Filter { get; init; }
 
     /// <summary>
     /// What it is about — the entity whose state it carries — for a paced subscription: queued past
@@ -830,11 +836,11 @@ public sealed class ServiceManager
         {
             var exclude = options?.Exclude;
             var filter = options?.Filter;
-            Func<string, bool>? filtered = exclude is null && filter is null
+            Func<string, SessionIdentifier?, bool>? filtered = exclude is null && filter is null
                 ? null
-                : (connectionHandle) =>
+                : (connectionHandle, identifier) =>
                 {
-                    return connectionHandle != exclude && (filter is null || filter(connectionHandle));
+                    return connectionHandle != exclude && (filter is null || filter(connectionHandle, identifier));
                 };
 
             var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.StartedNow(), Tx = notification };

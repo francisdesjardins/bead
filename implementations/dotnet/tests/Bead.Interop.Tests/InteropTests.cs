@@ -402,6 +402,71 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(RequesterOf(client, "whoami")(JsonOf("null"))));
     }
 
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task A_JWT_presented_by_default_runs_in_its_credential_s_session_whoami_answers_its_sub_and_logout_is_refused_ACCESS_DENIED(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        // an access token of the HS256 issuer for grace, an hour on the platform's clock, signed with
+        // the manifest's published key
+        var key = InteropService.CredentialsOf(TimeProvider.System).Keys.Single((held) =>
+        {
+            return held.Algorithm == JwtAlgorithm.Hs256;
+        });
+        var part = (object value) =>
+        {
+            return System.Buffers.Text.Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
+        };
+        var signingInput = $"{part(new Dictionary<string, string> { ["alg"] = "HS256", ["typ"] = "at+jwt" })}.{part(new Dictionary<string, object>
+        {
+            ["aud"] = "bead-interop",
+            ["exp"] = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds(),
+            ["iss"] = key.Issuer,
+            ["sub"] = "grace",
+        })}";
+        var signature = System.Security.Cryptography.HMACSHA256.HashData(
+            System.Buffers.Text.Base64Url.DecodeFromChars(key.Jwk.GetProperty("k").GetString()!),
+            System.Text.Encoding.ASCII.GetBytes(signingInput));
+
+        client.Router.Credential = Credential.Jwt($"{signingInput}.{System.Buffers.Text.Base64Url.EncodeToString(signature)}");
+
+        Assert.Equal("\"grace\"", (await RequesterOf(client, "whoami")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return RequesterOf(client, "logout")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.AccessDenied, FailureOrigin.Peer), (refused.Code, refused.Origin));
+        Assert.NotNull(client.Router.Credential);
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task An_ELSEWHERE_goes_over_HTTP_alone_its_Authorization_what_the_verifier_reads_whoami_answers_the_sub_it_names_over_a_WebSocket_it_fails_before_it_goes(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var whoami = RequesterOf(client, "whoami")(JsonOf("null"));
+
+        if (transport == Http)
+        {
+            Assert.Equal("\"ada\"", (await whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled)).GetRawText());
+
+            return;
+        }
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local), (refused.Code, refused.Origin));
+    }
+
     /// <summary>
     /// What an HTTP client's exchanges go through: an envelope goes only once the server said it had
     /// the one before — its head came back (section 15.7) — as a socket keeps them in order, so a

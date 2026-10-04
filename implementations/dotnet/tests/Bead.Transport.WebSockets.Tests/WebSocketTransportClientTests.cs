@@ -273,6 +273,30 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Carries_no_credential_beside_an_envelope_and_is_secure_under_wss_or_to_a_loopback_host_judged_by_the_URL_it_was_given()
+    {
+        await using var faraway = new WebSocketTransportClient();
+        await using var secured = new WebSocketTransportClient();
+        var instant = TimeSpan.FromMilliseconds(1);
+
+        // judged from what it connects with, before its first connect from nothing
+        Assert.Equal((false, false), (_client.CarriesCredential, _client.IsSecure));
+        await _client.Connect(Target, Cancelled);
+        Assert.Equal((false, true), (_client.CarriesCredential, _client.IsSecure));
+
+        // off the machine, in the clear or under TLS, whether its connect went through or not
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return faraway.Connect(new WebSocketConnectOptions { Host = "192.0.2.1", Port = 80, Timeout = instant }, Cancelled);
+        });
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return secured.Connect(new WebSocketConnectOptions { Host = "192.0.2.1", Port = 443, Secured = true, Timeout = instant }, Cancelled);
+        });
+        Assert.Equal((false, true), (faraway.IsSecure, secured.IsSecure));
+    }
+
+    [Fact]
     public async Task Throws_what_its_socket_threw_when_nothing_listens_ending_closed_and_can_connect_again()
     {
         await Assert.ThrowsAsync<WebSocketException>(() =>

@@ -88,7 +88,7 @@ internal static class Vectors
             "NONE" => Credential.None,
             "OPAQUE" => Credential.Opaque(SessionToken.FromBytes(BytesOf(credential, "bytes"))),
             "JWT" => Credential.Jwt(credential.GetProperty("token").GetString()!),
-            "ELSEWHERE" => Credential.Elsewhere,
+            "ELSEWHERE" => Credential.Elsewhere(),
             _ => throw new ArgumentException($"no credential scheme {name}", nameof(json)),
         };
     }

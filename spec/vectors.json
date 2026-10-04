@@ -9,7 +9,7 @@
     "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
     "side is the side that reads: a failure says which side raised it.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
-    "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it."
+    "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it."
   ],
   "specVersion": "0.1.0",
   "headers": [
@@ -3464,6 +3464,75 @@
       "verdict": {
         "holds": false,
         "reason": "token"
+      }
+    },
+    {
+      "name": "aud an array naming one of a set of audiences",
+      "clauses": [
+        "13.8",
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOlsiaHR0cHM6Ly90aGlyZC5leGFtcGxlIiwiaHR0cHM6Ly9vdGhlci5leGFtcGxlIl0sImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.F2pv3XisnPAFbkSwI9YsYiT729dkTWWQtPGPglP59Pk",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": [
+        "https://bead.example",
+        "https://other.example"
+      ],
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": [
+            "https://third.example",
+            "https://other.example"
+          ],
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "aud naming none of a set of audiences",
+      "clauses": [
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL3RoaXJkLmV4YW1wbGUiLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0._d8chpNd8YJbgTUQySQyPqMa3UmrNH5Zm2yD_OcxGkk",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": [
+        "https://bead.example",
+        "https://other.example"
+      ],
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "aud"
       }
     }
   ]

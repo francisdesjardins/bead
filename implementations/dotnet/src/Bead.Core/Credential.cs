@@ -30,11 +30,15 @@ public readonly record struct Credential
         }
     }
 
-    /// <summary>The credential its transport carried beside the envelope: none in the block.</summary>
-    public static Credential Elsewhere { get; } = new() { Scheme = CredentialScheme.Elsewhere };
-
     /// <summary>What the credential is: the format of its bytes.</summary>
     public CredentialScheme Scheme { get; private init; }
+
+    /// <summary>
+    /// What a call presenting <see cref="CredentialScheme.Elsewhere"/> has its transport carry beside
+    /// its envelope — over HTTP, its <c>Authorization</c>, as it is given — among a call's options; none
+    /// on a header, whose block holds nothing, and for any other scheme.
+    /// </summary>
+    public string? Carried { get; private init; }
 
     /// <summary>
     /// The token of a connection's session, for <see cref="CredentialScheme.Opaque"/>; none for any
@@ -76,6 +80,27 @@ public readonly record struct Credential
     }
 
     /// <summary>
+    /// <see cref="CredentialScheme.Elsewhere"/> as a header carries it: the block says the credential
+    /// is its transport's, and holds nothing.
+    /// </summary>
+    public static Credential Elsewhere()
+    {
+        return new Credential { Scheme = CredentialScheme.Elsewhere };
+    }
+
+    /// <summary>
+    /// <see cref="CredentialScheme.Elsewhere"/> among a call's options, with what its transport carries
+    /// beside its envelope: its header's block holds nothing, and <paramref name="carried"/> goes with
+    /// the envelope — over HTTP, as its <c>Authorization</c>.
+    /// </summary>
+    public static Credential Elsewhere(string carried)
+    {
+        ArgumentNullException.ThrowIfNull(carried);
+
+        return new Credential { Scheme = CredentialScheme.Elsewhere, Carried = carried };
+    }
+
+    /// <summary>
     /// A credential of a scheme to come, from 4 to 65535, its bytes copied. Throws an
     /// <see cref="ArgumentOutOfRangeException"/> for a scheme this side names, which has its own.
     /// </summary>
@@ -103,7 +128,17 @@ public readonly record struct Credential
         return Scheme == other.Scheme
             && SessionToken == other.SessionToken
             && string.Equals(Token, other.Token, StringComparison.Ordinal)
+            && string.Equals(Carried, other.Carried, StringComparison.Ordinal)
             && Bytes.Span.SequenceEqual(other.Bytes.Span);
+    }
+
+    /// <summary>
+    /// Its scheme alone: a credential's bytes, and what its transport carries, are written in no
+    /// string a side could report, trace or log (spec 15.1).
+    /// </summary>
+    public override string ToString()
+    {
+        return $"Credential {{ Scheme = {Scheme} }}";
     }
 
     /// <inheritdoc/>
@@ -114,6 +149,7 @@ public readonly record struct Credential
         hash.Add(Scheme);
         hash.Add(SessionToken);
         hash.Add(Token, StringComparer.Ordinal);
+        hash.Add(Carried, StringComparer.Ordinal);
         hash.AddBytes(Bytes.Span);
 
         return hash.ToHashCode();

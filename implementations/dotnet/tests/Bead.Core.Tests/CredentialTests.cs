@@ -31,8 +31,8 @@ public sealed class CredentialTests
         Assert.Null(jwt.SessionToken);
         Assert.Equal(Credential.Jwt("a.b.c"), jwt);
         Assert.NotEqual(Credential.Jwt("a.b.d"), jwt);
-        Assert.Equal(CredentialScheme.Elsewhere, Credential.Elsewhere.Scheme);
-        Assert.True(Credential.Elsewhere.Bytes.IsEmpty);
+        Assert.Equal(CredentialScheme.Elsewhere, Credential.Elsewhere().Scheme);
+        Assert.True(Credential.Elsewhere().Bytes.IsEmpty);
     }
 
     [Fact]
@@ -49,6 +49,15 @@ public sealed class CredentialTests
         Assert.Equal(Credential.Of((CredentialScheme)65_535, [1, 2, 3]).GetHashCode(), credential.GetHashCode());
         Assert.NotEqual(Credential.Of((CredentialScheme)4, [1, 2, 3]), credential);
         Assert.NotEqual(Credential.Of((CredentialScheme)65_535, [1, 2]), credential);
+    }
+
+    [Fact]
+    public void Writes_its_scheme_alone_in_a_string_never_its_bytes_nor_what_its_transport_carries()
+    {
+        Assert.Equal("Credential { Scheme = Jwt }", Credential.Jwt("a.b.c").ToString());
+        Assert.Equal("Credential { Scheme = Elsewhere }", Credential.Elsewhere("Interop sub=ada").ToString());
+        Assert.Equal("Credential { Scheme = Opaque }", Credential.Opaque(Token).ToString());
+        Assert.DoesNotContain("a.b.c", new RequestOptions { Credential = Credential.Jwt("a.b.c") }.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]

@@ -85,6 +85,7 @@ export const createHTTPServer = <Data = unknown>(
     },
     {
       closeOnCommandTimeout: options.closeOnCommandTimeout,
+      credentials: options.credentials,
       connectionInactivityTimeout:
         options.connectionInactivityTimeout ?? CONNECTION_INACTIVITY_TIMEOUT,
       limits,

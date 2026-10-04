@@ -4,6 +4,8 @@ import {
   connectionSessionOf,
   credentialSchemesDetailOf,
   presentedCredentialOf,
+  sessionKeyOf,
+  uncarriedOf,
 } from '../call-session';
 import { CLIENT_FAILURES, CredentialScheme, ProtocolCode, SERVER_FAILURES } from '../constants';
 import { FailureError } from '../errors';
@@ -66,12 +68,11 @@ test.describe('presentedCredentialOf', () => {
   test('presents none unless asked, OPAQUE with the token learned, and fails a call that asks before any session, SESSION_REQUIRED', () => {
     const opaque: RequestCredential = { scheme: CredentialScheme.OPAQUE };
 
-    expect(presentedCredentialOf(undefined, { failures: CLIENT_FAILURES, token: TOKEN })).toBe(
-      undefined
+    expect(presentedCredentialOf(undefined, { failures: CLIENT_FAILURES, token: TOKEN })).toEqual(
+      {}
     );
     expect(presentedCredentialOf(opaque, { failures: CLIENT_FAILURES, token: TOKEN })).toEqual({
-      scheme: CredentialScheme.OPAQUE,
-      token: TOKEN,
+      credential: { scheme: CredentialScheme.OPAQUE, token: TOKEN },
     });
 
     for (const failures of [CLIENT_FAILURES, SERVER_FAILURES]) {
@@ -100,5 +101,80 @@ test.describe('presentedCredentialOf', () => {
         }
       );
     }).toThrow(ProgrammerError);
+  });
+
+  test('presents NONE as none, a JWT as given, and an ELSEWHERE as its scheme, its value beside it for its transport', () => {
+    const presented = (credential: RequestCredential) => {
+      return presentedCredentialOf(credential, { failures: CLIENT_FAILURES, token: TOKEN });
+    };
+
+    expect(presented({ scheme: CredentialScheme.NONE })).toEqual({});
+    expect(presented({ scheme: CredentialScheme.JWT, token: 'a.b.c' })).toEqual({
+      credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+    });
+    expect(
+      presented({ carried: 'Bearer mF_9.B5f-4.1JqM', scheme: CredentialScheme.ELSEWHERE })
+    ).toEqual({
+      carried: 'Bearer mF_9.B5f-4.1JqM',
+      credential: { scheme: CredentialScheme.ELSEWHERE },
+    });
+
+    for (const refused of [
+      { scheme: CredentialScheme.JWT, token: '' },
+      { scheme: CredentialScheme.ELSEWHERE },
+      { scheme: 4 },
+    ]) {
+      expect(() => {
+        return presented(refused as unknown as RequestCredential);
+      }).toThrow(ProgrammerError);
+    }
+  });
+});
+
+test.describe('uncarriedOf', () => {
+  test('fails an ELSEWHERE over a transport that carries none, and a JWT or an ELSEWHERE over one not secure, DESTINATION_UNREACHABLE; none or OPAQUE goes over any', () => {
+    const jwt = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+    const elsewhere = { scheme: CredentialScheme.ELSEWHERE } as const;
+    const opaque = { scheme: CredentialScheme.OPAQUE, token: TOKEN } as const;
+    const codeOf = (
+      credential: Parameters<typeof uncarriedOf>[0],
+      [carriesCredential, isSecure]: [boolean, boolean]
+    ) => {
+      return uncarriedOf(credential, { carriesCredential, failures: CLIENT_FAILURES, isSecure })
+        ?.code;
+    };
+    const unreachable = ProtocolCode.DESTINATION_UNREACHABLE;
+
+    expect(
+      [undefined, opaque, jwt, elsewhere].map((credential) => {
+        return [
+          codeOf(credential, [true, true]),
+          codeOf(credential, [false, true]),
+          codeOf(credential, [true, false]),
+        ];
+      })
+    ).toEqual([
+      [undefined, undefined, undefined],
+      [undefined, undefined, undefined],
+      [undefined, undefined, unreachable],
+      [undefined, unreachable, unreachable],
+    ]);
+  });
+});
+
+test.describe('sessionKeyOf', () => {
+  test('keys a session by its scheme, its claim and its values: one sub under two issuers, sid and sub, and the connection’s session apart', () => {
+    const keys = [
+      sessionKeyOf(undefined),
+      sessionKeyOf({ issuer: 'https://a.example', scheme: CredentialScheme.JWT, sub: 'grace' }),
+      sessionKeyOf({ issuer: 'https://b.example', scheme: CredentialScheme.JWT, sub: 'grace' }),
+      sessionKeyOf({ issuer: 'https://a.example', scheme: CredentialScheme.JWT, sid: 'grace' }),
+      sessionKeyOf({ id: 'grace', scheme: CredentialScheme.ELSEWHERE }),
+    ];
+
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(
+      sessionKeyOf({ issuer: 'https://a.example', scheme: CredentialScheme.JWT, sub: 'grace' })
+    ).toBe(keys[1]);
   });
 });

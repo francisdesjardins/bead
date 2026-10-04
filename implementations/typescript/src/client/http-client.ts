@@ -59,6 +59,6 @@ export const createHTTPClient = (options?: IHTTPClientOptions): HTTPClient => {
         maximumBodyBytes: limits.maximumEnvelopeBytes,
       }),
     },
-    { limits }
+    { credential: options?.credential, credentials: options?.credentials, limits }
   );
 };

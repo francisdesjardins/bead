@@ -384,9 +384,9 @@ public sealed partial class RouterCoreTests
             link.Reports.Add(reason);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
-            return link.ToServer(bytes);
+            return link.ToServer(message.Bytes);
         }
     }
 }

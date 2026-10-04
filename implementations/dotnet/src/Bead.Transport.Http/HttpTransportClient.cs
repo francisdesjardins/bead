@@ -227,6 +227,33 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     /// <summary>
+    /// It carries a credential beside an envelope, in the <c>Authorization</c> of its <c>POST</c>
+    /// (spec 15.5).
+    /// </summary>
+    public bool CarriesCredential
+    {
+        get
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether it is secure, judged from the options of its last connect, never from what its host
+    /// resolves to (spec 13.4): <c>https</c>, or a host on the loopback. None before its first connect.
+    /// </summary>
+    public bool IsSecure
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _lastConnectOptions is { } given && TransportSecurity.IsSecure((given.Secured, given.Host));
+            }
+        }
+    }
+
+    /// <summary>
     /// Posts one envelope, with its credential in the <c>Authorization</c> field when it has one,
     /// settling on the head of its answer; refused with a <see cref="DisconnectException"/> unless
     /// Open, and with an <see cref="ArgumentException"/>, its connection kept, for a credential no

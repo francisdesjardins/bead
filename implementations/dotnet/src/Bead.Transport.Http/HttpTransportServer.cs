@@ -161,6 +161,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private readonly TransportServerLife _life = new();
     private WebApplication? _application;
 
+    // whether its listener is secure: under TLS, wherever it listens, or bound to the loopback as it
+    // starts
+    private volatile bool _isSecure;
+
     /// <summary>
     /// A transport server, not yet listening, its durations held. A bound not above 0, or a timeout
     /// that is not from 1 to <see cref="Clocks.LongestTimer"/> milliseconds — infinite aside, but for
@@ -184,6 +188,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), given.MaximumWaitingExchanges));
         _options = given with { ExchangeTimeout = exchangeTimeout, InactivityTimeout = inactivityTimeout, MaximumWait = maximumWait };
+        _isSecure = _options.Certificate is not null;
         _clock = _options.Clock ?? TimeProvider.System;
     }
 
@@ -371,6 +376,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
             bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
+            _isSecure = TransportSecurity.IsSecure((_options.Certificate is not null, start.Address));
         }
         catch
         {
@@ -429,6 +435,24 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     /// <summary>
+    /// What a listen brings back carries no credential beside its envelopes (spec 15.9): a command
+    /// presenting <see cref="CredentialScheme.Elsewhere"/> fails before it goes.
+    /// </summary>
+    public bool CarriesCredential(string connectionHandle)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a connection is secure, judged from its listener, never from what a name resolves to
+    /// (spec 13.4): under TLS, its certificate given, or bound to a loopback address.
+    /// </summary>
+    public bool IsSecure(string connectionHandle)
+    {
+        return _isSecure;
+    }
+
+    /// <summary>
     /// Hands an envelope to a connection: an answer ends the exchange of its request, settling once
     /// it went out; anything else — a late answer too — waits in the outbox of a connection whose
     /// client listens, and is refused with an <see cref="InvalidOperationException"/> on one whose
@@ -437,8 +461,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// </summary>
     public Task Send(TransportMessage message, string connectionHandle)
     {
-        // TODO neither carries a credential: the router fails a command that presents one before it
-        // goes, DESTINATION_UNREACHABLE (decision 0010)
+        // neither carries a credential: its router fails a command that presents one before it goes
         var bytes = message.Bytes;
 
         if (bytes.Length < HttpTransport.PrefixBytes)

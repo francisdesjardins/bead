@@ -7,22 +7,37 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import type { IDestinationRegistration } from '../src/router/server/types';
-import { CredentialScheme } from '../src/router/shared/constants';
+import { sessionKeyOf } from '../src/router/shared/call-session';
+import { CredentialScheme, LIMIT_DEFAULTS } from '../src/router/shared/constants';
+import { JWT_LIMIT_BYTES } from '../src/router/shared/credentials';
+import type { IJwtKey } from '../src/router/shared/jwt-verifier';
 import type {
   IBeforeRequest,
+  ICallSession,
+  ICredentials,
+  IElsewhereSession,
+  IJwtSetKey,
   IProcedure,
-  IRequestHeader,
   IServiceManager,
+  RouterLimitsOptions,
   ServerConnectionHandle,
+  SessionIdentifier,
 } from '../src/router/shared/types';
 import type { IServer, IServerTransportLike } from '../src/server/types';
 import type { TransportServerConnectionHandle } from '../src/transport/server/types';
-import { assertHeldFinite } from '../src/transport/shared/clock';
+import { assertHeldFinite, type IClock } from '../src/transport/shared/clock';
 
 // interfaces
 
 /** The interop service, as its manifest names it. */
 interface IInteropService {
+  credentials: {
+    jwt: {
+      audience: string;
+      keySet: { issuer: string; keys: IJwtSetKey[] };
+      keys: IJwtKey[];
+    };
+  };
   procedures: { offeredBy?: 'client'; procedureId: number; procedureName: string }[];
   serviceId: number;
   serviceRevision: number;
@@ -61,6 +76,20 @@ export const JSON_SERIALIZER = Object.freeze({
   },
 });
 
+// how long the key set takes to answer, on the server's clock, so a conversation sees each ask
+const KEY_SET_MILLISECONDS = 1_000;
+
+// the ELSEWHERE verifier's words, once its auth-scheme, compared without regard to case, is read
+// (RFC 9110 §11.1): a holding value, or a failing one, each parameter's case its own (RFC 7405)
+const ELSEWHERE_SCHEME = 'interop ';
+const ELSEWHERE_HOLDING =
+  /^sub=(?<sub>[a-z]{1,32})(?:, after=(?<after>[1-9][0-9]{0,9}))?(?:, end=(?<end>[1-9][0-9]{0,15}))?$/u;
+const ELSEWHERE_FAILING = /^fail=true(?:, after=(?<after>[1-9][0-9]{0,9}))?$/u;
+
+// the bounds of its numbers: a delay a timer holds (spec 1.4), an instant every side holds (1.2)
+const LONGEST_AFTER = 2 ** 31 - 1;
+const LATEST_END = Number.MAX_SAFE_INTEGER;
+
 // helpers
 
 /**
@@ -73,14 +102,56 @@ const durationOf = (name: string, given: unknown): number | undefined => {
   return given === undefined ? undefined : assertHeldFinite(name, given);
 };
 
+/** The name a call's session holds: the one `login` gave, or the `sub` of a credential's data. */
+const nameOf = (session: ICallSession | undefined): unknown => {
+  if (session?.identifier === undefined) {
+    return session?.data ?? null;
+  }
+
+  return (session.data as { sub?: unknown } | undefined)?.sub ?? null;
+};
+
 /**
- * Whether a call admitted runs in a credential's session: one that presented a `JWT` or an
- * `ELSEWHERE`, which never runs in its connection's.
+ * The identifier `revoke` names: `{"issuer":i,"sub":s}` or `{"issuer":i,"sid":s}`, a `JWT`'s;
+ * `{"id":d}`, an `ELSEWHERE`'s; of these members alone, each a string. Anything else throws, which
+ * its server answers with PROCEDURE_FAILED and reports.
  */
-const runsInCredentialSession = ({ credential }: Pick<IRequestHeader, 'credential'>): boolean => {
-  return (
-    credential?.scheme === CredentialScheme.JWT || credential?.scheme === CredentialScheme.ELSEWHERE
-  );
+const identifierOf = (request: unknown): SessionIdentifier => {
+  const named = (
+    typeof request === 'object' && request !== null && !Array.isArray(request) ? request : {}
+  ) as Record<string, unknown>;
+  const names = Object.keys(named).toSorted().join(',');
+  const { id, issuer, sid, sub } = named;
+
+  if (names === 'issuer,sub' && typeof issuer === 'string' && typeof sub === 'string') {
+    return { issuer, scheme: CredentialScheme.JWT, sub };
+  }
+
+  if (names === 'issuer,sid' && typeof issuer === 'string' && typeof sid === 'string') {
+    return { issuer, scheme: CredentialScheme.JWT, sid };
+  }
+
+  if (names === 'id' && typeof id === 'string') {
+    return { id, scheme: CredentialScheme.ELSEWHERE };
+  }
+
+  throw new Error('revoke names a session by {"issuer","sub"}, {"issuer","sid"} or {"id"} alone');
+};
+
+/** Settles with `value` once `milliseconds` passed on `clock`, or at once without them. */
+const afterOn = <Value>(
+  clock: IClock,
+  { milliseconds, value }: { milliseconds: number | undefined; value: () => Value }
+): Promise<Value> => {
+  if (milliseconds === undefined) {
+    return Promise.resolve().then(value);
+  }
+
+  return new Promise((resolve) => {
+    clock.setTimeout(() => {
+      resolve(Promise.resolve().then(value));
+    }, milliseconds);
+  });
 };
 
 /** The procedure of the interop service named `procedureName`. */
@@ -98,6 +169,87 @@ export const procedureOf = (procedureName: string): IProcedure => {
     procedureName,
     serviceId: INTEROP_SERVICE.serviceId,
     serviceRevision: INTEROP_SERVICE.serviceRevision,
+  };
+};
+
+/**
+ * The interop service's `ELSEWHERE` verifier, on `clock`, as `credentials.elsewhere` words it: a
+ * holding value settles with the session of its `sub`, its data `{ sub }` frozen as a `JWT`'s claims
+ * set is, and its `end` when it gives one; a failing value rejects; either once its `after` passed on
+ * `clock`, whatever its signal, or at once without it; anything else settles with none.
+ */
+export const interopVerifierOf = (
+  clock: IClock
+): ((carried: string) => Promise<IElsewhereSession | undefined>) => {
+  return (carried) => {
+    const words =
+      carried.slice(0, ELSEWHERE_SCHEME.length).toLowerCase() === ELSEWHERE_SCHEME
+        ? carried.slice(ELSEWHERE_SCHEME.length)
+        : '';
+    const holding = ELSEWHERE_HOLDING.exec(words)?.groups;
+    const failing = ELSEWHERE_FAILING.exec(words)?.groups;
+    const after = Number(holding?.['after'] ?? failing?.['after'] ?? 0) || undefined;
+    const end = holding?.['end'] === undefined ? undefined : Number(holding['end']);
+    const sub = holding?.['sub'];
+
+    if ((after ?? 0) > LONGEST_AFTER || (end ?? 0) > LATEST_END) {
+      return Promise.resolve(undefined);
+    }
+
+    if (failing !== undefined) {
+      return afterOn(clock, {
+        milliseconds: after,
+        value: () => {
+          throw new Error('this verifier fails, on purpose');
+        },
+      });
+    }
+
+    if (sub === undefined) {
+      return Promise.resolve(undefined);
+    }
+
+    return afterOn(clock, {
+      milliseconds: after,
+      value: () => {
+        return Object.freeze({
+          data: Object.freeze({ sub }),
+          id: sub,
+          ...(end === undefined ? {} : { end }),
+        });
+      },
+    });
+  };
+};
+
+/**
+ * What the interop server resolves a request's credential with, on `clock`, as
+ * `credentials` in its manifest says: its `JWT` keys, its audience and its key set, which answers
+ * once a second passed on `clock`, but under limits that hold no `JWT` (spec 12.2); and its
+ * `ELSEWHERE` verifier.
+ */
+export const interopCredentialsOf = (clock: IClock, limits?: RouterLimitsOptions): ICredentials => {
+  const { audience, keySet, keys } = INTEROP_SERVICE.credentials.jwt;
+  const chunkBytes = limits?.chunkBytes ?? LIMIT_DEFAULTS.chunkBytes;
+  const maximumEnvelopeBytes = limits?.maximumEnvelopeBytes ?? LIMIT_DEFAULTS.maximumEnvelopeBytes;
+  const verify = interopVerifierOf(clock);
+
+  if (chunkBytes < JWT_LIMIT_BYTES || maximumEnvelopeBytes < JWT_LIMIT_BYTES) {
+    return { verify };
+  }
+
+  return {
+    audience,
+    keySet: (issuer) => {
+      return afterOn(clock, {
+        milliseconds: KEY_SET_MILLISECONDS,
+        value: () => {
+          return issuer === keySet.issuer ? keySet.keys : [];
+        },
+      });
+    },
+    keys,
+    verify,
   };
 };
 
@@ -129,10 +281,10 @@ export type InteropServer = Pick<
  * Registers the interop service's resolvers on `server`. The calls to `slow` each connection
  * cancelled are counted per connection, for `cancellations` to answer; a connection's session holds
  * the name its `login` gave, whatever its call presents, and `whoami` answers the name its call's
- * session holds; the destination each connection registered last is kept past its close, for
- * `unregister` to take out from whichever connection takes its handle next. Its relay takes `OPAQUE`
- * alone, as its server does: a `JWT` or an `ELSEWHERE` to a destination is refused with
- * CREDENTIAL_UNSUPPORTED before `beforeRoute`, never forwarded without its credential.
+ * session holds, a credential's `sub`; `ticks` and `tick` hold per connection and per session, its
+ * connection's or a credential's; the destination each connection registered last is kept past its
+ * close, for `unregister` to take out from whichever connection takes its handle next. Its relay
+ * and its credentials are its server's, as it was built.
  */
 export const offerInterop = (server: InteropServer): void => {
   const { requireSession, router, services, sessions } = server;
@@ -140,8 +292,8 @@ export const offerInterop = (server: InteropServer): void => {
   const cancellations = new Map<TransportServerConnectionHandle, number>();
   // by connection, the destination it registered last
   const destinations = new Map<TransportServerConnectionHandle, IDestinationRegistration>();
-  // by connection, the ticks answers held, in the order they came
-  const holds = new Map<TransportServerConnectionHandle, IHold[]>();
+  // by connection and session, the ticks answers held, in the order they came
+  const holds = new Map<string, IHold[]>();
   const clock = services.getCommand(procedureOf('clock'), { serializer: JSON_SERIALIZER });
   const nobody: IBeforeRequest<TransportServerConnectionHandle> = Object.assign(
     () => {
@@ -149,6 +301,17 @@ export const offerInterop = (server: InteropServer): void => {
     },
     { refusal: { ...failures.accessDenied, detail: 'this procedure admits nobody' } }
   );
+
+  // the key a call's ticks are held under: its connection's, in its call's session
+  const holdsKeyOf = ({
+    connectionHandle,
+    session,
+  }: {
+    connectionHandle: TransportServerConnectionHandle;
+    session?: ICallSession | undefined;
+  }): string => {
+    return JSON.stringify([connectionHandle, sessionKeyOf(session?.identifier)]);
+  };
 
   services.getRequestResolver(procedureOf('echo'), { serializer: JSON_SERIALIZER })(
     (request, response) => {
@@ -217,7 +380,8 @@ export const offerInterop = (server: InteropServer): void => {
     }
   );
 
-  // held, it subscribes its requester first, then answers once its ticks notified
+  // held, it subscribes its requester first, in its call's session, then answers once that
+  // session's ticks on its connection notified
   const ticks = services.getNotificationResolver(procedureOf('ticks'), {
     serializer: JSON_NOTIFIED,
   })(async (request, response) => {
@@ -231,9 +395,10 @@ export const offerInterop = (server: InteropServer): void => {
 
     const released = Promise.withResolvers<void>();
     const answered = Promise.withResolvers<void>();
-    const connectionHolds = holds.get(request.connectionHandle) ?? [];
+    const key = holdsKeyOf(request);
+    const sessionHolds = holds.get(key) ?? [];
 
-    connectionHolds.push({
+    sessionHolds.push({
       release: () => {
         released.resolve();
 
@@ -241,7 +406,7 @@ export const offerInterop = (server: InteropServer): void => {
       },
       remaining: hold,
     });
-    holds.set(request.connectionHandle, connectionHolds);
+    holds.set(key, sessionHolds);
     await released.promise;
 
     try {
@@ -253,15 +418,18 @@ export const offerInterop = (server: InteropServer): void => {
     }
   });
 
-  // notifies its own connection, then lets the ticks it was the last for answer, before it does
+  // notifies the subscription its call's session holds on its connection, then lets the ticks of
+  // that session it was the last for answer, before it does
   services.getRequestResolver(procedureOf('tick'), { serializer: JSON_SERIALIZER })(
     async (request, response) => {
       const { key, value } = request.payload as { key?: string; value: unknown };
-      const { connectionHandle } = request;
+      const { connectionHandle, session } = request;
+      const sessionKey = sessionKeyOf(session?.identifier);
+      const held = holdsKeyOf(request);
 
       await ticks.notify(value, {
-        filter: (handle) => {
-          return handle === connectionHandle;
+        filter: (handle, identifier) => {
+          return handle === connectionHandle && sessionKeyOf(identifier) === sessionKey;
         },
         ...(key === undefined ? {} : { key }),
       });
@@ -269,15 +437,15 @@ export const offerInterop = (server: InteropServer): void => {
       const due: IHold[] = [];
       const still: IHold[] = [];
 
-      for (const held of holds.get(connectionHandle) ?? []) {
-        held.remaining -= 1;
-        (held.remaining === 0 ? due : still).push(held);
+      for (const hold of holds.get(held) ?? []) {
+        hold.remaining -= 1;
+        (hold.remaining === 0 ? due : still).push(hold);
       }
 
-      holds.set(connectionHandle, still);
+      holds.set(held, still);
       await Promise.all(
-        due.map((held) => {
-          return held.release();
+        due.map((hold) => {
+          return hold.release();
         })
       );
 
@@ -313,7 +481,7 @@ export const offerInterop = (server: InteropServer): void => {
     beforeRequest: requireSession,
     serializer: JSON_SERIALIZER,
   })((request, response) => {
-    if (runsInCredentialSession(request.header)) {
+    if (request.session?.identifier !== undefined) {
       return response(null, {
         ...failures.accessDenied,
         detail: "a call in a credential's session ends no connection's session",
@@ -330,7 +498,7 @@ export const offerInterop = (server: InteropServer): void => {
     beforeRequest: requireSession,
     serializer: JSON_SERIALIZER,
   })((request, response) => {
-    return response(request.session?.data ?? null);
+    return response(nameOf(request.session));
   });
 
   // the server asks its client back, by a command, before it answers
@@ -345,11 +513,16 @@ export const offerInterop = (server: InteropServer): void => {
     }
   );
 
-  // its caller's connection, as the destination it names: one registered already, closed or not,
-  // is the caller's to hear about, not a mistake of the server's
+  // its caller's connection, as the destination it names, with the audience it verifies: one
+  // registered already, closed or not, is the caller's to hear about, not a mistake of the server's
   services.getRequestResolver(procedureOf('register'), { serializer: JSON_SERIALIZER })(
     (request, response) => {
-      const { destination, timeout: given } = request.payload as {
+      const {
+        audience,
+        destination,
+        timeout: given,
+      } = request.payload as {
+        audience?: string;
         destination: number;
         timeout?: unknown;
       };
@@ -365,7 +538,10 @@ export const offerInterop = (server: InteropServer): void => {
 
       destinations.set(
         connectionHandle,
-        router.registerDestination({ connectionHandle }, { destinationId: destination, timeout })
+        router.registerDestination(
+          { connectionHandle },
+          { audience, destinationId: destination, timeout }
+        )
       );
 
       return response(destination);
@@ -379,6 +555,16 @@ export const offerInterop = (server: InteropServer): void => {
       destinations.delete(request.connectionHandle);
 
       return response(registration?.unregister() ?? false);
+    }
+  );
+
+  // ends a credential's session by its identifier on every connection that keeps it, as a token's
+  // revocation does, and answers once it did
+  services.getRequestResolver(procedureOf('revoke'), { serializer: JSON_SERIALIZER })(
+    async (request, response) => {
+      await router.endSession(identifierOf(request.payload));
+
+      return response(null);
     }
   );
 };

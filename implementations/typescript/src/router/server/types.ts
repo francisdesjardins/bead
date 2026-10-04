@@ -15,6 +15,7 @@ import type {
   DestinationId,
   IBeforeRequest,
   ICallAddress,
+  ICredentials,
   IFailure,
   INotificationLike,
   IProcedure,
@@ -29,6 +30,7 @@ import type {
   RouterActivity,
   RouterLimitsOptions,
   ServiceId,
+  SessionIdentifier,
   SessionOf,
   SessionToken,
 } from '../shared/types';
@@ -44,9 +46,9 @@ import type {
 
 // interfaces
 
-/** Who is notified of which procedure of which service, by connection and call id. */
+/** Who is notified of which procedure of which service, by connection, session and call id. */
 export interface INotificationManager {
-  /** A copy of the connections notified of a procedure, each with its subscription's call id. */
+  /** The subscriptions notified of a procedure, as copies: each connection's, in each session. */
   candidates(procedureAddress: IProcedureAddress): NotificationCandidates;
   /** Forgets every subscription of a connection, as when it closes. */
   clean(connectionHandle: TransportServerConnectionHandle): void;
@@ -63,16 +65,16 @@ export interface INotificationManager {
   pacingOf(callId: CallId, connectionHandle: TransportServerConnectionHandle): IPacing | undefined;
   /**
    * Subscribes `subscription.connectionHandle` to `procedureAddress` under the call id of the
-   * request that subscribed it — paced, when that request asked — and gives that call id. Throws a
-   * {@link ProgrammerError}, and registers nothing, when the connection holds a subscription to that
-   * procedure already, or one under that call id.
+   * request that subscribed it, in the session that holds it — paced, when that request asked — and
+   * gives that call id. Throws a {@link ProgrammerError}, and registers nothing, when the connection
+   * holds a subscription to that procedure in that session already, or one under that call id.
    */
   register(procedureAddress: IProcedureAddress, subscription: ISubscribingCall): CallId;
-  /** The call id `connectionHandle` is subscribed to a procedure under; `undefined` when none. */
-  subscriptionOf(
-    procedureAddress: IProcedureAddress,
-    connectionHandle: TransportServerConnectionHandle
-  ): CallId | undefined;
+  /**
+   * The call id a connection is subscribed to a procedure under, in a session of its own; `undefined`
+   * when none.
+   */
+  subscriptionOf(procedureAddress: IProcedureAddress, subscriber: ISubscriber): CallId | undefined;
   /** Every subscription — `connectionHandle`'s alone, when given — as copies. */
   subscriptions(connectionHandle?: TransportServerConnectionHandle): ISubscription[];
   /**
@@ -88,24 +90,54 @@ export interface INotificationManagerOptions {
   pacing?: PacingLimitsOptions | undefined;
 }
 
-/** A call that subscribes: where it is, and whether its request asked to be paced. */
-export interface ISubscribingCall extends ICallAddress<TransportServerConnectionHandle> {
+/**
+ * Who holds a subscription: a connection, in a session of its own — a credential's, named by its
+ * identifier; its connection's session, which a call presenting none runs in, none.
+ */
+export interface ISubscriber {
+  connectionHandle: TransportServerConnectionHandle;
+  identifier?: SessionIdentifier | undefined;
+}
+
+/**
+ * A call that subscribes: where it is, the session it holds the subscription in, and whether its
+ * request asked to be paced.
+ */
+export interface ISubscribingCall
+  extends ICallAddress<TransportServerConnectionHandle>, ISubscriber {
+  /**
+   * For a credential's session, its end as the call resolved it, in whole milliseconds since the
+   * epoch, which the router times while the session holds a subscription; none for a session
+   * without one.
+   */
+  end?: number | undefined;
   paced?: boolean | undefined;
 }
 
-/** One subscription: which procedure, which connection, and the call id it stays open under. */
+/**
+ * One subscription: which procedure, which connection, the call id it stays open under, and the
+ * identifier of the credential's session that holds it, when one does.
+ */
 export interface ISubscription
-  extends IProcedureAddress, ICallAddress<TransportServerConnectionHandle> {}
+  extends IProcedureAddress, ICallAddress<TransportServerConnectionHandle> {
+  identifier?: SessionIdentifier | undefined;
+}
 
 // types
 
-/** The connections notified of one procedure, each with its subscription's call id. */
-export type NotificationCandidates = Map<TransportServerConnectionHandle, CallId>;
+/** The subscriptions notified of one procedure: each connection's, in each session of its own. */
+export type NotificationCandidates = ISubscription[];
 
-/** Service → procedure → connection → the call id of its subscription. */
+/**
+ * Service → procedure → connection → session → the call id of its subscription: its connection's
+ * session under `''`, a credential's under a key its identifier gives.
+ */
 export type Notifications = ReadonlyMap<
   ServiceId,
-  ReadonlyMap<ProcedureId, ReadonlyMap<TransportServerConnectionHandle, CallId>>
+  ReadonlyMap<
+    ProcedureId,
+    ReadonlyMap<TransportServerConnectionHandle, ReadonlyMap<string, CallId>>
+  >
 >;
 
 // ── Notification pacing ───────────────────────────────────────────────────────
@@ -404,6 +436,14 @@ export interface IRouterServer<
     connectionHandle: TransportServerConnectionHandle;
     failure: IFailure;
   }): Promise<void>;
+  /**
+   * Ends a credential's session by its identifier, as a token's revocation does (RFC 7009), on every
+   * connection that keeps it: each subscription it bounds ends with SESSION_REQUIRED on its call id,
+   * a call still in flight left to its own answer. Resolves once each failure was tried; one that
+   * cannot go out is reported to `error`. One no connection keeps ends nothing, and a credential
+   * that still holds opens it anew.
+   */
+  endSession(identifier: SessionIdentifier): Promise<void>;
   emit<K extends ROUTER_SERVER_EVENTS>(event: K, ...params: RouterServerEventMap[K]): boolean;
   /**
    * Every `event` from now on, as its arguments, for `for await`; the signal, a `break` or a throw
@@ -498,15 +538,24 @@ export interface IRouterServerOptions {
    * They must hold together, or the router is a {@link ProgrammerError}.
    */
   limits?: RouterLimitsOptions | undefined;
+  /**
+   * What it resolves a request presenting a `JWT` or an `ELSEWHERE` with, on its clock: a `JWT`'s
+   * keys, audience and key set, an `ELSEWHERE`'s verifier. A scheme it is given nothing for is
+   * refused, CREDENTIAL_UNSUPPORTED. Given a `JWT`'s keys or key set, its limits hold 1,024 bytes of
+   * chunk and envelope at least, or it is a {@link ProgrammerError}, as is a key not shaped for its
+   * algorithm.
+   */
+  credentials?: ICredentials | undefined;
   /** What a paced subscription queues at most: {@link PACING_DEFAULTS}' where it says nothing. */
   pacing?: PacingLimitsOptions | undefined;
   /** How the router relays a request that names a destination registered in it. */
   relay?: IRelayOptions | undefined;
   /**
-   * The call's session each request's credential resolves to, asked once per request, its call id
-   * held, before its admission: as {@link SessionOf} says — a server's sessions give it. None when
-   * not given: a request presenting none runs in none, and one presenting a credential is refused
-   * with `SESSION_REQUIRED`.
+   * The call's session a request presenting none or `OPAQUE` runs in, asked once per request, its
+   * call id held, before its admission, in the turn it came: its connection's — a server's sessions
+   * give it — as {@link SessionOf} says. None when not given: a request presenting none runs in
+   * none, and one presenting `OPAQUE` is refused with `SESSION_REQUIRED`. A `JWT` and an `ELSEWHERE`
+   * resolve by `credentials`.
    */
   sessionOf?: SessionOf<TransportServerConnectionHandle> | undefined;
   /**
@@ -538,6 +587,12 @@ export interface IDestination {
 }
 
 export interface IDestinationOptions {
+  /**
+   * The audience it verifies, as a resource is named for a token (RFC 8707): a `JWT` goes to it only
+   * when its `aud` names it, and an `ELSEWHERE` only when it has one. None by default, which takes
+   * neither; a string of well-formed Unicode otherwise, or it is a {@link ProgrammerError}.
+   */
+  audience?: string | undefined;
   /** The destination, an integer from 1 to 2³² − 1; drawn, one not in use, when not given. */
   destinationId?: DestinationId | undefined;
   /** What the application calls it, for a list of its own. */
@@ -562,9 +617,11 @@ export interface IDestinationRegistration extends IDestination {
 /** How a server router relays the requests that name a destination. */
 export interface IRelayOptions {
   /**
-   * Whether a request may be relayed, asked on its header — its destination included — before its
-   * destination is looked up, so a requester not admitted learns only whether any is registered:
-   * only `true` admits. Without it, the relay admits nobody. Synchronous, as every admission.
+   * Whether a request may be relayed, asked on its header — its destination included — and the
+   * call's session, before its destination is looked up, so a requester presenting none or `OPAQUE`
+   * that is not admitted learns only whether any is registered: only `true` admits. Without it, the
+   * relay admits nobody; a server's admits by `requireSessionOrCredential`. Synchronous, as every
+   * admission.
    */
   beforeRoute?: IBeforeRequest<TransportServerConnectionHandle> | undefined;
   /**
@@ -574,6 +631,14 @@ export interface IRelayOptions {
    * {@link ProgrammerError}.
    */
   timeout?: number | undefined;
+  /**
+   * Whether it verifies what it forwards besides (spec 14.3, step 1), with its router's
+   * `credentials`, before `beforeRoute`: a `JWT` against the audiences its destinations were
+   * registered with, a credential that does not hold refused SESSION_REQUIRED, one that holds
+   * resolving to its credential's session, which `beforeRoute` reads. Not by default: a `JWT`, and
+   * an `ELSEWHERE` its transport carried, go on unresolved, for the destination to verify.
+   */
+  verifies?: boolean | undefined;
 }
 
 /** The part of a transport server this router uses — met by this package's. */
@@ -617,6 +682,19 @@ export interface IRouterServerTransportLike {
     >
   ): unknown;
   /**
+   * Whether a connection carries a credential beside an envelope the server sends it — a command, a
+   * relay's leg B: none of this package's does, a listen's batch, a WebSocket and a worker alike.
+   * None does without it. A command presenting `ELSEWHERE` over one that does not fails before it
+   * goes, DESTINATION_UNREACHABLE, and a relay sends it none (spec 13.4, 14.3).
+   */
+  carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean;
+  /**
+   * Whether a connection is secure: under TLS, from the loopback, or never leaving the machine, as
+   * a Web Worker. None is without it. A command presenting a `JWT` or an `ELSEWHERE` over one that is
+   * not fails before it goes, DESTINATION_UNREACHABLE, and a relay sends it neither (spec 13.4, 14.3).
+   */
+  isSecure?(connectionHandle: TransportServerConnectionHandle): boolean;
+  /**
    * Whether a connection carries both ways — what the server sends of its own, a notification, a
    * command, a relay's request, as well as its answers; every connection does, without it. One drawn
    * over HTTP does not, yet: a request that opens a subscription on it is refused, and a relay passes
@@ -638,8 +716,17 @@ export interface IRouterServerTransportLike {
  */
 export type RouterServerActivity = RouterActivity;
 
-/** What a destination names: a client router the relay calls through, or a connection of its own. */
-export type RelayTarget = IConnectionTarget | Pick<IRouterClient, 'limits' | 'request'>;
+/**
+ * What a destination names: a client router the relay calls through — the transport it calls
+ * through saying what it carries, none when it has none — or a connection of its own.
+ */
+export type RelayTarget =
+  | IConnectionTarget
+  | (Pick<IRouterClient, 'limits' | 'request'> & {
+      readonly transport?:
+        | Pick<IRouterClient['transport'], 'carriesCredential' | 'isSecure'>
+        | undefined;
+    });
 
 /** Event name → the arguments its listeners receive. */
 export type RouterServerEventMap = {

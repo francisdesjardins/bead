@@ -8,7 +8,7 @@ namespace Bead.Tests;
 /// <see cref="RouterClient"/>: against a server of the interop service, linked in memory, and against
 /// bytes a test writes as a server would.
 /// </summary>
-public sealed class RouterClientTests
+public sealed partial class RouterClientTests
 {
     // constants
 
@@ -1447,6 +1447,7 @@ public sealed class RouterClientTests
     {
         private readonly Lock _gate = new();
         private readonly List<ReadOnlyMemory<byte>> _sent = [];
+        private readonly List<string?> _carried = [];
 
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
@@ -1456,6 +1457,23 @@ public sealed class RouterClientTests
 
         // what a send fails with, once set: what it was given is recorded all the same
         public Exception? Refusal { get; set; }
+
+        // whether it carries a credential beside an envelope, and is secure: in process, it is both
+        public bool CarriesCredential { get; set; } = true;
+
+        public bool IsSecure { get; set; } = true;
+
+        // what it carried beside each envelope sent, in order
+        public List<string?> Carried
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return [.. _carried];
+                }
+            }
+        }
 
         public List<ReadOnlyMemory<byte>> Sent
         {
@@ -1540,6 +1558,12 @@ public sealed class RouterClientTests
             Deliver(EnvelopeCodec.WriteEnvelope(envelope));
         }
 
+        // an envelope, with what the transport carried beside it
+        public void Carrying(Envelope envelope, string carried)
+        {
+            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { Credential = carried });
+        }
+
         public void DeliverText(byte[] bytes)
         {
             Message?.Invoke(new TransportMessage(bytes, true));
@@ -1557,6 +1581,7 @@ public sealed class RouterClientTests
             lock (_gate)
             {
                 _sent.Add(bytes.ToArray());
+                _carried.Add(message.Credential);
             }
 
             return Refusal is { } refusal ? Task.FromException(refusal) : Task.CompletedTask;
@@ -1569,15 +1594,21 @@ public sealed class RouterClientTests
     private sealed class ScriptedRouter : IDisposable
     {
         public ScriptedRouter(RouterLimits? limits = null, TimeProvider? clock = null)
+            : this(new RouterClientOptions { Limits = limits, Clock = clock })
+        {
+        }
+
+        // a router of the options given, on its own scheduler, and on a clock only a test moves
+        // unless they give one
+        public ScriptedRouter(RouterClientOptions options)
         {
             var scheduler = new SerialScheduler();
 
-            Transport = new ScriptedTransport { Clock = clock ?? new FakeTimeProvider() };
+            Transport = new ScriptedTransport { Clock = options.Clock ?? new FakeTimeProvider() };
             Router = new RouterClient(
                 Transport,
-                new RouterClientOptions
+                options with
                 {
-                    Limits = limits,
                     ResolverScheduler = scheduler,
                     Scheduler = scheduler,
                 });

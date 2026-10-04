@@ -665,6 +665,17 @@ jwt_verdicts = [
     ('a claims set naming a member by a lone surrogate', [TOKEN], hs256(AT_JWT, access(**{'\udc00': 1})), [HS], NOW, refused(TOKEN)),
 ]
 
+# aud against a set of audiences, as a relay that verifies holds those its destinations were
+# registered with (section 14.3): the token names one of them, or none
+AUDIENCES = [AUDIENCE, OTHER]
+THIRD = 'https://third.example'
+
+jwt_verdicts_against_a_set = [
+    ('aud an array naming one of a set of audiences', ['13.8', AUD], hs256(AT_JWT, access(aud=[THIRD, OTHER])), [HS], NOW,
+     holds(hs256(AT_JWT, access(aud=[THIRD, OTHER])), TRUST, TWIN_END, sub='bob')),
+    ('aud naming none of a set of audiences', [AUD], hs256(AT_JWT, access(aud=THIRD)), [HS], NOW, refused(AUD)),
+]
+
 
 def entry(**fields):
     return {key: value for key, value in fields.items() if value is not None}
@@ -681,7 +692,7 @@ document = {
         "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
         "side is the side that reads: a failure says which side raised it.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
-        "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
+        "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
     ],
     'specVersion': spec_version(),
     'headers': [entry(name=name, clauses=clauses, bytes=data, header=header) for name, clauses, data, header in headers],
@@ -698,8 +709,9 @@ document = {
                  for name, clauses, record, maximum, failure in failures],
     'failureRefusals': [entry(name=name, clauses=clauses, record=record, code=MALFORMED) for name, clauses, record in failure_refusals],
     'jwtVerdicts': [{'name': name, 'clauses': [unit if isinstance(unit, str) else f'13.8.{unit}' for unit in units], 'token': token,
-                     'keys': keys, 'audience': AUDIENCE, 'now': instant(now), 'verdict': verdict}
-                    for name, units, token, keys, now, verdict in jwt_verdicts],
+                     'keys': keys, 'audience': audience, 'now': instant(now), 'verdict': verdict}
+                    for audience, verdicts in ((AUDIENCE, jwt_verdicts), (AUDIENCES, jwt_verdicts_against_a_set))
+                    for name, units, token, keys, now, verdict in verdicts],
 }
 
 with open(OUT, 'w', encoding='utf-8', newline='\n') as file:

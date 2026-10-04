@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { CredentialScheme } from '../../shared/constants';
 import {
   createNotificationManager,
   PACING_DEFAULTS,
@@ -46,13 +47,58 @@ test.describe('createNotificationManager', () => {
         [
           10,
           new Map([
-            [1, new Map([[first, 1]])],
-            [2, new Map([[second, 3]])],
+            [1, new Map([[first, new Map([['', 1]])]])],
+            [2, new Map([[second, new Map([['', 3]])]])],
           ]),
         ],
-        [20, new Map([[1, new Map([[first, 5]])]])],
+        [20, new Map([[1, new Map([[first, new Map([['', 5]])]])]])],
       ])
     );
+  });
+
+  test('holds one subscription a procedure for each session of a connection: its connection’s, and each credential’s by its identifier, octet for octet', () => {
+    const notifications = createNotificationManager();
+    const procedure = { procedureId: 1, serviceId: 10 };
+    const grace = {
+      issuer: 'https://a.example',
+      scheme: CredentialScheme.JWT,
+      sub: 'grace',
+    } as const;
+    const graceElsewhere = { ...grace, issuer: 'https://b.example' };
+
+    notifications.register(procedure, { callId: 1, connectionHandle: first });
+    notifications.register(procedure, { callId: 3, connectionHandle: first, identifier: grace });
+    notifications.register(procedure, {
+      callId: 5,
+      connectionHandle: first,
+      identifier: graceElsewhere,
+    });
+
+    // a second of one session is refused, a copy of its identifier the same session
+    expect(() => {
+      return notifications.register(procedure, {
+        callId: 7,
+        connectionHandle: first,
+        identifier: { ...grace },
+      });
+    }).toThrow(ProgrammerError);
+    expect(
+      [undefined, grace, graceElsewhere].map((identifier) => {
+        return notifications.subscriptionOf(procedure, { connectionHandle: first, identifier });
+      })
+    ).toEqual([1, 3, 5]);
+    expect(notifications.candidates(procedure)).toEqual([
+      { callId: 1, connectionHandle: first, ...procedure },
+      { callId: 3, connectionHandle: first, identifier: grace, ...procedure },
+      { callId: 5, connectionHandle: first, identifier: graceElsewhere, ...procedure },
+    ]);
+
+    notifications.unregister(3, first);
+
+    expect(
+      notifications.subscriptionOf(procedure, { connectionHandle: first, identifier: grace })
+    ).toBeUndefined();
+    expect(notifications.subscriptions(first)).toHaveLength(2);
   });
 
   test('takes the same call id on two connections as two subscriptions', () => {
@@ -67,12 +113,10 @@ test.describe('createNotificationManager', () => {
       { callId: 13, connectionHandle: second }
     );
 
-    expect(notifications.candidates({ procedureId: 1, serviceId: 10 })).toEqual(
-      new Map([
-        [first, 13],
-        [second, 13],
-      ])
-    );
+    expect(notifications.candidates({ procedureId: 1, serviceId: 10 })).toEqual([
+      { callId: 13, connectionHandle: first, procedureId: 1, serviceId: 10 },
+      { callId: 13, connectionHandle: second, procedureId: 1, serviceId: 10 },
+    ]);
     expect(notifications.has(13, first)).toBe(true);
     expect(notifications.has(13, second)).toBe(true);
 
@@ -100,16 +144,16 @@ test.describe('createNotificationManager', () => {
 
     const candidates = notifications.candidates({ procedureId: 1, serviceId: 10 });
 
-    expect([...candidates]).toEqual([
-      [first, 1],
-      [second, 3],
+    expect(candidates).toEqual([
+      { callId: 1, connectionHandle: first, procedureId: 1, serviceId: 10 },
+      { callId: 3, connectionHandle: second, procedureId: 1, serviceId: 10 },
     ]);
 
-    candidates.clear();
+    candidates.length = 0;
 
-    expect(notifications.candidates({ procedureId: 1, serviceId: 10 }).size).toBe(2);
-    expect(notifications.candidates({ procedureId: 3, serviceId: 10 }).size).toBe(0);
-    expect(notifications.candidates({ procedureId: 1, serviceId: 99 }).size).toBe(0);
+    expect(notifications.candidates({ procedureId: 1, serviceId: 10 })).toHaveLength(2);
+    expect(notifications.candidates({ procedureId: 3, serviceId: 10 })).toHaveLength(0);
+    expect(notifications.candidates({ procedureId: 1, serviceId: 99 })).toHaveLength(0);
   });
 
   test('refuses a second subscription of a connection to a procedure, and a call id it holds, registering nothing', () => {
@@ -200,7 +244,9 @@ test.describe('createNotificationManager', () => {
       { callId: 3, connectionHandle: second }
     );
 
-    expect(notifications.subscriptionOf({ procedureId: 1, serviceId: 20 }, second)).toBe(3);
+    expect(
+      notifications.subscriptionOf({ procedureId: 1, serviceId: 20 }, { connectionHandle: second })
+    ).toBe(3);
   });
 
   test('finds the subscription a connection has to a procedure, among its own only', () => {
@@ -223,13 +269,26 @@ test.describe('createNotificationManager', () => {
       { callId: 7, connectionHandle: second }
     );
 
-    expect(notifications.subscriptionOf({ procedureId: 1, serviceId: 10 }, first)).toBe(1);
-    expect(notifications.subscriptionOf({ procedureId: 1, serviceId: 20 }, first)).toBe(5);
-    expect(notifications.subscriptionOf({ procedureId: 1, serviceId: 10 }, second)).toBe(7);
-    expect(notifications.subscriptionOf({ procedureId: 2, serviceId: 20 }, first)).toBeUndefined();
-    expect(notifications.subscriptionOf({ procedureId: 2, serviceId: 10 }, second)).toBeUndefined();
     expect(
-      notifications.subscriptionOf({ procedureId: 1, serviceId: 10 }, 'type=WS;ip=127.0.0.1;port=1')
+      notifications.subscriptionOf({ procedureId: 1, serviceId: 10 }, { connectionHandle: first })
+    ).toBe(1);
+    expect(
+      notifications.subscriptionOf({ procedureId: 1, serviceId: 20 }, { connectionHandle: first })
+    ).toBe(5);
+    expect(
+      notifications.subscriptionOf({ procedureId: 1, serviceId: 10 }, { connectionHandle: second })
+    ).toBe(7);
+    expect(
+      notifications.subscriptionOf({ procedureId: 2, serviceId: 20 }, { connectionHandle: first })
+    ).toBeUndefined();
+    expect(
+      notifications.subscriptionOf({ procedureId: 2, serviceId: 10 }, { connectionHandle: second })
+    ).toBeUndefined();
+    expect(
+      notifications.subscriptionOf(
+        { procedureId: 1, serviceId: 10 },
+        { connectionHandle: 'type=WS;ip=127.0.0.1;port=1' }
+      )
     ).toBeUndefined();
   });
 

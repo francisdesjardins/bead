@@ -148,7 +148,7 @@
       }
     },
     "jwtVerdicts": {
-      "description": "JWTs verified against keys, an audience and the wall clock's reading, and the verdict every side gives (section 13.8).",
+      "description": "JWTs verified against keys, an audience or a set of them, and the wall clock's reading, and the verdict every side gives (section 13.8).",
       "type": "array",
       "minItems": 1,
       "items": {
@@ -176,7 +176,13 @@
               }
             }
           },
-          "audience": { "description": "The receiver's audience.", "type": "string" },
+          "audience": {
+            "description": "The receiver's audience, or the set of them a relay that verifies holds (section 14.3), any of which the token's aud may name.",
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+            ]
+          },
           "now": {
             "description": "The wall clock's reading, W, an RFC 3339 instant in UTC to the millisecond.",
             "type": "string",

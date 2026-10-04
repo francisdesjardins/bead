@@ -79,6 +79,57 @@ public sealed class ConversationsTests
         return limits;
     }
 
+    // the server's credentials, the interop service's on its clock: no JWT key and no key set under
+    // limits whose chunk or envelope is under 1,024 bytes, which section 12.2 forbids beside them
+    private static Credentials CredentialsOf((RouterLimits Limits, TimeProvider Clock) server)
+    {
+        var credentials = InteropService.CredentialsOf(server.Clock);
+
+        return server.Limits.ChunkBytes < 1_024 || server.Limits.MaximumEnvelopeBytes < 1_024
+            ? credentials with { Keys = [], KeySet = null }
+            : credentials;
+    }
+
+    // the server's relay, the conversation's where it gives it: whether it verifies, and its
+    // admission, requireSession in place of the server's default, which the server built gives
+    private static RelayOptions? RelayOf((JsonElement Conversation, Func<BeforeRequest> RequireSession) given)
+    {
+        if (!given.Conversation.TryGetProperty("relay", out var relay))
+        {
+            return null;
+        }
+
+        var options = new RelayOptions { Verifies = relay.TryGetProperty("verifies", out var verifies) && verifies.GetBoolean() };
+
+        return relay.TryGetProperty("beforeRoute", out var beforeRoute) switch
+        {
+            false => options,
+            true when beforeRoute.GetString() == "requireSessionOrCredential" => options,
+            true when beforeRoute.GetString() == "requireSession" => options with
+            {
+                BeforeRoute = new BeforeRequest(
+                    (request) =>
+                    {
+                        return given.RequireSession().Admits(request);
+                    },
+                    Failure.OfProtocol(ProtocolCode.SessionRequired)),
+            },
+            _ => throw new ArgumentException($"a conversation's relay admits by a name no test reads: {beforeRoute}", nameof(given)),
+        };
+    }
+
+    // a header's credential, as vectors.json writes it, a JWT's token a character a byte; an
+    // OPAQUE's token in hexadecimal
+    private static string CredentialOf(Credential credential)
+    {
+        return credential.Scheme switch
+        {
+            CredentialScheme.Jwt => $"credential JWT {credential.Token}",
+            CredentialScheme.Opaque => $"credential OPAQUE {credential.SessionToken}",
+            var scheme => $"credential {scheme.ToString().ToUpperInvariant()}",
+        };
+    }
+
     // the server's pacing, the conversation's where it gives it
     private static PacingLimits PacingOf(JsonElement conversation)
     {
@@ -102,9 +153,11 @@ public sealed class ConversationsTests
         return pacing;
     }
 
-    // an envelope sent, as a conversation writes what it expects
-    private static string OutOf(ReadOnlyMemory<byte> bytes)
+    // an envelope sent, and the credential its transport carried beside it, as a conversation
+    // writes what it expects
+    private static string OutOf((ReadOnlyMemory<byte> Bytes, string? Carried) sent)
     {
+        var bytes = sent.Bytes;
         var envelope = EnvelopeCodec.ReadEnvelope(
             bytes.Span,
             new EnvelopeReadOptions { Side = RouterSide.Client, MaximumEnvelopeBytes = int.MaxValue })!;
@@ -131,8 +184,11 @@ public sealed class ConversationsTests
             ChunkHeader chunk => $"{kind} {callId} from {chunk.Offset}{(chunk.IsLast ? " last" : "")} {Convert.ToHexString(envelope.Payload.Span)}",
             CreditHeader credit => $"{kind} {callId} credit {credit.CreditEnd}",
 
-            // a command the server sends its client, with its flags, the envelope's byte 2 as sent
-            RequestHeader request => $"{kind} {callId} flags {bytes.Span[2]} {request.ServiceId}/{request.ProcedureId} {Convert.ToHexString(envelope.Payload.Span)}",
+            // a command the server sends its client, with its flags, the envelope's byte 2 as sent,
+            // the credential it presents, and what its transport carried beside it
+            RequestHeader request => $"{kind} {callId} flags {bytes.Span[2]} {request.ServiceId}/{request.ProcedureId} {Convert.ToHexString(envelope.Payload.Span)}"
+                + (request.Credential is { } presented ? $" {CredentialOf(presented)}" : "")
+                + (sent.Carried is { } carried ? $" carried {carried}" : ""),
             _ => $"{kind} {callId}",
         };
     }
@@ -150,6 +206,12 @@ public sealed class ConversationsTests
         });
 
         return Vectors.FromHexadecimal(hexadecimal);
+    }
+
+    // what a step says a transport carried beside its envelope: its carried; none when it says none
+    private static string? CarriedOf(JsonElement step)
+    {
+        return step.TryGetProperty("carried", out var carried) ? carried.GetString() : null;
     }
 
     // the token an answer announced, OPAQUE; none for any other
@@ -175,13 +237,18 @@ public sealed class ConversationsTests
             new EnvelopeReadOptions { Side = RouterSide.Client, MaximumEnvelopeBytes = int.MaxValue })!.Failure!.Detail;
     }
 
-    // what a conversation expects, written as OutOf writes what was sent
-    private static string ExpectedOf(JsonElement expected)
+    // what a conversation expects, and what its transport carried beside a request, written as OutOf
+    // writes what was sent
+    private static string ExpectedOf((JsonElement Expected, string? Carried) step)
     {
+        var expected = step.Expected;
         var kind = expected.GetProperty("kind").GetInt32();
         var callId = expected.GetProperty("callId").GetUInt32();
 
-        var credential = expected.TryGetProperty("credential", out var announced) ? $" {announced.GetString()}" : "";
+        // on an answer, the scheme it announced; on a request, the credential it presents
+        var credential = expected.TryGetProperty("credential", out var announced) && announced.ValueKind == JsonValueKind.String
+            ? $" {announced.GetString()}"
+            : "";
 
         if (expected.TryGetProperty("failure", out var failure))
         {
@@ -194,7 +261,17 @@ public sealed class ConversationsTests
 
         if (expected.TryGetProperty("procedureId", out var procedureId))
         {
-            return $"{kind} {callId} flags {expected.GetProperty("flags").GetInt32()} {expected.GetProperty("serviceId").GetInt32()}/{procedureId.GetInt32()} {hexadecimal}";
+            var presented = announced.ValueKind == JsonValueKind.Object
+                ? announced.GetProperty("scheme").GetString() switch
+                {
+                    "JWT" => $" credential JWT {announced.GetProperty("token").GetString()}",
+                    var scheme => $" credential {scheme}",
+                }
+                : "";
+
+            return $"{kind} {callId} flags {expected.GetProperty("flags").GetInt32()} {expected.GetProperty("serviceId").GetInt32()}/{procedureId.GetInt32()} {hexadecimal}"
+                + presented
+                + (step.Carried is { } carried ? $" carried {carried}" : "");
         }
 
         if (expected.TryGetProperty("offset", out var offset))
@@ -238,16 +315,28 @@ public sealed class ConversationsTests
 
         // the tokens the server announced, by the name the conversation gave each
         var tokens = new Dictionary<string, SessionToken>();
+        var limits = LimitsOf(conversation);
+        Server<string>? built = null;
+
+        // the admission a conversation's relay may name, the server's once it is built
+        BeforeRequest RequireSession()
+        {
+            return built!.RequireSession;
+        }
 
         await using var server = new Server<string>(
             transport,
             new ServerOptions
             {
-                Limits = LimitsOf(conversation),
+                Credentials = CredentialsOf((limits, clock)),
+                Limits = limits,
                 Pacing = PacingOf(conversation),
+                Relay = RelayOf((conversation, RequireSession)),
                 ResolverScheduler = scheduler,
                 Scheduler = scheduler,
             });
+
+        built = server;
 
         var router = server.Router;
 
@@ -264,7 +353,7 @@ public sealed class ConversationsTests
         {
             return transport.Left().Select((left) =>
             {
-                return $"{left.Name}: {OutOf(left.Bytes)}";
+                return $"{left.Name}: {OutOf((left.Bytes, left.Carried))}";
             }).Concat(reports.Select((report) =>
             {
                 return $"{transport.NameOf(report.ConnectionHandle)}: report {report.Report}";
@@ -284,7 +373,7 @@ public sealed class ConversationsTests
             return step.TryGetProperty("open", out _);
         }))
         {
-            transport.Open(OnlyConnection, true);
+            transport.Open(OnlyConnection, new Carrying(true, true, true));
         }
 
         try
@@ -295,15 +384,20 @@ public sealed class ConversationsTests
 
                 if (step.TryGetProperty("open", out var opened))
                 {
+                    var carrying = new Carrying(
+                        !step.TryGetProperty("twoWay", out var twoWay) || twoWay.GetBoolean(),
+                        !step.TryGetProperty("carries", out var carries) || carries.GetBoolean(),
+                        !step.TryGetProperty("secure", out var secure) || secure.GetBoolean());
+
                     await NothingMore();
-                    transport.Open(opened.GetString()!, !step.TryGetProperty("twoWay", out var twoWay) || twoWay.GetBoolean());
+                    transport.Open(opened.GetString()!, carrying);
                     await scheduler.WhenIdle();
                 }
 
                 if (step.TryGetProperty("send", out var bytes))
                 {
                     await NothingMore();
-                    transport.Deliver(SentOf(bytes.GetString()!, tokens), connection);
+                    transport.Deliver(new TransportMessage(SentOf(bytes.GetString()!, tokens), false) { Credential = CarriedOf(step) }, connection);
                     await scheduler.WhenIdle();
                 }
 
@@ -340,17 +434,17 @@ public sealed class ConversationsTests
                     var sent = transport.Next(connection);
 
                     Assert.Equal(
-                        ExpectedOf(expected),
+                        ExpectedOf((expected, CarriedOf(step))),
                         sent is { } envelope ? OutOf(envelope) : $"nothing, but [{string.Join(", ", Pending())}]");
 
                     if (expected.TryGetProperty("failure", out var failure) && failure.TryGetProperty("detail", out var detail))
                     {
-                        Assert.Equal(detail.GetString(), DetailOf(sent!.Value));
+                        Assert.Equal(detail.GetString(), DetailOf(sent!.Value.Bytes));
                     }
 
                     if (step.TryGetProperty("token", out var token))
                     {
-                        tokens[token.GetString()!] = AnnouncedOf(sent!.Value)!.Value;
+                        tokens[token.GetString()!] = AnnouncedOf(sent!.Value.Bytes)!.Value;
                     }
                 }
 
@@ -380,9 +474,13 @@ public sealed class ConversationsTests
         }
     }
 
+    // what a connection opened carries: the server's own envelopes back, a credential beside an
+    // envelope, and whether it is secure
+    private readonly record struct Carrying(bool IsTwoWay, bool CarriesCredential, bool IsSecure);
+
     // a transport of connections a test opens by name, delivers to and closes, which records what
-    // it sends on each. A name keeps its handle: a connection opened again under it is a new
-    // connection under the same handle
+    // it sends on each, with the credential it carries beside it. A name keeps its handle: a
+    // connection opened again under it is a new connection under the same handle
     private sealed class ScriptedTransport : IServerTransport
     {
         // what is sent and asked on the router's scheduler, and taken on the test's
@@ -393,11 +491,11 @@ public sealed class ConversationsTests
         private readonly Dictionary<string, string> _names = [];
 
         // by handle, what was sent on it and not yet taken, in order
-        private readonly Dictionary<string, Queue<ReadOnlyMemory<byte>>> _sent = [];
+        private readonly Dictionary<string, Queue<(ReadOnlyMemory<byte> Bytes, string? Carried)>> _sent = [];
 
-        // the handles of the connections open, and of those that carry nothing back
+        // the handles of the connections open, and what each carries
         private readonly HashSet<string> _open = [];
-        private readonly HashSet<string> _oneWay = [];
+        private readonly Dictionary<string, Carrying> _carrying = [];
 
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
@@ -424,29 +522,22 @@ public sealed class ConversationsTests
             return _names.GetValueOrDefault(connectionHandle, connectionHandle);
         }
 
-        public void Open(string name, bool isTwoWay)
+        public void Open(string name, Carrying carrying)
         {
             var handle = HandleOf(name);
 
             lock (_gate)
             {
-                if (isTwoWay)
-                {
-                    _oneWay.Remove(handle);
-                }
-                else
-                {
-                    _oneWay.Add(handle);
-                }
+                _carrying[handle] = carrying;
             }
 
             _open.Add(handle);
             Connection?.Invoke(handle);
         }
 
-        public void Deliver(byte[] bytes, string name)
+        public void Deliver(TransportMessage message, string name)
         {
-            Message?.Invoke(new TransportMessage(bytes, false), HandleOf(name));
+            Message?.Invoke(message, HandleOf(name));
         }
 
         public void Closed(string name)
@@ -467,27 +558,28 @@ public sealed class ConversationsTests
             }
         }
 
-        // the next envelope sent on a connection, taken; none while none waits
-        public ReadOnlyMemory<byte>? Next(string name)
+        // the next envelope sent on a connection, with what it carried beside it, taken; none while
+        // none waits
+        public (ReadOnlyMemory<byte> Bytes, string? Carried)? Next(string name)
         {
             var handle = HandleOf(name);
 
             lock (_gate)
             {
-                return _sent.TryGetValue(handle, out var sent) && sent.TryDequeue(out var bytes) ? bytes : null;
+                return _sent.TryGetValue(handle, out var sent) && sent.TryDequeue(out var next) ? next : null;
             }
         }
 
         // what was sent and not yet taken, each with the name of its connection
-        public IReadOnlyList<(string Name, ReadOnlyMemory<byte> Bytes)> Left()
+        public IReadOnlyList<(string Name, ReadOnlyMemory<byte> Bytes, string? Carried)> Left()
         {
             lock (_gate)
             {
                 return [.. _sent.SelectMany((sent) =>
                 {
-                    return sent.Value.Select((bytes) =>
+                    return sent.Value.Select((left) =>
                     {
-                        return (NameOf(sent.Key), bytes);
+                        return (NameOf(sent.Key), left.Bytes, left.Carried);
                     });
                 })];
             }
@@ -497,7 +589,23 @@ public sealed class ConversationsTests
         {
             lock (_gate)
             {
-                return !_oneWay.Contains(connectionHandle);
+                return !_carrying.TryGetValue(connectionHandle, out var carrying) || carrying.IsTwoWay;
+            }
+        }
+
+        public bool CarriesCredential(string connectionHandle)
+        {
+            lock (_gate)
+            {
+                return !_carrying.TryGetValue(connectionHandle, out var carrying) || carrying.CarriesCredential;
+            }
+        }
+
+        public bool IsSecure(string connectionHandle)
+        {
+            lock (_gate)
+            {
+                return !_carrying.TryGetValue(connectionHandle, out var carrying) || carrying.IsSecure;
             }
         }
 
@@ -523,7 +631,7 @@ public sealed class ConversationsTests
                     _sent[connectionHandle] = sent;
                 }
 
-                sent.Enqueue(bytes.ToArray());
+                sent.Enqueue((bytes.ToArray(), message.Credential));
             }
 
             return Task.CompletedTask;

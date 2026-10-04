@@ -9,7 +9,7 @@ namespace Bead;
 /// The algorithms a <c>JWT</c>'s key verifies with, one a key, which the application names
 /// (RFC 8725 §3.1).
 /// </summary>
-internal enum JwtAlgorithm
+public enum JwtAlgorithm
 {
     /// <summary>ECDSA on P-256 with SHA-256 (RFC 7518 §3.4), for keys a federation shares by their public half.</summary>
     Es256,
@@ -65,7 +65,7 @@ internal enum JwtRefusal
 /// A key a <c>JWT</c> is verified with: a JWK (RFC 7517), the issuer whose tokens it signs, and its
 /// one algorithm, which the application names (RFC 8725 §3.1).
 /// </summary>
-internal sealed record JwtKey
+public sealed record JwtKey
 {
     /// <summary>The issuer whose tokens the key signs, compared to their <c>iss</c> octet for octet.</summary>
     public required string Issuer { get; init; }
@@ -75,19 +75,28 @@ internal sealed record JwtKey
 
     /// <summary>The key, a JWK, as a key set writes it.</summary>
     public required JsonElement Jwk { get; init; }
+
+    /// <summary>Its issuer and its algorithm alone: an HS256 key's secret is written in no string.</summary>
+    public override string ToString()
+    {
+        return $"JwtKey {{ Issuer = {Issuer}, Algorithm = {Algorithm} }}";
+    }
 }
 
 /// <summary>
-/// What <see cref="JwtVerifier.VerifyJwt"/> holds a token to: the keys, the receiver's audience, and
+/// What <see cref="JwtVerifier.VerifyJwt"/> holds a token to: the keys, the receiver's audiences, and
 /// the wall clock's reading, <em>W</em>, a whole number of milliseconds since the epoch.
 /// </summary>
 internal sealed record VerifyJwtProps
 {
-    /// <summary>The keys a token is verified with, the application's.</summary>
+    /// <summary>The keys a token is verified with, the application's and those a key set answered.</summary>
     public required IReadOnlyList<JwtKey> Keys { get; init; }
 
-    /// <summary>The receiver's audience, which a token's <c>aud</c> names.</summary>
-    public required string Audience { get; init; }
+    /// <summary>
+    /// The receiver's audience, or a set of them, one of which a token's <c>aud</c> names: a relay
+    /// that verifies holds those of its destinations (spec 14.3).
+    /// </summary>
+    public required IReadOnlyCollection<string> Audiences { get; init; }
 
     /// <summary>The wall clock's reading, in milliseconds since the epoch.</summary>
     public required long Now { get; init; }
@@ -427,16 +436,29 @@ internal static class JwtVerifier
         return milliseconds >= -Largest && milliseconds <= Largest ? (long)milliseconds : null;
     }
 
-    private static bool NamesAudience(JsonElement claims, string audience)
+    /// <summary>
+    /// Whether a claims set's <c>aud</c> names one of <paramref name="audiences"/>: a string, or an
+    /// array of strings, one of them (step 11 of section 13.8); read alike from a token a relay does
+    /// not verify.
+    /// </summary>
+    internal static bool NamesAudience(JsonElement claims, IReadOnlyCollection<string> audiences)
     {
         if (!claims.TryGetProperty("aud", out var aud))
         {
             return false;
         }
 
+        var named = (JsonElement name) =>
+        {
+            return audiences.Any((audience) =>
+            {
+                return name.ValueEquals(audience);
+            });
+        };
+
         if (aud.ValueKind == JsonValueKind.String)
         {
-            return aud.ValueEquals(audience);
+            return named(aud);
         }
 
         return aud.ValueKind == JsonValueKind.Array
@@ -444,10 +466,7 @@ internal static class JwtVerifier
             {
                 return name.ValueKind == JsonValueKind.String;
             })
-            && aud.EnumerateArray().Any((name) =>
-            {
-                return name.ValueEquals(audience);
-            });
+            && aud.EnumerateArray().Any(named);
     }
 
     // steps 8 to 13 of section 13.8, on a token whose signature verified under its key
@@ -473,7 +492,7 @@ internal static class JwtVerifier
             return Refused(JwtRefusal.Nbf);
         }
 
-        if (!NamesAudience(claims, props.Audience))
+        if (!NamesAudience(claims, props.Audiences))
         {
             return Refused(JwtRefusal.Aud);
         }
@@ -514,19 +533,57 @@ internal static class JwtVerifier
     public static ValueTask<JwtVerdict> VerifyJwt(string token, VerifyJwtProps props)
     {
         ArgumentNullException.ThrowIfNull(token);
-        ArgumentNullException.ThrowIfNull(props);
 
-        if (props.Audience is null || !IsWellFormed(props.Audience))
+        AssertHeld((props.Keys, props.Audiences));
+
+        return ValueTask.FromResult(Verdict(token, props));
+    }
+
+    /// <summary>
+    /// Throws an <see cref="ArgumentException"/> for a key not shaped for its algorithm, or an
+    /// audience that is not a string of well-formed Unicode: what a verifier holds a token to, held
+    /// as a side's credentials are given, or as a key set answers.
+    /// </summary>
+    internal static void AssertHeld((IReadOnlyList<JwtKey> Keys, IReadOnlyCollection<string> Audiences) held)
+    {
+        if (held.Keys is null || held.Audiences is null || held.Audiences.Any((audience) =>
         {
-            throw new ArgumentException("an audience is a string of well-formed Unicode", nameof(props));
+            return audience is null || !IsWellFormed(audience);
+        }))
+        {
+            throw new ArgumentException("a JWT's keys are a list, and an audience is a string of well-formed Unicode", nameof(held));
         }
 
-        foreach (var key in props.Keys)
+        foreach (var key in held.Keys)
         {
             AssertKey(key);
         }
+    }
 
-        return ValueTask.FromResult(Verdict(token, props));
+    /// <summary>
+    /// A token's claims set, and its header's <c>kid</c> when it is a string, read as step 1 of
+    /// section 13.8 reads them, without verifying it: none for a token that does not read.
+    /// </summary>
+    internal static (JsonElement Claims, string? Kid)? ReadUnverified(string token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+
+        var parts = token.Split('.');
+
+        if (parts.Length != 3 || FromBase64Url(parts[2]) is null)
+        {
+            return null;
+        }
+
+        using var header = ObjectOf(parts[0]);
+        using var claims = ObjectOf(parts[1]);
+
+        if (header is null || claims is null)
+        {
+            return null;
+        }
+
+        return (claims.RootElement.Clone(), StringOf(header.RootElement, "kid"));
     }
 
     private static JwtVerdict Verdict(string token, VerifyJwtProps props)

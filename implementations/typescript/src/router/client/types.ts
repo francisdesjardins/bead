@@ -6,8 +6,11 @@ import type {
   IEventIteratorOptions,
   ITransportMessage,
 } from '../../transport/shared/types';
+import type { CredentialScheme } from '../shared/constants';
 import type {
   DebugDirection,
+  DefaultCredential,
+  ICredentials,
   INotificationLike,
   IProcedure,
   IResolvedRequestOptions,
@@ -32,6 +35,15 @@ import type {
 export interface IRouterClient<
   Transport extends IRouterClientTransportLike = IRouterClientTransportLike,
 > extends IRouterLike<RouterClientConnectionHandle> {
+  /**
+   * The credential every call presents but one that gives its own, or `NONE` (spec 13.4): a `JWT`, or
+   * an `ELSEWHERE` with what its transport carries beside each request; none when not given, and
+   * once a call that presented it was refused SESSION_REQUIRED, which `credentialWithdrawn` tells.
+   * Given anew, it renews it: a refusal of a call that presented an older one withdraws nothing.
+   * `OPAQUE`, which a call asks for alone, or a `JWT` past what its limits hold, is a
+   * {@link ProgrammerError}, and nothing changes.
+   */
+  credential: DefaultCredential | undefined;
   /**
    * What it reads, writes and holds by: its options', {@link LIMIT_DEFAULTS}' where they say nothing.
    * A relay reads them, to refuse at the opening what this router would refuse after.
@@ -75,7 +87,10 @@ export interface IRouterClient<
    * it `subscribes` a notification other than the one this router holds for the procedure, for a
    * procedure's payload limit that is not a whole number above 0, or a timeout longer than a timer
    * holds; a {@link TimeoutError}, a {@link CancelError}, a {@link DisconnectError} when the
-   * connection closes first or the router was disposed, or what the transport's `send` does.
+   * connection closes first or the router was disposed, or what the transport's `send` does. A call
+   * presenting a credential its transport cannot carry — an `ELSEWHERE` over one that carries none,
+   * a `JWT` or an `ELSEWHERE` over one that is not secure — rejects with a {@link FailureError},
+   * DESTINATION_UNREACHABLE, before it goes.
    */
   request(
     payload: Uint8Array,
@@ -107,6 +122,17 @@ export interface IRouterClientOptions {
    */
   clock?: IClock | undefined;
   /**
+   * The credential every call presents by default, as {@link IRouterClient.credential} says; none
+   * when not given.
+   */
+  credential?: DefaultCredential | undefined;
+  /**
+   * What it resolves a command presenting a `JWT` or an `ELSEWHERE` with, as a server does: a
+   * `JWT`'s keys, audience and key set, an `ELSEWHERE`'s verifier; a scheme it is given nothing for
+   * is refused, CREDENTIAL_UNSUPPORTED.
+   */
+  credentials?: ICredentials | undefined;
+  /**
    * How much the router reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing.
    * They must hold together, or the router is a {@link ProgrammerError}.
    */
@@ -115,8 +141,20 @@ export interface IRouterClientOptions {
 
 /** The part of a transport client this router uses — met by any of this package's. */
 export interface IRouterClientTransportLike {
+  /**
+   * Whether it carries a credential beside an envelope it sends — over HTTP, its `POST`'s
+   * `Authorization`; a WebSocket and a worker carry none. None does without it: a call presenting
+   * `ELSEWHERE` over one that does not fails before it goes, DESTINATION_UNREACHABLE (spec 13.4).
+   */
+  readonly carriesCredential?: boolean | undefined;
   /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
   readonly clock?: IClock | undefined;
+  /**
+   * Whether it is secure: under TLS, on the loopback, or never leaving the machine, as a worker;
+   * none is without it. A call presenting a `JWT` or an `ELSEWHERE` over one that is not fails before
+   * it goes, DESTINATION_UNREACHABLE (spec 13.4).
+   */
+  readonly isSecure?: boolean | undefined;
   off(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown;
   off(event: 'message', listener: (message: ITransportMessage) => void): unknown;
   off(event: 'reconnect', listener: () => void): unknown;
@@ -144,6 +182,11 @@ export type RouterClientConnectionHandle = ServerConnectionHandle;
 /** Event name → the arguments its listeners receive. */
 export type RouterClientEventMap = {
   activity: [activity: RouterClientActivity];
+  /**
+   * The default credential was withdrawn, a call that presented it refused SESSION_REQUIRED: its
+   * scheme alone, never its bytes, so the application renews it.
+   */
+  credentialWithdrawn: [credentialScheme: CredentialScheme];
   /** Each envelope, out or in; built only while someone listens. */
   debug: [info: IRouterDebugInfo];
   /** What went wrong with an envelope no call was waiting on, or in a resolver or a notification. */

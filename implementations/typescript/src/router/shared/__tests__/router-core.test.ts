@@ -201,7 +201,7 @@ const createPort = (hooks: Partial<IRouterCorePort<Handle>> = {}) => {
     report: (error, connectionHandle) => {
       reported.push([error, connectionHandle]);
     },
-    send: (bytes, connectionHandle) => {
+    send: ({ data: bytes }, connectionHandle) => {
       const sendError = control.sendErrors.get(connectionHandle);
 
       sizes.push(bytes.length);
@@ -1144,7 +1144,7 @@ test.describe('createRouterCore', () => {
       const asked: unknown[] = [];
       const seen: IRequestResolverProps<Handle>[] = [];
       const { port, reported } = createPort({
-        sessionOf: ({ connectionHandle, header, signal }) => {
+        sessionOf: ({ connectionHandle, header }, signal) => {
           asked.push([connectionHandle, header.callId, header.credential, signal.aborted]);
 
           return header.credential === undefined ? undefined : SESSION;
@@ -1207,6 +1207,11 @@ test.describe('createRouterCore', () => {
       first.receive(requestOf(1, { credential: OPAQUE }), 'a');
       first.receive(requestOf(3), 'a');
       first.receive(requestOf(5, { credential: ELSEWHERE }), 'a');
+      // one its transport carried a credential beside came, and did not hold
+      first.receive(
+        { credential: 'Interop sub=Ada', data: requestOf(7, { credential: ELSEWHERE }) },
+        'a'
+      );
       second.receive(requestOf(1, { credential: OPAQUE }), 'a');
       second.receive(requestOf(3), 'a');
       await sleep(0);
@@ -1214,6 +1219,7 @@ test.describe('createRouterCore', () => {
       expect(failuresOf(resolving.sent)).toEqual([
         [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
         [5, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+        [7, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
       ]);
       expect(failuresOf(bare.sent)).toEqual([
         [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
@@ -1280,11 +1286,13 @@ test.describe('createRouterCore', () => {
 
     test('of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {
       const order: string[] = [];
+      const carried: unknown[] = [];
       const { port, reported, sent } = createPort({
         credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
         // at once, never waiting
-        sessionOf: ({ header }) => {
+        sessionOf: ({ header, transportCredential }) => {
           order.push(`resolve ${String(header.callId)}`);
+          carried.push([header.callId, transportCredential]);
 
           return SESSION;
         },
@@ -1301,7 +1309,10 @@ test.describe('createRouterCore', () => {
         })
       );
       core.receive(requestOf(1, { credential: JWT }), 'a');
-      core.receive(requestOf(3, { credential: ELSEWHERE }), 'a');
+      core.receive(
+        { credential: 'Bearer mF_9.B5f-4.1JqM', data: requestOf(3, { credential: ELSEWHERE }) },
+        'a'
+      );
       // one presenting none, which came after, goes first
       core.receive(requestOf(5), 'a');
       // the call id of one resolving is open: a request on it is reported, never answered
@@ -1320,6 +1331,12 @@ test.describe('createRouterCore', () => {
         'admit 1 ada',
         'admit 3 ada',
       ]);
+      // the credential an ELSEWHERE stands for is the one its transport carried
+      expect(carried).toEqual([
+        [1, undefined],
+        [3, 'Bearer mF_9.B5f-4.1JqM'],
+        [5, undefined],
+      ]);
       expect(sent).toEqual([]);
     });
 
@@ -1329,7 +1346,7 @@ test.describe('createRouterCore', () => {
       const admitted: number[] = [];
       const { port, reported, sent } = createPort({
         credentialSchemes: [CredentialScheme.JWT],
-        sessionOf: ({ header, signal }) => {
+        sessionOf: ({ header }, signal) => {
           const resolution = Promise.withResolvers<ICallSession | undefined>();
 
           pending.set(header.callId, resolution);
@@ -4226,14 +4243,14 @@ test.describe('createRouterCore', () => {
         {
           ...port,
           // a transport that throws as it is handed the first answer
-          send: (bytes, connectionHandle) => {
-            if (isRefusing && bytes[1] === EnvelopeKind.RESULT) {
+          send: (message, connectionHandle) => {
+            if (isRefusing && message.data[1] === EnvelopeKind.RESULT) {
               isRefusing = false;
 
               throw new Error('the transport is closing');
             }
 
-            return port.send(bytes, connectionHandle);
+            return port.send(message, connectionHandle);
           },
         },
         { limits }

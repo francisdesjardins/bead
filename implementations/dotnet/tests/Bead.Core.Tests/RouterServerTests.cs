@@ -810,7 +810,7 @@ public sealed partial class RouterServerTests : IDisposable
             })];
         }
 
-        bool IsNotFirst(string connectionHandle)
+        bool IsNotFirst(string connectionHandle, SessionIdentifier? identifier)
         {
             return connectionHandle != First;
         }
@@ -835,7 +835,7 @@ public sealed partial class RouterServerTests : IDisposable
             return response.Answer("ok");
         });
 
-        bool Filter(string connectionHandle)
+        bool Filter(string connectionHandle, SessionIdentifier? identifier)
         {
             if (connectionHandle == Second)
             {
@@ -1846,7 +1846,7 @@ public sealed partial class RouterServerTests : IDisposable
                 word,
                 new NotifyOptions
                 {
-                    Filter = (connectionHandle) =>
+                    Filter = (connectionHandle, _) =>
                     {
                         return connectionHandle == First;
                     },
@@ -2191,6 +2191,15 @@ public sealed partial class RouterServerTests : IDisposable
         // the connections that carry no request of the server's, while listed
         public HashSet<string> OneWay { get; } = [];
 
+        // the connections whose transport carries no credential beside an envelope, and those not
+        // secure, while listed: in process, every other does, and is
+        public HashSet<string> Uncarrying { get; } = [];
+
+        public HashSet<string> InTheClear { get; } = [];
+
+        // what its transport carried beside each envelope sent, in order
+        public List<string?> Carried { get; } = [];
+
         // whether the router still follows its events
         public bool IsFollowed
         {
@@ -2220,14 +2229,32 @@ public sealed partial class RouterServerTests : IDisposable
             Message?.Invoke(new TransportMessage(Encoding.UTF8.GetBytes(text), true), connectionHandle);
         }
 
+        // an envelope, with what its transport carried beside it
+        public void Carrying(string connectionHandle, (byte[] Bytes, string Carried) message)
+        {
+            Message?.Invoke(new TransportMessage(message.Bytes, false) { Credential = message.Carried }, connectionHandle);
+        }
+
         public bool IsTwoWay(string connectionHandle)
         {
             return !OneWay.Contains(connectionHandle);
         }
 
+        public bool CarriesCredential(string connectionHandle)
+        {
+            return !Uncarrying.Contains(connectionHandle);
+        }
+
+        public bool IsSecure(string connectionHandle)
+        {
+            return !InTheClear.Contains(connectionHandle);
+        }
+
         public Task Send(TransportMessage message, string connectionHandle)
         {
             var bytes = message.Bytes;
+
+            Carried.Add(message.Credential);
 
             var copy = bytes.ToArray();
             var envelope = EnvelopeCodec.ReadEnvelope(

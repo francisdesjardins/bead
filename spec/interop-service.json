@@ -6,13 +6,17 @@
     "answers says what a procedure answers; admits, what its admission lets through, when it has one.",
     "offeredBy client: a command, which a client offers and its server calls; any other procedure, the server offers.",
     "notifies: what a notification procedure notifies its subscribers.",
-    "relay: what the interop server's relay admits. Its destinations are its clients' connections, each registered by register and taken out by unregister."
+    "relay: what the interop server's relay admits, what it forwards, and whether it verifies what it forwards. Its destinations are its clients' connections, each registered by register, with the audience it verifies or with none, and taken out by unregister.",
+    "credentials: what the interop server resolves a request's credential with, by its scheme. elsewhere is its ELSEWHERE verifier: what it reads, the grammar of the values it holds, in ABNF (RFC 5234, where a string is case-insensitive, and RFC 7405, where %s makes one case-sensitive), and what it settles with.",
+    "credentials.jwt: what the interop server verifies a JWT with (section 13.8), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: the issuer it answers for, the keys it answers, a third published test key, and when it answers, on the server's clock."
   ],
   "specVersion": "0.1.0",
   "serviceId": 1,
   "serviceRevision": 1,
   "relay": {
-    "admits": "requireSessionOrCredential, a server's relay's admission by default: a call in leg A's connection's session, or one whose header presents a JWT, or an ELSEWHERE its transport carried, read from its credential scheme alone; any other is refused with SESSION_REQUIRED"
+    "admits": "requireSessionOrCredential, a server's relay's admission by default: a call in leg A's connection's session, or one whose header presents a JWT, or an ELSEWHERE its transport carried, read from its credential scheme alone; any other is refused with SESSION_REQUIRED. Before it, a scheme to come is refused with CREDENTIAL_UNSUPPORTED, detail \"OPAQUE, JWT, ELSEWHERE\", and an OPAQUE that does not hold, or an ELSEWHERE whose transport carried nothing, with SESSION_REQUIRED (section 14.3, step 1). A conversation's relay may give requireSession in its place, which tests the call's session, and so refuses every credential the relay forwards without verifying",
+    "forwards": "what leg A presents, as section 14.2's table says: none for none or OPAQUE; a JWT, its same bytes, to a destination registered with the audience its aud names; an ELSEWHERE, the credential its transport carried moved to leg B's transport as it came, to a destination registered with an audience, over a connection whose transport carries one. A JWT or an ELSEWHERE it cannot so forward — to a destination of another audience or of none, over a connection that carries no credential, or in the clear off the machine — is refused with DESTINATION_UNREACHABLE (section 14.3, step 5)",
+    "verifies": "nothing, unless a conversation's relay says it verifies: then it verifies a JWT with the server's credentials against the audiences its destinations were registered with, and an ELSEWHERE with the server's ELSEWHERE verifier, before its admission, which then reads the credential's session (section 14.3, step 1)"
   },
   "procedures": [
     {
@@ -74,15 +78,15 @@
     {
       "procedureId": 10,
       "procedureName": "ticks",
-      "notifies": "each value tick notifies, as a JSON number, on its connection",
+      "notifies": "each value tick notifies, as a JSON number, to the subscription its call's session holds on its connection, one per session (section 11.3)",
       "request": "{\"hold\":n}, {\"hold\":n,\"fail\":true}, or any other JSON value",
-      "answers": "null: at once; or, held, once n ticks of its connection notified, having subscribed its requester before it waits; held and failing, an application failure there instead: code 7, detail \"this procedure fails, on purpose\""
+      "answers": "null: at once; or, held, once n ticks of its call's session on its connection notified, having subscribed its requester before it waits; held and failing, an application failure there instead: code 7, detail \"this procedure fails, on purpose\""
     },
     {
       "procedureId": 11,
       "procedureName": "tick",
       "request": "{\"value\":v} or {\"value\":v,\"key\":k}",
-      "answers": "null, once it notified v to its connection's subscription to ticks — keyed by k when given — and the ticks it held have answered"
+      "answers": "null, once it notified v to the subscription to ticks its call's session holds on its connection — keyed by k when given — and the ticks of that session it held have answered"
     },
     {
       "procedureId": 12,
@@ -107,14 +111,74 @@
     {
       "procedureId": 15,
       "procedureName": "register",
-      "request": "{\"destination\":n} or {\"destination\":n,\"timeout\":t}",
-      "answers": "n, once it registered its caller's connection as the destination n, leg B waiting t milliseconds at most for its answer when given, t held as section 1.4 holds a duration; a t under a millisecond or past 2³¹ − 1, as given, registers nothing and fails it, which its server answers with PROCEDURE_FAILED and reports; a destination registered already fails it, an application failure: code 8, detail \"that destination is registered already\""
+      "request": "{\"destination\":n}, with \"audience\":a, \"timeout\":t, or both",
+      "answers": "n, once it registered its caller's connection as the destination n, with the audience a, which that destination verifies, when given, and with none otherwise (section 14.1), leg B waiting t milliseconds at most for its answer when given, t held as section 1.4 holds a duration; a t under a millisecond or past 2³¹ − 1, as given, registers nothing and fails it, which its server answers with PROCEDURE_FAILED and reports; a destination registered already fails it, an application failure: code 8, detail \"that destination is registered already\""
     },
     {
       "procedureId": 16,
       "procedureName": "unregister",
       "request": "any JSON value",
       "answers": "true, once it took out the destination its caller's connection registered last; false when there is none, or another took its id since"
+    },
+    {
+      "procedureId": 17,
+      "procedureName": "revoke",
+      "request": "a credential's session's identifier, an object of these members alone, each a string: a JWT's, {\"issuer\":i,\"sub\":s} or {\"issuer\":i,\"sid\":s}; an ELSEWHERE's, {\"id\":d}",
+      "answers": "null, once it ended the credential's session of that identifier on every connection that keeps it, as a token's revocation does (RFC 7009), each subscription it bounded failing SESSION_REQUIRED (section 13.9); an identifier no connection keeps ends nothing, and a credential that still holds opens its session anew. A request that names no identifier ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
     }
-  ]
+  ],
+  "credentials": {
+    "jwt": {
+      "keys": [
+        {
+          "issuer": "https://es256.interop.bead.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        },
+        {
+          "issuer": "https://hs256.interop.bead.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "bead-interop",
+      "keySet": {
+        "issuer": "https://keys.interop.bead.example",
+        "keys": [
+          {
+            "algorithm": "HS256",
+            "jwk": {
+              "kty": "oct",
+              "kid": "018c0ae5-4d9b-471b-bfd6-eef314bc7037",
+              "use": "sig",
+              "alg": "HS256",
+              "k": "hJtXIZ2uSN5kbQfbtTNWbpdmhkV8FJG-Onbc6mxCcYg"
+            }
+          }
+        ],
+        "answers": "asked for its issuer, its keys; asked for any other, no key: each time once 1,000 ms passed on the server's clock since it was asked, so a conversation sees each ask by its timer"
+      }
+    },
+    "elsewhere": {
+      "reads": "what its call's transport carried beside the request, whole: over HTTP, the Authorization of its POST as it came, its auth-scheme included and its surrounding whitespace removed (spec 15.5). Its server asks it nothing for a request whose transport carried nothing, which it refuses with SESSION_REQUIRED, detail \"no credential came\"",
+      "grammar": [
+        "credential  = auth-scheme SP ( holding / failing )",
+        "auth-scheme = \"Interop\"  ; case-insensitive, as RFC 9110 §11.1 compares an auth-scheme",
+        "holding     = %s\"sub=\" sub [ %s\", after=\" after ] [ %s\", end=\" end ]",
+        "failing     = %s\"fail=true\" [ %s\", after=\" after ]",
+        "sub         = 1*32%x61-7A  ; a to z",
+        "after       = %x31-39 *9DIGIT  ; milliseconds, at most 2147483647, 2³¹ − 1 (spec 1.4)",
+        "end         = %x31-39 *15DIGIT  ; milliseconds since the epoch, at most 9007199254740991, 2⁵³ − 1 (spec 1.2)"
+      ],
+      "settles": "a value of holding with a credential's session: its id sub, its data the JSON object {\"sub\":sub}, given as each side gives a JWT's claims set (spec 13.8), and its end when the value gives one, none otherwise; a value of failing by rejecting, its error \"this verifier fails, on purpose\", which its server answers with PROCEDURE_FAILED and reports; either once after milliseconds passed, on a timer armed on the clock its server is given (decision 0011), whatever its signal, so that its settling may come once its call ended, which its server drops in silence (spec 10.2); without after, at once; any other value, an after or an end past its bound among them, with none: the credential does not hold, which its server refuses with SESSION_REQUIRED, detail \"the credential does not hold\", as it does a session whose end its wall clock has reached as the verifier settles (spec 13.10)"
+    }
+  }
 }

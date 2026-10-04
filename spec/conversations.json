@@ -3,13 +3,15 @@
   "$comment": [
     "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
     "A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client's connection.",
+    "carried, beside a send, is the credential the client's transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization's value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination's connection, what leg B's transport carried beside it. Absent, it carried none.",
     "token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.",
-    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
+    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header's, a JWT's token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
     "report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
-    "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.",
+    "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket's or a listen's batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.",
     "Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
-    "limits, where given, are the server's limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions.",
+    "limits, where given, are the server's limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server's relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireSessionOrCredential by default, or requireSession.",
+    "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set, which answers on the server's clock as its words say; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
   "specVersion": "0.1.0",
@@ -1494,6 +1496,862 @@
       ]
     },
     {
+      "name": "a request presenting a JWT that verifies runs in its credential's session, never its connection's",
+      "clauses": [
+        "9.2.5",
+        "13.1",
+        "13.5",
+        "13.8"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 03  00 01 00 0E  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "send": "A1 10 08 5D  00 00 00 05  00 01 00 0E  00 02 01 62  65 79 4A 68 62 47 63 69 4F 69 4A 46 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 56 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 5A 58 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 36 4E 71 56 32 76 31 77 79 5A 61 45 5A 73 47 53 58 55 37 69 6D 5A 6D 39 7A 55 75 35 47 73 7A 32 31 73 78 46 49 45 52 76 63 45 56 7A 56 4A 71 4B 4D 39 69 74 52 4A 63 59 35 54 67 65 53 6F 61 51 72 5A 67 6B 32 35 53 2D 38 70 69 65 39 62 78 46 63 75 64 42 38 67 00 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 0E | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 61 64 61 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a JWT holds while the server's wall clock is before its exp plus 60 s, a millisecond either side",
+      "clauses": [
+        "9.2.5",
+        "13.8.9",
+        "13.9.1"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 52  00 00 00 01  00 01 00 0E  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 55 32 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4D 6A 41 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 79 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 50 68 30 31 53 48 66 50 75 46 37 57 61 6A 39 39 61 46 70 6B 45 59 77 6D 63 66 4E 4A 75 6F 69 6B 6E 57 4A 4E 4F 6E 36 39 46 59 41 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "wall": 59999
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 03  00 01 00 0E  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 55 32 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4D 6A 41 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 79 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 50 68 30 31 53 48 66 50 75 46 37 57 61 6A 39 39 61 46 70 6B 45 59 77 6D 63 66 4E 4A 75 6F 69 6B 6E 57 4A 4E 4F 6E 36 39 46 59 41 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "wall": 1
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 05  00 01 00 01  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 55 32 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4D 6A 41 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 79 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 50 68 30 31 53 48 66 50 75 46 37 57 61 6A 39 39 61 46 70 6B 45 59 77 6D 63 66 4E 4A 75 6F 69 6B 6E 57 4A 4E 4F 6E 36 39 46 59 41 00 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a JWT for another audience is refused SESSION_REQUIRED, whatever its procedure requires",
+      "clauses": [
+        "9.2.5",
+        "13.8.11"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 51  00 00 00 01  00 01 00 01  00 02 01 34  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 39 30 61 47 56 79 49 69 77 69 5A 58 68 77 49 6A 6F 78 4E 7A 59 33 4D 6A 49 35 4D 6A 41 77 4C 43 4A 70 59 58 51 69 4F 6A 45 33 4E 6A 63 79 4D 6A 55 32 4D 44 41 73 49 6D 70 30 61 53 49 36 49 6D 46 30 4C 57 68 7A 4D 6A 55 32 4C 54 41 77 4D 44 55 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 39 43 46 36 4E 37 41 6E 56 79 49 46 63 6D 75 65 62 44 6C 6F 57 72 37 58 4F 32 53 64 4E 76 59 6A 58 79 71 33 4B 52 6C 35 65 4A 77 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 03  00 01 00 01  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "logout, in a credential's session, is refused ACCESS_DENIED, and its connection's session stays",
+      "clauses": [
+        "9.2.5",
+        "13.5"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 03  00 01 00 0D  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 33,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 0E | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 61 64 61 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sessions of one connection subscribing to one procedure each hold their own: its connection's, and each credential's",
+      "clauses": [
+        "11.3",
+        "13.9"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 18 52  00 00 00 03  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 18 5D  00 00 00 05  00 01 00 0A  00 02 01 62  65 79 4A 68 62 47 63 69 4F 69 4A 46 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 56 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 5A 58 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 36 4E 71 56 32 76 31 77 79 5A 61 45 5A 73 47 53 58 55 37 69 6D 5A 6D 39 7A 55 75 35 47 73 7A 32 31 73 78 46 49 45 52 76 63 45 56 7A 56 4A 71 4B 4D 39 69 74 52 4A 63 59 35 54 67 65 53 6F 61 51 72 5A 67 6B 32 35 53 2D 38 70 69 65 39 62 78 46 63 75 64 42 38 67 00 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 18 52  00 00 00 07  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 09  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 0B  00 01 00 0B  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 3,
+            "payload": "32"
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 11,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 08 5D  00 00 00 0D  00 01 00 0B  00 02 01 62  65 79 4A 68 62 47 63 69 4F 69 4A 46 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 56 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 5A 58 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 36 4E 71 56 32 76 31 77 79 5A 61 45 5A 73 47 53 58 55 37 69 6D 5A 6D 39 7A 55 75 35 47 73 7A 32 31 73 78 46 49 45 52 76 63 45 56 7A 56 4A 71 4B 4D 39 69 74 52 4A 63 59 35 54 67 65 53 6F 61 51 72 5A 67 6B 32 35 53 2D 38 70 69 65 39 62 78 46 63 75 64 42 38 67 00 00 | 7B 22 76 61 6C 75 65 22 3A 33 7D"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 5,
+            "payload": "33"
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 13,
+            "payload": "6E 75 6C 6C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "two issuers presenting one sub are two sessions: the second moves nothing of the first's subscription",
+      "clauses": [
+        "11.3",
+        "13.9"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 18 5D  00 00 00 01  00 01 00 0A  00 02 01 62  65 79 4A 68 62 47 63 69 4F 69 4A 46 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 56 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 5A 58 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 36 4E 71 56 32 76 31 77 79 5A 61 45 5A 73 47 53 58 55 37 69 6D 5A 6D 39 7A 55 75 35 47 73 7A 32 31 73 78 46 49 45 52 76 63 45 56 7A 56 4A 71 4B 4D 39 69 74 52 4A 63 59 35 54 67 65 53 6F 61 51 72 5A 67 6B 32 35 53 2D 38 70 69 65 39 62 78 46 63 75 64 42 38 67 00 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 03  00 01 00 0E  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 7A 49 34 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 69 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 51 69 6F 35 2D 59 49 57 64 57 73 45 52 6B 65 48 68 4A 6B 48 52 79 59 36 35 7A 2D 46 65 64 6A 4A 4E 73 78 45 67 77 5A 31 45 38 55 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 05  00 01 00 0B  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 7A 49 34 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 69 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 51 69 6F 35 2D 59 49 57 64 57 73 45 52 6B 65 48 68 4A 6B 48 52 79 59 36 35 7A 2D 46 65 64 6A 4A 4E 73 78 45 67 77 5A 31 45 38 55 00 | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 08 5D  00 00 00 07  00 01 00 0B  00 02 01 62  65 79 4A 68 62 47 63 69 4F 69 4A 46 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 56 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 5A 58 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 36 4E 71 56 32 76 31 77 79 5A 61 45 5A 73 47 53 58 55 37 69 6D 5A 6D 39 7A 55 75 35 47 73 7A 32 31 73 78 46 49 45 52 76 63 45 56 7A 56 4A 71 4B 4D 39 69 74 52 4A 63 59 35 54 67 65 53 6F 61 51 72 5A 67 6B 32 35 53 2D 38 70 69 65 39 62 78 46 63 75 64 42 38 67 00 00 | 7B 22 76 61 6C 75 65 22 3A 32 7D"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "32"
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "until": {
+            "timer": 3660000
+          }
+        },
+        {
+          "advance": 3660000
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a JWT renewed under a subscription keeps it past the first token's end, until the renewed one's",
+      "clauses": [
+        "11.3",
+        "13.6",
+        "13.9",
+        "13.9.3"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 18 52  00 00 00 01  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "until": {
+            "timer": 3660000
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 03  00 01 00 0E  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 7A 49 34 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 69 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 51 69 6F 35 2D 59 49 57 64 57 73 45 52 6B 65 48 68 4A 6B 48 52 79 59 36 35 7A 2D 46 65 64 6A 4A 4E 73 78 45 67 77 5A 31 45 38 55 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "until": {
+            "timer": 7260000
+          }
+        },
+        {
+          "advance": 3660000
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 05  00 01 00 0E  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 07  00 01 00 0B  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 7A 49 34 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 69 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 51 69 6F 35 2D 59 49 57 64 57 73 45 52 6B 65 48 68 4A 6B 48 52 79 59 36 35 7A 2D 46 65 64 6A 4A 4E 73 78 45 67 77 5A 31 45 38 55 00 | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "until": {
+            "timer": 3600000
+          }
+        },
+        {
+          "advance": 3600000
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a credential's session whose end lies past a timer's ceiling is timed in two steps, the wall clock read again at each",
+      "clauses": [
+        "13.9",
+        "13.9.3"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 18 52  00 00 00 01  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 6B 34 4D 54 63 32 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4E 43 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 49 41 5F 50 6F 46 33 77 76 4C 75 71 78 4D 33 6C 4F 4C 65 32 4F 51 75 6E 70 6A 73 32 45 37 30 44 48 67 66 6C 42 4A 46 79 4C 74 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "until": {
+            "timer": 2147483647
+          }
+        },
+        {
+          "advance": 2147483647
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 03  00 01 00 0B  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 6B 34 4D 54 63 32 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4E 43 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 49 41 5F 50 6F 46 33 77 76 4C 75 71 78 4D 33 6C 4F 4C 65 32 4F 51 75 6E 70 6A 73 32 45 37 30 44 48 67 66 6C 42 4A 46 79 4C 74 49 00 | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "until": {
+            "timer": 444576353
+          }
+        },
+        {
+          "advance": 444576353
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a wall clock set by hand takes effect at the next due: a credential's session's end is read again, never counted down",
+      "clauses": [
+        "13.9.2",
+        "13.9.3"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 18 52  00 00 00 01  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "until": {
+            "timer": 3660000
+          }
+        },
+        {
+          "wall": -1000000
+        },
+        {
+          "advance": 3660000
+        },
+        {
+          "until": {
+            "timer": 1000000
+          }
+        },
+        {
+          "advance": 1000000
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a credential's session ended by its identifier ends on every connection that keeps it, and a credential that still holds opens it anew",
+      "clauses": [
+        "13.6",
+        "13.9"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "other"
+        },
+        {
+          "open": "admin"
+        },
+        {
+          "send": "A1 10 18 52  00 00 00 01  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 18 5D  00 00 00 03  00 01 00 0A  00 02 01 62  65 79 4A 68 62 47 63 69 4F 69 4A 46 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 56 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 5A 58 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 36 4E 71 56 32 76 31 77 79 5A 61 45 5A 73 47 53 58 55 37 69 6D 5A 6D 39 7A 55 75 35 47 73 7A 32 31 73 78 46 49 45 52 76 63 45 56 7A 56 4A 71 4B 4D 39 69 74 52 4A 63 59 35 54 67 65 53 6F 61 51 72 5A 67 6B 32 35 53 2D 38 70 69 65 39 62 78 46 63 75 64 42 38 67 00 00 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 18 52  00 00 00 01  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 11 | 7B 22 69 73 73 75 65 72 22 3A 22 68 74 74 70 73 3A 2F 2F 68 73 32 35 36 2E 69 6E 74 65 72 6F 70 2E 62 65 61 64 2E 65 78 61 6D 70 6C 65 22 2C 22 73 75 62 22 3A 22 67 72 61 63 65 22 7D",
+          "on": "admin"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "admin"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 05  00 01 00 0B  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 7B 22 76 61 6C 75 65 22 3A 31 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 18 52  00 00 00 07  00 01 00 0A  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 08 52  00 00 00 09  00 01 00 0B  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 61 48 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 73 47 35 77 74 4B 45 45 4D 64 6B 79 6E 74 75 32 38 6F 66 62 2D 50 31 47 38 79 45 36 65 49 6C 32 4F 73 43 4B 76 33 56 58 4E 34 49 00 | 7B 22 76 61 6C 75 65 22 3A 32 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 7,
+            "payload": "32"
+          },
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 08 5D  00 00 00 0B  00 01 00 0B  00 02 01 62  65 79 4A 68 62 47 63 69 4F 69 4A 46 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 56 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 5A 33 4A 68 59 32 55 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 5A 58 4D 79 4E 54 59 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 36 4E 71 56 32 76 31 77 79 5A 61 45 5A 73 47 53 58 55 37 69 6D 5A 6D 39 7A 55 75 35 47 73 7A 32 31 73 78 46 49 45 52 76 63 45 56 7A 56 4A 71 4B 4D 39 69 74 52 4A 63 59 35 54 67 65 53 6F 61 51 72 5A 67 6B 32 35 53 2D 38 70 69 65 39 62 78 46 63 75 64 42 38 67 00 00 | 7B 22 76 61 6C 75 65 22 3A 33 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 3,
+            "payload": "33"
+          },
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 11,
+            "payload": "6E 75 6C 6C"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a call presenting none, sent while a JWT call resolves, is answered first",
+      "clauses": [
+        "9.2"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 60  00 00 00 01  00 01 00 0E  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 6E 75 6C 6C"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 78 22"
+          }
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a key set is asked once a minute at most for an issuer: a kid only it names is taken from its answer, then from the keys held; a kid none names is refused, and asks again past the minute",
+      "clauses": [
+        "13.8",
+        "13.8.4"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 60  00 00 00 01  00 01 00 0E  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 6E 75 6C 6C"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "send": "A1 10 08 60  00 00 00 03  00 01 00 0E  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "send": "A1 10 08 57  00 00 00 05  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 39 30 30 30 30 7D"
+        },
+        {
+          "until": {
+            "timer": 90000
+          }
+        },
+        {
+          "advance": 90000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "39 30 30 30 30"
+          }
+        },
+        {
+          "send": "A1 10 08 57  00 00 00 09  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 79 22"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 9,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 60  00 00 00 0B  00 01 00 0E  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 11,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        }
+      ]
+    },
+    {
       "name": "a request presenting its connection's OPAQUE is taken, and runs in that session",
       "clauses": [
         "9.2.5",
@@ -1809,7 +2667,7 @@
               "code": 36,
               "scope": 0,
               "relays": 0,
-              "detail": "OPAQUE"
+              "detail": "OPAQUE, JWT, ELSEWHERE"
             }
           }
         },
@@ -1824,7 +2682,7 @@
               "code": 36,
               "scope": 0,
               "relays": 0,
-              "detail": "OPAQUE"
+              "detail": "OPAQUE, JWT, ELSEWHERE"
             }
           }
         },
@@ -1845,9 +2703,10 @@
       ]
     },
     {
-      "name": "a JWT, to a server with no key, is answered CREDENTIAL_UNSUPPORTED",
+      "name": "a JWT that does not verify is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying one came and did not hold",
       "clauses": [
-        "9.2.5"
+        "9.2.5",
+        "13.8.1"
       ],
       "steps": [
         {
@@ -1858,19 +2717,20 @@
             "kind": 18,
             "callId": 1,
             "failure": {
-              "code": 36,
+              "code": 32,
               "scope": 0,
               "relays": 0,
-              "detail": "OPAQUE"
+              "detail": "the credential does not hold"
             }
           }
         }
       ]
     },
     {
-      "name": "an ELSEWHERE, to a server with no verifier, is answered CREDENTIAL_UNSUPPORTED",
+      "name": "an ELSEWHERE whose transport carried nothing is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying no credential came",
       "clauses": [
-        "9.2.5"
+        "9.2.5",
+        "15.1"
       ],
       "steps": [
         {
@@ -1881,10 +2741,412 @@
             "kind": 18,
             "callId": 1,
             "failure": {
-              "code": 36,
+              "code": 32,
               "scope": 0,
               "relays": 0,
-              "detail": "OPAQUE"
+              "detail": "no credential came"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE is resolved by the server's verifier from what its transport carried, and its call runs in that credential's session, never announced: whoami answers the sub it names",
+      "clauses": [
+        "9.2.5",
+        "13.1",
+        "13.10",
+        "15.1"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop sub=ada"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22"
+          }
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 03  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "interop sub=bob"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 62 6F 62 22"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 0E | 6E 75 6C 6C",
+          "carried": "Interop sub=ada"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE its verifier does not hold is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying the credential does not hold",
+      "clauses": [
+        "9.2.5",
+        "13.5",
+        "13.10"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 01  00 03 00 00 | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 03  00 01 00 01  00 03 00 00 | 22 79 22",
+          "carried": "Interop sub=Ada"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE whose verifier fails is answered PROCEDURE_FAILED, and reported, never SESSION_REQUIRED",
+      "clauses": [
+        "9.2.5",
+        "13.10"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop fail=true"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": "exception"
+        }
+      ]
+    },
+    {
+      "name": "a verifier that settles late, its call cancelled meanwhile: the call is answered nothing, its call id is free again at once, and the late settling is dropped in silence",
+      "clauses": [
+        "9.4",
+        "10.2",
+        "13.10"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop sub=ada, after=1000"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop sub=bob, after=2000"
+        },
+        {
+          "until": {
+            "timer": 2000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 62 6F 62 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a verifier that fails late, its call cancelled meanwhile, is dropped in silence: neither answered nor reported",
+      "clauses": [
+        "10.2"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop fail=true, after=1000"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a connection that closes while a credential resolves ends its call, and its verifier's late failure is dropped in silence",
+      "clauses": [
+        "9.10"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop fail=true, after=1000"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "close": true
+        },
+        {
+          "advance": 1000
+        }
+      ]
+    },
+    {
+      "name": "a call presenting none, sent while an ELSEWHERE call resolves, is answered first",
+      "clauses": [
+        "9.2"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop sub=ada, after=1000"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a transfer's opening presenting ELSEWHERE gets no credit until its verifier settles",
+      "clauses": [
+        "12.3",
+        "12.3.1"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 0C 06  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 64  00 03 00 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D",
+          "carried": "Interop sub=ada, after=1000"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 100
+          }
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 28 | 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69"
+        },
+        {
+          "send": "A1 14 00 04  00 00 00 01  00 00 00 00 00 00 00 58 | 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "total": 100
+          }
+        },
+        {
+          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 64"
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 28,
+            "isLast": false,
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+          }
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 76,
+            "isLast": true,
+            "payload": "78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE whose end the wall clock has reached as its verifier settles does not hold, and one a millisecond short of it holds",
+      "clauses": [
+        "13.10"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop sub=ada, after=1000, end=1767225601001"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22"
+          }
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 03  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C",
+          "carried": "Interop sub=bob, after=1000, end=1767225602000"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
             }
           }
         }
@@ -4049,6 +5311,1502 @@
         },
         {
           "report": "exception",
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a call presenting none or OPAQUE crosses a relay to leg B presenting none, over any leg B, what its transport carried staying at the relay",
+      "clauses": [
+        "14.2.1",
+        "14.3.1",
+        "14.7"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "open": "plain",
+          "carries": false,
+          "secure": false
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 33 7D",
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 33"
+          },
+          "on": "plain"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 78 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 78 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 09  00 00 00 05  00 01 00 01  00 00 00 0C  00 01 00 10  <ada> | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 4,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 04 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 0D | 22 7A 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 6,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 7A 22"
+          },
+          "on": "plain"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 06 | 22 7A 22",
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 7A 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "an OPAQUE no session holds is answered SESSION_REQUIRED at a relay's first step, before its destination is looked up",
+      "clauses": [
+        "14.3.1"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 09  00 00 00 03  00 01 00 01  00 00 00 0C  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 09  00 00 00 05  00 01 00 01  00 00 00 63  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a JWT crosses a relay, its same bytes, to a destination whose audience its aud names, read without verifying it: one expired crosses too, for its destination to verify",
+      "clauses": [
+        "14.1",
+        "14.2.2",
+        "14.3.1",
+        "14.3.5"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 78 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 49 77 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 78 4F 44 51 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 69 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 48 6E 6E 57 62 41 6B 76 32 50 78 6C 41 42 57 4A 6C 67 6B 72 61 66 79 5F 64 33 63 78 38 43 4D 78 61 63 34 5F 38 35 6D 35 68 44 51 00 | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 4,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjIwMDAsImlhdCI6MTc2NzIxODQwMCwianRpIjoiYXQtcmVsYXktMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.HnnWbAkv2PxlABWJlgkrafy_d3cx8CMxac4_85m5hDQ"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 04 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a JWT to a destination of another audience, or of none, is answered DESTINATION_UNREACHABLE: its credential may hold, and its route does not",
+      "clauses": [
+        "14.1",
+        "14.3.5"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "open": "other"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 6F 74 68 65 72 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 33 7D",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 33"
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0D  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a JWT passes the default admission of a relay that does not verify on its scheme alone: one whose aud does not read learns which destinations exist, and none takes it",
+      "clauses": [
+        "14.3.1",
+        "14.3.2",
+        "14.3.5"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 07  00 00 00 01  00 01 00 01  00 00 00 63  00 02 00 05  61 2E 62 2E 63  00 00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 16,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 07  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 00 05  61 2E 62 2E 63  00 00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE its transport carried crosses a relay to a destination registered with an audience, its credential moved to leg B's transport as it came",
+      "clauses": [
+        "14.2.3",
+        "14.3.1",
+        "14.3.5"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 01  00 01 00 01  00 00 00 0C  00 03 00 00 | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22",
+            "credential": {
+              "scheme": "ELSEWHERE"
+            }
+          },
+          "on": "device",
+          "carried": "Bearer mF_9.B5f-4.1JqM"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 78 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE over a leg B whose transport carries none, or to a destination registered with no audience, is answered DESTINATION_UNREACHABLE, where a JWT crosses in its block",
+      "clauses": [
+        "14.2.2",
+        "14.3.5"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device",
+          "carries": false
+        },
+        {
+          "open": "other"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 33 7D",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 33"
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 01  00 01 00 01  00 00 00 0C  00 03 00 00 | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 03  00 01 00 01  00 00 00 0D  00 03 00 00 | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 05  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a JWT or an ELSEWHERE to a leg B in the clear off the machine is answered DESTINATION_UNREACHABLE, nothing tried, where a call presenting none crosses",
+      "clauses": [
+        "14.2.1",
+        "14.3.5"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device",
+          "secure": false
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 05  00 01 00 01  00 00 00 0C  00 03 00 00 | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 0C | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a credential scheme to come is answered CREDENTIAL_UNSUPPORTED at a relay's first step, before its admission and its destination, its detail naming the schemes it takes",
+      "clauses": [
+        "14.3.1"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 03  00 01 00 01  00 00 00 0C  00 04 00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 36,
+              "scope": 0,
+              "relays": 0,
+              "detail": "OPAQUE, JWT, ELSEWHERE"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 06  00 00 00 05  00 01 00 01  00 00 00 63  FF FF 00 02  01 02  00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 36,
+              "scope": 0,
+              "relays": 0,
+              "detail": "OPAQUE, JWT, ELSEWHERE"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "an ELSEWHERE whose transport carried nothing is answered SESSION_REQUIRED at a relay's first step, whatever leg A's connection's session",
+      "clauses": [
+        "14.3.1"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 03  00 01 00 01  00 00 00 0C  00 03 00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no credential came"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 05  00 01 00 01  00 00 00 63  00 03 00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no credential came"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "leg B's header counts its credential, call by call, against the smaller of the two legs' limits, once its route holds",
+      "clauses": [
+        "14.3.5",
+        "14.3.6"
+      ],
+      "limits": {
+        "maximumEnvelopeBytes": 2048,
+        "chunkBytes": 1024,
+        "maximumTransfers": 0
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "open": "other"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 33 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 6F 74 68 65 72 22 7D",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 33"
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 6F 6B 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 6F 6B 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 05  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 34,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 0C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 4,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 04 | 22 6F 6B 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 6F 6B 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 09  00 01 00 01  00 00 00 0D  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 9,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relay that verifies answers a JWT that does not hold SESSION_REQUIRED at its first step, before its destination is looked up, and forwards one that holds",
+      "clauses": [
+        "14.3.1"
+      ],
+      "relay": {
+        "verifies": true
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 49 77 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 78 4F 44 51 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 69 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 48 6E 6E 57 62 41 6B 76 32 50 78 6C 41 42 57 4A 6C 67 6B 72 61 66 79 5F 64 33 63 78 38 43 4D 78 61 63 34 5F 38 35 6D 35 68 44 51 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 07  00 00 00 03  00 01 00 01  00 00 00 63  00 02 00 05  61 2E 62 2E 63  00 00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 05  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relay that verifies answers a JWT that names none of its destinations' audiences SESSION_REQUIRED, its server's own audience not among them until a destination holds it",
+      "clauses": [
+        "13.8.11",
+        "14.3.1"
+      ],
+      "relay": {
+        "verifies": true
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "open": "other"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 6F 74 68 65 72 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 33 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 33"
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0D  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
+            }
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relay that verifies holds the aud it verified to its destination's own audience: another is answered DESTINATION_UNREACHABLE",
+      "clauses": [
+        "14.3.5"
+      ],
+      "relay": {
+        "verifies": true
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "open": "other"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 33 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 6F 74 68 65 72 22 7D",
+          "on": "other"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 33"
+          },
+          "on": "other"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 01  00 01 00 01  00 00 00 0D  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 17,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relay that verifies hands its admission the credential's session: requireSession admits a JWT that holds, and refuses a call in none",
+      "clauses": [
+        "14.3.1"
+      ],
+      "relay": {
+        "verifies": true,
+        "beforeRoute": "requireSession"
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22",
+            "credential": {
+              "scheme": "JWT",
+              "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 78 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relay whose admission is requireSession refuses every credential it forwards without verifying, whatever leg A's connection's session",
+      "clauses": [
+        "13.5",
+        "14.3.1"
+      ],
+      "relay": {
+        "beforeRoute": "requireSession"
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 05  00 01 00 01  00 00 00 0C  00 03 00 00 | 22 78 22",
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 09  00 00 00 07  00 01 00 01  00 00 00 0C  00 01 00 10  <ada> | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 09  00 01 00 01  00 00 00 0C | 22 7A 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 4,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 7A 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 04 | 22 7A 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "22 7A 22"
+          },
           "on": "client"
         }
       ]

@@ -9,8 +9,10 @@ import { isSameSessionToken } from './identifiers';
 import type {
   Credential,
   ICallSession,
+  IFailure,
   IRouterFailures,
   RequestCredential,
+  SessionIdentifier,
   SessionToken,
 } from './types';
 
@@ -42,6 +44,26 @@ export const credentialSchemesDetailOf = (schemes: Iterable<number>): string => 
 };
 
 /**
+ * The key a session is held under, per connection (spec 11.3, 13.9): `''` for its connection's
+ * session, which a call presenting none runs in; for a credential's, its identifier's scheme, claim
+ * name and values, written so that two keys are one exactly when the identifiers are one, octet for
+ * octet.
+ */
+export const sessionKeyOf = (identifier: SessionIdentifier | undefined): string => {
+  if (identifier === undefined) {
+    return '';
+  }
+
+  if ('id' in identifier) {
+    return JSON.stringify([identifier.scheme, 'id', identifier.id]);
+  }
+
+  return 'sid' in identifier
+    ? JSON.stringify([identifier.scheme, 'sid', identifier.issuer, identifier.sid])
+    : JSON.stringify([identifier.scheme, 'sub', identifier.issuer, identifier.sub]);
+};
+
+/**
  * The connection's session a request presenting `credential` runs in, its token `token` (spec 13.1):
  * one presenting none runs in it whenever there is one; one presenting `OPAQUE`, when it is that
  * token, compared in constant time. `undefined` otherwise, any other scheme included. `dataOf` gives
@@ -70,31 +92,93 @@ export const connectionSessionOf = (
 };
 
 /**
- * The credential a call's header presents, as its options ask: none, unless they ask; `OPAQUE` with
- * `token`, the session its router learned. Throws a {@link FailureError} of `failures`' table,
- * `SESSION_REQUIRED`, when they ask `OPAQUE` and the router knows no session — the call fails before
- * it goes — and a {@link ProgrammerError} for any other scheme.
+ * The credential a call's header presents, and what its transport carries beside it, as its options
+ * ask: none, unless they ask one, or ask `NONE`; `OPAQUE` with `token`, the session its router
+ * learned; a `JWT`, its token; an `ELSEWHERE`, its scheme in the header, and its value beside it.
+ * Throws a {@link FailureError} of `failures`' table, `SESSION_REQUIRED`, when they ask `OPAQUE` and
+ * the router knows no session — the call fails before it goes — and a {@link ProgrammerError} for a
+ * `JWT` with no token, an `ELSEWHERE` with no value, or any other scheme.
  */
 export const presentedCredentialOf = (
   requested: RequestCredential | undefined,
   { failures, token }: { failures: IRouterFailures; token: SessionToken | undefined }
-): Credential | undefined => {
-  if (requested === undefined) {
+): { carried?: string | undefined; credential?: Credential | undefined } => {
+  const {
+    carried,
+    scheme,
+    token: presented,
+  } = (requested ?? {}) as {
+    carried?: unknown;
+    scheme?: unknown;
+    token?: unknown;
+  };
+
+  switch (scheme) {
+    case undefined:
+    case CredentialScheme.NONE:
+      return {};
+    case CredentialScheme.OPAQUE:
+      if (token === undefined) {
+        throw new FailureError({
+          ...failures.sessionRequired,
+          detail: 'the call presents OPAQUE, and this side knows no session to present',
+        });
+      }
+
+      return { credential: { scheme: CredentialScheme.OPAQUE, token } };
+    case CredentialScheme.JWT:
+      if (typeof presented !== 'string' || presented.length === 0) {
+        throw new ProgrammerError('a call that presents a JWT gives its token, a string');
+      }
+
+      return { credential: { scheme: CredentialScheme.JWT, token: presented } };
+    case CredentialScheme.ELSEWHERE:
+      if (typeof carried !== 'string') {
+        throw new ProgrammerError(
+          'a call that presents ELSEWHERE gives what its transport carries, a string'
+        );
+      }
+
+      return { carried, credential: { scheme: CredentialScheme.ELSEWHERE } };
+    default:
+      throw new ProgrammerError(
+        `a call presents NONE, OPAQUE, JWT or ELSEWHERE, not scheme ${String(scheme)}`
+      );
+  }
+};
+
+/**
+ * The failure of a call presenting `credential` that its transport cannot carry (spec 13.4):
+ * `DESTINATION_UNREACHABLE`, nothing tried, for an `ELSEWHERE` over a transport that carries no
+ * credential beside an envelope, and for a `JWT` or an `ELSEWHERE` over one that is not secure;
+ * `undefined` for a call it carries, any presenting none or `OPAQUE` among them.
+ */
+export const uncarriedOf = (
+  credential: Credential | undefined,
+  {
+    carriesCredential,
+    failures,
+    isSecure,
+  }: { carriesCredential: boolean; failures: IRouterFailures; isSecure: boolean }
+): IFailure | undefined => {
+  const scheme = credential?.scheme;
+
+  if (scheme !== CredentialScheme.JWT && scheme !== CredentialScheme.ELSEWHERE) {
     return undefined;
   }
 
-  if ((requested.scheme as number) !== CredentialScheme.OPAQUE) {
-    throw new ProgrammerError(
-      `a call presents OPAQUE, or no credential at all, not scheme ${String(requested.scheme)}`
-    );
+  if (scheme === CredentialScheme.ELSEWHERE && !carriesCredential) {
+    return {
+      ...failures.destinationUnreachable,
+      detail: 'its transport carries no credential beside an envelope, which ELSEWHERE stands for',
+    };
   }
 
-  if (token === undefined) {
-    throw new FailureError({
-      ...failures.sessionRequired,
-      detail: 'the call presents OPAQUE, and this side knows no session to present',
-    });
-  }
-
-  return { scheme: CredentialScheme.OPAQUE, token };
+  return isSecure
+    ? undefined
+    : {
+        ...failures.destinationUnreachable,
+        detail:
+          'its transport leaves the machine in the clear, which a bearer credential never crosses',
+      };
 };

@@ -186,16 +186,13 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
-    public async Task Refuses_a_JWT_or_an_ELSEWHERE_CREDENTIAL_UNSUPPORTED_before_beforeRoute_forwarding_nothing_OPAQUE_resolves_to_leg_A_s_connection_s_session_which_beforeRoute_reads()
+    public async Task Hands_beforeRoute_a_JWT_unresolved_refusing_a_scheme_to_come_CREDENTIAL_UNSUPPORTED_and_an_ELSEWHERE_that_carried_nothing_SESSION_REQUIRED_before_it_OPAQUE_resolves_to_leg_A_s_connection_s_session_which_beforeRoute_reads()
     {
         var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
         var admitted = new List<object?>();
 
         using var device = StartRelayed(new Setup
         {
-            // TODO it forwards a JWT and an ELSEWHERE once it carries credentials (decision 0010):
-            // until then it takes none of them, whatever its side takes
-            CredentialSchemes = [CredentialScheme.Jwt, CredentialScheme.Elsewhere],
             SessionOf = (request, _) =>
             {
                 return ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (token, "ada")));
@@ -211,22 +208,27 @@ public sealed partial class RouterServerTests
             },
         });
 
+        // a JWT read from its scheme alone reaches beforeRoute in no session, and its destination,
+        // registered with no audience, cannot take it; one at a time, as each settles in its turn
         Deliver(First, To(7, Presenting(RequestOf(1), Credential.Jwt("a.b.c"))));
-        Deliver(First, To(7, Presenting(RequestOf(3), Credential.Elsewhere)));
+        await Settle();
+        Deliver(First, To(7, Presenting(RequestOf(3), Credential.Elsewhere())));
+        await Settle();
         Deliver(First, To(8, Presenting(RequestOf(5), Credential.Of((CredentialScheme)7, []))));
         await Settle();
 
         Assert.Equal(
-            ["OPAQUE", "OPAQUE", "OPAQUE"],
-            _transport.Sent.Select((entry) =>
+            ["no credential came", "OPAQUE, JWT, ELSEWHERE"],
+            _transport.Sent.Skip(1).Select((entry) =>
             {
                 return entry.Envelope.Failure!.Detail;
             }));
         Assert.Equal(
-            ["first failure 1 CredentialUnsupported", "first failure 3 CredentialUnsupported", "first failure 5 CredentialUnsupported"],
+            ["first failure 1 DestinationUnreachable", "first failure 3 SessionRequired", "first failure 5 CredentialUnsupported"],
             SentSince());
-        Assert.Empty(admitted);
+        Assert.Equal([null], admitted);
         Assert.Empty(device.Pipe.ClientSent);
+        admitted.Clear();
 
         // none and its OPAQUE run in leg A's connection's session; another token does not hold.
         // One at a time: the TypeScript side answers each within its delivery, over its pipe

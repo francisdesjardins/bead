@@ -271,7 +271,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         return closeSocket(socket, 1000);
       },
 
-      // TODO a credential given here is not carried: the router fails a command that presents one
+      // a credential given here is not carried: the router fails a command that presents one
       // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
       send: ({ data }, { socket }) => {
         return createPromise((resolve) => {

@@ -124,6 +124,7 @@ export const createWorkerTransportServer = ({
     return {
       clock,
       defaults: START_DEFAULTS,
+      isSecure: true,
       type: TRANSPORT_WORKER,
 
       close: (connection) => {
@@ -132,7 +133,7 @@ export const createWorkerTransportServer = ({
 
         return Promise.resolve();
       },
-      // TODO a credential given here is not carried: the router fails a command that presents one
+      // a credential given here is not carried: the router fails a command that presents one
       // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
       send: ({ data }, { socket: port }) => {
         const bytes = transferableOf(data);

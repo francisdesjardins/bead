@@ -10,6 +10,7 @@ import type { IRouterServer, IRouterServerTransportLike } from '../router/server
 import type {
   AdmissionFailure,
   IAdmissionRequest,
+  ICredentials,
   IServiceManager,
   IServiceManagerOptions,
   RouterLimitsOptions,
@@ -65,6 +66,15 @@ export interface IServer<
     request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>
   ) => boolean) & { readonly refusal: AdmissionFailure };
   /**
+   * A relay's `beforeRoute`, its server's by default (spec 14.3, step 1): a call in leg A's
+   * connection's session, or one whose header presents a `JWT`, or an `ELSEWHERE` its transport
+   * carried, which the relay forwards for its destination to verify. It refuses with its `refusal`,
+   * SESSION_REQUIRED.
+   */
+  requireSessionOrCredential: ((
+    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'header' | 'session'>
+  ) => boolean) & { readonly refusal: AdmissionFailure };
+  /**
    * What `await using` calls: the layers come apart in the reverse of the order they were built in
    * — the router stops listening to the transport, rejecting what still waits for an answer, the
    * sessions stop their timers, then the transport stops.
@@ -109,6 +119,12 @@ export interface IServerOptions {
    */
   clock?: IClock | undefined;
   /**
+   * What its router resolves a request presenting a `JWT` or an `ELSEWHERE` with: a `JWT`'s keys,
+   * audience and key set, an `ELSEWHERE`'s verifier. A scheme it is given nothing for is refused,
+   * CREDENTIAL_UNSUPPORTED.
+   */
+  credentials?: ICredentials | undefined;
+  /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the server is a {@link ProgrammerError}.
    */
@@ -133,7 +149,8 @@ export interface IServerOptions {
   pacing?: PacingLimitsOptions | undefined;
   /**
    * How the router relays a request that names a destination registered in it. Its `beforeRoute`
-   * is `requireSession` when not given: a relay is a door to what is behind it.
+   * is `requireSessionOrCredential` when not given: a relay is a door to what is behind it, which a
+   * credential it forwards opens for its destination to verify.
    */
   relay?: IRelayOptions | undefined;
 }

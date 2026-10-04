@@ -44,6 +44,23 @@ const drop = (client: ITransportClient<object, never>): void => {
   (client as ITransportClientInternal<object, never>)[dispose]();
 };
 
+/**
+ * Whether a client carries a credential, and is secure, once a connect to `target` was tried — the
+ * judgement made from the URL it was given, its socket refused.
+ */
+const judgedOf = async (target: { host: string; secured?: boolean }) => {
+  const client = createWSTransportClient({
+    // no constructor at all: the socket it would open is refused as it is made
+    WebSocket: (() => {
+      return undefined;
+    }) as unknown as IWebSocketConstructor,
+  });
+
+  await client.connect({ ...target, port: 8_080 }).catch(() => {});
+
+  return [client.carriesCredential, client.isSecure];
+};
+
 const nextEvent = <K extends TRANSPORT_CLIENT_EVENTS>(client: WSTransportClient, event: K) => {
   return new Promise<TransportClientEventMap[K]>((resolve) => {
     client.once(event, (...params) => {
@@ -871,6 +888,29 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     await expect(connecting).rejects.toThrow('disposed while connecting');
     expect(sockets[0]?.closeCodes).toEqual([undefined]);
     expect(client.socket).toBeNull();
+  });
+});
+
+test.describe('WSTransportClient, what it carries', () => {
+  test('carries no credential beside an envelope, and is secure under wss or to a loopback host, judged by the URL it was given', async () => {
+    expect(createWSTransportClient().isSecure).toBe(false);
+    expect(
+      await Promise.all([
+        judgedOf({ host: 'bead.example', secured: true }),
+        judgedOf({ host: 'localhost' }),
+        judgedOf({ host: '127.0.0.1' }),
+        judgedOf({ host: '::1' }),
+        judgedOf({ host: 'bead.example' }),
+        judgedOf({ host: '192.0.2.1' }),
+      ])
+    ).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, false],
+      [false, false],
+    ]);
   });
 });
 

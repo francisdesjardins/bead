@@ -744,6 +744,30 @@ public sealed class HttpTransportClientTests
 
     // definition
 
+    [Theory]
+    [InlineData("http://bead.example", false)]
+    [InlineData("https://bead.example", true)]
+    [InlineData("http://localhost", true)]
+    [InlineData("http://127.0.0.1", true)]
+    [InlineData("http://[::1]", true)]
+    public async Task Carries_a_credential_beside_an_envelope_in_its_POST_s_Authorization_and_is_secure_under_https_or_to_a_loopback_host_judged_by_the_URL_it_was_given(string url, bool isSecure)
+    {
+        var target = new Uri(url);
+        var (host, isTls) = (target.Host.Trim('[', ']'), target.Scheme == "https");
+        var fetch = new Fetch();
+
+        await using var faked = new Faked(new HttpTransportClient(NotListening with { Handler = fetch }), fetch);
+
+        // judged from what it connects with, before its first connect from nothing
+        Assert.Equal((true, false), (faked.Client.CarriesCredential, faked.Client.IsSecure));
+
+        var connecting = faked.Client.Connect(new HttpConnectOptions { Host = host, Port = 8_080, Secured = isTls }, Cancelled);
+
+        (await fetch.CallOf(0)).Answer(DrawnOf(false));
+        await connecting.WaitAsync(Patience, Cancelled);
+        Assert.Equal((true, isSecure), (faked.Client.CarriesCredential, faked.Client.IsSecure));
+    }
+
     [Fact]
     public async Task Draws_its_connection_sends_an_envelope_settled_on_the_head_of_its_answer_and_hears_the_answer_as_a_message()
     {

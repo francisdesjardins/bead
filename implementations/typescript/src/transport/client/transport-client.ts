@@ -179,8 +179,14 @@ export const createTransportClient = <
       return client;
     }),
 
+    get carriesCredential() {
+      return implementation.carriesCredential === true;
+    },
     get clock() {
       return implementation.clock ?? PLATFORM_CLOCK;
+    },
+    get isSecure() {
+      return implementation.isSecure === true;
     },
 
     connect: (given) => {

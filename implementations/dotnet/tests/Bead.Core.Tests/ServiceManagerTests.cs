@@ -1218,7 +1218,7 @@ public sealed class ServiceManagerTests
         await resolver.Notify(new Text("news"), new NotifyOptions { Exclude = "b" }).WaitAsync(Patience, Cancelled);
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
-            Filter = (handle) =>
+            Filter = (handle, _) =>
             {
                 return handle != "a";
             },
@@ -1226,7 +1226,7 @@ public sealed class ServiceManagerTests
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
             Exclude = "c",
-            Filter = (handle) =>
+            Filter = (handle, _) =>
             {
                 return handle != "a";
             },
@@ -1236,7 +1236,12 @@ public sealed class ServiceManagerTests
             ["each", "a c", "b c", "b"],
             router.Notified.Select((notified) =>
             {
-                return notified.Request.Filter is { } filter ? string.Join(' ', handles.Where(filter)) : "each";
+                return notified.Request.Filter is { } filter
+                    ? string.Join(' ', handles.Where((handle) =>
+                    {
+                        return filter(handle, null);
+                    }))
+                    : "each";
             }));
     }
 
@@ -1974,9 +1979,11 @@ public sealed class ServiceManagerTests
 
         await manager.GetRequest(Echo, Asked)(new Text("a"))(new RequestOptions { Credential = Credential.Opaque() }).WaitAsync(Patience, Cancelled);
         await manager.GetRequest(Echo, Asked)(new Text("b"))().WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("c"))(new RequestOptions { Credential = Credential.Jwt("a.b.c") }).WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("d"))(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(
-            [Credential.Opaque(), null],
+            [Credential.Opaque(), null, Credential.Jwt("a.b.c"), Credential.Elsewhere("Interop sub=ada")],
             router.Requests.Select((sent) =>
             {
                 return sent.Request.Options.Credential;
@@ -1985,6 +1992,31 @@ public sealed class ServiceManagerTests
         {
             Assert.Null(told.Event.Options!.Credential);
         });
+    }
+
+    [Fact]
+    public async Task Hands_the_filter_the_identifier_of_the_session_holding_each_subscription_beside_its_connection()
+    {
+        var router = new RecordingRouter();
+        var resolver = new ServiceManager(router).GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
+        var grace = new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = "https://a.example", Sub = "grace" };
+        var heard = new List<(string ConnectionHandle, SessionIdentifier? Identifier)>();
+
+        await resolver.Notify(new Text("news"), new NotifyOptions
+        {
+            Exclude = "b",
+            Filter = (handle, identifier) =>
+            {
+                heard.Add((handle, identifier));
+
+                return identifier == grace;
+            },
+        }).WaitAsync(Patience, Cancelled);
+
+        var filter = Assert.Single(router.Notified).Request.Filter!;
+
+        Assert.Equal([true, false, false], new[] { filter("a", grace), filter("a", null), filter("b", grace) });
+        Assert.Equal([("a", (SessionIdentifier?)grace), ("a", null)], heard);
     }
 
     [Fact]

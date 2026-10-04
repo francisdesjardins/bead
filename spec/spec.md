@@ -263,10 +263,11 @@ first that applies:
       once it verifies (section 13.8); `ELSEWHERE`, to the session the receiver's verifier makes of
       what its transport carried. A credential that does not resolve, or an `ELSEWHERE` whose
       transport carried nothing, is answered with `SESSION_REQUIRED`, whatever the procedure
-      requires; its detail SHOULD say whether no credential came or one came and did not hold. A
-      verifier that fails — it throws or rejects, its key set cannot be reached — is answered with
-      `PROCEDURE_FAILED`, and reported, never with `SESSION_REQUIRED`, which would have its
-      requester withdraw a credential that holds (section 13.4);
+      requires; its detail SHOULD say whether no credential came or one came and did not hold:
+      `no credential came`, or `the credential does not hold`. A verifier that fails — it throws
+      or rejects, its key set cannot be reached — is answered with `PROCEDURE_FAILED`, and
+      reported, never with `SESSION_REQUIRED`, which would have its requester withdraw a
+      credential that holds (section 13.4);
    3. its admission, synchronous, on the call's session: answered with the admission's failure —
       `SESSION_REQUIRED`, `ACCESS_DENIED`, or another of the admission's block; `PROCEDURE_FAILED`
       when the admission itself fails.
@@ -326,8 +327,9 @@ section 1.4 allows, or without end. While a payload or its result goes as a tran
 inactivity counts instead. Past it, the call ends, and is cancelled.
 
 9.10. A connection that closes ends every call on it: each call waiting fails, and each call to
-answer is ended as cancelled — its resolver told, or its verifier while its credential resolves
-(section 9.2) — and answered by nothing.
+answer is ended as cancelled — its resolver told, or, while its credential resolves (section 9.2),
+its verifier, by the call's signal — and answered by nothing. What a verifier settles to then is
+dropped in silence (section 10.2).
 
 ## 10. Cancel and reservation
 
@@ -340,8 +342,11 @@ prefix alone, and is never answered.
 
 10.2. A side receiving a cancel on a call id of its own parity MUST report it as
 `ENVELOPE_MALFORMED`. Otherwise it forgets the call, takes away what the call subscribed, then
-tells the resolver, or the verifier while the call's credential resolves (section 9.2), so nothing
-more goes out on that call id. A cancel for no call has crossed its answer, and is dropped in
+tells the resolver, so nothing more goes out on that call id. A call whose credential still
+resolves (section 9.2) ends alike, at once: its verifier is told by the call's signal, its call id
+is free again for a request that opens a new call, and whatever its verifier settles to after — a
+session, none, or a failure of its own — is dropped in silence: it opens no session, answers
+nothing, and reports nothing. A cancel for no call has crossed its answer, and is dropped in
 silence.
 
 10.3. A requester MUST reserve a call id in three cases: when it sends a cancel on it; when the last
@@ -374,11 +379,12 @@ and takes away what the call subscribed before it.
 (section 13.1), and the first call of a session to take it keeps it: notifications travel on that
 call's id, and that session bounds it (section 13.6). A connection's session and a call presenting
 none count as one session for this, the connection's, so a connection whose calls present no
-credential holds one subscription per procedure. A later request of the same session that opens a
-subscription to the same procedure is answered, and holds nothing; one of another session takes
-one of its own. Should the later request be answered while the first call is still unanswered, it
-waits: if the first call then fails, is cancelled, or its answer does not go out, the waiting call
-holds the subscription in its place, while its connection is open.
+credential holds one subscription per procedure; calls whose credentials resolve to one identifier
+are of one credential's session, whatever token each presented (section 13.9). A later request of
+the same session that opens a subscription to the same procedure is answered, and holds nothing;
+one of another session takes one of its own. Should the later request be answered while the first
+call is still unanswered, it waits: if the first call then fails, is cancelled, or its answer does
+not go out, the waiting call holds the subscription in its place, while its connection is open.
 
 11.4. A server MAY send a notification before the answer of the call it travels on: a client binds
 its subscription to the call id as it draws it, before the request goes out.
@@ -449,7 +455,11 @@ one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a resul
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
-budget; a timeout section 1.4 allows, never without end, so a transfer's call id comes free.
+budget; a timeout section 1.4 allows, never without end, so a transfer's call id comes free. A side
+that takes or presents a `JWT` — given its keys, or one to present by default — sets `chunkBytes`
+and `maximumEnvelopeBytes` to 1,024 bytes at least besides, which a header of 1,020 bytes
+(section 4.3) and the byte of payload an opening carries (section 12.3) need: its limits hold
+together only so.
 
 12.3. The opening is the request or the result itself, with the TRANSFER block: the payload's total
 on 8 bytes, and its first bytes, one at least, as many as fill the envelope to `chunkBytes`, sent
@@ -560,12 +570,32 @@ nothing carries no `CREDENTIAL` block. An answer that did not go out announced n
 13.4. A client learns its connection's session from the answers, and presents it, `OPAQUE`, only
 on a call that asks for it, never by default: that call is bound to the session the client knows,
 so a call made in a session that ended, or that was opened anew under a new token, is refused
-rather than run in whatever session the connection holds. A credential a client presents by
-default, `JWT` or `ELSEWHERE`, is withdrawn once a call that presented it is refused
-`SESSION_REQUIRED`, and the client tells its application, so the call that renews it goes out
-without it; a call may present none, whatever the default. A client receiving a command resolves
-its credential as a server does (section 9.2, step 5), the session it learned standing for its
-connection's.
+rather than run in whatever session the connection holds. A client MAY be given a credential to
+present by default: a `JWT`, or an `ELSEWHERE` with what its transport carries beside each request
+(section 15.1). Every call presents it but one that gives its own, or none: a call may present
+none, whatever the default. A default is withdrawn once a call that presented it is refused
+`SESSION_REQUIRED`, whatever relays the refusal crossed: the client presents none by default from
+then on, and tells its application, by the credential's scheme alone, so the call that renews it
+goes out without it. A refusal withdraws only the credential its call presented, never a default
+given anew since; and a failure that ends a subscription once answered (section 13.6) withdraws
+nothing, since a session the application ended leaves a credential that may still hold. A client
+receiving a command resolves its credential as a server does (section 9.2, step 5), the session it
+learned standing for its connection's.
+
+A client fails a call before it goes, and a server a command alike, with
+`DESTINATION_UNREACHABLE`, as a relay refuses a call its leg B cannot carry (section 14.3): nothing
+was tried, and its credential stays. It does so for a call that presents `ELSEWHERE` over a
+transport that carries no credential beside an envelope — a WebSocket, a Web Worker, a server's
+over HTTP (sections 15.2, 15.9) — and for one that presents a `JWT` or an `ELSEWHERE` over a
+transport that leaves the machine in the clear, since a bearer credential crosses only TLS off the
+machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is
+judged by what it is given, never by what a name resolves to. It is secure under TLS, its scheme
+`wss` or `https`; on the loopback, its host — the one a client names in its URL, or the one a
+server listens on — `localhost` or a name that ends in `.localhost`, compared in ASCII lower case,
+an IPv4 address in 127.0.0.0/8, or `::1`, as the W3C's
+[Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
+potentially trustworthy; or when it never leaves the machine, a Web Worker or a router called in
+process. Any other leaves the machine in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 5): a call never runs outside the session it presented. A procedure
@@ -577,8 +607,9 @@ failure of section 13.6, should one go out first — announces the end.
 
 13.6. A session that ends ends the subscriptions it bounds (section 11.3): a connection's session,
 those of its connection that no credential's session bounds; a credential's session, those its
-calls hold. Each is answered with a failure on its call id, `SESSION_REQUIRED`; a call still
-unanswered is left to its own answer. The connection stays, to open another session.
+calls hold on each connection that keeps it, at its end or by its identifier (section 13.9). Each
+is answered with a failure on its call id, `SESSION_REQUIRED`; a call still unanswered is left to
+its own answer. The connection stays, to open another session.
 
 13.7. A connection's session has two inactivity timeouts: past its session timeout, the session
 ends, and the connection stays; past its connection timeout, the connection is closed, and takes its
@@ -597,8 +628,10 @@ ends at once.
 13.8. A side verifies a `JWT` one way, as an access token of RFC 9068's profile in JWS Compact
 Serialization (RFC 7515), as RFC 8725 recommends. The application gives its keys, each a JWK
 (RFC 7517) with its issuer and its one algorithm, `ES256` or `HS256` (RFC 8725 §3.1), and its
-audience; the side reads the wall clock, _W_, a whole number of milliseconds since the epoch. It
-takes these steps in this order, and the first that fails refuses the token for the reason it names:
+audience, or a set of them, as a relay that verifies holds those of its destinations
+(section 14.3); the side reads the wall clock, _W_, a whole number of milliseconds since the epoch.
+It takes these steps in this order, and the first that fails refuses the token for the reason it
+names:
 
 1. `token`: the token is three parts apart by a period, each base64url without padding (RFC 4648
    §5) whose bits past its last byte are zero, and its header and its claims set are each a JSON
@@ -623,8 +656,8 @@ takes these steps in this order, and the first that fails refuses the token for 
    −(2⁵³ − 1) to 2⁵³ − 1 (section 1.2), and _W_ < _X_ + 60,000 (RFC 7519 §4.1.4);
 10. `nbf`: its `nbf`, when present, is a JSON number, _N_ = ⌈`nbf` × 1000⌉ is from −(2⁵³ − 1) to
     2⁵³ − 1, and _W_ ≥ _N_ − 60,000 (RFC 7519 §4.1.5);
-11. `aud`: its `aud` is a string, or an array of strings, that names the audience (RFC 7519
-    §4.1.3);
+11. `aud`: its `aud` is a string, or an array of strings, that names the audience, or one of the
+    set (RFC 7519 §4.1.3);
 12. `sid`: its `sid`, when present, is a string;
 13. `sub`: without a `sid`, its `sub` is a string.
 
@@ -637,38 +670,145 @@ A key not shaped for its algorithm — an `ES256` one that is not `EC` on `P-256
 bytes each, an `HS256` one that is not `oct`, its `k` 32 bytes at least (RFC 7518 §3.2) — is the
 application's fault, never the token's: the verifier fails, and refuses nothing.
 
+A side may be given a key set besides its keys: asked for an issuer, it answers that issuer's keys
+(RFC 7517 §5), each a JWK with its one algorithm, and may wait. The keys it answered are held for
+that issuer beside the application's, until its next answer for that issuer replaces them, and
+step 4 finds a key among both: a token without a `kid` finds one only when its issuer has one key,
+the held ones counted. The side asks it for a token's `iss` when the token's `kid` names none of
+these keys, once a minute at most for that issuer: an ask sets a deadline a minute on, on its
+monotonic reading (decision 0011), before which no other goes for that issuer. A call that finds an
+ask under way waits on it, and its cancel ends its own wait, never the ask. A `kid` none names once
+the set answered, or before the deadline, is refused at step 4; while that issuer's last ask failed,
+the verifier fails instead (section 9.2, step 5), as when the set cannot be reached. The side
+fetches nothing itself: the key set is the application's to fetch.
+
 _Vectors: `jwtVerdicts`._
+
+13.9. A credential's session ends at its end, on a timer that reads the wall clock again at each
+step, on the clock its side runs on (decision 0011):
+
+1. its end, _E_, is a whole number of milliseconds since the epoch: for a `JWT`, _X_ + 60,000, _X_
+   its `exp` in milliseconds rounded up (section 13.8, RFC 7519 §4.1.4), since a skew moves an end
+   as much as a start; for an `ELSEWHERE`, the end its verifier gives, rounded up to a
+   millisecond, or none, for a session no timer ends;
+2. the wall clock's reading, _W_, is a whole number of milliseconds since the epoch, a fraction
+   dropped, so no fraction reaches a timer;
+3. as its session comes to be kept, by a reading of its own apart from the one its verdict took, as
+   a renewal moves _E_, and at its timer's due, the side reads _W_ again, never counting down, and
+   takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends then, with no timer armed; otherwise it arms a
+   timer of min(_R_, 2³¹ − 1) ms in place of the one before, so an end is never refused for its
+   distance, and a wall clock set by hand takes effect at the next due;
+4. an `ELSEWHERE` whose end _W_ has reached when its verification settles does not hold:
+   `SESSION_REQUIRED` (section 13.10).
+
+A side keeps a credential's session, per connection and identifier, only while it bounds a
+subscription (section 11.3): its end, the later of those its calls resolved to, and the
+subscriptions it bounds. Two identifiers are one when their credential scheme, their claim's name
+and their values are equal, octet for octet — a `JWT`'s `{ issuer, sid }` or `{ issuer, sub }`, an
+`ELSEWHERE`'s verifier's `id` — so one `sub` under two issuers names two sessions. A call whose
+credential resolves to the identifier of a session its connection keeps moves that end to the later
+of the two, in whatever order resolutions settle, and runs with it: a credential renewed keeps its
+subscriptions. One that resolves to a session not kept runs with its own end, and keeps it once it
+subscribes. The application ends a credential's session by its identifier, as a token's revocation
+does ([RFC 7009](https://www.rfc-editor.org/rfc/rfc7009)), on every connection that keeps it; a
+credential that still holds opens it anew. A session that ends — at its end, by its identifier, or
+with its connection — ends the subscriptions it bounds (section 13.6). A token under a subscription,
+its `exp` an hour past the reading that times its session, arms 3,660,000 ms; one 30 days past,
+2,147,483,647 ms, then 444,576,353.
+
+13.10. A side resolves an `ELSEWHERE` by its verifier, the application's: a side given none takes
+no `ELSEWHERE` (section 9.2, step 5). It asks the verifier once per request that presents one and
+whose transport carried a credential, in a later turn, with what that transport carried, whole
+(section 15.1), and the call's signal, aborted once the call ends while it resolves (sections 9.10,
+10.2). The verifier makes of the credential what the application trusts — a session service asked
+whether a token holds, a broker's word for the client it authenticated — and settles with a
+credential's session, or with none when the credential does not hold. The session gives its `id`,
+a string, its identifier being the record of `ELSEWHERE` and that `id`, two of which are one when
+their `id`s are equal, octet for octet; its data, which the call carries; and its end, in
+milliseconds since the epoch, or none for a session without one. The side holds that end rounded up
+to a whole millisecond, _E_, and reads the wall clock, _W_, as the verifier settles: a session whose
+end _W_ has reached, _W_ ≥ _E_, does not hold, `SESSION_REQUIRED`. A verifier that throws or
+rejects fails, `PROCEDURE_FAILED`, reported, as does one that settles with a session whose `id` is
+no string, or whose end is not a number from −(2⁵³ − 1) to 2⁵³ − 1 (section 1.2): the application's
+fault, never the credential's.
 
 ## 14. Relays
 
 _Conversations: `spec/conversations.json`._
 
+_Transports: `spec/transports.json`._
+
 14.1. A server MAY relay. It registers destinations — each from 1 to 2³² − 1, given or drawn, never
-0 — and a request whose `DESTINATION` names one goes on to what stands behind it: a router it calls
-through, or a connection of its own, asked by a request of the server's. Each destination answers
-the same procedures; the requester picks one by its destination. A side with no destination
-registered relays nothing: it answers a request that names any with `DESTINATION_UNKNOWN` (section
-9.2).
+0 — each with the audience it verifies, as a resource is named for a token
+([RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)), or with none, and a request whose
+`DESTINATION` names one goes on to what stands behind it: a router it calls through, or a connection
+of its own, asked by a request of the server's. Each destination answers the same procedures; the
+requester picks one by its destination. A side with no destination registered relays nothing: it
+answers a request that names any with `DESTINATION_UNKNOWN` (section 9.2).
 
 14.2. The relay terminates each leg: leg A, from the requester, and leg B, to the destination, each
 with its own call ids, limits and session. What crosses is the payload's bytes, undecoded, and the
 answer; a payload that came as a transfer is whole at the relay before leg B's request goes, as a
-transfer of its own when it needs one. Leg B's request names no destination and presents no
-session: a relay forms no chain, so no loop can form.
+transfer of its own when it needs one. Leg B's request names no destination, so a relay forms no
+chain, and no loop can form. A relay forwards a bearer credential, and its destination verifies it:
+leg B's request presents what leg A's does, by its credential scheme, as section 14.3 lets it.
+
+| Leg A presents | The relay                                                                                                 | Leg B presents                                                         |
+| -------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| none, `OPAQUE` | resolves it to leg A's connection's session, which its admission checks                                   | none: it runs in leg B's session at the destination (section 14.7)     |
+| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it verifies | the same bytes                                                         |
+| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries one        | `ELSEWHERE`, leg A's credential moved to leg B's transport, as it came |
+
+A call that presents a credential never runs in leg B's session in place of its own. What leg A's
+transport carried beside a call that presents anything but `ELSEWHERE` stays at the relay.
 
 14.3. A relay takes these steps on a request that names a destination, in this order, on its
-opening, before any of its payload crosses — as section 9.2's admission and limit:
+opening, before any of its payload crosses — as section 9.2's credential, admission and limit:
 
-1. its admission, `beforeRoute`, asked on its header, its destination included, before the
-   destination is looked up: a requester not admitted learns only whether the relay has any
-   destination. A relay with no `beforeRoute` admits nobody: `ACCESS_DENIED`. A server's relay asks
-   for a session by default (section 13.5);
+1. its credential, then its admission, `beforeRoute`, asked on its header, its destination
+   included, before the destination is looked up, in this order:
+   1. a credential scheme the relay neither resolves nor forwards — one to come, or, when it
+      verifies, one its side has no verifier for: `CREDENTIAL_UNSUPPORTED`, whose detail names the
+      schemes it takes as section 9.2's does — `OPAQUE, JWT, ELSEWHERE` from a relay that takes
+      them all;
+   2. its credential: none and `OPAQUE` resolve to leg A's connection's session as section 9.2
+      resolves them. An `OPAQUE` that does not hold, and an `ELSEWHERE` whose transport carried
+      nothing, are answered with `SESSION_REQUIRED`, with the detail section 9.2 gives each. A
+      `JWT`, and an `ELSEWHERE` its transport carried, the relay forwards, read from the header's
+      credential scheme alone: they resolve to no session at the relay. With `verifies`, it verifies them besides, with its side's
+      credentials, as section 9.2 does: a `JWT` as section 13.8 does, against the set of audiences
+      its destinations were registered with. One that does not hold — a `JWT` that names none of
+      those audiences, say — is answered with `SESSION_REQUIRED`, with the detail section 9.2 gives
+      it; a verifier that fails, with `PROCEDURE_FAILED`, and reported; one that holds resolves to
+      its credential's session;
+   3. `beforeRoute`, synchronous, on the call's session. A relay with no `beforeRoute` admits
+      nobody: `ACCESS_DENIED`. A server's relay admits by default with `requireSessionOrCredential`:
+      a call in leg A's connection's session, or one whose header presents a `JWT`, or an
+      `ELSEWHERE` its transport carried, read from its credential scheme alone; any other, with
+      `SESSION_REQUIRED`. `requireSession` in its place tests the call's session (section 13.5), so
+      it refuses every credential the relay forwards without verifying.
+
+   A requester not admitted learns only whether the relay has any destination, when it presents
+   none or `OPAQUE`, or presents anything to a relay that verifies: a `JWT` passes the default
+   admission of a relay that does not verify on its scheme alone, whatever its bytes;
+
 2. a destination not registered: `DESTINATION_UNKNOWN`;
 3. a request that opens a subscription: `SUBSCRIPTION_UNSUPPORTED`, since a relay carries none;
 4. a destination whose connection closed, or whose connection carries no request of the relay's:
    `DESTINATION_UNREACHABLE`;
-5. a payload, or a transfer's total, past the smaller of the two legs' limits — a destination that
-   takes no transfer takes what one of its envelopes holds: `PAYLOAD_TOO_LARGE`.
+5. a call its leg B cannot carry, its credential holding or not: a `JWT` to a destination whose
+   audience its `aud` does not name — read as section 13.8's step 11 reads it, without verifying
+   the token; with `verifies`, the `aud` verified at step 1 — or to a destination registered with
+   none; an `ELSEWHERE` to a destination registered with no audience, or over a leg B whose
+   transport carries no credential beside an envelope (section 15.1); a `JWT` or an `ELSEWHERE`
+   over a leg B that reaches off the machine in the clear, neither over TLS — `wss`, `https` — nor
+   within the machine — the loopback, a Web Worker, a router called in process — since a bearer
+   credential crosses only TLS off the machine
+   ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender holds:
+   `DESTINATION_UNREACHABLE`, since nothing was tried;
+6. a payload, or a transfer's total, past the smaller of the two legs' limits, leg B's header
+   counted with its credential, call by call — a destination that takes no transfer takes what one
+   of its envelopes holds behind that header: `PAYLOAD_TOO_LARGE`.
 
 14.4. A destination on a connection of the relay's own dies with that connection: once it closed,
 the destination is unreachable, whoever connects under the same handle next, until it is registered
@@ -694,9 +834,12 @@ it, or `PROCEDURE_FAILED`.
 (section 7.5); its side is not known. The relay's own failures cross no relay, and name no address
 behind it: why leg B failed is the relay's to report, with leg A's connection.
 
-14.7. Every requester behind a relay shares its leg B: one session at the destination, one space of
-call ids, its transfers' capacity. `beforeRoute`, which sees the procedure and the destination, is
-where each requester's rights are checked.
+14.7. Every requester behind a relay that presents none or `OPAQUE` shares its leg B: one session
+at the destination, one space of call ids, its transfers' capacity. `beforeRoute`, which sees the
+procedure and the destination, is where each such requester's rights are checked. A requester that
+presents a `JWT` or an `ELSEWHERE` shares leg B's call ids and its transfers' capacity alike, and
+runs at the destination in the session its own credential resolves to there, which the destination
+verifies.
 
 ## 15. Transports
 
@@ -709,8 +852,13 @@ its own is no envelope, and the router never sees it. A connection that closes e
 way on it (sections 9.4, 12.10, 13.7). A transport may carry a credential beside an envelope, both
 ways: it hands the router what it carried with an envelope it took, and carries what the router
 gives it with one it sends. That credential is what a request presenting `ELSEWHERE` stands for
-(section 9.2, step 5): over HTTP, the `Authorization` field of a request's `POST` (section 15.5);
-over a WebSocket, none (section 15.2).
+(section 9.2, step 5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves
+as its header says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a
+request's `POST` (section 15.5); over a WebSocket, none (section 15.2). A transport says whether it
+carries a credential beside an envelope it sends, and whether it is secure — under TLS, on the
+loopback, or never leaving the machine — so that a side fails before it goes a call whose
+credential it cannot carry (section 13.4). No failure's detail, event, trace or log carries that
+credential, nor a header's: only its credential scheme.
 
 ### WebSocket
 
@@ -719,7 +867,9 @@ each binary message one envelope. A text message is no envelope: the receiver re
 `ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket carries no
 credential beside an envelope, either way: a request that presents `ELSEWHERE` on one is refused
 `SESSION_REQUIRED` (section 9.2, step 5), and a side fails a call that would present it over one
-before it goes, `DESTINATION_UNREACHABLE`.
+before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake
+carried, its `Authorization` among it, is no credential beside an envelope, and never stands for
+`ELSEWHERE`.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
@@ -734,8 +884,10 @@ of type `application/prs.bead` as every `POST /bead` is, and no token, connects:
 bytes from a cryptographic source and answers 201, the token in
 `bead-connection-token`, in base64url without padding. Each exchange after presents that token in
 the same header, and a `DELETE /bead` ends the connection. The router, the sessions and the relays
-see a connection, as over a socket: a client never presents its session, only its connection's
-token, which names it nowhere else — no handle, no event, no report.
+see a connection, as over a socket. The connection's token names the connection and nothing else —
+no session, no credential, which a call presents in its own header or its `POST`'s
+`Authorization` (section 15.5) — and is written nowhere but in its header: no handle, no event, no
+report carries it.
 
 15.5. Each `POST /bead` carries one envelope, of type `application/prs.bead`. The transport reads its
 layout, kind and call id, in the prefix every layout keeps (section 2), and nothing else:

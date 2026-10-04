@@ -550,7 +550,40 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Relays_as_its_options_say_its_own_admission_and_timeout_kept_require_session_where_it_gives_none()
+    public void Admits_a_call_with_a_session_its_call_s_whatever_its_header_presents_and_refuses_one_in_none_SESSION_REQUIRED()
+    {
+        Start(new ServerOptions());
+
+        var requireSession = Server.RequireSession;
+        var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
+        var inSession = new AdmissionRequest(Handle, header) { Session = new CallSession() };
+
+        Assert.True(requireSession.Admits(inSession));
+        Assert.True(requireSession.Admits(inSession with { Header = header with { Credential = Credential.Jwt("a.b.c") } }));
+        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header)));
+        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header with { Credential = Credential.Jwt("a.b.c") })));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSession.Refusal!.Code);
+    }
+
+    [Fact]
+    public void Admits_a_call_in_a_session_or_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_any_other_in_none_SESSION_REQUIRED()
+    {
+        Start(new ServerOptions());
+
+        var requireSessionOrCredential = Server.RequireSessionOrCredential;
+        var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
+        var inNone = new AdmissionRequest(Handle, header);
+
+        Assert.True(requireSessionOrCredential.Admits(inNone with { Session = new CallSession() }));
+        Assert.True(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Jwt("not even a token") } }));
+        Assert.True(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Elsewhere() } }));
+        Assert.False(requireSessionOrCredential.Admits(inNone));
+        Assert.False(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })) } }));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSessionOrCredential.Refusal!.Code);
+    }
+
+    [Fact]
+    public async Task Relays_as_its_options_say_its_own_admission_and_timeout_kept_requireSessionOrCredential_where_it_gives_none()
     {
         const string device = "type=WS;ip=127.0.0.1;port=50002";
         var admitting = new BeforeRequest((_) =>
@@ -573,7 +606,8 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(new FailureHeader { CallId = 1 }, lost.Header);
         Assert.Equal((ushort)ProtocolCode.DestinationLost, lost.Failure!.Code);
 
-        // none of its own: the server's RequireSession
+        // none of its own: the server's RequireSessionOrCredential, which refuses a call in none, and
+        // lets a JWT by on its scheme alone, for its destination to verify — one of no audience here
         await DisposeServer();
         _transport.Sent.Clear();
         Start(new ServerOptions { Relay = new RelayOptions { Timeout = TimeSpan.FromMilliseconds(250) } });
@@ -581,10 +615,16 @@ public sealed class ServerTests : IAsyncLifetime
         _transport.Open(device);
         Server.Router.RegisterDestination(new ConnectionTarget(device), new DestinationOptions { DestinationId = 7 });
         await Deliver(RelayedOf(1));
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, Assert.Single(_transport.Sent.Select((_, index) =>
-        {
-            return _transport.Read(index).Failure!.Code;
-        })));
+
+        var jwt = RelayedOf(3);
+
+        await Deliver(new Envelope { Header = (RequestHeader)jwt.Header with { Credential = Credential.Jwt("a.b.c") }, Payload = jwt.Payload });
+        Assert.Equal(
+            [(ushort)ProtocolCode.SessionRequired, (ushort)ProtocolCode.DestinationUnreachable],
+            _transport.Sent.Select((_, index) =>
+            {
+                return _transport.Read(index).Failure!.Code;
+            }));
     }
 
     [Fact]

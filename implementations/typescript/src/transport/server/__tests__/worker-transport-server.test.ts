@@ -211,6 +211,14 @@ test.describe('createWorkerTransportServer', () => {
       .toEqual([WORKER_MESSAGES.OPEN, [2]]);
   });
 
+  test('says it carries no credential toward a connection, and is secure, never leaving the machine', async () => {
+    await using started = await startWorker();
+    const { server } = started;
+    const handle = 'type=WORKER;ip=local;ordinal=1' as const;
+
+    expect([server.carriesCredential(handle), server.isSecure(handle)]).toEqual([false, true]);
+  });
+
   test('ends a connection its page closes, once, and one it closes itself, telling the page', async () => {
     await using started = await startWorker();
     const { connect, events, server } = started;

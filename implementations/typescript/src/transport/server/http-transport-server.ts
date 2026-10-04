@@ -1138,6 +1138,12 @@ export const createHTTPTransportServer = (
       return {
         clock,
         defaults: START_DEFAULTS,
+        // a server under TLS has its contexts, as Node's https and its HTTP/2 secure server do
+        get isSecure() {
+          return (
+            typeof (httpServer as { addContext?: unknown } | undefined)?.addContext === 'function'
+          );
+        },
         type: TRANSPORT_HTTP,
 
         start: async ({ address, findOpenPort, port, signal }) => {
@@ -1260,7 +1266,7 @@ export const createHTTPTransportServer = (
 
         // an answer ends the exchange of its request; anything else — a late answer too — waits for
         // a listen, when its client listens
-        // TODO neither carries a credential: the router fails a command that presents one before it
+        // neither carries a credential: the router fails a command that presents one before it
         // goes, DESTINATION_UNREACHABLE (decision 0010)
         send: ({ data }, { socket }) => {
           const bytes = bytesOf(data);

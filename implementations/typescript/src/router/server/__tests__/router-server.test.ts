@@ -14,6 +14,8 @@ import { createServiceManager } from '../../shared/service-manager';
 import type {
   Credential,
   Envelope,
+  ICredentials,
+  IElsewhereSession,
   IProcedure,
   OutgoingEnvelope,
   RouterLimitsOptions,
@@ -22,6 +24,7 @@ import type {
 import type { IRelayOptions, RelayTarget } from '../types';
 import {
   createTestClock,
+  delaysOn,
   type TestClock,
   timersUntil,
 } from '../../../transport/shared/__tests__/fixtures';
@@ -176,14 +179,22 @@ const resultOf = (callId: number, payload = new Uint8Array(0)): OutgoingEnvelope
   return { header: { callId, kind: EnvelopeKind.RESULT }, kind: EnvelopeKind.RESULT, payload };
 };
 
-/** A transport server that records what it sends, read as a client reads it, and delivers what a test gives. */
-const createScriptedTransport = () => {
+/**
+ * A transport server that records what it sends, read as a client reads it, and the credential it
+ * is given beside it, delivers what a test gives, with what its transport carried, and carries a
+ * credential, securely, unless told otherwise.
+ */
+const createScriptedTransport = ({
+  carriesCredential = true,
+  isSecure = true,
+}: { carriesCredential?: boolean; isSecure?: boolean } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [socket: unknown, request: unknown, connectionHandle: Handle];
     message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
   const sent: ISentEnvelope[] = [];
+  const carried: (string | undefined)[] = [];
   const control = {
     /** Called with each envelope as it is handed over, before the send settles. */
     onSend: undefined as ((sentEnvelope: ISentEnvelope) => void) | undefined,
@@ -192,9 +203,17 @@ const createScriptedTransport = () => {
   };
 
   const transport: IRouterServerTransportLike = {
+    carriesCredential: () => {
+      return carriesCredential;
+    },
+    isSecure: () => {
+      return isSecure;
+    },
     off: emitter.off,
     on: emitter.on,
-    send: ({ data }, connectionHandle) => {
+    send: ({ credential, data }, connectionHandle) => {
+      carried.push(credential);
+
       const sentEnvelope = {
         connectionHandle,
         envelope: readEnvelope(bytesOf(data), {
@@ -227,7 +246,15 @@ const createScriptedTransport = () => {
     );
   };
 
-  return { close, control, deliver, emitter, open, sent, transport };
+  // as `deliver`, with what its transport carried beside it
+  const carry = (
+    connectionHandle: Handle,
+    { credential, envelope }: { credential: string; envelope: OutgoingEnvelope }
+  ) => {
+    emitter.emit('message', { credential, data: envelopeOf(envelope) }, connectionHandle);
+  };
+
+  return { carried, carry, close, control, deliver, emitter, open, sent, transport };
 };
 
 const recordErrors = (router: ReturnType<typeof createRouterServer>) => {
@@ -398,7 +425,7 @@ test.describe('createRouterServer', () => {
       const { deliver, sent, transport } = createScriptedTransport();
       const order: unknown[] = [];
       using router = createRouterServer(transport, {
-        sessionOf: ({ connectionHandle, header, signal }) => {
+        sessionOf: ({ connectionHandle, header }, signal) => {
           order.push(['session', connectionHandle, header.callId, signal.aborted]);
 
           return header.credential === undefined ? undefined : Object.freeze({ data: 'ada' });
@@ -864,8 +891,8 @@ test.describe('createRouterServer', () => {
 
       control.onSend = ({ connectionHandle }) => {
         subscribedWhenSent.push(
-          [...router.notifications.candidates(news).keys()].map((subscriber) => {
-            return subscriber === connectionHandle ? 'itself' : 'another';
+          router.notifications.candidates(news).map((subscriber) => {
+            return subscriber.connectionHandle === connectionHandle ? 'itself' : 'another';
           })
         );
       };
@@ -2175,6 +2202,424 @@ test('a server’s failures are its own, whatever table a client uses', () => {
   expect(FailureScope.PROTOCOL).toBe(0);
 });
 
+test.describe('createRouterServer, credentials', () => {
+  const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
+  const CARRIED = 'Interop sub=ada';
+
+  /** Each failure sent: its call id, its code, its detail. */
+  const failuresOf = (sent: ISentEnvelope[]) => {
+    return sent.flatMap(({ envelope }) => {
+      return envelope?.kind === EnvelopeKind.FAILURE
+        ? [[envelope.header.callId, envelope.failure.code, envelope.failure.detail]]
+        : [];
+    });
+  };
+
+  /** A router whose ELSEWHERE verifier is `verify`, `echo` answering the name of its call's session. */
+  const createVerifying = (
+    verify: NonNullable<ICredentials['verify']>,
+    { clock }: { clock?: TestClock } = {}
+  ) => {
+    const scripted = createScriptedTransport();
+    const router = createRouterServer(scripted.transport, {
+      clock,
+      credentials: { verify },
+    });
+    const services = createServiceManager(router);
+
+    services.getRequestResolver(echo, { serializer: answering })((request, response) => {
+      const { session } = request;
+
+      return response(session === undefined ? 'none' : JSON.stringify(session.data));
+    });
+
+    return { ...scripted, errors: recordErrors(router), router };
+  };
+
+  test('moves the end of a session kept by a call whose credential renews it, and by none that settles once its call ended', async () => {
+    const clock = createTestClock(1_767_225_600_000);
+    const now = clock.Date.now();
+    const settling = new Map<string, PromiseWithResolvers<IElsewhereSession | undefined>>();
+    const { carry, deliver, router } = createVerifying(
+      (carried) => {
+        const resolution = Promise.withResolvers<IElsewhereSession | undefined>();
+
+        settling.set(carried, resolution);
+
+        return resolution.promise;
+      },
+      { clock }
+    );
+    const subscribing = subscribingOf(1);
+
+    using _router = router;
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('subscribed');
+      }
+    );
+    carry(first, {
+      credential: 'kept',
+      envelope: {
+        ...subscribing,
+        header: { ...subscribing.header, credential: ELSEWHERE },
+      } as OutgoingEnvelope,
+    });
+    carry(first, { credential: 'late', envelope: requestOf(3, { credential: ELSEWHERE }) });
+    carry(first, { credential: 'renewed', envelope: requestOf(5, { credential: ELSEWHERE }) });
+    await sleep(0);
+    settling.get('kept')?.resolve({ data: 'ada', end: now + 60_000, id: 'ada' });
+    await sleep(0);
+
+    expect(delaysOn(clock)).toEqual([60_000]);
+
+    // cancelled as it resolves, its later end moves nothing
+    deliver(first, cancelOf(3));
+    settling.get('late')?.resolve({ data: 'ada', end: now + 120_000, id: 'ada' });
+    await sleep(0);
+
+    expect(delaysOn(clock)).toEqual([60_000]);
+
+    settling.get('renewed')?.resolve({ data: 'ada', end: now + 90_000, id: 'ada' });
+    await sleep(0);
+
+    expect(delaysOn(clock)).toEqual([90_000]);
+  });
+
+  test('requests run in none without a sessionOf, and one presenting a credential is refused SESSION_REQUIRED or CREDENTIAL_UNSUPPORTED', async () => {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      sessionTokenOf: () => {
+        return TOKEN;
+      },
+    });
+
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.session === undefined ? 'none' : 'a session');
+      }
+    );
+    deliver(first, requestOf(1));
+    await sleep(0);
+    deliver(first, requestOf(3, { credential: OPAQUE }));
+    deliver(first, requestOf(5, { credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } }));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 1, 'none'],
+      [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 5, ProtocolCode.CREDENTIAL_UNSUPPORTED],
+    ]);
+  });
+
+  test('asks verify once per request with exactly what its transport carried and a live signal, never for none, OPAQUE or an ELSEWHERE that carried nothing', async () => {
+    const asked: unknown[] = [];
+    const { carry, deliver, router, sent } = createVerifying((carried, signal) => {
+      asked.push([carried, signal.aborted]);
+
+      return Promise.resolve({ data: carried, id: carried });
+    });
+
+    using _router = router;
+
+    carry(first, {
+      credential: ` \t${CARRIED}`,
+      envelope: requestOf(1, { credential: ELSEWHERE }),
+    });
+    carry(first, { credential: CARRIED, envelope: requestOf(3) });
+    carry(first, { credential: CARRIED, envelope: requestOf(5, { credential: OPAQUE }) });
+    deliver(first, requestOf(7, { credential: ELSEWHERE }));
+    await sleep(0);
+
+    expect(asked).toEqual([[` \t${CARRIED}`, false]]);
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 3, 'none'],
+      [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 7, ProtocolCode.SESSION_REQUIRED],
+      [first, 'result', 1, JSON.stringify(` \t${CARRIED}`)],
+    ]);
+    expect(failuresOf(sent)).toEqual([
+      [5, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      [7, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+    ]);
+  });
+
+  test('resolves an ELSEWHERE whose verifier settles at once in a later turn, answering a request presenting none delivered behind it first', async () => {
+    const { carry, deliver, router, sent } = createVerifying((carried) => {
+      return { data: carried, id: carried };
+    });
+
+    using _router = router;
+
+    carry(first, { credential: CARRIED, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    deliver(first, requestOf(3));
+    await sleep(0);
+
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.header.callId;
+      })
+    ).toEqual([3, 1]);
+  });
+
+  test('a cancel and a close during resolution abort the signal, and what the verifier settles to after is dropped in silence', async () => {
+    const pending: {
+      resolution: PromiseWithResolvers<IElsewhereSession | undefined>;
+      signal: AbortSignal;
+    }[] = [];
+    const { carry, close, deliver, errors, router, sent } = createVerifying((_carried, signal) => {
+      const resolution = Promise.withResolvers<IElsewhereSession | undefined>();
+
+      pending.push({ resolution, signal });
+
+      return resolution.promise;
+    });
+
+    using _router = router;
+
+    carry(first, { credential: CARRIED, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    carry(first, { credential: CARRIED, envelope: requestOf(3, { credential: ELSEWHERE }) });
+    carry(second, { credential: CARRIED, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    await sleep(0);
+    deliver(first, cancelOf(1));
+    // its call id is free again at once
+    deliver(first, requestOf(1));
+    close(second);
+
+    expect(
+      pending.map(({ signal }) => {
+        return signal.aborted;
+      })
+    ).toEqual([true, false, true]);
+
+    pending[0]?.resolution.resolve({ data: 'ada', id: 'ada' });
+    pending[2]?.resolution.reject(new Error('a verifier that fails late'));
+    pending[1]?.resolution.resolve(undefined);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 1, 'none'],
+      [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers a verifier that throws at once PROCEDURE_FAILED, and reports it as one that rejects, never SESSION_REQUIRED', async () => {
+    const { carry, errors, router, sent } = createVerifying((carried) => {
+      if (carried === 'throws') {
+        throw new Error('this verifier throws');
+      }
+
+      return Promise.reject(new Error('this verifier rejects'));
+    });
+
+    using _router = router;
+
+    carry(first, { credential: 'throws', envelope: requestOf(1, { credential: ELSEWHERE }) });
+    carry(first, { credential: 'rejects', envelope: requestOf(3, { credential: ELSEWHERE }) });
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+      [first, 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
+    ]);
+    expect(reportedOf(errors)).toEqual([
+      ['this verifier throws', first],
+      ['this verifier rejects', first],
+    ]);
+  });
+
+  test('reports and traces no carried value of an ELSEWHERE, only its scheme', async () => {
+    const secret = 'Interop sub=secret';
+    const { carry, router, sent } = createVerifying(() => {
+      return Promise.reject(new Error('this verifier fails, on purpose'));
+    });
+    const told: unknown[] = [];
+
+    using _router = router;
+
+    router.on('error', (error) => {
+      told.push(error.message, error.cause, (error as { header?: unknown }).header);
+    });
+    router.on('debug', (info) => {
+      told.push(info);
+    });
+    carry(first, { credential: secret, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    carry(first, {
+      credential: secret,
+      envelope: requestOf(3, { credential: { bytes: new Uint8Array(), scheme: 9 } }),
+    });
+    await sleep(0);
+
+    expect(failuresOf(sent)).toHaveLength(2);
+    expect(JSON.stringify(told)).not.toContain('secret');
+    expect(
+      told.flatMap((info) => {
+        return typeof info === 'object' && info !== null && 'direction' in info
+          ? [(info as unknown as { header: { credentialScheme?: number } }).header.credentialScheme]
+          : [];
+      })
+    ).toEqual([CredentialScheme.ELSEWHERE, 9, undefined, undefined]);
+  });
+
+  test('fails a command presenting ELSEWHERE over a transport that carries none, and a JWT command over one not secure, before they go, DESTINATION_UNREACHABLE', async () => {
+    const elsewhere = { carried: CARRIED, scheme: CredentialScheme.ELSEWHERE } as const;
+    const jwt = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+    const command = async (
+      router: ReturnType<typeof createRouterServer>,
+      credential: typeof elsewhere | typeof jwt
+    ) => {
+      return router
+        .request(new Uint8Array(0), {
+          options: { ...options, connectionHandle: first, credential },
+          procedure: echo,
+        })
+        .then(
+          () => {
+            return 'answered';
+          },
+          (reason: unknown) => {
+            return reason instanceof FailureError ? [reason.code, reason.origin] : reason;
+          }
+        );
+    };
+
+    for (const [carriesCredential, isSecure] of [
+      [false, true],
+      [true, false],
+    ] as const) {
+      const { open, sent, transport } = createScriptedTransport({ carriesCredential, isSecure });
+
+      using router = createRouterServer(transport);
+
+      open(first);
+
+      const unreachable = [ProtocolCode.DESTINATION_UNREACHABLE, 'local'];
+
+      expect([await command(router, elsewhere)]).toEqual([unreachable]);
+
+      if (isSecure) {
+        const going = command(router, jwt);
+
+        await sleep(0);
+
+        expect(sent[0]?.envelope?.header).toMatchObject({ callId: 2, credential: jwt });
+        router[Symbol.dispose]();
+        await going;
+      } else {
+        expect([await command(router, jwt)]).toEqual([unreachable]);
+        expect(sent).toEqual([]);
+      }
+    }
+  });
+
+  test('refuses as it is built limits that hold no header of 1020 bytes once it takes a JWT', () => {
+    const { transport } = createScriptedTransport();
+    const limits = { chunkBytes: 1_000, maximumEnvelopeBytes: 1_000, windowBytes: 2_000 };
+    const key = {
+      algorithm: 'HS256',
+      issuer: 'https://issuer.example',
+      jwk: { k: 'A'.repeat(43), kty: 'oct' },
+    } as const;
+
+    const keySet = () => {
+      return Promise.resolve([]);
+    };
+
+    for (const credentials of [{ keys: [key] }, { keySet }]) {
+      expect(() => {
+        return createRouterServer(transport, { credentials, limits });
+      }).toThrow(/limits do not hold together/);
+    }
+
+    expect(() => {
+      return createRouterServer(transport, {
+        credentials: { keys: [{ ...key, jwk: { k: 'A'.repeat(42), kty: 'oct' } }] },
+      });
+    }).toThrow(ProgrammerError);
+
+    // an ELSEWHERE's verifier holds whatever the limits
+    using router = createRouterServer(transport, {
+      credentials: {
+        verify: () => {
+          return Promise.resolve(undefined);
+        },
+      },
+      limits,
+    });
+
+    expect(router.limits.chunkBytes).toBe(1_000);
+  });
+
+  test('holds one subscription a procedure per session of a connection, its connection’s and each credential’s, each notified alone, and ends a credential’s by its identifier', async () => {
+    const { carry, deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      credentials: {
+        verify: (carried) => {
+          return Promise.resolve({ data: carried, id: carried });
+        },
+      },
+    });
+    const notification = createServiceManager(router).getNotificationResolver(news, {
+      serializer: answering,
+    })((_request, response) => {
+      return response('subscribed');
+    });
+    const subscribe = (callId: number, carried?: string) => {
+      const envelope = subscribingOf(callId);
+
+      if (carried === undefined) {
+        return (deliver(first, envelope), undefined);
+      }
+
+      return (
+        carry(first, {
+          credential: carried,
+          envelope: {
+            ...envelope,
+            header: { ...envelope.header, credential: ELSEWHERE },
+          } as OutgoingEnvelope,
+        }),
+        undefined
+      );
+    };
+
+    subscribe(1);
+    subscribe(3, 'ada');
+    subscribe(5, 'bob');
+    subscribe(7, 'ada');
+    await sleep(0);
+    sent.length = 0;
+
+    await notification.notify('to ada', {
+      filter: (_connectionHandle, identifier) => {
+        return identifier !== undefined && 'id' in identifier && identifier.id === 'ada';
+      },
+    });
+    await notification.notify('to all');
+    await router.endSession({ id: 'bob', scheme: CredentialScheme.ELSEWHERE });
+    // none keeps it now: it ends nothing
+    await router.endSession({ id: 'bob', scheme: CredentialScheme.ELSEWHERE });
+
+    expect(answersOf(sent)).toEqual([
+      [first, EnvelopeKind.NOTIFICATION, 3, 'to ada'],
+      [first, EnvelopeKind.NOTIFICATION, 1, 'to all'],
+      [first, EnvelopeKind.NOTIFICATION, 3, 'to all'],
+      [first, EnvelopeKind.NOTIFICATION, 5, 'to all'],
+      [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(
+      router.notifications.subscriptions().map(({ callId, identifier }) => {
+        return [callId, identifier];
+      })
+    ).toEqual([
+      [1, undefined],
+      [3, { id: 'ada', scheme: CredentialScheme.ELSEWHERE }],
+    ]);
+  });
+});
+
 test.describe('createRouterServer, relaying', () => {
   const device: Handle = 'type=WS;ip=127.0.0.1;port=50100';
   const failing: IProcedure = { ...echo, procedureId: 2, procedureName: 'failing' };
@@ -2321,7 +2766,7 @@ test.describe('createRouterServer, relaying', () => {
     expect(router.destinations()).toEqual([{ destinationId: 7, label: 'the device' }]);
   });
 
-  test('refuses a JWT or an ELSEWHERE, CREDENTIAL_UNSUPPORTED, before beforeRoute, forwarding nothing; OPAQUE resolves to leg A’s connection’s session, which beforeRoute reads', async () => {
+  test('hands beforeRoute a JWT unresolved, refusing a scheme to come CREDENTIAL_UNSUPPORTED and an ELSEWHERE that carried nothing SESSION_REQUIRED before it; OPAQUE resolves to leg A’s connection’s session, which beforeRoute reads', async () => {
     const routed: unknown[] = [];
     using relayed = createRelayed({
       relay: {
@@ -2364,8 +2809,13 @@ test.describe('createRouterServer, relaying', () => {
         destinationId: 7,
       })
     );
+    deliver(
+      first,
+      requestOf(11, { credential: { bytes: new Uint8Array(), scheme: 4 }, destinationId: 7 })
+    );
     await sleep(0);
 
+    // none and OPAQUE in the turn they came; a JWT and an ELSEWHERE in a later one
     expect(
       sent.map(({ envelope }) => {
         return envelope?.kind === EnvelopeKind.FAILURE
@@ -2373,15 +2823,17 @@ test.describe('createRouterServer, relaying', () => {
           : [envelope?.header.callId, envelope?.kind];
       })
     ).toEqual([
-      [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
-      [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
       [5, ProtocolCode.ACCESS_DENIED, ''],
       [9, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+      [1, ProtocolCode.ACCESS_DENIED, ''],
+      [3, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
       [7, EnvelopeKind.RESULT],
     ]);
     expect(routed).toEqual([
       [5, undefined],
       [7, { data: 'leg A' }],
+      [1, undefined],
     ]);
     // leg B carried the one admitted alone, and no credential
     expect(

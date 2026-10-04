@@ -64,7 +64,7 @@ public sealed partial class RouterCoreTests
         var resolver = server.Resolve();
 
         await server.Deliver(PresentingOf(1, Credential.Jwt("a.b.c")));
-        await server.Deliver(PresentingOf(3, Credential.Elsewhere));
+        await server.Deliver(PresentingOf(3, Credential.Elsewhere()));
         await server.Deliver(PresentingOf(5, Credential.Of((CredentialScheme)7, [1, 2])));
 
         // one that takes them all names them, in the order of their numbers
@@ -137,22 +137,25 @@ public sealed partial class RouterCoreTests
         var server = new Peer(RouterSide.Server) { Session = token, Schemes = [CredentialScheme.Opaque, CredentialScheme.Elsewhere] };
         var resolver = server.Resolve();
 
-        // another's token, an ELSEWHERE that carried nothing — asked nothing — and the token of a
-        // session ended
+        // another's token, an ELSEWHERE that carried nothing — asked nothing — the token of a
+        // session ended, and an ELSEWHERE that carried a value resolving to none
         await server.Deliver(PresentingOf(1, SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw")));
-        await server.Deliver(PresentingOf(3, Credential.Elsewhere));
+        await server.Deliver(PresentingOf(3, Credential.Elsewhere()));
         server.Session = null;
         await server.Deliver(PresentingOf(5, token));
+        server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(13, Credential.Elsewhere())), false) { Credential = "Interop sub=ada" }, Handle);
+        await server.Settle();
 
         Assert.Equal(
             [
                 (1u, ProtocolCode.SessionRequired, "the credential does not hold"),
                 (3u, ProtocolCode.SessionRequired, "no credential came"),
                 (5u, ProtocolCode.SessionRequired, "the credential does not hold"),
+                (13u, ProtocolCode.SessionRequired, "the credential does not hold"),
             ],
             RefusalsOf(server.Sent));
         Assert.Equal(
-            [1u, 5u],
+            [1u, 5u, 13u],
             server.Resolved.Select((resolved) =>
             {
                 return resolved.Request.Header.CallId;
@@ -200,9 +203,14 @@ public sealed partial class RouterCoreTests
         };
 
         // a JWT's in a later turn, even one that throws at once: what came after it is answered first
-        server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, Credential.Jwt("a.b.c"))), Handle);
-        server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(3, Credential.Jwt("a.b.c"))), Handle);
-        server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Opaque(SessionToken.FromBytes(PatternOf(16))))), Handle);
+        // ! in one turn of the router's scheduler, as one read brings them: posted one by one, a later
+        // turn could fall between two of them
+        server.Loop.Post(() =>
+        {
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, Credential.Jwt("a.b.c"))), Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(3, Credential.Jwt("a.b.c"))), Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Opaque(SessionToken.FromBytes(PatternOf(16))))), Handle);
+        });
         await server.Settle();
 
         Assert.Equal(
@@ -238,10 +246,14 @@ public sealed partial class RouterCoreTests
         };
 
         // each settles at once, and what came after a JWT or an ELSEWHERE is taken first
-        server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, Credential.Jwt("a.b.c"))), Handle);
-        server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(3, null)), Handle);
-        server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Elsewhere)), false) { Credential = "Bearer a.b.c" }, Handle);
-        server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(7, Credential.Opaque(SessionToken.FromBytes(PatternOf(16))))), Handle);
+        // ! in one turn of the router's scheduler, as one read brings them
+        server.Loop.Post(() =>
+        {
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, Credential.Jwt("a.b.c"))), Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(3, null)), Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Elsewhere())), false) { Credential = "Bearer a.b.c" }, Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(7, Credential.Opaque(SessionToken.FromBytes(PatternOf(16))))), Handle);
+        });
         await server.Settle();
 
         Assert.Equal([3u, 7u, 1u, 5u], admitted);

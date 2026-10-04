@@ -9,12 +9,15 @@ import {
   SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
   UPDATED_EVENT,
 } from '../router/server/constants';
-import { createRouterServer, SERVER_FAILURES } from '../router/server/router-server';
+import {
+  createRouterServer,
+  requireSession,
+  requireSessionOrCredential,
+} from '../router/server/router-server';
 import { createSessionManager } from '../router/server/session-manager';
 import type { ISession } from '../router/server/types';
 import { connectionSessionOf } from '../router/shared/call-session';
 import { createServiceManager } from '../router/shared/service-manager';
-import type { IAdmissionRequest } from '../router/shared/types';
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import { assertHeld, clockOf, type TimeoutId } from '../transport/shared/clock';
 import {
@@ -38,6 +41,8 @@ export {
   LIMIT_DEFAULTS,
   PACING_DEFAULTS,
   ProtocolCode,
+  requireSession,
+  requireSessionOrCredential,
   SERVER_FAILURES,
 } from '../router/server/router-server';
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../transport/shared/clock';
@@ -54,6 +59,7 @@ export type {
   IBeforeRequest,
   ICallSession,
   IConnectionTarget,
+  ICredentials,
   IDestination,
   IDestinationOptions,
   IDestinationRegistration,
@@ -67,6 +73,7 @@ export type {
   RelayTarget,
   RequestCredential,
   RouterLimitsOptions,
+  SessionIdentifier,
   SessionOf,
   TransportServerConnectionHandle,
 } from '../router/server/router-server';
@@ -88,7 +95,9 @@ export type { HealthStatus, IHealth, IHealthCheck, ILayerGauges, ServerGauges } 
  * `beforeRequest`, which refuses a call in none with SESSION_REQUIRED. A request runs in its
  * connection's session, its data the call's, when it presents none, or that session's token as
  * `OPAQUE`, compared in constant time; one presenting another token is refused with
- * SESSION_REQUIRED, whatever its procedure requires (spec 13.5). A procedure that closes a session calls
+ * SESSION_REQUIRED, whatever its procedure requires (spec 13.5). One presenting a `JWT` or an
+ * `ELSEWHERE` runs in the credential's session its options' `credentials` resolve it to, never its
+ * connection's. A procedure that closes a session calls
  * `sessions.delete` before it answers, so the next answer to go out announces the end: its own, or
  * the failure that ends one of the connection's subscriptions. Each message from a connection is
  * activity for it. When the connection timeout of a session passes, its connection is closed; when
@@ -299,14 +308,6 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   transport.on(LISTEN_EVENT, onListen);
   transport.on(CLOSE_EVENT, onClose);
 
-  // a refusal of its own, which a composition by `&&` loses to ACCESS_DENIED; the relay's by default
-  const requireSession = Object.assign(
-    ({ session }: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>): boolean => {
-      return session !== undefined;
-    },
-    { refusal: SERVER_FAILURES.sessionRequired }
-  );
-
   let router: ReturnType<typeof createRouter>;
 
   // limits that do not hold together refuse the router: the server lets go of its transport
@@ -315,7 +316,13 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       clock,
       limits: options?.limits,
       pacing: options?.pacing,
-      relay: { ...options?.relay, beforeRoute: options?.relay?.beforeRoute ?? requireSession },
+      credentials: options?.credentials,
+      // a server's relay admits a call in leg A's connection's session, or one presenting a
+      // credential it forwards, by default
+      relay: {
+        ...options?.relay,
+        beforeRoute: options?.relay?.beforeRoute ?? requireSessionOrCredential,
+      },
       // the connection's session, its data a copy the call keeps, whatever befalls the session
       sessionOf: ({ connectionHandle, header }) => {
         return connectionSessionOf(header.credential, {
@@ -440,6 +447,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       return healthOf(gauges());
     },
     requireSession,
+    requireSessionOrCredential,
     [Symbol.asyncDispose]: async () => {
       release();
       sessions.off(CREATED_EVENT, onSessionCreated);

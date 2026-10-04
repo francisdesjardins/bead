@@ -14,6 +14,7 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../shared/ready-state';
+import { isLoopbackHost } from '../shared/secure';
 import type {
   ITransportServer,
   ITransportServerClientHandleInfo,
@@ -173,6 +174,10 @@ export const createTransportServer = <Socket extends object, Request>(
       return implementation.type;
     },
 
+    // none carries one toward its client: an answer, a batch, a message or a worker's alike
+    carriesCredential: () => {
+      return false;
+    },
     close: async (connectionHandle) => {
       const connection = connections.get(connectionHandle);
 
@@ -193,6 +198,9 @@ export const createTransportServer = <Socket extends object, Request>(
           })
           .toArray()
       );
+    },
+    isSecure: () => {
+      return implementation.isSecure === true || isLoopbackHost(startOptions.address);
     },
     gauges: () => {
       return mergeGauges([

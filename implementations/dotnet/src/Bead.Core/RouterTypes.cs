@@ -89,6 +89,13 @@ public sealed record RequestResolverProps
     /// closed, or its router was disposed. Its answer would go nowhere.
     /// </summary>
     public required CancellationToken Signal { get; init; }
+
+    /// <summary>
+    /// What its transport carried beside it, for a request presenting
+    /// <see cref="CredentialScheme.Elsewhere"/>, which a relay moves to leg B's transport as it came;
+    /// none for any other, whose transport's credential stays where it came (spec 14.2).
+    /// </summary>
+    internal string? TransportCredential { get; init; }
 }
 
 /// <summary>
@@ -112,6 +119,21 @@ public interface IRequestHandler
     /// refuses it as failed, and is reported.
     /// </summary>
     Failure? Admit(AdmissionRequest request);
+
+    /// <summary>
+    /// Whether it forwards a credential unresolved — a relay's that does not verify (spec 14.3, step
+    /// 1): a request presenting a <see cref="CredentialScheme.Jwt"/>, or an
+    /// <see cref="CredentialScheme.Elsewhere"/> its transport carried, reaches its admission in
+    /// none, every scheme the protocol names taken, and its session is not asked; one presenting none
+    /// or <see cref="CredentialScheme.Opaque"/> resolves as any other. None does by default.
+    /// </summary>
+    bool ForwardsCredentials
+    {
+        get
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>A procedure as a resolver answers it.</summary>
@@ -332,7 +354,11 @@ public readonly record struct TracedEnvelope(
 /// <param name="Target">The request it answers.</param>
 /// <param name="IsFailure">Whether it is a failure.</param>
 /// <param name="Resolver">The handler its request was routed to, if any.</param>
-public readonly record struct AnswerInfo(AnswerTarget Target, bool IsFailure, IRequestHandler? Resolver);
+public readonly record struct AnswerInfo(AnswerTarget Target, bool IsFailure, IRequestHandler? Resolver)
+{
+    /// <summary>The session the request it answers ran in, its call's; none for a call in none.</summary>
+    public CallSession? Session { get; init; }
+}
 
 /// <summary>
 /// What sets one side of a router apart, for its core: its side, how it sends, and what it hears of
@@ -375,8 +401,11 @@ public interface IRouterCorePort
         return false;
     }
 
-    /// <summary>The handler of a request that names a destination; none refuses it.</summary>
-    IRequestHandler? HandlerOfDestination(uint destinationId)
+    /// <summary>
+    /// The handler of a request that names a destination, its header given, its destination among
+    /// it; none refuses it.
+    /// </summary>
+    IRequestHandler? HandlerOfDestination(RequestHeader header)
     {
         return null;
     }
@@ -385,6 +414,27 @@ public interface IRouterCorePort
     bool IsTwoWay(string connectionHandle)
     {
         return true;
+    }
+
+    /// <summary>
+    /// Whether a connection's transport carries a credential beside an envelope the side sends on it
+    /// (spec 15.1): a call presenting <see cref="CredentialScheme.Elsewhere"/> over one that carries
+    /// none fails before it goes. None does by default.
+    /// </summary>
+    bool CarriesCredential(string connectionHandle)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a connection's transport is secure — under TLS, on the loopback, or never leaving the
+    /// machine (spec 13.4): a call presenting <see cref="CredentialScheme.Jwt"/> or
+    /// <see cref="CredentialScheme.Elsewhere"/> over one that is not fails before it goes. None is by
+    /// default.
+    /// </summary>
+    bool IsSecure(string connectionHandle)
+    {
+        return false;
     }
 
     /// <summary>
@@ -426,10 +476,12 @@ public interface IRouterCorePort
     void Report(Exception reason, string connectionHandle);
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> over to the transport, for a connection: at once, without
-    /// blocking; the task settles once the transport sent them, or could not.
+    /// Hands <paramref name="message"/> over to the transport, for a connection — an envelope's bytes,
+    /// and the credential its transport carries beside them, a call's presenting
+    /// <see cref="CredentialScheme.Elsewhere"/>: at once, without blocking; the task settles once the
+    /// transport sent them, or could not.
     /// </summary>
-    Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle);
+    Task Send(TransportMessage message, string connectionHandle);
 
     /// <summary>The session of a connection, which its next answer announces when it changed.</summary>
     SessionToken? SessionTokenOf(string connectionHandle)
@@ -478,6 +530,16 @@ public interface IRouterCorePort
         return ValueTask.FromResult(CallSession.ConnectionSessionOf(
             request.Header.Credential,
             (KnownSessionTokenOf(request.ConnectionHandle), null)));
+    }
+
+    /// <summary>
+    /// A credential's session a request resolved to, while its call is still its own — never once
+    /// it ended: the side gives it the end it keeps for its identifier on the connection, the later
+    /// of the two, and so renews it (spec 13.9). As it came by default.
+    /// </summary>
+    CallSession OnResolved(CallSession session, string connectionHandle)
+    {
+        return session;
     }
 
     /// <summary>Each envelope, out or in, its credential left out.</summary>

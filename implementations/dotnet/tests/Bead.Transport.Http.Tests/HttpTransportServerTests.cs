@@ -1145,6 +1145,24 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Is_secure_under_TLS_whatever_it_listens_on_or_on_a_loopback_host_alone_and_carries_no_credential_toward_a_connection()
+    {
+        using var key = System.Security.Cryptography.ECDsa.Create();
+        using var certificate = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=bead.example", key, System.Security.Cryptography.HashAlgorithmName.SHA256)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        await using var unstarted = new HttpTransportServer();
+        await using var underTls = new HttpTransportServer(new HttpTransportServerOptions { Certificate = certificate });
+
+        await Start();
+
+        // bound to the loopback, it never leaves the machine; under TLS, wherever it listens;
+        // otherwise, nothing bound, nothing is
+        Assert.Equal((false, true), (_server.CarriesCredential("any"), _server.IsSecure("any")));
+        Assert.Equal((false, true), (underTls.CarriesCredential("any"), underTls.IsSecure("any")));
+        Assert.Equal((false, false), (unstarted.CarriesCredential("any"), unstarted.IsSecure("any")));
+    }
+
+    [Fact]
     public async Task Answers_each_listen_it_holds_the_marked_404_as_it_stops_however_many()
     {
         await Start();

@@ -282,6 +282,16 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Carries_no_credential_toward_a_connection_and_is_secure_on_a_loopback_host_it_listens_on_or_as_its_transport_says()
+    {
+        await using var unstarted = new WebSocketTransportServer();
+
+        // bound to the loopback, it never leaves the machine; nothing bound, nothing is
+        Assert.Equal((false, true), (_server.CarriesCredential("any"), _server.IsSecure("any")));
+        Assert.Equal((false, false), (unstarted.CarriesCredential("any"), unstarted.IsSecure("any")));
+    }
+
+    [Fact]
     public async Task Answers_a_request_that_does_not_upgrade_with_426()
     {
         // the TypeScript side's ws library answers the same to a request that asks no WebSocket

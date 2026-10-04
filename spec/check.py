@@ -74,14 +74,16 @@ TEST_KEYS = {
     "RFC 7517's A.2, a P-256 encryption key": {'kty': 'EC', 'crv': 'P-256', 'x': 'MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4',
                                                'y': '4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM',
                                                'd': '870MB6gfuTJ4HtUnUvYMyJpr5eUZNP4Bk43bVdj3eAE'},
+    "RFC 7520's 3.5, an HMAC key": {'kty': 'oct', 'k': 'hJtXIZ2uSN5kbQfbtTNWbpdmhkV8FJG-Onbc6mxCcYg'},
 }
 
 # the files that may name a test key, by their path from the root: the conformance files, each side's
 # tests, and the interop service, whose credentials hold them
 TESTS = re.compile(r'spec/|(.*/)?__tests__/|implementations/[^/]+/(tests|interop)/')
 
-# the file whose vectors use every test key listed, so that a gate that matches nothing fails
-KEYS_USED = 'spec/vectors.json'
+# the files that use every test key listed, so that a gate that matches nothing fails: the verdicts'
+# keys, and the interop service's credentials, its key set's among them
+KEYS_USED = ('spec/vectors.json', 'spec/interop-service.json')
 
 problems = []
 
@@ -374,14 +376,14 @@ for path in tracked:
             if value.encode('ascii') not in content:
                 continue
 
-            if path == KEYS_USED:
+            if path in KEYS_USED:
                 used.add(name)
             elif not TESTS.match(path):
                 problems.append(f'{path}: names {name}, a published test key, by its {member}: only spec/, the tests and the '
                                 'interop service name one')
 
 for name in sorted(set(TEST_KEYS) - used):
-    problems.append(f'{KEYS_USED} uses no {name}: the test keys\' gate would match nothing of it')
+    problems.append(f'neither {" nor ".join(KEYS_USED)} uses {name}: the test keys\' gate would match nothing of it')
 
 # ── What each implementation's tests read ───────────────────────────────────────────────────────
 

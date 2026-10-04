@@ -23,6 +23,7 @@ import {
   wrapReason,
 } from '../shared/errors';
 import { noop } from '../shared/noop';
+import { isSecureUrl } from '../shared/secure';
 import {
   getReadyState,
   ReadyState,
@@ -258,6 +259,8 @@ export const createHTTPTransportClient = (
       let drawn: IDrawn | undefined;
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
+      // whether the URL of the last connect is secure
+      let isSecure = false;
 
       // a DELETE nobody waits on, which outlives a page that is closing
       const release = ({ connectionToken, url }: IDrawn): void => {
@@ -501,7 +504,11 @@ export const createHTTPTransportClient = (
       };
 
       return {
+        carriesCredential: true,
         clock,
+        get isSecure() {
+          return isSecure;
+        },
 
         connect: async (connectOptions) => {
           const {
@@ -516,6 +523,8 @@ export const createHTTPTransportClient = (
           // an IPv6 literal is bracketed, or its colons would read as the port's
           const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
           const url = `${secured ? 'https' : 'http'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/u, '/$1')}`;
+
+          isSecure = isSecureUrl(url);
           const attempt = new AbortController();
           let connection: IDrawn | undefined;
           let opened: IDrawn;

@@ -10,11 +10,21 @@ import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT } from '../../transport/sh
 import { gaugesOf, mergeGauges } from '../../transport/shared/gauges';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import type { ITransportMessage } from '../../transport/shared/types';
-import { presentedCredentialOf } from '../shared/call-session';
-import { EnvelopeKind, SERVER_FAILURES } from '../shared/constants';
-import { DisconnectError } from '../shared/errors';
+import { presentedCredentialOf, uncarriedOf } from '../shared/call-session';
+import { CredentialScheme, EnvelopeKind, SERVER_FAILURES } from '../shared/constants';
+import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
+import { DisconnectError, FailureError } from '../shared/errors';
 import { createRouterCore } from '../shared/router-core';
-import type { Credential, ICallAddress, IFailure, IRequestHeader } from '../shared/types';
+import type {
+  ICallAddress,
+  ICallSession,
+  IFailure,
+  IRequestHeader,
+  ISessionRequest,
+  SessionIdentifier,
+  SessionOf,
+} from '../shared/types';
+import { createCredentialSessions } from './credential-sessions';
 import { createNotificationManager } from './notification-manager';
 import { createRelay } from './relay';
 import { createSubscriptionPlaces } from './subscription-places';
@@ -36,6 +46,7 @@ export {
   SERVER_FAILURES,
 } from '../shared/constants';
 export { PACING_DEFAULTS } from './notification-pacing';
+export { requireSession, requireSessionOrCredential } from './admissions';
 export { filterEnvelopeDebug, parseDebugFilter } from '../shared/debug-filter';
 export { DisconnectError, FailureError } from '../shared/errors';
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
@@ -53,6 +64,7 @@ export type {
   CallId,
   Credential,
   DebugFilterSource,
+  DefaultCredential,
   DestinationId,
   EnvelopeHeader,
   FailureOrigin,
@@ -60,6 +72,9 @@ export type {
   IBeforeRequest,
   ICallSession,
   ICancelHeader,
+  ICredentials,
+  IElsewhereSession,
+  IJwtSetKey,
   IChunkHeader,
   ICreditHeader,
   IDebugFilter,
@@ -78,9 +93,11 @@ export type {
   RequestCredential,
   RouterLimitsOptions,
   RouterSide,
+  SessionIdentifier,
   SessionOf,
   SessionToken,
 } from '../shared/types';
+export type { IJwtKey, Jwk, JwtAlgorithm } from '../shared/jwt-verifier';
 export type {
   IConnectionTarget,
   IDestination,
@@ -103,6 +120,20 @@ export type {
 
 /** A call of a connection's. */
 type ServerCall = ICallAddress<TransportServerConnectionHandle>;
+
+// helpers
+
+/**
+ * What a subscribing call holds its subscription in, beside its address: a credential's session,
+ * its identifier and its end; nothing for its connection's.
+ */
+const subscribingOf = (
+  session: ICallSession | undefined
+): { end?: number | undefined; identifier?: SessionIdentifier | undefined } => {
+  return session?.identifier === undefined
+    ? {}
+    : { end: session.end, identifier: session.identifier };
+};
 
 // definition
 
@@ -145,7 +176,17 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     { below: 'its transport', layer: "a server's router" }
   );
   const emitter = createEmitter<RouterServerEventMap>();
-  const notifications = createNotificationManager({ pacing: options?.pacing });
+  // what resolves a JWT and an ELSEWHERE, on the router's clock: a key not shaped is refused here
+  const credentials = createCredentialResolver(options?.credentials, { clock });
+  // the credentials' sessions its connections keep, each while it holds a subscription
+  const credentialSessions = createCredentialSessions({
+    clock,
+    notifications: createNotificationManager({ pacing: options?.pacing }),
+    onEnd: (subscriber) => {
+      return endSession(subscriber);
+    },
+  });
+  const { notifications } = credentialSessions;
   // the request of each paced subscription its resolver subscribed in flight, so one whose queue
   // goes past its bounds before the answer is answered with that failure; gone with the pacing
   const requests = new WeakMap<IPacing, IRequestHeader>();
@@ -163,8 +204,51 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     emitter.emit('error', error, connectionHandle);
   };
 
+  // what a connection's transport carries beside an envelope the router sends: a credential, and
+  // whether off the machine in the clear, each none when the transport does not say
+  const carriageOf = (connectionHandle: TransportServerConnectionHandle) => {
+    return {
+      carriesCredential: transport.carriesCredential?.(connectionHandle) ?? false,
+      isSecure: transport.isSecure?.(connectionHandle) ?? false,
+    };
+  };
+
+  // the call's session: none and OPAQUE as the options say; a JWT or an ELSEWHERE by the router's
+  // credentials, to a destination against its relay's audiences, a session kept taking the later end
+  const sessionOf = (
+    request: ISessionRequest<TransportServerConnectionHandle>,
+    signal: AbortSignal
+  ): ReturnType<SessionOf<TransportServerConnectionHandle>> => {
+    const { connectionHandle, header, transportCredential } = request;
+    const { credential, destinationId } = header;
+
+    if (
+      credential?.scheme !== CredentialScheme.JWT &&
+      credential?.scheme !== CredentialScheme.ELSEWHERE
+    ) {
+      return options?.sessionOf?.(request, signal);
+    }
+
+    return credentials
+      .resolve(
+        {
+          ...(destinationId === undefined ? {} : { audience: relay.audiences() }),
+          credential,
+          transportCredential,
+        },
+        signal
+      )
+      .then((session) => {
+        // ! one that settles once its call ended moves no end: it is dropped
+        return session === undefined || signal.aborted
+          ? undefined
+          : credentialSessions.resolved(session, connectionHandle);
+      });
+  };
+
   const core = createRouterCore<TransportServerConnectionHandle>(
     {
+      credentialSchemes: credentials.schemes,
       failures: SERVER_FAILURES,
 
       activity: (activity, connectionHandle) => {
@@ -181,11 +265,20 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       isTwoWay: (connectionHandle) => {
         return transport.isTwoWay?.(connectionHandle) ?? true;
       },
-      beforeAnswer: ({ connectionHandle, header, isFailure, resolver }) => {
+      beforeAnswer: ({ connectionHandle, header, isFailure, resolver, session }) => {
         const { callId, procedureId, serviceId } = header;
+        const { end, identifier } = subscribingOf(session);
+
+        // a call in flight whose credential's session ended meanwhile keeps it anew as its answer
+        // subscribes it, once that answer went: it ends behind it, its end reached
+        if (!isFailure && identifier !== undefined) {
+          queueMicrotask(() => {
+            credentialSessions.held({ callId, connectionHandle, end, identifier });
+          });
+        }
 
         return places.settle(
-          { callId, connectionHandle, paced: header.paced === true },
+          { ...subscribingOf(session), callId, connectionHandle, paced: header.paced === true },
           {
             isFailure,
             // a notification's resolver, answering a request that opens a subscription, on a
@@ -214,10 +307,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         }
       },
       report,
-      send: (bytes, connectionHandle) => {
-        return transport.send({ data: bytes }, connectionHandle);
+      send: (message, connectionHandle) => {
+        return transport.send(message, connectionHandle);
       },
-      ...(options?.sessionOf === undefined ? {} : { sessionOf: options.sessionOf }),
+      sessionOf,
       ...(options?.sessionTokenOf === undefined ? {} : { sessionTokenOf: options.sessionTokenOf }),
       trace: (direction, { connectionHandle, header }) => {
         if (emitter.listenerCount('debug') > 0) {
@@ -227,6 +320,11 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     },
     { clock, limits: options?.limits }
   );
+
+  // a router that takes a JWT holds its header: its limits hold 1,024 bytes at least
+  if (credentials.takesJwt) {
+    assertLimitsHoldJwt(core.limits);
+  }
 
   // one notification to one subscription; a connection that cannot take it keeps none of the others
   // from getting theirs
@@ -295,13 +393,35 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     }
   };
 
+  // ends what a session bounds on its connection — its connection's, or a credential's by its
+  // identifier: each established subscription, and each call waiting, with a failure on its call id;
+  // a call still in flight is left to its own answer, so no call is answered twice
+  const endSession = async (
+    {
+      connectionHandle,
+      identifier,
+    }: {
+      connectionHandle: TransportServerConnectionHandle;
+      identifier?: SessionIdentifier | undefined;
+    },
+    failure: IFailure = SERVER_FAILURES.sessionRequired
+  ): Promise<void> => {
+    const ending = places.drop({ connectionHandle, identifier }).map((callId) => {
+      return endSubscription({ callId, connectionHandle }, failure);
+    });
+
+    await Promise.all(ending);
+  };
+
+  // what a transport carried beside the envelope goes with it: a request presenting ELSEWHERE
+  // stands for it
   const onMessage = (
-    { data }: ITransportMessage,
+    message: ITransportMessage,
     connectionHandle: TransportServerConnectionHandle
   ): void => {
     // a connection that speaks is open, even one opened before the router was built
     connections.set(connectionHandle, connectionHandle);
-    core.receive(data, connectionHandle);
+    core.receive(message, connectionHandle);
   };
 
   const onConnection = (
@@ -348,13 +468,13 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       );
     }
 
-    let credential: Credential | undefined;
+    let presented: ReturnType<typeof presentedCredentialOf>;
 
-    // OPAQUE, the connection's session, as its answers announce it
+    // OPAQUE, the connection's session, as its answers announce it; a JWT, or an ELSEWHERE beside it
     try {
-      credential =
+      presented =
         requestOptions.credential === undefined
-          ? undefined
+          ? {}
           : presentedCredentialOf(requestOptions.credential, {
               failures: SERVER_FAILURES,
               token: options?.sessionTokenOf?.(connectionHandle),
@@ -363,17 +483,35 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       return Promise.reject(toError(reason));
     }
 
+    const { carried, credential } = presented;
+    // a credential its transport cannot carry fails the call before it goes: nothing was tried
+    const uncarried = uncarriedOf(credential, {
+      ...carriageOf(connectionHandle),
+      failures: SERVER_FAILURES,
+    });
+
+    if (uncarried !== undefined) {
+      const { destinationId } = requestOptions;
+      const { procedureId, serviceId } = procedure;
+
+      return Promise.reject(
+        new FailureError(uncarried, { destinationId, procedureAddress: { procedureId, serviceId } })
+      );
+    }
+
     return core.request(payload, {
       connectionHandle,
       credential,
       onSent,
       options: requestOptions,
       procedure,
+      transportCredential: carried,
     });
   };
 
   // the requests that name a destination go on through it; none does until one is registered
   const relay = createRelay({
+    carriageOf,
     failures: SERVER_FAILURES,
     isTwoWay: (connectionHandle) => {
       return transport.isTwoWay?.(connectionHandle) ?? true;
@@ -411,14 +549,11 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     destinations: () => {
       return relay.destinations();
     },
-    dropSubscriptions: async ({ connectionHandle, failure }) => {
-      // each established subscription, and each call waiting, is ended with a failure on its call
-      // id; a call still in flight is left to its own answer, so no call is answered twice
-      const ending = places.drop(connectionHandle).map((callId) => {
-        return endSubscription({ callId, connectionHandle }, failure);
-      });
-
-      await Promise.all(ending);
+    dropSubscriptions: ({ connectionHandle, failure }) => {
+      return endSession({ connectionHandle }, failure);
+    },
+    endSession: (identifier) => {
+      return credentialSessions.end(identifier);
     },
     gauges: () => {
       return mergeGauges([
@@ -429,6 +564,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         core.gauges(),
         places.gauges(),
         notifications.gauges(),
+        credentialSessions.gauges(),
         relay.gauges(),
       ]);
     },
@@ -439,13 +575,11 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       // who gets it is settled before any is sent: a filter that throws sends it to none
       const targets = notifications
         .candidates({ procedureId, serviceId })
-        .entries()
-        .filter(([connectionHandle]) => {
-          return filter === undefined || filter(connectionHandle);
-        })
-        .toArray();
+        .filter(({ connectionHandle, identifier }) => {
+          return filter === undefined || filter(connectionHandle, identifier);
+        });
       // offered in order, each before the next: a paced subscription sends it, queues it, or ends
-      const sending = targets.map(([connectionHandle, callId]) => {
+      const sending = targets.map(({ callId, connectionHandle }) => {
         const call = { callId, connectionHandle };
         const pacing = notifications.pacingOf(callId, connectionHandle);
 
@@ -480,7 +614,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     respond: (response, request) => {
       return core.respond(response, request);
     },
-    subscribe: ({ connectionHandle, header }) => {
+    subscribe: ({ connectionHandle, header, session }) => {
       const { callId, procedureId, serviceId } = header;
 
       // its requester asked for an answer alone, and would take the notifications for nothing
@@ -500,7 +634,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       }
 
       const subscribed = places.subscribe(
-        { callId, connectionHandle, paced: header.paced === true },
+        { ...subscribingOf(session), callId, connectionHandle, paced: header.paced === true },
         { procedureId, serviceId }
       );
       const pacing = notifications.pacingOf(subscribed, connectionHandle);
@@ -531,6 +665,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       // notified again
       connections.clear();
       places.clear();
+      credentialSessions[Symbol.dispose]();
       core[Symbol.dispose]();
 
       for (const connectionHandle of followed) {

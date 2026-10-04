@@ -77,6 +77,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // its ready state, and the guards around its start and its stop, as every transport server's
     private readonly TransportServerLife _life = new();
     private WebApplication? _application;
+
+    // whether its listener is secure, set as it starts: bound to the loopback, as it takes no TLS
+    private volatile bool _isSecure;
     // how many connections came, which ranks each: the dictionary keeps no order
     private long _arrivals;
 
@@ -244,6 +247,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
             bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
+            _isSecure = TransportSecurity.IsSecure((false, start.Address));
         }
         catch
         {
@@ -291,12 +295,27 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return Stop();
     }
 
+    /// <summary>
+    /// A WebSocket carries no credential beside an envelope (spec 15.2): a command presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes.
+    /// </summary>
+    public bool CarriesCredential(string connectionHandle)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a connection is secure, judged from its listener, never from what a name resolves to
+    /// (spec 13.4): bound to a loopback address, since it takes no TLS of its own.
+    /// </summary>
+    public bool IsSecure(string connectionHandle)
+    {
+        return _isSecure;
+    }
+
     /// <inheritdoc/>
     public Task Send(TransportMessage message, string connectionHandle)
     {
-        // TODO a credential given here is not carried: the router fails a command that presents one
-        // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
-
         // as the TypeScript side's: what goes to a connection not open goes nowhere, and says nothing,
         // for the router refuses what is for a connection it does not hold itself
         return _connections.TryGetValue(connectionHandle, out var held) && held.Connection.Socket.State == WebSocketState.Open

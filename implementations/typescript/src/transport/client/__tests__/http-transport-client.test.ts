@@ -94,6 +94,23 @@ const nextEvent = (client: HTTPTransportClient, event: 'close' | 'message') => {
   });
 };
 
+/**
+ * Whether a client carries a credential, and is secure, once a connect to `target` was tried — the
+ * judgement made from the URL it was given, the network down.
+ */
+const judgedOf = async (target: { host: string; secured?: boolean }) => {
+  const client = createHTTPTransportClient({
+    fetch: () => {
+      return Promise.reject(new Error('the network is down'));
+    },
+    isListening: false,
+  });
+
+  await client.connect({ ...target, port: 8_080 }).catch(() => {});
+
+  return [client.carriesCredential, client.isSecure];
+};
+
 const handleOf = (server: HTTPTransportServer) => {
   return server.clients.at(-1)?.connectionHandle as TransportServerConnectionHandle;
 };
@@ -114,6 +131,29 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 };
 
 // definition
+
+test.describe('createHTTPTransportClient, what it carries', () => {
+  test('carries a credential beside an envelope, in its POST’s Authorization, and is secure under https or to a loopback host, judged by the URL it was given', async () => {
+    expect(createHTTPTransportClient().isSecure).toBe(false);
+    expect(
+      await Promise.all([
+        judgedOf({ host: 'bead.example', secured: true }),
+        judgedOf({ host: 'localhost' }),
+        judgedOf({ host: '127.0.0.1' }),
+        judgedOf({ host: '::1' }),
+        judgedOf({ host: 'bead.example' }),
+        judgedOf({ host: '192.0.2.1' }),
+      ])
+    ).toEqual([
+      [true, true],
+      [true, true],
+      [true, true],
+      [true, true],
+      [true, false],
+      [true, false],
+    ]);
+  });
+});
 
 test.describe('createHTTPTransportClient', () => {
   test.afterAll(async () => {

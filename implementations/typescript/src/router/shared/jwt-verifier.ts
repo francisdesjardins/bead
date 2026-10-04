@@ -15,11 +15,12 @@ export interface IJwtKey {
 }
 
 /**
- * What {@link verifyJwt} holds a token to: the keys, the receiver's audience, and the wall clock's
- * reading, _W_, a whole number of milliseconds since the epoch.
+ * What {@link verifyJwt} holds a token to: the keys, the receiver's audience — or the set of them a
+ * relay that verifies holds, any of which its `aud` may name — and the wall clock's reading, _W_, a
+ * whole number of milliseconds since the epoch.
  */
 export interface IVerifyJwtProps {
-  readonly audience: string;
+  readonly audience: string | readonly string[];
   readonly keys: readonly IJwtKey[];
   readonly now: number;
 }
@@ -225,9 +226,11 @@ const freezeDeeply = (root: object): void => {
   }
 };
 
-// a key not shaped for its algorithm is the application's fault, never the token's: it throws, so
-// the call fails rather than withdraw a credential that holds
-const assertKey = ({ algorithm, issuer, jwk }: IJwtKey): void => {
+/**
+ * Throws a {@link ProgrammerError} for a key not shaped for its algorithm, the application's fault,
+ * never the token's: the call fails rather than withdraw a credential that holds.
+ */
+export const assertJwtKey = ({ algorithm, issuer, jwk }: IJwtKey): void => {
   const fault = (what: string): ProgrammerError => {
     return new ProgrammerError(`a JWT's key ${what}, for the issuer ${JSON.stringify(issuer)}`);
   };
@@ -361,24 +364,29 @@ const millisecondsOf = (value: unknown): number | undefined => {
     : undefined;
 };
 
-const namesAudience = (aud: unknown, audience: string): boolean => {
+/**
+ * The audiences a token's `aud` names (RFC 7519 §4.1.3): itself, a string; each of an array of
+ * strings; none for anything else, an array holding what is not a string among it.
+ */
+export const audiencesOf = (aud: unknown): readonly string[] => {
   if (typeof aud === 'string') {
-    return aud === audience;
+    return [aud];
   }
 
-  return (
-    Array.isArray(aud) &&
-    aud.every((name) => {
-      return typeof name === 'string';
-    }) &&
-    aud.includes(audience)
-  );
+  return Array.isArray(aud) && aud.every(isString) ? aud : [];
+};
+
+/** Whether a token's `aud` names one of `audiences`. */
+const namesAudience = (aud: unknown, audiences: readonly string[]): boolean => {
+  return audiencesOf(aud).some((name) => {
+    return audiences.includes(name);
+  });
 };
 
 /** Steps 8 to 13 of section 13.8, on a token whose signature verified under `key`. */
 const verdictOf = (
   claims: Record<string, unknown>,
-  { audience, key, now }: { audience: string; key: IJwtKey; now: number }
+  { audiences, key, now }: { audiences: readonly string[]; key: IJwtKey; now: number }
 ): JwtVerdict => {
   if (stringOf(claims, 'iss') !== key.issuer) {
     return refused(JwtRefusal.ISS);
@@ -402,7 +410,7 @@ const verdictOf = (
     }
   }
 
-  if (!namesAudience(claims['aud'], audience)) {
+  if (!namesAudience(claims['aud'], audiences)) {
     return refused(JwtRefusal.AUD);
   }
 
@@ -432,12 +440,42 @@ const verdictOf = (
 // definition
 
 /**
+ * A token's header and claims set as step 1 of section 13.8 reads them, verifying nothing: what a
+ * relay that does not verify reads its `aud` from, and a key set's ask its `kid` and its `iss`;
+ * `undefined` for a token that does not read.
+ */
+export const readJwt = (
+  token: string
+): { claims: Record<string, unknown>; header: Record<string, unknown> } | undefined => {
+  const parts = token.split('.');
+
+  if (parts.length !== 3) {
+    return undefined;
+  }
+
+  const [encodedHeader = '', encodedClaims = '', encodedSignature = ''] = parts;
+  const header = objectOf(encodedHeader);
+  const claims = objectOf(encodedClaims);
+
+  return header === undefined ||
+    claims === undefined ||
+    fromBase64url(encodedSignature) === undefined
+    ? undefined
+    : { claims, header };
+};
+
+/** A member of a token's header or claims set, when it is a string of well-formed Unicode. */
+export const jwtStringOf = (object: Record<string, unknown>, name: string): string | undefined => {
+  return stringOf(object, name);
+};
+
+/**
  * The verdict on `token`, a `JWT`: an access token of RFC 9068's profile in JWS Compact
  * Serialization (RFC 7515), verified as section 13.8 states, step by step, the first that fails
  * naming the verdict's reason. It settles in a later turn, Web Crypto's. Throws a
- * {@link ProgrammerError} for a key not shaped for its algorithm, an audience that is not
- * well-formed Unicode, or a reading that is not a whole number of milliseconds; rejects for a key
- * Web Crypto does not import, a point off its curve.
+ * {@link ProgrammerError} for a key not shaped for its algorithm, an audience — or one of a set —
+ * that is not well-formed Unicode, or a reading that is not a whole number of milliseconds; rejects
+ * for a key Web Crypto does not import, a point off its curve.
  */
 export const verifyJwt = async (
   token: string,
@@ -449,12 +487,21 @@ export const verifyJwt = async (
     );
   }
 
-  if (!isString(audience) || !audience.isWellFormed()) {
-    throw new ProgrammerError('an audience is a string of well-formed Unicode');
+  const audiences: readonly unknown[] = typeof audience === 'string' ? [audience] : audience;
+
+  if (
+    !Array.isArray(audiences) ||
+    !audiences.every((name) => {
+      return isString(name) && name.isWellFormed();
+    })
+  ) {
+    throw new ProgrammerError(
+      'an audience is a string of well-formed Unicode, and a set of them each'
+    );
   }
 
   for (const key of keys) {
-    assertKey(key);
+    assertJwtKey(key);
   }
 
   const parts = token.split('.');
@@ -499,5 +546,5 @@ export const verifyJwt = async (
     return refused(JwtRefusal.SIGNATURE);
   }
 
-  return verdictOf(claims, { audience, key, now });
+  return verdictOf(claims, { audiences: audiences as readonly string[], key, now });
 };

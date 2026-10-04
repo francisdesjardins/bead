@@ -41,7 +41,7 @@ public sealed class EnvelopeCodecHeaderTests
         ["NONE on a request"] =
             new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = Credential.None },
         ["a JWT on a result"] = new ResultHeader { CallId = 2, Credential = Credential.Jwt("a") },
-        ["ELSEWHERE on a failure"] = new FailureHeader { CallId = 2, Credential = Credential.Elsewhere },
+        ["ELSEWHERE on a failure"] = new FailureHeader { CallId = 2, Credential = Credential.Elsewhere() },
         ["a scheme to come on a result"] =
             new ResultHeader { CallId = 2, Credential = Credential.Of((CredentialScheme)4, []) },
         ["a JWT of no character"] =

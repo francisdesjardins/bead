@@ -5,8 +5,9 @@
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
-import type { CallId, ICallAddress, IProcedureAddress } from '../shared/types';
-import type { INotificationManager, ISubscribingCall } from './types';
+import { sessionKeyOf } from '../shared/call-session';
+import type { CallId, ICallAddress, IProcedureAddress, SessionIdentifier } from '../shared/types';
+import type { INotificationManager, ISubscriber, ISubscribingCall } from './types';
 
 // types
 
@@ -16,11 +17,13 @@ type ServerCall = ICallAddress<TransportServerConnectionHandle>;
 // interfaces
 
 /**
- * A call answered while another holds its place, the procedure it would take the place for, and
- * whether it asked to be paced there.
+ * A call answered while another holds its place, the procedure it would take the place for, the
+ * session it holds it in, and whether it asked to be paced there.
  */
 interface IWaiting extends IProcedureAddress {
   callId: CallId;
+  end: number | undefined;
+  identifier: SessionIdentifier | undefined;
   paced: boolean | undefined;
 }
 
@@ -34,26 +37,27 @@ export interface ISubscriptionPlaces {
   /** Forgets every call in flight and every call waiting — `connectionHandle`'s alone, when given. */
   clear(connectionHandle?: TransportServerConnectionHandle): void;
   /**
-   * The calls a session end ends on `connectionHandle`: each established subscription, and each
-   * call waiting, which no longer waits. A call in flight is left to its own answer.
+   * The calls a session's end ends on its connection — its connection's session, or a credential's,
+   * by its identifier: each established subscription it holds, and each call of it waiting, which no
+   * longer waits. A call in flight is left to its own answer.
    */
-  drop(connectionHandle: TransportServerConnectionHandle): CallId[];
+  drop(subscriber: ISubscriber): CallId[];
   /** The subscribing calls in flight and those waiting for a place, counted, and their connections. */
   gauges(): IGauges<TransportServerConnectionHandle>;
   /**
    * An answer about to go out for `call`: a failure takes away what the call subscribed, and hands
    * its place over; a success keeps it, subscribes the call — paced, when it asked — when it
-   * `notifies` and its connection holds no place for `procedure`, or has it wait on a holder still in
-   * flight. What it returns undoes the success, should the answer not go out.
+   * `notifies` and its connection holds no place for `procedure` in its session, or has it wait on
+   * a holder still in flight. What it returns undoes the success, should the answer not go out.
    */
   settle(
     call: ISubscribingCall,
     answer: { isFailure: boolean; notifies: boolean; procedure: IProcedureAddress }
   ): (() => void) | undefined;
   /**
-   * Subscribes `call` to `procedure` — paced, when it asked — in flight until its answer settles it,
-   * and gives its call id; a connection that holds the place already gives the holder's, and nothing
-   * changes.
+   * Subscribes `call` to `procedure`, in its session — paced, when it asked — in flight until its
+   * answer settles it, and gives its call id; a connection that holds the place in that session
+   * already gives the holder's, and nothing changes.
    */
   subscribe(call: ISubscribingCall, procedure: IProcedureAddress): CallId;
   /** Takes a subscription away, as its requester asks; whether the connection held it. */
@@ -64,7 +68,8 @@ export interface ISubscriptionPlaces {
 
 /**
  * The subscription places of a server's connections. A place is the one subscription a connection
- * holds to a procedure, and the first call to take it keeps it. A call in a place is:
+ * holds to a procedure in a session of its own — its connection's, or a credential's — and the first
+ * call of that session to take it keeps it. A call in a place is:
  *
  * - in flight, from `subscribe` until its answer goes out;
  * - established, once its answer went out, until it is cancelled, unsubscribed or dropped;
@@ -141,11 +146,17 @@ export const createSubscriptionPlaces = ({
     if (
       successor !== undefined &&
       isConnected(connectionHandle) &&
-      notifications.subscriptionOf(successor, connectionHandle) === undefined
+      notifications.subscriptionOf(successor, {
+        connectionHandle,
+        identifier: successor.identifier,
+      }) === undefined
     ) {
-      const { callId, paced, procedureId, serviceId } = successor;
+      const { callId, end, identifier, paced, procedureId, serviceId } = successor;
 
-      notifications.register({ procedureId, serviceId }, { callId, connectionHandle, paced });
+      notifications.register(
+        { procedureId, serviceId },
+        { callId, connectionHandle, end, identifier, paced }
+      );
     }
   };
 
@@ -165,17 +176,32 @@ export const createSubscriptionPlaces = ({
         waiting.delete(connectionHandle);
       }
     },
-    drop: (connectionHandle) => {
+    drop: ({ connectionHandle, identifier }) => {
+      const sessionKey = sessionKeyOf(identifier);
+      const isOfSession = (held: { identifier?: SessionIdentifier | undefined }): boolean => {
+        return sessionKeyOf(held.identifier) === sessionKey;
+      };
       // a call waiting on one in flight already believes it is subscribed: it ends as one that is
-      const successors = [...(waiting.get(connectionHandle)?.values() ?? [])];
+      const calls = waiting.get(connectionHandle);
+      const successors = [...(calls?.entries() ?? [])].filter(([, successor]) => {
+        return isOfSession(successor);
+      });
 
-      waiting.delete(connectionHandle);
+      for (const [holder] of successors) {
+        calls?.delete(holder);
+      }
+
+      if (calls?.size === 0) {
+        waiting.delete(connectionHandle);
+      }
 
       return [
-        ...notifications.subscriptions(connectionHandle).filter(({ callId }) => {
-          return !isInFlight({ callId, connectionHandle });
+        ...notifications.subscriptions(connectionHandle).filter((held) => {
+          return isOfSession(held) && !isInFlight({ callId: held.callId, connectionHandle });
         }),
-        ...successors,
+        ...successors.map(([, successor]) => {
+          return successor;
+        }),
       ].map(({ callId }) => {
         return callId;
       });
@@ -205,9 +231,7 @@ export const createSubscriptionPlaces = ({
         return undefined;
       }
 
-      const holder = notifies
-        ? notifications.subscriptionOf(procedure, connectionHandle)
-        : undefined;
+      const holder = notifies ? notifications.subscriptionOf(procedure, call) : undefined;
 
       // a notification's successful answer subscribes the connection under the request's call id,
       // when its resolver did not and the connection holds no place for it yet, before it goes out,
@@ -226,7 +250,13 @@ export const createSubscriptionPlaces = ({
       ) {
         const calls = waiting.get(connectionHandle) ?? new Map<CallId, IWaiting>();
 
-        calls.set(holder, { callId, paced: call.paced, ...procedure });
+        calls.set(holder, {
+          callId,
+          end: call.end,
+          identifier: call.identifier,
+          paced: call.paced,
+          ...procedure,
+        });
         waiting.set(connectionHandle, calls);
       }
 
@@ -244,7 +274,7 @@ export const createSubscriptionPlaces = ({
       };
     },
     subscribe: (call, procedure) => {
-      const holder = notifications.subscriptionOf(procedure, call.connectionHandle);
+      const holder = notifications.subscriptionOf(procedure, call);
 
       // the first subscription is kept, and nothing is in flight for this call
       if (holder !== undefined) {
