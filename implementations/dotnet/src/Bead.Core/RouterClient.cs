@@ -165,7 +165,6 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
         Transport = transport;
         _callbacks = options?.ResolverScheduler ?? new SerialScheduler();
-        _resolver = new CredentialResolver(options?.Credentials, (clock, false));
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions
@@ -175,6 +174,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 Scheduler = options?.Scheduler,
                 Clock = clock,
             });
+
+        // * what a key set's deadline does goes on the router's scheduler, as its other timers' work
+        _resolver = new CredentialResolver(options?.Credentials, (clock, _core.Post));
         CredentialResolver.AssertLimits(_core.Limits, _resolver.TakesJwt);
         Credential = options?.Credential;
         transport.Message += OnMessage;

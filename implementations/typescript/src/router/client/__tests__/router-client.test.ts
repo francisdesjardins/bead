@@ -704,8 +704,11 @@ test.describe('createRouterClient', () => {
         issuer: 'https://issuer.example',
         jwk: { k: 'A'.repeat(43), kty: 'oct' },
       } as const;
-      const keySet = () => {
-        return Promise.resolve([]);
+      const keySet = {
+        ask: () => {
+          return Promise.resolve([]);
+        },
+        issuers: ['https://keys.example'],
       };
 
       for (const credentials of [{ keys: [key] }, { keySet }]) {

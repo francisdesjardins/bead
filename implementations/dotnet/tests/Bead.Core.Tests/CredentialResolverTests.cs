@@ -17,6 +17,9 @@ public sealed class CredentialResolverTests
 
     private const string Issuer = "https://hs256.example";
 
+    // the issuer the key set names, which no key of the application's signs for
+    private const string SetIssuer = "https://keys.example";
+
     private const string Audience = "bead-interop";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
@@ -55,13 +58,13 @@ public sealed class CredentialResolverTests
         return Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
     }
 
-    // an HS256 access token of the issuer for grace, an hour from the start, under a key and its kid
-    private static string TokenOf((byte[] Secret, string? Kid) key)
+    // an HS256 access token of an issuer for grace, an hour from the start, under a key and its kid
+    private static string TokenOf((byte[] Secret, string? Kid) key, string issuer = Issuer)
     {
         var header = key.Kid is { } kid
             ? PartOf(new Dictionary<string, string> { ["alg"] = "HS256", ["kid"] = kid, ["typ"] = "at+jwt" })
             : PartOf(new Dictionary<string, string> { ["alg"] = "HS256", ["typ"] = "at+jwt" });
-        var claims = PartOf(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = 1_767_229_200, ["iss"] = Issuer, ["sub"] = "grace" });
+        var claims = PartOf(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = 1_767_229_200, ["iss"] = issuer, ["sub"] = "grace" });
         var signature = HMACSHA256.HashData(key.Secret, Encoding.ASCII.GetBytes($"{header}.{claims}"));
 
         return $"{header}.{claims}.{Base64Url.EncodeToString(signature)}";
@@ -83,12 +86,44 @@ public sealed class CredentialResolverTests
         return asked.Resolver.Resolve(RequestOf(asked.Credential), Cancelled).AsTask().WaitAsync(Patience, Cancelled);
     }
 
+    // what a deadline does, run where the clock fires it
+    private static void Inline(Action action)
+    {
+        action();
+    }
+
+    // a resolver of credentials, on a clock
+    private static CredentialResolver ResolverOf(Credentials credentials, TimeProvider clock)
+    {
+        return new CredentialResolver(credentials, (clock, Inline));
+    }
+
     // a resolver of an ELSEWHERE verifier, on a clock at the start
     private static (CredentialResolver Resolver, FakeTimeProvider Clock) ElsewhereOf(Func<string, CancellationToken, ValueTask<ElsewhereSession?>> verify)
     {
         var clock = new FakeTimeProvider(Start);
 
-        return (new CredentialResolver(new Credentials { Verify = verify }, (clock, false)), clock);
+        return (ResolverOf(new Credentials { Verify = verify }, clock), clock);
+    }
+
+    // a key set for the issuer that answers as its ask does
+    private static JwtKeySet KeySetOf(Func<string, CancellationToken, ValueTask<IReadOnlyList<JwtSetKey>>> ask)
+    {
+        return new JwtKeySet { Issuers = [Issuer], Ask = ask };
+    }
+
+    // a key set for the issuer answering keys at once
+    private static JwtKeySet AnsweringOf(params JwtSetKey[] keys)
+    {
+        return KeySetOf((_, _) =>
+        {
+            return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>(keys);
+        });
+    }
+
+    private static JwtSetKey SetKeyOf((byte[] Secret, string? Kid) key)
+    {
+        return new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf(key) };
     }
 
     // definition
@@ -97,9 +132,9 @@ public sealed class CredentialResolverTests
     public async Task Resolves_a_JWT_that_verifies_to_its_credential_s_session_its_claims_its_identifier_with_its_scheme_its_end_exp_plus_60_s_and_one_that_does_not_to_none()
     {
         var clock = new FakeTimeProvider(Start);
-        var resolver = new CredentialResolver(
+        var resolver = ResolverOf(
             new Credentials { Audience = Audience, Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) }] },
-            (clock, false));
+            clock);
         var session = await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null)))));
 
         Assert.Equal(new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = Issuer, Sub = "grace" }, session!.Identifier);
@@ -118,24 +153,21 @@ public sealed class CredentialResolverTests
         var clock = new FakeTimeProvider(Start);
         var keys = new[] { new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) } };
 
-        Assert.Equal([CredentialScheme.Opaque], new CredentialResolver(null, (clock, false)).Schemes);
-        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], new CredentialResolver(new Credentials { Audience = Audience, Keys = keys }, (clock, false)).Schemes);
+        Assert.Equal([CredentialScheme.Opaque], ResolverOf(new Credentials(), clock).Schemes);
+        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], ResolverOf(new Credentials { Audience = Audience, Keys = keys }, clock).Schemes);
         Assert.Equal(
             [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere],
-            new CredentialResolver(
+            ResolverOf(
                 new Credentials
                 {
                     Audience = Audience,
-                    KeySet = (_) =>
-                    {
-                        return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
-                    },
+                    KeySet = AnsweringOf(),
                     Verify = (_, _) =>
                     {
                         return ValueTask.FromResult<ElsewhereSession?>(null);
                     },
                 },
-                (clock, false)).Schemes);
+                clock).Schemes);
     }
 
     [Fact]
@@ -146,42 +178,50 @@ public sealed class CredentialResolverTests
 
         Assert.Throws<ArgumentException>(() =>
         {
-            return new CredentialResolver(new Credentials { Audience = Audience, Keys = [key with { Jwk = JwkOf((First[..31], null)) }] }, (clock, false));
+            return ResolverOf(new Credentials { Audience = Audience, Keys = [key with { Jwk = JwkOf((First[..31], null)) }] }, clock);
         });
         Assert.Throws<ArgumentException>(() =>
         {
-            return new CredentialResolver(new Credentials { Audience = "\ud800", Keys = [key] }, (clock, false));
+            return ResolverOf(new Credentials { Audience = "\ud800", Keys = [key] }, clock);
         });
     }
 
     [Fact]
-    public void Refuses_as_it_is_built_keys_or_a_key_set_given_without_an_audience_unless_its_side_s_relay_verifies()
+    public void Refuses_as_it_is_built_a_key_set_given_no_issuer_or_one_that_is_no_string()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = AnsweringOf();
+
+        foreach (var issuers in new IReadOnlyList<string>[] { [], [null!], [Issuer, null!], null! })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return ResolverOf(new Credentials { Audience = Audience, KeySet = keySet with { Issuers = issuers } }, clock);
+            });
+        }
+
+        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], ResolverOf(new Credentials { Audience = Audience, KeySet = keySet }, clock).Schemes);
+    }
+
+    [Fact]
+    public void Refuses_as_it_is_built_keys_or_a_key_set_given_without_an_audience()
     {
         var clock = new FakeTimeProvider(Start);
         var keys = new Credentials { Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) }] };
-        var keySet = new Credentials
+        var keySet = new Credentials { KeySet = AnsweringOf() };
+
+        foreach (var credentials in new[] { keys, keySet })
         {
-            KeySet = (_) =>
+            Assert.Throws<ArgumentException>(() =>
             {
-                return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
-            },
-        };
+                return ResolverOf(credentials, clock);
+            });
+        }
 
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new CredentialResolver(keys, (clock, false));
-        });
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new CredentialResolver(keySet, (clock, false));
-        });
-
-        // a relay that verifies holds its destinations' audiences; an ELSEWHERE's verifier needs none
-        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], new CredentialResolver(keys, (clock, true)).Schemes);
-        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], new CredentialResolver(keySet, (clock, true)).Schemes);
+        // an ELSEWHERE's verifier needs none
         Assert.Equal(
             [CredentialScheme.Opaque, CredentialScheme.Elsewhere],
-            new CredentialResolver(
+            ResolverOf(
                 new Credentials
                 {
                     Verify = (_, _) =>
@@ -189,7 +229,7 @@ public sealed class CredentialResolverTests
                         return ValueTask.FromResult<ElsewhereSession?>(null);
                     },
                 },
-                (clock, false)).Schemes);
+                clock).Schemes);
     }
 
     [Fact]
@@ -215,28 +255,9 @@ public sealed class CredentialResolverTests
     public async Task Counts_the_keys_held_toward_an_issuer_s_one_key_for_a_token_without_a_kid()
     {
         var clock = new FakeTimeProvider(Start);
-        var resolver = new CredentialResolver(
-            new Credentials
-            {
-                Audience = Audience,
-                KeySet = (_) =>
-                {
-                    return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }]);
-                },
-            },
-            (clock, false));
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = AnsweringOf(SetKeyOf((First, "first"))) }, clock);
         var key = new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((Second, "second")) };
-        var twoKeyed = new CredentialResolver(
-            new Credentials
-            {
-                Audience = Audience,
-                Keys = [key],
-                KeySet = (_) =>
-                {
-                    return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }]);
-                },
-            },
-            (clock, false));
+        var twoKeyed = ResolverOf(new Credentials { Audience = Audience, Keys = [key], KeySet = AnsweringOf(SetKeyOf((First, "first"))) }, clock);
 
         // none held yet: a kid-less token asks nothing, and finds no key
         Assert.Null(await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null))))));
@@ -251,68 +272,44 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
-    public async Task Asks_its_key_set_for_a_kid_no_key_held_names_once_a_minute_at_most_for_an_issuer_sharing_an_ask_under_way_and_holding_its_answer_until_the_next()
+    public async Task Asks_its_key_set_once_a_minute_at_most_for_an_issuer_sharing_an_ask_under_way_a_kid_none_names_within_the_minute_waits_for_the_deadline_and_the_ask_then_refused_once_its_answer_does_not_name_it()
     {
         var clock = new FakeTimeProvider(Start);
-        var asked = new List<string>();
-        var later = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
-        IReadOnlyList<JwtSetKey>[] answers =
-        [
-            [new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }],
-            [new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((Second, "second")) }],
-        ];
-        var resolver = new CredentialResolver(
-            new Credentials
-            {
-                Audience = Audience,
-                KeySet = (issuer) =>
-                {
-                    asked.Add(issuer);
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var named = Credential.Jwt(TokenOf((First, "first")));
+        var unnamed = Credential.Jwt(TokenOf((Second, "second")));
 
-                    return asked.Count == 1 ? ValueTask.FromResult(answers[0]) : new ValueTask<IReadOnlyList<JwtSetKey>>(later.Task);
-                },
-            },
-            (clock, false));
-        var first = Credential.Jwt(TokenOf((First, "first")));
-        var second = Credential.Jwt(TokenOf((Second, "second")));
+        // two calls on one ask, for the token's issuer
+        var sharing = new[] { ResolvedOf((resolver, named)), ResolvedOf((resolver, named)) };
 
-        // asked for the token's issuer, then held: no ask for the kid it named
-        Assert.NotNull(await ResolvedOf((resolver, first)));
-        Assert.NotNull(await ResolvedOf((resolver, first)));
-
-        // a kid none names, within the minute: refused, nothing asked
-        Assert.Null(await ResolvedOf((resolver, second)));
-        Assert.Equal([Issuer], asked);
-
-        // past the minute, asked again, two calls sharing the ask: its answer replaces the keys held
-        clock.Advance(TimeSpan.FromMinutes(1));
-
-        var sharing = new[] { ResolvedOf((resolver, second)), ResolvedOf((resolver, second)) };
-
-        later.SetResult(answers[1]);
+        Assert.Single(keySet.Asks);
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
         Assert.All(await Task.WhenAll(sharing), Assert.NotNull);
-        Assert.Null(await ResolvedOf((resolver, first)));
-        Assert.Equal([Issuer, Issuer], asked);
+
+        // its answer held, no ask goes; a kid none names waits for the deadline, a minute after the
+        // ask went, on the monotonic reading
+        Assert.NotNull(await ResolvedOf((resolver, named)));
+
+        var unknown = ResolvedOf((resolver, unnamed));
+
+        clock.Advance(TimeSpan.FromMilliseconds(59_999));
+        Assert.False(unknown.IsCompleted);
+        Assert.Single(keySet.Asks);
+
+        // the ask goes at the deadline, for the issuer, and its answer names no "second"
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([Issuer, Issuer], keySet.Issuers());
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Null(await unknown);
     }
 
     [Fact]
     public async Task Lets_a_call_s_cancel_end_its_own_wait_never_the_ask_the_others_wait_on()
     {
         var clock = new FakeTimeProvider(Start);
-        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
-        var asks = 0;
-        var resolver = new CredentialResolver(
-            new Credentials
-            {
-                Audience = Audience,
-                KeySet = (_) =>
-                {
-                    asks += 1;
-
-                    return new ValueTask<IReadOnlyList<JwtSetKey>>(answer.Task);
-                },
-            },
-            (clock, false));
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
         var token = Credential.Jwt(TokenOf((First, "first")));
 
         using var leaving = new CancellationTokenSource();
@@ -327,46 +324,189 @@ public sealed class CredentialResolverTests
         });
         Assert.False(waiting.IsCompleted);
 
-        answer.SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }]);
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
 
         Assert.NotNull(await waiting.WaitAsync(Patience, Cancelled));
-        Assert.Equal(1, asks);
+        Assert.Single(keySet.Asks);
     }
 
     [Fact]
-    public async Task Fails_a_call_while_its_issuer_s_last_ask_failed_within_the_minute_and_asks_again_past_it()
+    public async Task Fails_the_calls_that_wait_on_an_ask_that_rejects_and_has_a_token_within_the_minute_wait_for_the_deadline_and_the_ask_then()
     {
         var clock = new FakeTimeProvider(Start);
-        var asks = 0;
-        var resolver = new CredentialResolver(
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var token = Credential.Jwt(TokenOf((First, "first")));
+        var failing = ResolvedOf((resolver, token));
+
+        keySet.Asks[0].Settle.SetException(new HttpRequestException("the key set cannot be reached"));
+        Assert.Contains("key set", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return failing;
+        })).Message, StringComparison.Ordinal);
+
+        // within the minute, the next waits for the deadline, asking nothing before it
+        var next = ResolvedOf((resolver, token));
+
+        clock.Advance(TimeSpan.FromMilliseconds(59_999));
+        Assert.False(next.IsCompleted);
+        Assert.Single(keySet.Asks);
+
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal(2, keySet.Asks.Count);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Equal("grace", (await next)!.Identifier!.Sub);
+    }
+
+    [Fact]
+    public async Task Fails_a_call_alike_when_its_key_set_throws_as_it_is_asked_and_has_the_next_within_the_minute_wait_for_the_deadline_and_the_ask_then()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var asked = 0;
+        var resolver = ResolverOf(
             new Credentials
             {
                 Audience = Audience,
-                KeySet = (_) =>
+                KeySet = KeySetOf((_, _) =>
                 {
-                    asks += 1;
+                    asked += 1;
 
-                    return asks == 1
-                        ? ValueTask.FromException<IReadOnlyList<JwtSetKey>>(new HttpRequestException("the key set cannot be reached"))
-                        : ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }]);
-                },
+                    if (asked == 1)
+                    {
+                        throw new HttpRequestException("the key set cannot be reached");
+                    }
+
+                    return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([SetKeyOf((First, "first"))]);
+                }),
             },
-            (clock, false));
+            clock);
         var token = Credential.Jwt(TokenOf((First, "first")));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        Assert.Contains("key set", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
             return ResolvedOf((resolver, token));
-        });
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-        {
-            return ResolvedOf((resolver, token));
-        });
-        Assert.Equal(1, asks);
+        })).Message, StringComparison.Ordinal);
+
+        var next = ResolvedOf((resolver, token));
+
+        Assert.False(next.IsCompleted);
+        Assert.Equal(1, asked);
 
         clock.Advance(TimeSpan.FromMinutes(1));
-        Assert.NotNull(await ResolvedOf((resolver, token)));
-        Assert.Equal(2, asks);
+        Assert.Equal("grace", (await next)!.Identifier!.Sub);
+        Assert.Equal(2, asked);
+    }
+
+    [Fact]
+    public async Task Aborts_the_signal_it_gives_its_key_set_s_ask_at_the_ask_s_deadline_a_minute_after_it_went_and_not_before_failing_the_calls_that_wait_on_it()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var token = Credential.Jwt(TokenOf((First, "first")));
+        var waiting = ResolvedOf((resolver, token));
+
+        clock.Advance(TimeSpan.FromMilliseconds(59_999));
+        Assert.False(keySet.Asks[0].Signal.IsCancellationRequested);
+        Assert.False(waiting.IsCompleted);
+
+        // unsettled at its deadline, it has failed, whatever it does with its signal
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.True(keySet.Asks[0].Signal.IsCancellationRequested);
+        Assert.Contains("key set", (await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return waiting;
+        })).Message, StringComparison.Ordinal);
+
+        // the next ask goes at once, its own signal live
+        var next = ResolvedOf((resolver, token));
+
+        Assert.Equal(2, keySet.Asks.Count);
+        Assert.False(keySet.Asks[1].Signal.IsCancellationRequested);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Equal("grace", (await next)!.Identifier!.Sub);
+    }
+
+    [Fact]
+    public async Task Drops_what_an_ask_settles_to_after_its_deadline_its_keys_are_never_held()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var token = Credential.Jwt(TokenOf((First, "first")));
+        var late = ResolvedOf((resolver, token));
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return late;
+        });
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+
+        // nothing held: a token of that kid asks anew, and holds only once that ask names it
+        var again = ResolvedOf((resolver, token));
+
+        Assert.Equal(2, keySet.Asks.Count);
+        keySet.Asks[1].Settle.SetResult([]);
+        Assert.Null(await again);
+    }
+
+    [Fact]
+    public async Task Has_a_token_without_a_kid_wait_on_a_new_ask_once_the_keys_held_for_its_issuer_are_past_their_ten_minutes_a_millisecond_either_side()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var kidless = Credential.Jwt(TokenOf((First, null)));
+        var first = ResolvedOf((resolver, Credential.Jwt(TokenOf((First, "first")))));
+
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.NotNull(await first);
+        clock.Advance(TimeSpan.FromMilliseconds(599_999));
+
+        // a millisecond short of ten minutes from the answer, its keys serve: no ask
+        Assert.Equal("grace", (await ResolvedOf((resolver, kidless)))!.Identifier!.Sub);
+        Assert.Single(keySet.Asks);
+
+        // ten minutes from it, they serve no more: the token waits on a new ask, which serves anew
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+
+        var stale = ResolvedOf((resolver, kidless));
+
+        Assert.False(stale.IsCompleted);
+        Assert.Equal(2, keySet.Asks.Count);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Equal("grace", (await stale)!.Identifier!.Sub);
+    }
+
+    [Fact]
+    public async Task Refuses_at_once_asking_nothing_a_token_of_an_issuer_its_key_set_does_not_name_the_application_s_own_among_them_whose_kid_another_issuer_s_held_key_names()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet(SetIssuer);
+        var resolver = ResolverOf(
+            new Credentials
+            {
+                Audience = Audience,
+                Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) }],
+                KeySet = keySet.KeySet,
+            },
+            clock);
+        var first = ResolvedOf((resolver, Credential.Jwt(TokenOf((Second, "set-1"), SetIssuer))));
+
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((Second, "set-1"))]);
+        Assert.Equal(SetIssuer, (await first)!.Identifier!.Issuer);
+
+        // set-1 is held for the key set's issuer alone: each of these is judged by the keys there are
+        foreach (var issuer in new[] { "https://other.example", Issuer })
+        {
+            foreach (var secret in new[] { Second, First })
+            {
+                Assert.Null(await ResolvedOf((resolver, Credential.Jwt(TokenOf((secret, "set-1"), issuer)))));
+            }
+        }
+
+        Assert.Single(keySet.Asks);
     }
 
     [Fact]
@@ -453,5 +593,38 @@ public sealed class CredentialResolverTests
         Assert.Equal(wall + 1, (await resolver.Resolve(RequestOf(Credential.Elsewhere(), "Interop sub=ada"), Cancelled))!.End);
         Assert.Null(await resolver.Resolve(RequestOf(Credential.Elsewhere(), "Interop sub=ada"), Cancelled));
         Assert.Equal(wall + 1, (await resolver.Resolve(RequestOf(Credential.Elsewhere(), "Interop sub=ada"), Cancelled))!.End);
+    }
+
+    // a key set for an issuer that records each ask, its issuer and its signal, and answers as each
+    // is settled
+    private sealed class RecordingKeySet
+    {
+        public RecordingKeySet(string issuer = Issuer)
+        {
+            KeySet = new JwtKeySet
+            {
+                Issuers = [issuer],
+                Ask = (asked, signal) =>
+                {
+                    var settle = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+
+                    Asks.Add((asked, settle, signal));
+
+                    return new ValueTask<IReadOnlyList<JwtSetKey>>(settle.Task);
+                },
+            };
+        }
+
+        public JwtKeySet KeySet { get; }
+
+        public List<(string Issuer, TaskCompletionSource<IReadOnlyList<JwtSetKey>> Settle, CancellationToken Signal)> Asks { get; } = [];
+
+        public List<string> Issuers()
+        {
+            return [.. Asks.Select((ask) =>
+            {
+                return ask.Issuer;
+            })];
+        }
     }
 }

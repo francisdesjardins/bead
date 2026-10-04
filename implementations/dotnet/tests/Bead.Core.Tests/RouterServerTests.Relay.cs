@@ -17,6 +17,14 @@ public sealed partial class RouterServerTests
 
     private static readonly Procedure Held = new() { ServiceId = 2, ProcedureId = 3, ProcedureName = "held", ServiceRevision = 3 };
 
+    // requireSession, as a server gives it: a call in none is refused SESSION_REQUIRED
+    private static readonly BeforeRequest RequiringSession = new(
+        (request) =>
+        {
+            return request.Session is not null;
+        },
+        Failure.OfProtocol(ProtocolCode.SessionRequired));
+
     private static readonly RelayOptions Admitting = new()
     {
         BeforeRoute = new BeforeRequest((_) =>
@@ -249,6 +257,73 @@ public sealed partial class RouterServerTests
 
             Assert.Null(Assert.IsType<RequestHeader>(header).Credential);
         });
+    }
+
+    [Fact]
+    public async Task Answers_a_JWT_and_an_ELSEWHERE_it_forwards_without_verifying_ACCESS_DENIED_once_beforeRoute_is_requireSession_a_call_in_none_SESSION_REQUIRED_and_relays_an_OPAQUE_that_holds()
+    {
+        using var device = StartRelayed(new Setup
+        {
+            SessionOf = (request, _) =>
+            {
+                return ValueTask.FromResult(request.Header.Credential is null ? null : CallSession.ConnectionSessionOf(request.Header.Credential, (Token, "leg A")));
+            },
+            Relay = new RelayOptions { BeforeRoute = RequiringSession },
+        });
+
+        Deliver(First, To(7, Presenting(RequestOf(1), Credential.Jwt("a.b.c"))));
+        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(To(7, Presenting(RequestOf(3), Credential.Elsewhere()))), "Bearer mF_9.B5f-4.1JqM"));
+        Deliver(First, To(7, RequestOf(5)));
+        Deliver(First, To(7, Presenting(RequestOf(7, payload: "hi"), Token)));
+        await Settle();
+
+        Assert.Equal(
+            ["1 AccessDenied 0", "3 AccessDenied 0", "5 SessionRequired 0", "7 result"],
+            _transport.Sent
+                .Select((entry) =>
+                {
+                    return entry.Envelope.Failure is { } failure
+                        ? $"{entry.Envelope.Header.CallId} {CodeOf(failure)} {failure.Relays}"
+                        : $"{entry.Envelope.Header.CallId} result";
+                })
+                .Order(StringComparer.Ordinal));
+
+        // leg B carried the OPAQUE call alone
+        Assert.Single(device.Pipe.ClientSent);
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Keeps_the_default_JWT_a_client_presents_through_a_relay_whose_beforeRoute_is_requireSession_its_ACCESS_DENIED_withdraws_nothing()
+    {
+        var credential = Credential.Jwt("a.b.c");
+        var legA = new Pipe(First, null) { Clock = _time, IsSecure = true };
+        var withdrawn = new List<CredentialScheme>();
+
+        using var device = DeviceOf(new Setup());
+        using var router = new RouterServer(
+            legA.Server,
+            new RouterServerOptions { Relay = new RelayOptions { BeforeRoute = RequiringSession }, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+        using var requester = new RouterClient(legA.Client, new RouterClientOptions { Credential = credential, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+
+        router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7 });
+        requester.CredentialWithdrawn += (scheme) =>
+        {
+            withdrawn.Add(scheme);
+        };
+        legA.Open();
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return requester.Request(
+                BytesOf("hi"),
+                new RouterRequest(Echo, new ResolvedRequestOptions { DestinationId = 7, Timeout = TimeSpan.FromSeconds(5) })).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.AccessDenied, (byte)0), (refused.Code, refused.Relays));
+        Assert.Empty(withdrawn);
+        Assert.Equal(credential, requester.Credential);
+        Assert.Empty(device.Pipe.ClientSent);
     }
 
     [Fact]
@@ -678,6 +753,9 @@ public sealed partial class RouterServerTests
         // what both its ends run on
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
+        // whether its client end is secure, as a transport that never leaves the machine may say
+        public bool IsSecure { get; init; }
+
         public PipeClient Client { get; }
 
         public PipeServer Server { get; }
@@ -763,6 +841,14 @@ public sealed partial class RouterServerTests
             get
             {
                 return pipe.Clock;
+            }
+        }
+
+        public bool IsSecure
+        {
+            get
+            {
+                return pipe.IsSecure;
             }
         }
 

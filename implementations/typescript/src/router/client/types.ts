@@ -130,8 +130,8 @@ export interface IRouterClientOptions {
   /**
    * What it resolves a command presenting a `JWT` or an `ELSEWHERE` with, as a server does: a
    * `JWT`'s keys, audience and key set, an `ELSEWHERE`'s verifier; a scheme it is given nothing for
-   * is refused, CREDENTIAL_UNSUPPORTED. Keys or a key set without an audience are a
-   * {@link ProgrammerError}: a client relays nothing.
+   * is refused, CREDENTIAL_UNSUPPORTED. Keys or a key set without an audience, and a key set given
+   * no issuer, are a {@link ProgrammerError}.
    */
   credentials?: ICredentials | undefined;
   /**

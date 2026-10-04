@@ -97,10 +97,11 @@ public sealed record ServerOptions
 /// A server from its layers, bottom up: the transport, the router built on it, the services built on
 /// the router, and the sessions whose tokens the router announces to their connections as they
 /// change. A session is made by a request: the resolver of the procedure that opens one stores it,
-/// and the others take <see cref="RequireSession"/>, which refuses a call in none with
-/// SESSION_REQUIRED. A request presenting none runs in its connection's session, with its data, and
-/// one presenting OPAQUE in that session when it carries its token. A procedure
-/// that closes a session deletes it before it answers, so the next answer announces the end. Each
+/// and the others take <see cref="RequireSession"/>, which refuses a call in none that presented no
+/// credential with SESSION_REQUIRED, and one that presented a credential with ACCESS_DENIED. A
+/// request presenting none runs in its connection's session, with its data, and one presenting
+/// OPAQUE in that session when it carries its token. A procedure that closes a session deletes it
+/// before it answers, so the next answer announces the end. Each
 /// message is activity. Past a session's connection timeout, its connection is closed; past its
 /// session timeout, the session ends — each subscription of its connection with SESSION_REQUIRED —
 /// and the connection stays, its silence counted afresh against the server's own timeout. A listen
@@ -283,8 +284,10 @@ public sealed class Server<TData> : IAsyncDisposable
 
     /// <summary>
     /// The admission of a procedure that needs a session: a call in none — its call's session, never
-    /// its connection's — is refused with SESSION_REQUIRED. A relay's in its place refuses every
-    /// credential it forwards without verifying, which resolves to no session there.
+    /// its connection's — is refused with SESSION_REQUIRED, which a call that presented a credential
+    /// is answered ACCESS_DENIED in place of (spec 9.2, step 5). A relay's in its place so refuses
+    /// every credential it forwards without verifying, which resolves to no session there, and a call
+    /// in none that presented none with SESSION_REQUIRED.
     /// </summary>
     public BeforeRequest RequireSession { get; }
 
@@ -292,8 +295,8 @@ public sealed class Server<TData> : IAsyncDisposable
     /// A relay's admission by default (spec 14.3, step 1): a call in leg A's connection's session, or
     /// one whose header presents a <see cref="CredentialScheme.Jwt"/>, or an
     /// <see cref="CredentialScheme.Elsewhere"/> its transport carried, read from its credential
-    /// scheme alone — a credential the relay may forward, which its destination verifies; any other
-    /// is refused with SESSION_REQUIRED.
+    /// scheme alone — a credential the relay may forward, which its destination verifies; any other,
+    /// a call in none that presented none, is refused with SESSION_REQUIRED.
     /// </summary>
     public BeforeRequest RequireSessionOrCredential { get; }
 

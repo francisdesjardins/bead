@@ -770,6 +770,38 @@ public sealed class ServiceManagerTests
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), router.Responses[0].Failure);
     }
 
+    [Fact]
+    public void Answers_its_SESSION_REQUIRED_to_a_call_that_presented_a_credential_ACCESS_DENIED_its_detail_kept_and_to_a_call_that_presented_none_SESSION_REQUIRED()
+    {
+        BeforeRequest Refusing(Failure? refusal)
+        {
+            return new BeforeRequest(
+                (_) =>
+                {
+                    return false;
+                },
+                refusal);
+        }
+
+        var plain = Refusing(Failure.OfProtocol(ProtocolCode.SessionRequired));
+        var detailed = Refusing(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"));
+        var request = new AdmissionRequest(Handle, Header);
+
+        foreach (var credential in new[] { (Credential)SessionToken.FromBytes([.. Enumerable.Repeat((byte)1, SessionToken.Bytes)]), Credential.Jwt("a.b.c"), Credential.Elsewhere() })
+        {
+            var presenting = request with { Header = Header with { Credential = credential } };
+
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), plain.RefusalOf(presenting));
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied, "sign in first"), detailed.RefusalOf(presenting));
+
+            // ACCESS_DENIED goes out as it is
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), Refusing(null).RefusalOf(presenting));
+        }
+
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), plain.RefusalOf(request));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"), detailed.RefusalOf(request));
+    }
+
     // a failure carries no side here — the router writes it as its own — so what is left to show is
     // a client's resolver refusing before it reads
     [Fact]

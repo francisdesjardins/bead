@@ -58,7 +58,8 @@ export interface IServer<
   /**
    * A `beforeRequest` that lets through only a call with a session, its call's, never its
    * connection's (spec 13.5): what every procedure but the one that makes the session asks for. It
-   * refuses with its `refusal`, SESSION_REQUIRED. A composition by `&&` loses that refusal and
+   * refuses with its `refusal`, SESSION_REQUIRED, which its router answers a call that presented a
+   * credential with ACCESS_DENIED (spec 9.2, step 5). A composition by `&&` loses that refusal and
    * answers ACCESS_DENIED; a caller that wants to keep SESSION_REQUIRED puts `refusal` on its own
    * function.
    */
@@ -68,8 +69,8 @@ export interface IServer<
   /**
    * A relay's `beforeRoute`, its server's by default (spec 14.3, step 1): a call in leg A's
    * connection's session, or one whose header presents a `JWT`, or an `ELSEWHERE` its transport
-   * carried, which the relay forwards for its destination to verify. It refuses with its `refusal`,
-   * SESSION_REQUIRED.
+   * carried, which the relay forwards for its destination to verify. It refuses any other, a call in
+   * none that presented none, with its `refusal`, SESSION_REQUIRED.
    */
   requireSessionOrCredential: ((
     request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'header' | 'session'>

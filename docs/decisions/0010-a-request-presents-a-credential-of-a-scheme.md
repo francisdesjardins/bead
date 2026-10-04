@@ -128,7 +128,11 @@ Within step 5 of section 9.2, in this order:
 3. **its admission**, `beforeRequest`, synchronous, decides on the call's session.
 
 `requireSession`, `RequireSession`, tests the call's session, never the connection's: a call that
-presented a `JWT` is not in its connection's session, whatever that session holds.
+presented a `JWT` is not in its connection's session, whatever that session holds. It refuses a call
+in none that presented no credential with `SESSION_REQUIRED`, and one that presented a credential it
+does not run in — a relay forwarding it without verifying — with `ACCESS_DENIED`: an admission never
+answers `SESSION_REQUIRED` to a call that presented a credential, which would have its client
+withdraw one that may hold.
 
 **Resolution may wait.** A `JWT` verified by Web Crypto, a key set asked for a `kid` not yet seen, a
 session service asked whether a token holds: a verifier settles later, a `PromiseLike` on the
@@ -150,8 +154,9 @@ The client's side keeps that from refusing the calls that renew a credential:
   to the session the client knows, so a call made in a session that ended, or that was opened anew
   under a new token, is refused rather than run in whatever session the connection holds;
 - a credential a client presents by default, `JWT` or `ELSEWHERE`, is withdrawn once a call that
-  presented it is refused `SESSION_REQUIRED`, and the client tells its application, so the call that
-  renews it goes out without it; a call may present none, whatever the default;
+  presented it is refused `SESSION_REQUIRED`, while it is still, by value, the credential that call
+  presented, and the client tells its application, so the call that renews it goes out without it; a
+  call may present none, whatever the default;
 - a client fails a call before it goes, and a server a command alike, with
   `DESTINATION_UNREACHABLE`, as a relay refuses a call its leg B cannot carry, when it presents
   `ELSEWHERE` over a transport that carries none, or `JWT` or `ELSEWHERE` in the clear off the
@@ -172,14 +177,20 @@ as RFC 8725 recommends:
   ES256, for keys a federation shares by their public half, or HS256, for one trust domain. A
   token's `alg` is its key's, so `none`, an algorithm no key takes, and an HS256 token keyed with a
   public key's bytes are refused. A key is found by the token's `kid` among the application's keys
-  and those its issuer's key set answered, which are held for that issuer, beside the application's,
-  until the set's next answer replaces them: without a `kid`, only when its issuer has one key. The
-  runtime asks the key set, when the application gives one, when neither names the `kid`, once a
-  minute at most for that issuer, a deadline on the monotonic reading
-  ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). A call that finds an ask
-  under way waits on it, and its own signal leaves that ask to the others. A `kid` still unnamed
-  after an answer is refused `SESSION_REQUIRED`, never tried against the others; while the last ask
-  failed, it is refused `PROCEDURE_FAILED`, as a key set that cannot be reached is. The runtime
+  and those its issuer's key set answered: without a `kid`, only when its issuer has one key. The
+  application gives the key set with the issuers it answers for, and the runtime asks it for those
+  alone, when no key of the token's issuer names the `kid`, once a minute at most for that issuer, a
+  deadline on the monotonic reading
+  ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)): a token of an issuer the set
+  does not name asks nothing, so no peer has the set fetch at its will (RFC 8725 §3.10). An ask is
+  given a signal its deadline aborts; one unsettled then has failed, and the next may go. A call
+  that finds an ask under way waits on it, and its own signal leaves that ask to the others; a call
+  whose `kid` comes while its issuer's minute runs waits for the deadline and the ask that goes
+  then. The keys an answer gave are held ten minutes, beside the application's, held for good: past
+  them, a token whose `kid` they name waits on a new ask before they serve, so a key its issuer
+  withdrew stops verifying. A `kid` still unnamed by an answer to an ask that went after its token
+  came is refused `SESSION_REQUIRED`, never tried against the others; a call that waited on an ask
+  that failed is refused `PROCEDURE_FAILED`, as a key set that cannot be reached is. The runtime
   fetches nothing itself: a token's `jwk`, `jku`, `x5u` and `x5c` are never read (RFC 8725 §3.10),
   and a token that carries `crit` is refused. A JWK serves only when its `alg` is its key's
   algorithm, or is absent and the application names it, its `use` is `sig` or absent, and its
@@ -194,8 +205,9 @@ as RFC 8725 recommends:
   (RFC 7519 §4.1.2), and its end is `exp` plus 60 s, the instant its verdict uses, since a skew
   moves an end as much as a start.
 
-The keys and the audience are the application's; the verifying is the runtime's. Another format, a
-CWT (RFC 8392) for a constrained peer, takes a scheme to come.
+The keys and the audience are the application's, and keys given without an audience are refused as
+the side is built; the verifying is the runtime's. Another format, a CWT (RFC 8392) for a
+constrained peer, takes a scheme to come.
 
 **A credential's session ends on a timer that reads the wall clock again at each step**
 (section 13.9), on the clock its side runs on
@@ -210,9 +222,9 @@ CWT (RFC 8392) for a constrained peer, takes a scheme to come.
   dropped, so a comparison with _X_ or _N_ is exact — _W_ is before `exp` × 1000 exactly when it is
   before _X_ — and no fraction reaches a timer;
 - as its session comes to be kept, as a renewal moves _E_, and at each step's due, the side reads
-  _W_ again, never counting down, and takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends then, with
-  no timer armed; otherwise a timer of min(_R_, 2³¹ − 1) ms is armed, so an end is never refused for
-  its distance;
+  _W_ again, never counting down, and takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends in a turn
+  of its own, past the answer that kept it, with no timer armed; otherwise a timer of min(_R_,
+  2³¹ − 1) ms is armed, so an end is never refused for its distance;
 - a `JWT` holds while _W_ < _E_, and _W_ ≥ _N_ − 60,000 when it carries `nbf`, by one reading of _W_
   taken once its signature verifies; its session's first timer takes a reading of its own, once the
   session is kept;
@@ -239,8 +251,9 @@ procedure. A subscription held in a `JWT`'s or an `ELSEWHERE`'s session ends whe
 as a connection's session ends the subscriptions of its connection that no credential's session
 bounds (section 13.6). A call on the same connection whose credential resolves to the identifier of
 a session kept moves its end to the later of the two, in whatever order resolutions settle: a
-credential renewed keeps its subscriptions. Ending a credential's session by its identifier ends it
-on every connection that keeps it, and a credential that still holds opens it anew.
+credential renewed keeps its subscriptions. Ending a credential's session by its identifier ends it,
+and the subscriptions it bounds, on every connection that keeps it, and nothing else: a credential
+that still holds opens it anew, so ending a session is no revocation.
 
 **A transport may carry a credential beside an envelope, both ways**: it hands the router what it
 carried with an envelope it took, and carries what the router gives it with one it sends. Over HTTP,
@@ -264,7 +277,10 @@ connects, by the decision that brings it, and never stands for `ELSEWHERE`.
 **A bearer credential crosses only TLS off the machine.** A side presents a `JWT`, and carries an
 `ELSEWHERE`, only over TLS — `wss`, `https` — or within the machine: the loopback, a Web Worker, a
 router called in process, as RFC 6750 §5.3 requires of every bearer token. The sender holds it, the
-client and a relay's leg B alike, since a server behind a terminator of TLS cannot tell.
+client and a relay's leg B alike, since a server behind a terminator of TLS cannot tell. A server's
+transport judges a connection by what it listens on, unless its application says what stands in
+front of it, `secure`, `Secure`: TLS terminated before it, or a proxy that serves the network in the
+clear, believed whatever it listens on.
 
 **A relay forwards a credential, and its destination verifies it**:
 
@@ -278,19 +294,19 @@ A destination is registered with the audience it verifies, as a resource is name
 (RFC 8707). A relay's default admission, `requireSessionOrCredential`, `RequireSessionOrCredential`,
 admits a call in leg A's connection's session, or one whose header presents a `JWT`, or an
 `ELSEWHERE` its transport carried, read from the header's scheme; a `beforeRoute` given as
-`requireSession` refuses every credential the relay forwards without verifying. With `verifies`, the
-relay verifies what it forwards besides, with its side's `credentials`, at step 1 of section 14.3,
-before `beforeRoute`: a `JWT` against the set of audiences its registrations hold. A credential that
-does not hold, or a `JWT` that names none of those audiences, is refused `SESSION_REQUIRED` there,
-and `beforeRoute` reads the credential's session. At step 1, a scheme the relay neither resolves nor
-forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `ELSEWHERE` that carried nothing
-`SESSION_REQUIRED`. A call the relay cannot forward — to a destination of another audience or of
-none, over a leg B that carries no credential, or in the clear off the machine — is refused
-`DESTINATION_UNREACHABLE`, at a step of its own, section 14.3's fifth, before the limits' step, the
-sixth: its credential may hold, and its route does not; with `verifies`, that step holds a verified
-`aud` to its destination's own audience. A call that presents a credential never runs in leg B's
-session in place of its own. Leg B's header counts its credential, call by call, against the smaller
-of the two legs' limits (section 14.3, step 6).
+`requireSession` refuses every credential the relay forwards without verifying, `ACCESS_DENIED`.
+With `verifies`, the relay verifies what it forwards besides, with its side's `credentials`, at
+step 1 of section 14.3, before `beforeRoute`: a `JWT` against the set of audiences its registrations
+hold. A credential that does not hold, or a `JWT` that names none of those audiences, is refused
+`SESSION_REQUIRED` there, and `beforeRoute` reads the credential's session. At step 1, a scheme the
+relay neither resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `ELSEWHERE` that
+carried nothing `SESSION_REQUIRED`. A call the relay cannot forward — to a destination of another
+audience or of none, over a leg B that carries no credential, or in the clear off the machine — is
+refused `DESTINATION_UNREACHABLE`, at a step of its own, section 14.3's fifth, before the limits'
+step, the sixth: its credential may hold, and its route does not; with `verifies`, that step holds a
+verified `aud` to its destination's own audience. A call that presents a credential never runs in
+leg B's session in place of its own. Leg B's header counts its credential, call by call, against the
+smaller of the two legs' limits (section 14.3, step 6).
 
 **A credential stays out of everything a side reports**: no detail, event, trace or log carries its
 bytes, nor the transport's field; only its scheme, `credentialScheme`, `CredentialScheme`.
@@ -298,13 +314,14 @@ bytes, nor the transport's field; only its scheme, `credentialScheme`, `Credenti
 **The surface is named alike on both sides**, the TypeScript side's name before the C# side's:
 
 - `credentials`, `Credentials`, among a server's options, and a client's for the commands it
-  receives: a `JWT`'s keys, each with its issuer and its algorithm, and its audience; the key set
-  the runtime asks for a `kid` no key it holds names, `keySet`, `KeySet`, which may wait, and whose
-  answer it holds; and an `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the transport
-  carried and its call's signal, which settles with a credential's session — its identifier, its
-  data, and its end, none for a session without one — or with none, when the credential does not
-  hold. The side builds its `JWT` verifier from them, as data, on the clock its stack runs on, so no
-  verifier brings a clock of its own;
+  receives: a `JWT`'s keys, each with its issuer and its algorithm, and its audience; the key set,
+  `keySet`, `KeySet`, given with the issuers it answers for, which the runtime asks for a `kid` no
+  key of the token's issuer names, with a signal its deadline aborts, which may wait, and whose
+  answer it holds ten minutes; and an `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the
+  transport carried and its call's signal, which settles with a credential's session — its
+  identifier, its data, and its end, none for a session without one — or with none, when the
+  credential does not hold. The side builds its `JWT` verifier from them, as data, on the clock its
+  stack runs on, so no verifier brings a clock of its own;
 - the call's session, `session`, `Session`, on the request admission reads and on the request a
   resolver receives: none when the call runs in none; its data; and, for a credential's session, its
   identifier, the record above, and its end;
@@ -315,7 +332,8 @@ bytes, nor the transport's field; only its scheme, `credentialScheme`, `Credenti
 - `requireSession`, `RequireSession`, tests the call's session;
 - `requireSessionOrCredential`, `RequireSessionOrCredential`, a relay's default admission: a call in
   leg A's connection's session, or one presenting a credential the relay may forward;
-- `endSession(id)`, `EndSession(id)`, ends a credential's session by its identifier, that record;
+- `endSession(id)`, `EndSession(id)`, ends a credential's session by its identifier, that record,
+  and the subscriptions it bounds;
 - `verifies`, `Verifies`, among a relay's options, has it verify what it forwards besides, at step 1
   of section 14.3;
 - `credential`, `Credential`, among a client's options for its default, and among a request's
@@ -340,14 +358,15 @@ verifier gave. `login` opens its connection's session whatever its call presents
 `OPAQUE`, its `sessionTimeout` and `connectionTimeout` that session's alone. `logout` ends its
 connection's session; it refuses a call in a credential's session `ACCESS_DENIED`, since
 `SESSION_REQUIRED` would have its client withdraw a credential that holds, and a call in none
-`SESSION_REQUIRED`. `revoke` ends a credential's session by its identifier, as a token's revocation
-does (RFC 7009). `register` takes the audience its destination verifies, and the service's relay,
-its `relay.admits`, admits in the same words what a server's relay admits by default. Its
-`credentials` hold two issuers' published test keys, one ES256 and one HS256, one audience, a key
-set that names a third key, and an `ELSEWHERE` verifier that holds a carried value naming a `sub`,
-settles one that asks to settle after so many milliseconds then, on the server's clock, rejects one
-that asks to fail, and holds nothing else; its `JWT` verifier is the runtime's. Its clients are
-given the published keys and their audience, for the commands they receive.
+`SESSION_REQUIRED`. `endSession` ends a credential's session by its identifier, and nothing else.
+`register` takes the audience its destination verifies, and the service's relay, its `relay.admits`,
+admits in the same words what a server's relay admits by default. Its `credentials` hold two
+issuers' published test keys, one ES256 and one HS256, one audience, a key set, named with the
+issuers it answers for, that names a third key, and an `ELSEWHERE` verifier that holds a carried
+value naming a `sub`, settles one that asks to settle after so many milliseconds then, on the
+server's clock, rejects one that asks to fail, and holds nothing else; its `JWT` verifier is the
+runtime's. Its clients are given the published keys and their audience, for the commands they
+receive.
 
 ## Consequences
 
@@ -528,3 +547,21 @@ objections, each with its answer:
 | What lands gives a `JWT`'s verification no section of the spec, and misses places the record changes                               | Accepted: 13.8 verifies a `JWT` and names its verdicts, 13.9 ends a credential's session, and the list names 9.10, 15.9, 0006's gate on the test keys and the root README.                                                                        |
 | A credential's session that bounds no subscription is still kept and timed, a timer for every `JWT` call                           | Accepted: a credential's session is kept, and its end timed, only while it bounds a subscription.                                                                                                                                                 |
 | A client that sends a bearer credential in the clear off the machine is given no code                                              | Accepted: it fails the call before it goes, `DESTINATION_UNREACHABLE`, and the credential stays.                                                                                                                                                  |
+
+Implemented whole, the record met the Tenth Man a fourth time, at its convergence. Its objections,
+each with its answer:
+
+| Objection                                                                                                                                             | Answer                                                                                                                                                                                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A session whose end has passed as a subscribing call keeps it is ended inside that call, its failure before its result, on one side                   | Accepted: such an end is taken in a turn of its own, past the answer that kept it, and a call still owed its answer is never ended under it, on both sides.                                                                          |
+| A relay whose `beforeRoute` is `requireSession` answers a forwarded credential `SESSION_REQUIRED`, and every client withdraws a credential that holds | Accepted, the user's choice: an admission never answers `SESSION_REQUIRED` to a call that presented a credential; `requireSession` refuses it `ACCESS_DENIED`.                                                                       |
+| The key set is asked for any `iss` an unauthenticated peer writes, before a signature is checked                                                      | Accepted, the user's choice: it is given with the issuers it answers for, and asked for those alone.                                                                                                                                 |
+| A `kid` another issuer's key names keeps the key set from being asked for the token's own issuer                                                      | Accepted: the key set is asked when no key of the token's issuer names its `kid`.                                                                                                                                                    |
+| A key set's ask that never settles blocks its issuer for good                                                                                         | Accepted, the user's choice: an ask is given a signal its deadline aborts, and one unsettled then has failed; a call's cancel leaves the ask it waits on.                                                                            |
+| The keys a key set answered are held until its next answer, so a key its issuer withdrew verifies for good                                            | Accepted, the user's choice: they are held ten minutes, past which a token waits on a new ask before they serve.                                                                                                                     |
+| Keys given without an audience refuse every `JWT`, the application's fault charged to the token                                                       | Accepted: they are refused as the side is built.                                                                                                                                                                                     |
+| A server cannot say that TLS stands in front of it                                                                                                    | Accepted: its application says so, `secure`, `Secure`, and is believed whatever the server listens on.                                                                                                                               |
+| Any peer can spend an issuer's minute, and a new `kid` is then refused and its credential withdrawn                                                   | Accepted, the user's choice: a `kid` that comes while the minute runs waits for the ask its deadline lets go, and only an answer to an ask that went after the token came refuses it.                                                |
+| Ending a session by its identifier is cited as a revocation, while the token is taken again at once                                                   | Accepted, the user's choice, as an end: it ends the session and its subscriptions and nothing else, the citation of RFC 7009 goes, and the interop service's procedure is `endSession`; a revocation would be a decision of its own. |
+| A default set again to the same token is withdrawn on one side and kept on the other                                                                  | Accepted, the other way than proposed: the token was just found not to hold, so both sides withdraw a default while it is still, by value, the credential the refused call presented.                                                |
+| A resolution that settles once its router is disposed runs a resolver on one side                                                                     | Refused for its premise: both sides abort every call that resolves as their router is disposed, which a twin test now holds.                                                                                                         |

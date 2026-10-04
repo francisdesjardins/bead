@@ -30,6 +30,7 @@ import { bytesOf } from '../../shared/envelope';
 import { createServiceManager } from '../../shared/service-manager';
 import { createPipedTransports } from '../../shared/__tests__/fixtures';
 import type {
+  IJwtSetKey,
   IProcedure,
   IServiceManager,
   RouterLimitsOptions,
@@ -480,6 +481,78 @@ test('the interop service’s ELSEWHERE verifier holds, refuses and fails each v
 
     expect(outcome, carried).toEqual(expected);
   }
+});
+
+test("the interop service's key set answers each issuer it names as its words say, on its server's clock, whatever its signal, and fails at once for any other", async () => {
+  const keysIssuer = 'https://keys.interop.bead.example';
+  const rotatedIssuer = 'https://rotated.interop.bead.example';
+  const stalledIssuer = 'https://stalled.interop.bead.example';
+  const kid = '018c0ae5-4d9b-471b-bfd6-eef314bc7037';
+  const second = 1_000;
+  const clock = createTestClock();
+  const keySet = interopCredentialsOf(clock).keySet!;
+  // the signal of every ask, aborted before it goes
+  const signal = AbortSignal.abort();
+  // what each ask came to, in the order they went: its keys, or nothing yet
+  const answers: (readonly IJwtSetKey[] | 'pending')[] = [];
+  const ask = (issuer: string): Promise<readonly IJwtSetKey[]> => {
+    const index = answers.push('pending') - 1;
+
+    return Promise.resolve(keySet.ask(issuer, signal)).then((keys) => {
+      answers[index] = keys;
+
+      return keys;
+    });
+  };
+
+  expect(keySet.issuers).toEqual([keysIssuer, rotatedIssuer, stalledIssuer]);
+
+  // the rotated issuer's keys at its first ask alone; the stalled one's never, no timer armed
+  const asked = [ask(keysIssuer), ask(rotatedIssuer), ask(rotatedIssuer)];
+
+  void ask(stalledIssuer);
+
+  expect(duesOn(clock)).toEqual([second, second, second]);
+
+  await clock.tickAsync(second - 1);
+
+  expect(answers).toEqual(['pending', 'pending', 'pending', 'pending']);
+
+  await clock.tickAsync(1);
+
+  const answered = await Promise.all(asked);
+
+  expect(
+    answered.map((keys) => {
+      return keys.length;
+    })
+  ).toEqual([1, 1, 0]);
+  expect([answered[0]?.[0]?.jwk.kid, answered[1]?.[0]?.jwk.kid]).toEqual([kid, kid]);
+  expect(answered[0]?.[0]?.jwk.k).not.toBe(answered[1]?.[0]?.jwk.k);
+  expect(answers[3]).toBe('pending');
+  expect(duesOn(clock)).toEqual([]);
+
+  // its asks counted per key set built: another server's answers its first anew
+  const another = interopCredentialsOf(clock).keySet!.ask(rotatedIssuer, signal);
+
+  await clock.tickAsync(second);
+
+  expect(await another).toHaveLength(1);
+
+  // asked for an issuer it does not name, it fails at once, its clock unmoved and no timer armed
+  let failure: unknown = 'pending';
+
+  void Promise.resolve(keySet.ask('https://unnamed.interop.bead.example', signal)).catch(
+    (reason: unknown) => {
+      failure = (reason as Error).message;
+    }
+  );
+  await sleep(0);
+
+  expect(duesOn(clock)).toEqual([]);
+  expect(failure).toBe(
+    'the interop key set answers for no issuer https://unnamed.interop.bead.example'
+  );
 });
 
 test.describe('the conversations', () => {

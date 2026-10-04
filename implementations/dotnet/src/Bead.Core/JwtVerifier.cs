@@ -245,9 +245,11 @@ internal static class JwtVerifier
         return true;
     }
 
-    // json's member name, when it is a string of well-formed Unicode, which JSON's escapes need not
-    // write; none otherwise
-    private static string? StringOf(JsonElement json, string name)
+    /// <summary>
+    /// <paramref name="json"/>'s member <paramref name="name"/>, when it is a string of well-formed
+    /// Unicode, which JSON's escapes need not write; none otherwise.
+    /// </summary>
+    internal static string? StringOf(JsonElement json, string name)
     {
         if (!json.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
         {
@@ -566,10 +568,10 @@ internal static class JwtVerifier
     }
 
     /// <summary>
-    /// A token's claims set, and its header's <c>kid</c> when it is a string, read as step 1 of
-    /// section 13.8 reads them, without verifying it: none for a token that does not read.
+    /// A token's header and claims set, read as step 1 of section 13.8 reads them, without verifying
+    /// it: none for a token that does not read.
     /// </summary>
-    internal static (JsonElement Claims, string? Kid)? ReadUnverified(string token)
+    internal static (JsonElement Header, JsonElement Claims)? ReadUnverified(string token)
     {
         ArgumentNullException.ThrowIfNull(token);
 
@@ -588,7 +590,7 @@ internal static class JwtVerifier
             return null;
         }
 
-        return (claims.RootElement.Clone(), StringOf(header.RootElement, "kid"));
+        return (header.RootElement.Clone(), claims.RootElement.Clone());
     }
 
     private static JwtVerdict Verdict(string token, VerifyJwtProps props)

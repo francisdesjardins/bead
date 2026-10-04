@@ -371,36 +371,39 @@ listen held is no silence: no connection timeout runs while one is, and each cou
 end, while a session timeout counts messages alone.
 
 A credential's session is what the server's `credentials` make of a credential a request presents, a
-`JWT` or an `ELSEWHERE`: its identifier, a record — `{ scheme, issuer, sid }`, else `{ scheme,
-issuer, sub }`, for a `JWT`, `{ scheme, id }` for an `ELSEWHERE` — the data of the credential the
-call presented, and its end, in milliseconds since the epoch; it is never announced. `credentials`
-holds a `JWT`'s `keys`, each a JWK with its issuer and its one algorithm, `ES256` or `HS256`, and
-its `audience`; `keySet(issuer)`, asked for a token's issuer when its `kid` names no key held, once
-a minute at most for that issuer; and an `ELSEWHERE`'s `verify(carried, signal)`, given what the
-transport carried, which settles with `{ id, data, end }`, or with none when the credential does not
-hold. The server verifies a `JWT` one way, as an access token of RFC 9068's profile (spec 13.8), on
-its own clock, and takes the schemes it is given something for: a request presenting another is
-refused `CREDENTIAL_UNSUPPORTED`, whose detail names those it takes. A credential's session has no
-inactivity timeout: no message, listen or silence moves its end, and it ends at its end, with its
-connection, or by `server.router.endSession(identifier)`, which ends it and the subscriptions it
-bounds on every connection that keeps it; a credential that still holds opens it anew. The server
-keeps one, and times its end, only while it bounds a subscription, and a call whose credential
-resolves to the same identifier moves that end to the later of the two: a credential renewed keeps
-its subscriptions.
+`JWT` or an `ELSEWHERE`: its identifier, a record — `{ scheme, issuer, sid }`, else
+`{ scheme, issuer, sub }`, for a `JWT`, `{ scheme, id }` for an `ELSEWHERE` — the data of the
+credential the call presented, and its end, in milliseconds since the epoch; it is never announced.
+`credentials` holds a `JWT`'s `keys`, each a JWK with its issuer and its one algorithm, `ES256` or
+`HS256`, and its `audience`; `keySet`, `{ issuers, ask(issuer, signal) }`, asked for the issuers it
+names alone, when no key of a token's issuer names its `kid`, once a minute at most for that issuer,
+with a signal its deadline aborts, its answer held ten minutes, and a `kid` that comes while the
+minute runs waiting for the ask its deadline lets go; and an `ELSEWHERE`'s
+`verify(carried, signal)`, given what the transport carried, which settles with `{ id, data, end }`,
+or with none when the credential does not hold. The server verifies a `JWT` one way, as an access
+token of RFC 9068's profile (spec 13.8), on its own clock, and takes the schemes it is given
+something for: a request presenting another is refused `CREDENTIAL_UNSUPPORTED`, whose detail names
+those it takes. A credential's session has no inactivity timeout: no message, listen or silence
+moves its end, and it ends at its end, with its connection, or by
+`server.router.endSession(identifier)`, which ends it and the subscriptions it bounds on every
+connection that keeps it; a credential that still holds opens it anew. The server keeps one, and
+times its end, only while it bounds a subscription, and a call whose credential resolves to the same
+identifier moves that end to the later of the two: a credential renewed keeps its subscriptions.
 
 Each request runs in its call's session, which its admission reads and its callback receives as
-`session`: its connection's, its data a copy the call keeps, when it presents none or that
-session's token as `OPAQUE`, compared in constant time; a credential's, with its own credential's
-data — a `JWT`'s claims set, frozen — when it presents a `JWT` or an `ELSEWHERE`, never its
-connection's. A credential that does not hold — another token, an expired `JWT` — is refused
-`SESSION_REQUIRED`, whatever its procedure requires, and a verifier that fails `PROCEDURE_FAILED`,
-reported. A server's router resolves it once per request, its call id held, before
-`beforeRequest`: none and `OPAQUE` by its `sessionOf(request, signal)` — the server's gives the
-connection's session from its sessions — in the turn the request came; a `JWT` or an `ELSEWHERE`
-by its `credentials`, in a later turn, whether its verifier waits or not. A cancel, or its
-connection's close, meanwhile aborts the signal its verifier holds, and what it settles to then is
-dropped. `requireSession` is the `beforeRequest` of every other procedure: it tests the call's
-session, never the connection's, and refuses a call in none with `SESSION_REQUIRED`; composed with
+`session`: its connection's, its data a copy the call keeps, when it presents none or that session's
+token as `OPAQUE`, compared in constant time; a credential's, with its own credential's data — a
+`JWT`'s claims set, frozen — when it presents a `JWT` or an `ELSEWHERE`, never its connection's. A
+credential that does not hold — another token, an expired `JWT` — is refused `SESSION_REQUIRED`,
+whatever its procedure requires, and a verifier that fails `PROCEDURE_FAILED`, reported. A server's
+router resolves it once per request, its call id held, before `beforeRequest`: none and `OPAQUE` by
+its `sessionOf(request, signal)` — the server's gives the connection's session from its sessions —
+in the turn the request came; a `JWT` or an `ELSEWHERE` by its `credentials`, in a later turn,
+whether its verifier waits or not. A cancel, or its connection's close, meanwhile aborts the signal
+its verifier holds, and what it settles to then is dropped. `requireSession` is the `beforeRequest`
+of every other procedure: it tests the call's session, never the connection's, and refuses a call in
+none with `SESSION_REQUIRED`; an admission's `SESSION_REQUIRED` to a call that presented a
+credential goes out `ACCESS_DENIED`, so its client keeps a credential that may hold; composed with
 `&&`, it loses that refusal and the composition refuses with `ACCESS_DENIED` — a caller that wants
 to keep it puts `refusal` on its own function.
 
@@ -539,11 +542,11 @@ router's `credentials` — a `JWT` against the audiences its destinations were r
 that one that does not hold is refused `SESSION_REQUIRED` there. Then `beforeRoute`, on its header
 and the call's session: a server's `requireSessionOrCredential` by default, which admits a call in
 leg A's connection's session, or one presenting a `JWT` or an `ELSEWHERE`, by its scheme alone;
-`requireSession` in its place refuses, `SESSION_REQUIRED`, every credential the relay forwards
-without verifying, and a router's relay admits nobody without one. Then its destination is looked
-up. Then its credential is held to what leg B carries: a `JWT` whose `aud` does not name its
-destination's audience, a destination registered with none, an `ELSEWHERE` over a leg B that carries
-no credential, a `JWT` or an `ELSEWHERE` over a leg B that leaves the machine in the clear, each
+`requireSession` in its place refuses, `ACCESS_DENIED`, every credential the relay forwards without
+verifying, and a router's relay admits nobody without one. Then its destination is looked up. Then
+its credential is held to what leg B carries: a `JWT` whose `aud` does not name its destination's
+audience, a destination registered with none, an `ELSEWHERE` over a leg B that carries no
+credential, a `JWT` or an `ELSEWHERE` over a leg B that leaves the machine in the clear, each
 refused `DESTINATION_UNREACHABLE`, nothing tried. Then it is held to the smaller of the two legs'
 limits, leg B's header counted with its credential, call by call. Every refusal falls on the
 opening. A requester presenting none or `OPAQUE` that is not admitted learns only whether the relay

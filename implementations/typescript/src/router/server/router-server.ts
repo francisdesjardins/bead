@@ -74,6 +74,7 @@ export type {
   ICancelHeader,
   ICredentials,
   IElsewhereSession,
+  IJwtKeySet,
   IJwtSetKey,
   IChunkHeader,
   ICreditHeader,
@@ -176,12 +177,9 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     { below: 'its transport', layer: "a server's router" }
   );
   const emitter = createEmitter<RouterServerEventMap>();
-  // what resolves a JWT and an ELSEWHERE, on the router's clock: a key not shaped, and keys without
-  // an audience unless its relay verifies against its destinations', are refused here
-  const credentials = createCredentialResolver(options?.credentials, {
-    clock,
-    relayVerifies: options?.relay?.verifies === true,
-  });
+  // what resolves a JWT and an ELSEWHERE, on the router's clock: a key not shaped, a key set without
+  // an issuer, and keys without an audience, whatever its relay does, are refused here
+  const credentials = createCredentialResolver(options?.credentials, { clock });
   // the credentials' sessions its connections keep, each while it holds a subscription
   const credentialSessions = createCredentialSessions({
     clock,

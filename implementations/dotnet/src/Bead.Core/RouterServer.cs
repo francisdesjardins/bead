@@ -113,7 +113,7 @@ public sealed record RouterServerOptions
     /// request presenting a scheme it takes none of is refused CREDENTIAL_UNSUPPORTED. Given JWT keys
     /// or a key set, its limits hold a chunk's envelope and an envelope of 1,024 bytes at least, or
     /// they do not hold together, an <see cref="ArgumentException"/> (spec 12.2); and they come with
-    /// their audience, unless its relay verifies, or they are an <see cref="ArgumentException"/>
+    /// their audience, whatever its relay does, or they are an <see cref="ArgumentException"/>
     /// (spec 13.8).
     /// </summary>
     public Credentials? Credentials { get; init; }
@@ -198,8 +198,6 @@ public sealed class RouterServer : IRouterLike, IDisposable
             });
         _sessionTokenOf = options?.SessionTokenOf;
         _sessionOf = options?.SessionOf;
-        _resolver = new CredentialResolver(options?.Credentials, (clock, options?.Relay?.Verifies ?? false));
-        _credentialSchemes = [.. (options?.CredentialSchemes ?? []).Concat(_resolver.Schemes).Distinct().Order()];
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions
@@ -209,6 +207,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 Scheduler = options?.Scheduler,
                 Clock = clock,
             });
+
+        // * what a key set's deadline does goes on the router's scheduler, as its other timers' work
+        _resolver = new CredentialResolver(options?.Credentials, (clock, _core.Post));
+        _credentialSchemes = [.. (options?.CredentialSchemes ?? []).Concat(_resolver.Schemes).Distinct().Order()];
         CredentialResolver.AssertLimits(_core.Limits, _resolver.TakesJwt);
         _relay = new Relay(
             new RelayRouter
@@ -485,10 +487,11 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     /// <summary>
-    /// Ends a credential's session by its identifier, as a token's revocation does (RFC 7009), on
-    /// every connection that keeps it: each subscription it bounds fails SESSION_REQUIRED on its call
-    /// id (spec 13.9). An identifier no connection keeps ends nothing; a credential that still holds
-    /// opens its session anew. Settles once each failure was tried; one that cannot go out is
+    /// Ends a credential's session by its identifier on every connection that keeps it, and nothing
+    /// else: each subscription it bounds fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// identifier no connection keeps ends nothing. Ending a session refuses no credential: one that
+    /// still holds opens it anew, a call that resolved to it before it ended and subscribes as it is
+    /// answered after among them. Settles once each failure was tried; one that cannot go out is
     /// reported.
     /// </summary>
     public Task EndSession(SessionIdentifier identifier)

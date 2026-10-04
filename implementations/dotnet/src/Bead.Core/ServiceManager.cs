@@ -97,7 +97,9 @@ public interface IRequestSerializerServer<TRequest, TResponse>
 
 /// <summary>
 /// Whether a request may reach a resolver, on its header alone: only <c>true</c> admits it; anything
-/// else refuses it, with <see cref="Refusal"/>, or with <see cref="ProtocolCode.AccessDenied"/>.
+/// else refuses it, with <see cref="Refusal"/>, or with <see cref="ProtocolCode.AccessDenied"/>. A
+/// refusal SESSION_REQUIRED of a call that presented a credential is answered ACCESS_DENIED, its
+/// detail kept: the credential may hold, and its requester would withdraw it (spec 9.2, step 5).
 /// </summary>
 public sealed class BeforeRequest
 {
@@ -136,6 +138,27 @@ public sealed class BeforeRequest
     public bool Admits(AdmissionRequest request)
     {
         return _admits(request);
+    }
+
+    /// <summary>
+    /// What the admission makes of a request: none admits it; any other its refusal, or
+    /// ACCESS_DENIED. A refusal SESSION_REQUIRED of a call whose header presents a credential goes
+    /// out ACCESS_DENIED, its detail kept (spec 9.2, step 5). An admission that throws throws.
+    /// </summary>
+    internal Failure? RefusalOf(AdmissionRequest request)
+    {
+        if (Admits(request))
+        {
+            return null;
+        }
+
+        var refusal = Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+
+        // ! never SESSION_REQUIRED to a call that presented a credential: it may hold, and its
+        // requester would withdraw it (RFC 6750 §3.1, a token short of its scope answered 403)
+        return refusal.Code == (ushort)ProtocolCode.SessionRequired && request.Header.Credential is not null
+            ? refusal with { Code = (ushort)ProtocolCode.AccessDenied }
+            : refusal;
     }
 }
 
@@ -883,14 +906,7 @@ public sealed class ServiceManager
 
         public Failure? Admit(AdmissionRequest request)
         {
-            var beforeRequest = made.BeforeRequest;
-
-            if (beforeRequest is null || beforeRequest.Admits(request))
-            {
-                return null;
-            }
-
-            return beforeRequest.Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+            return made.BeforeRequest?.RefusalOf(request);
         }
 
         public async Task Handle(RequestResolverProps props)

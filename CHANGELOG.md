@@ -77,14 +77,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it bounds a subscription, its end timed on the clock the side is given, the wall clock read again
   at each step and a timer of 2³¹ − 1 ms at most armed toward it. A credential renewed under the
   same identifier moves its end, and `endSession`, `EndSession`, ends it by its identifier on every
-  connection that keeps it. A connection holds one subscription per procedure and per session.
+  connection that keeps it, and nothing else: a credential that still holds opens it anew. A
+  connection holds one subscription per procedure and per session.
 - `credentials`, `Credentials`, among a server's and a client's options: a `JWT`'s keys, each with
-  its issuer and its algorithm, its audience, and a key set the side asks for a `kid` it holds no
-  key of, once a minute at most for an issuer, its answer held and an ask under way shared; and an
-  `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the transport carried and the call's
-  signal. A side given a `JWT`'s keys holds its limits to 1,024 bytes at least (section 12.2), and
-  keys or a key set given without an audience are refused as the side is built, unless its relay
-  verifies. A `JWT`'s verdict reads the wall clock once its signature has verified.
+  its issuer and its algorithm, its audience, and a key set, given with the issuers it answers for
+  and asked for those alone, when no key of a token's issuer names its `kid`, once a minute at most
+  for an issuer, with a signal its deadline aborts: its answer is held ten minutes, an ask under way
+  is shared, and a `kid` that comes while its issuer's minute runs waits for the ask its deadline
+  lets go; and an `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the transport carried and
+  the call's signal. A side given a `JWT`'s keys holds its limits to 1,024 bytes at least (section
+  12.2), and keys or a key set given without an audience are refused as the side is built. A
+  `JWT`'s verdict reads the wall clock once its signature has verified.
 - A client's credential, `credential`, `Credential`, by default and per call: `NONE`, `OPAQUE`, a
   `JWT` or an `ELSEWHERE`. A default withdrawn once a call that presented it is refused
   `SESSION_REQUIRED`, while it is still, by value, the credential that call presented, tells its
@@ -95,16 +98,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `carriesCredential` and `isSecure`, on both sides, and a server's transport may be told what
   stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy in the clear.
 - A relay forwards a credential, and its destination verifies it (section 14): its default
-  admission is `requireSessionOrCredential`, `RequireSessionOrCredential`; a destination is
+  admission is `requireSessionOrCredential`, `RequireSessionOrCredential`, and an admission never
+  answers `SESSION_REQUIRED` to a call that presented a credential, but `ACCESS_DENIED`, so its
+  client keeps a credential that may hold; a destination is
   registered with the audience it verifies; `verifies`, `Verifies`, has the relay verify what it
   forwards against its destinations' audiences; a `JWT` crosses with its same bytes to a destination
   of its audience, an `ELSEWHERE` moves to leg B's transport, and a call the relay cannot so forward
   is refused `DESTINATION_UNREACHABLE` at a step of its own, 14.3's fifth; leg B's header counts its
   credential, at the sixth.
-- The interop service verifies a `JWT` under two issuers' published test keys and a key set's
-  third, and an `ELSEWHERE` of its own auth-scheme, `Interop`; `revoke` ends a credential's session
-  by its identifier, `register` takes the audience its destination verifies, and `ticks` and `tick`
-  hold per session. 221 vectors in 10 groups, where 123 were in 9; 134 conversations, where 89 were;
+- The interop service verifies a `JWT` under two issuers' published test keys and a key set's third,
+  and an `ELSEWHERE` of its own auth-scheme, `Interop`; `endSession` ends a credential's session by
+  its identifier, `register` takes the audience its destination verifies, and `ticks` and `tick`
+  hold per session. 221 vectors in 10 groups, where 123 were in 9; 139 conversations, where 89 were;
   56 transports' cases, where 50 were.
 
 ### Changed

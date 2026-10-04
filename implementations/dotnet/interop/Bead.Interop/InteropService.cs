@@ -36,6 +36,11 @@ public static class InteropService
     // how long the key set takes to answer, on the server's clock, so a conversation sees each ask
     private static readonly TimeSpan KeySetWait = TimeSpan.FromMilliseconds(1_000);
 
+    // the issuers whose key set answers as their words say: its keys at its first ask alone, and
+    // never; any other it names answers its keys at every ask
+    private const string RotatedIssuer = "https://rotated.interop.bead.example";
+    private const string StalledIssuer = "https://stalled.interop.bead.example";
+
     /// <summary>What the interop service's payloads are, to answer: JSON, in UTF-8. What is not JSON throws.</summary>
     public static IRequestSerializerServer<JsonElement, JsonElement> Json
     {
@@ -89,21 +94,30 @@ public static class InteropService
     /// <summary>
     /// The interop service's credentials, <c>credentials.jwt</c> and <c>credentials.elsewhere</c>,
     /// on <paramref name="clock"/>, the clock its server is given (decision 0011): the two issuers'
-    /// published test keys and their audience; the key set, which answers its issuer its keys, and
-    /// any other none, each time once 1,000 ms passed on that clock; and the ELSEWHERE verifier, by
-    /// its grammar, which settles on that clock whatever its signal.
+    /// published test keys and their audience; the key set, given with the issuers it answers for,
+    /// which answers each as its words say, on that clock whatever its signal, and fails at once for
+    /// any other, its rotated issuer's asks counted for this key set alone; and the ELSEWHERE
+    /// verifier, by its grammar, which settles on that clock whatever its signal.
     /// </summary>
     public static Credentials CredentialsOf(TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
 
         var jwt = Manifest.GetProperty("credentials").GetProperty("jwt");
-        var keySet = jwt.GetProperty("keySet");
-        var keySetIssuer = keySet.GetProperty("issuer").GetString()!;
-        IReadOnlyList<JwtSetKey> keySetKeys = [.. keySet.GetProperty("keys").EnumerateArray().Select((key) =>
-        {
-            return new JwtSetKey { Algorithm = AlgorithmOf(key), Jwk = key.GetProperty("jwk").Clone() };
-        })];
+        var answered = jwt.GetProperty("keySet").GetProperty("issuers").EnumerateArray().ToDictionary(
+            (named) =>
+            {
+                return named.GetProperty("issuer").GetString()!;
+            },
+            (named) =>
+            {
+                return (IReadOnlyList<JwtSetKey>)[.. named.GetProperty("keys").EnumerateArray().Select((key) =>
+                {
+                    return new JwtSetKey { Algorithm = AlgorithmOf(key), Jwk = key.GetProperty("jwk").Clone() };
+                })];
+            },
+            StringComparer.Ordinal);
+        var rotatedAsks = 0;
 
         return new Credentials
         {
@@ -112,17 +126,41 @@ public static class InteropService
             {
                 return new JwtKey { Issuer = key.GetProperty("issuer").GetString()!, Algorithm = AlgorithmOf(key), Jwk = key.GetProperty("jwk").Clone() };
             })],
-            KeySet = async (issuer) =>
+            KeySet = new JwtKeySet
             {
-                await Task.Delay(KeySetWait, clock);
+                Issuers = [.. answered.Keys],
+                Ask = (issuer, _) =>
+                {
+                    if (!answered.TryGetValue(issuer, out var keys))
+                    {
+                        return ValueTask.FromException<IReadOnlyList<JwtSetKey>>(
+                            new InvalidOperationException($"the interop key set names no issuer {issuer}"));
+                    }
 
-                return issuer == keySetIssuer ? keySetKeys : [];
+                    // ! never settles, and arms no timer: its ask fails at its deadline alone
+                    if (issuer == StalledIssuer)
+                    {
+                        return new ValueTask<IReadOnlyList<JwtSetKey>>(new TaskCompletionSource<IReadOnlyList<JwtSetKey>>().Task);
+                    }
+
+                    var isWithdrawn = issuer == RotatedIssuer && Interlocked.Increment(ref rotatedAsks) > 1;
+
+                    return Answer((isWithdrawn ? [] : keys, clock));
+                },
             },
             Verify = (carried, _) =>
             {
                 return Verify((carried, clock));
             },
         };
+    }
+
+    // the key set's answer, once 1,000 ms passed on the server's clock, whatever its signal
+    private static async ValueTask<IReadOnlyList<JwtSetKey>> Answer((IReadOnlyList<JwtSetKey> Keys, TimeProvider Clock) answering)
+    {
+        await Task.Delay(KeySetWait, answering.Clock);
+
+        return answering.Keys;
     }
 
     // a key's one algorithm, as the manifest names it
@@ -186,7 +224,7 @@ public static class InteropService
         };
     }
 
-    // a credential's session's identifier, as revoke takes it: an object of these members alone,
+    // a credential's session's identifier, as endSession takes it: an object of these members alone,
     // each a string — {"issuer","sub"} or {"issuer","sid"}, a JWT's; {"id"}, an ELSEWHERE's
     private static SessionIdentifier IdentifierOf(JsonElement request)
     {
@@ -208,7 +246,7 @@ public static class InteropService
             return value.ValueKind != JsonValueKind.String;
         }))
         {
-            throw new ArgumentException("revoke names a credential's session by strings alone", nameof(request));
+            throw new ArgumentException("endSession names a credential's session by strings alone", nameof(request));
         }
 
         string StringOf(string name)
@@ -221,7 +259,7 @@ public static class InteropService
             ["issuer", "sub"] => new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = StringOf("issuer"), Sub = StringOf("sub") },
             ["issuer", "sid"] => new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = StringOf("issuer"), Sid = StringOf("sid") },
             ["id"] => new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = StringOf("id") },
-            _ => throw new ArgumentException("revoke names a credential's session by {issuer, sub}, {issuer, sid} or {id}", nameof(request)),
+            _ => throw new ArgumentException("endSession names a credential's session by {issuer, sub}, {issuer, sid} or {id}", nameof(request)),
         };
     }
 
@@ -256,7 +294,8 @@ public static class InteropService
     /// registers itself as a destination of the server's relay by <c>register</c>, with the audience
     /// it verifies; the destination
     /// it registered last is kept by its handle, once it closed too, for <c>unregister</c> to take
-    /// out. <c>revoke</c> ends a credential's session on every connection that keeps it.
+    /// out. <c>endSession</c> ends a credential's session on every connection that keeps it, and
+    /// nothing else.
     /// </summary>
     public static void Offer(Server<string> server)
     {
@@ -424,8 +463,9 @@ public static class InteropService
             return response.Answer(JsonSerializer.SerializeToElement(NameOf(request.Session)));
         });
 
-        // a credential's session ended by its identifier, on every connection that keeps it
-        services.GetRequestResolver(ProcedureOf("revoke"), dependencies)(async (request, response) =>
+        // a credential's session ended by its identifier, on every connection that keeps it, and
+        // nothing else: a credential that still holds opens it anew
+        services.GetRequestResolver(ProcedureOf("endSession"), dependencies)(async (request, response) =>
         {
             await router.EndSession(IdentifierOf(request.Payload));
             await response.Answer(Null);

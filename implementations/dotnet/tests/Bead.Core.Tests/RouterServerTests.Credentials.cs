@@ -55,11 +55,15 @@ public sealed partial class RouterServerTests
             Credentials = new Credentials
             {
                 Audience = Audience,
-                KeySet = (_) =>
+                KeySet = new JwtKeySet
                 {
-                    asking.Counts.Asks += 1;
+                    Issuers = [Issuer],
+                    Ask = (_, _) =>
+                    {
+                        asking.Counts.Asks += 1;
 
-                    return new ValueTask<IReadOnlyList<JwtSetKey>>(asking.Answer.Task);
+                        return new ValueTask<IReadOnlyList<JwtSetKey>>(asking.Answer.Task);
+                    },
                 },
             },
         });
@@ -566,9 +570,13 @@ public sealed partial class RouterServerTests
         var keys = new Credentials
         {
             Audience = "bead-interop",
-            KeySet = (_) =>
+            KeySet = new JwtKeySet
             {
-                return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
+                Issuers = ["https://keys.example"],
+                Ask = (_, _) =>
+                {
+                    return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
+                },
             },
         };
 
@@ -597,32 +605,89 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
-    public void Refuses_as_it_is_built_keys_or_a_key_set_without_an_audience_unless_its_relay_verifies()
+    public async Task Answers_an_admission_s_SESSION_REQUIRED_to_a_call_that_presented_a_credential_ACCESS_DENIED_and_to_one_that_presented_none_SESSION_REQUIRED()
+    {
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Audience = Audience,
+                Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = Jwk }],
+                Verify = (_, _) =>
+                {
+                    return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Id = "ada" });
+                },
+            },
+            SessionOf = (request, _) =>
+            {
+                return ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (Token, "leg A")));
+            },
+        });
+        _transport.Open(First);
+
+        // an admission of the application's own, which refuses every call with SESSION_REQUIRED, its
+        // detail its own
+        Services.GetRequestResolver(
+            Echo,
+            new RequestResolverDependencies<string, string>
+            {
+                Serializer = Text,
+                BeforeRequest = new BeforeRequest(
+                    (_) =>
+                    {
+                        return false;
+                    },
+                    Failure.OfProtocol(ProtocolCode.SessionRequired, "not this one")),
+            })((_, response) =>
+            {
+                return response.Answer("admitted");
+            });
+        Deliver(First, RequestOf(1));
+        Deliver(First, Presenting(RequestOf(3), Token));
+        Deliver(First, Presenting(RequestOf(5), Credential.Jwt(Holding())));
+        DeliverElsewhere(First, (7, Carried));
+        await Settle();
+
+        // each credential held, and its call in a session: the admission's refusal is not the
+        // credential's, which its requester keeps
+        Assert.Equal(
+            ["1 SessionRequired not this one", "3 AccessDenied not this one", "5 AccessDenied not this one", "7 AccessDenied not this one"],
+            _transport.Sent
+                .Select((entry) =>
+                {
+                    return $"{entry.Envelope.Header.CallId} {CodeOf(entry.Envelope.Failure!)} {entry.Envelope.Failure!.Detail}";
+                })
+                .Order(StringComparer.Ordinal));
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public void Refuses_as_it_is_built_keys_or_a_key_set_without_an_audience_whatever_its_relay_does_and_a_key_set_given_no_issuer()
     {
         var keys = new Credentials { Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = Jwk }] };
-        var keySet = new Credentials
+        var ask = (string _, CancellationToken _) =>
         {
-            KeySet = (_) =>
-            {
-                return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
-            },
+            return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
         };
+        var keySet = new Credentials { KeySet = new JwtKeySet { Issuers = ["https://keys.example"], Ask = ask } };
 
         foreach (var credentials in new[] { keys, keySet })
         {
-            foreach (var relay in new[] { null, new RelayOptions { Verifies = false } })
+            // a relay that verifies holds the audiences of its destinations, but a request to the
+            // server itself holds its own
+            foreach (var relay in new[] { null, new RelayOptions { Verifies = false }, new RelayOptions { Verifies = true } })
             {
                 Assert.Throws<ArgumentException>(() =>
                 {
                     Start(new RouterServerOptions { Credentials = credentials, Relay = relay });
                 });
             }
-
-            // a relay that verifies holds the audiences of its destinations instead
-            Start(new RouterServerOptions { Credentials = credentials, Relay = new RelayOptions { Verifies = true } });
-            Assert.Empty(Router.Destinations());
-            Router.Dispose();
         }
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            Start(new RouterServerOptions { Credentials = new Credentials { Audience = Audience, KeySet = new JwtKeySet { Issuers = [], Ask = ask } } });
+        });
 
         // an ELSEWHERE's verifier needs none
         Start(new RouterServerOptions

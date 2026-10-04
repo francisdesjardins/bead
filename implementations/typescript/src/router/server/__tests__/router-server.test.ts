@@ -44,6 +44,7 @@ import {
   LIMIT_DEFAULTS,
   ProgrammerError,
   ProtocolCode,
+  requireSession,
   SERVER_FAILURES,
   TimeoutError,
   type IJwtKey,
@@ -2250,18 +2251,21 @@ test.describe('createRouterServer, credentials', () => {
     return `${header}.${claims}.${signature}`;
   };
 
-  /** A key set that records each issuer asked, and answers as each ask is settled. */
+  /** A key set for {@link SET_ISSUER} that records each ask, and answers as each is settled. */
   const createKeySet = () => {
     const asks: { issuer: string; settle: PromiseWithResolvers<readonly IJwtSetKey[]> }[] = [];
 
     return {
       asks,
-      keySet: (issuer: string) => {
-        const settle = Promise.withResolvers<readonly IJwtSetKey[]>();
+      keySet: {
+        ask: (issuer: string) => {
+          const settle = Promise.withResolvers<readonly IJwtSetKey[]>();
 
-        asks.push({ issuer, settle });
+          asks.push({ issuer, settle });
 
-        return settle.promise;
+          return settle.promise;
+        },
+        issuers: [SET_ISSUER],
       },
     };
   };
@@ -2371,6 +2375,69 @@ test.describe('createRouterServer, credentials', () => {
       [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
       [first, 'failure', 5, ProtocolCode.CREDENTIAL_UNSUPPORTED],
     ]);
+  });
+
+  test('answers an admission’s SESSION_REQUIRED to a call that presented a credential ACCESS_DENIED, and to one that presented none SESSION_REQUIRED', async () => {
+    const { carry, deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: {
+        audience: AUDIENCE,
+        keys: [KEY],
+        verify: () => {
+          return Promise.resolve({ id: 'ada' });
+        },
+      },
+      sessionOf: ({ header }) => {
+        return header.credential === undefined ? undefined : Object.freeze({ data: 'leg A' });
+      },
+      sessionTokenOf: () => {
+        return TOKEN;
+      },
+    });
+    const errors = recordErrors(router);
+
+    // an admission of the application's own, which refuses every call with SESSION_REQUIRED, its
+    // detail its own
+    createServiceManager(router).getRequestResolver(echo, {
+      beforeRequest: Object.assign(
+        () => {
+          return false;
+        },
+        { refusal: { ...SERVER_FAILURES.sessionRequired, detail: 'not this one' } }
+      ),
+      serializer: answering,
+    })((_request, response) => {
+      return response('admitted');
+    });
+    deliver(first, requestOf(1));
+    deliver(first, requestOf(3, { credential: OPAQUE }));
+    deliver(
+      first,
+      requestOf(5, {
+        credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600) },
+      })
+    );
+    carry(first, { credential: CARRIED, envelope: requestOf(7, { credential: ELSEWHERE }) });
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(4);
+
+    // each credential held, and its call in a session: the admission's refusal is not the
+    // credential's, which its requester keeps
+    expect(
+      failuresOf(sent).toSorted(([a], [b]) => {
+        return Number(a) - Number(b);
+      })
+    ).toEqual([
+      [1, ProtocolCode.SESSION_REQUIRED, 'not this one'],
+      [3, ProtocolCode.ACCESS_DENIED, 'not this one'],
+      [5, ProtocolCode.ACCESS_DENIED, 'not this one'],
+      [7, ProtocolCode.ACCESS_DENIED, 'not this one'],
+    ]);
+    expect(errors).toEqual([]);
   });
 
   test('asks verify once per request with exactly what its transport carried and a live signal, never for none, OPAQUE or an ELSEWHERE that carried nothing', async () => {
@@ -2583,8 +2650,11 @@ test.describe('createRouterServer, credentials', () => {
       jwk: { k: 'A'.repeat(43), kty: 'oct' },
     } as const;
 
-    const keySet = () => {
-      return Promise.resolve([]);
+    const keySet = {
+      ask: () => {
+        return Promise.resolve([]);
+      },
+      issuers: ['https://keys.example'],
     };
 
     for (const credentials of [{ keys: [key] }, { keySet }]) {
@@ -2618,29 +2688,33 @@ test.describe('createRouterServer, credentials', () => {
     expect(router.limits.chunkBytes).toBe(1_000);
   });
 
-  test('refuses as it is built keys or a key set without an audience, unless its relay verifies', () => {
+  test('refuses as it is built keys or a key set without an audience, whatever its relay does, and a key set given no issuer', () => {
     const { transport } = createScriptedTransport();
     const key = {
       algorithm: 'HS256',
       issuer: 'https://issuer.example',
       jwk: { k: 'A'.repeat(43), kty: 'oct' },
     } as const;
-    const keySet = () => {
+    const ask = () => {
       return Promise.resolve([]);
     };
+    const keySet = { ask, issuers: ['https://keys.example'] };
 
     for (const credentials of [{ keys: [key] }, { keySet }]) {
-      for (const relay of [undefined, { verifies: false }]) {
+      // a relay that verifies holds the audiences of its destinations, but a request to the
+      // server itself holds its own
+      for (const relay of [undefined, { verifies: false }, { verifies: true }]) {
         expect(() => {
           return createRouterServer(transport, { credentials, relay });
         }).toThrow(ProgrammerError);
       }
-
-      // a relay that verifies holds the audiences of its destinations instead
-      using verifying = createRouterServer(transport, { credentials, relay: { verifies: true } });
-
-      expect(verifying.destinations()).toEqual([]);
     }
+
+    expect(() => {
+      return createRouterServer(transport, {
+        credentials: { audience: 'https://bead.example', keySet: { ask, issuers: [] } },
+      });
+    }).toThrow(ProgrammerError);
   });
 
   test('holds one subscription a procedure per session of a connection, its connection’s and each credential’s, each notified alone, and ends a credential’s by its identifier', async () => {
@@ -3130,6 +3204,91 @@ test.describe('createRouterServer, relaying', () => {
         })?.header;
       })
     ).toEqual([{ callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 }]);
+  });
+
+  test('answers a JWT and an ELSEWHERE it forwards without verifying ACCESS_DENIED once beforeRoute is requireSession, a call in none SESSION_REQUIRED, and relays an OPAQUE that holds', async () => {
+    using relayed = createRelayed({
+      relay: { beforeRoute: requireSession },
+      sessionOf: ({ header }) => {
+        const { credential } = header;
+
+        return credential !== undefined && 'token' in credential && credential.token === TOKEN
+          ? Object.freeze({ data: 'leg A' })
+          : undefined;
+      },
+    });
+    const { carry, deliver, errors, pipe, sent } = relayed;
+
+    deliver(
+      first,
+      requestOf(1, {
+        credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+        destinationId: 7,
+      })
+    );
+    carry(first, {
+      credential: 'Bearer mF_9.B5f-4.1JqM',
+      envelope: requestOf(3, {
+        credential: { scheme: CredentialScheme.ELSEWHERE },
+        destinationId: 7,
+      }),
+    });
+    deliver(first, requestOf(5, { destinationId: 7 }));
+    deliver(
+      first,
+      requestOf(7, { credential: OPAQUE, destinationId: 7, payload: text.encode('hi') })
+    );
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(4);
+
+    expect(
+      sent
+        .map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.FAILURE
+            ? [envelope.header.callId, envelope.failure.code, envelope.failure.relays]
+            : [envelope?.header.callId, envelope?.kind];
+        })
+        .toSorted(([a], [b]) => {
+          return Number(a) - Number(b);
+        })
+    ).toEqual([
+      [1, ProtocolCode.ACCESS_DENIED, 0],
+      [3, ProtocolCode.ACCESS_DENIED, 0],
+      [5, ProtocolCode.SESSION_REQUIRED, 0],
+      [7, EnvelopeKind.RESULT],
+    ]);
+    // leg B carried the OPAQUE call alone
+    expect(pipe.sent.client).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps the default JWT a client presents through a relay whose beforeRoute is requireSession: its ACCESS_DENIED withdraws nothing', async () => {
+    const legA = createPipedTransports({ connectionHandle: first });
+    const credential = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+    using router = createRouterServer(legA.server, { relay: { beforeRoute: requireSession } });
+    using requester = createRouterClient(legA.client, { credential });
+    using behind = createDevice();
+    const withdrawn: unknown[] = [];
+
+    router.registerDestination(behind.toDevice, { destinationId: 7 });
+    requester.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    legA.open();
+
+    await expect(
+      requester.request(text.encode('hi'), {
+        options: { destinationId: 7, timeout: 5_000 },
+        procedure: echo,
+      })
+    ).rejects.toMatchObject({ code: ProtocolCode.ACCESS_DENIED, relays: 0 });
+
+    expect(withdrawn).toEqual([]);
+    expect(requester.credential).toEqual(credential);
+    expect(behind.pipe.sent.client).toEqual([]);
   });
 
   test('refuses before leg B — the routing not admitted, the destination unknown, a subscription, a payload past the target’s limit — and sends the target nothing', async () => {

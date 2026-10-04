@@ -34,7 +34,7 @@ interface IInteropService {
   credentials: {
     jwt: {
       audience: string;
-      keySet: { issuer: string; keys: IJwtSetKey[] };
+      keySet: { issuers: { issuer: string; keys: IJwtSetKey[] }[] };
       keys: IJwtKey[];
     };
   };
@@ -79,6 +79,11 @@ export const JSON_SERIALIZER = Object.freeze({
 // how long the key set takes to answer, on the server's clock, so a conversation sees each ask
 const KEY_SET_MILLISECONDS = 1_000;
 
+// the key set's issuers that answer otherwise than with their keys at every ask: one whose key is
+// withdrawn after its first ask, and one whose ask never settles
+const ROTATED_ISSUER = 'https://rotated.interop.bead.example';
+const STALLED_ISSUER = 'https://stalled.interop.bead.example';
+
 // the ELSEWHERE verifier's words, once its auth-scheme, compared without regard to case, is read
 // (RFC 9110 §11.1): a holding value, or a failing one, each parameter's case its own (RFC 7405)
 const ELSEWHERE_SCHEME = 'interop ';
@@ -112,7 +117,7 @@ const nameOf = (session: ICallSession | undefined): unknown => {
 };
 
 /**
- * The identifier `revoke` names: `{"issuer":i,"sub":s}` or `{"issuer":i,"sid":s}`, a `JWT`'s;
+ * The identifier `endSession` names: `{"issuer":i,"sub":s}` or `{"issuer":i,"sid":s}`, a `JWT`'s;
  * `{"id":d}`, an `ELSEWHERE`'s; of these members alone, each a string. Anything else throws, which
  * its server answers with PROCEDURE_FAILED and reports.
  */
@@ -135,7 +140,9 @@ const identifierOf = (request: unknown): SessionIdentifier => {
     return { id, scheme: CredentialScheme.ELSEWHERE };
   }
 
-  throw new Error('revoke names a session by {"issuer","sub"}, {"issuer","sid"} or {"id"} alone');
+  throw new Error(
+    'endSession names a session by {"issuer","sub"}, {"issuer","sid"} or {"id"} alone'
+  );
 };
 
 /** Settles with `value` once `milliseconds` passed on `clock`, or at once without them. */
@@ -223,16 +230,20 @@ export const interopVerifierOf = (
 };
 
 /**
- * What the interop server resolves a request's credential with, on `clock`, as
- * `credentials` in its manifest says: its `JWT` keys, its audience and its key set, which answers
- * once a second passed on `clock`, but under limits that hold no `JWT` (spec 12.2); and its
- * `ELSEWHERE` verifier.
+ * What the interop server resolves a request's credential with, on `clock`, as `credentials` in
+ * its manifest says: its `JWT` keys, its audience and its key set, but under limits that hold no
+ * `JWT` (spec 12.2); and its `ELSEWHERE` verifier. The key set answers for the manifest's issuers,
+ * each once a second passed on `clock`, whatever its signal: the keys issuer its keys at every ask;
+ * the rotated one its keys at its first ask, counted per key set, so per server, and none after; the
+ * stalled one never, arming no timer. Asked for any other, it fails at once.
  */
 export const interopCredentialsOf = (clock: IClock, limits?: RouterLimitsOptions): ICredentials => {
   const { audience, keySet, keys } = INTEROP_SERVICE.credentials.jwt;
   const chunkBytes = limits?.chunkBytes ?? LIMIT_DEFAULTS.chunkBytes;
   const maximumEnvelopeBytes = limits?.maximumEnvelopeBytes ?? LIMIT_DEFAULTS.maximumEnvelopeBytes;
   const verify = interopVerifierOf(clock);
+  // the rotated issuer's asks, so far
+  let rotatedAsks = 0;
 
   if (chunkBytes < JWT_LIMIT_BYTES || maximumEnvelopeBytes < JWT_LIMIT_BYTES) {
     return { verify };
@@ -240,13 +251,34 @@ export const interopCredentialsOf = (clock: IClock, limits?: RouterLimitsOptions
 
   return {
     audience,
-    keySet: (issuer) => {
-      return afterOn(clock, {
-        milliseconds: KEY_SET_MILLISECONDS,
-        value: () => {
-          return issuer === keySet.issuer ? keySet.keys : [];
-        },
-      });
+    keySet: {
+      ask: (issuer) => {
+        const named = keySet.issuers.find((answering) => {
+          return answering.issuer === issuer;
+        });
+
+        if (named === undefined) {
+          return Promise.reject(new Error(`the interop key set answers for no issuer ${issuer}`));
+        }
+
+        if (issuer === STALLED_ISSUER) {
+          return Promise.withResolvers<IJwtSetKey[]>().promise;
+        }
+
+        rotatedAsks += issuer === ROTATED_ISSUER ? 1 : 0;
+
+        const isWithdrawn = issuer === ROTATED_ISSUER && rotatedAsks > 1;
+
+        return afterOn(clock, {
+          milliseconds: KEY_SET_MILLISECONDS,
+          value: () => {
+            return isWithdrawn ? [] : named.keys;
+          },
+        });
+      },
+      issuers: keySet.issuers.map(({ issuer }) => {
+        return issuer;
+      }),
     },
     keys,
     verify,
@@ -558,9 +590,9 @@ export const offerInterop = (server: InteropServer): void => {
     }
   );
 
-  // ends a credential's session by its identifier on every connection that keeps it, as a token's
-  // revocation does, and answers once it did
-  services.getRequestResolver(procedureOf('revoke'), { serializer: JSON_SERIALIZER })(
+  // ends a credential's session by its identifier on every connection that keeps it, and nothing
+  // else, and answers once it did
+  services.getRequestResolver(procedureOf('endSession'), { serializer: JSON_SERIALIZER })(
     async (request, response) => {
       await router.endSession(identifierOf(request.payload));
 

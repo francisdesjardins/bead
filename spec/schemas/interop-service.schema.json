@@ -118,27 +118,42 @@
               "minLength": 1
             },
             "keySet": {
-              "description": "The key set the server is given: the issuer it answers for, the keys it answers, each a JWK with its one algorithm, and when it answers.",
+              "description": "The key set the server is given, with the issuers it answers for (spec 13.8): each issuer, the keys it answers, each a JWK with its one algorithm, and what and when it answers; and what it does asked for any other issuer.",
               "type": "object",
-              "required": ["issuer", "keys", "answers"],
+              "required": ["issuers", "answers"],
               "additionalProperties": false,
               "properties": {
-                "issuer": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "keys": {
+                "issuers": {
                   "type": "array",
+                  "minItems": 1,
                   "items": {
                     "type": "object",
-                    "required": ["algorithm", "jwk"],
+                    "required": ["issuer", "keys", "answers"],
                     "additionalProperties": false,
                     "properties": {
-                      "algorithm": {
-                        "$ref": "#/$defs/jwtAlgorithm"
+                      "issuer": {
+                        "type": "string",
+                        "minLength": 1
                       },
-                      "jwk": {
-                        "$ref": "#/$defs/jwk"
+                      "keys": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["algorithm", "jwk"],
+                          "additionalProperties": false,
+                          "properties": {
+                            "algorithm": {
+                              "$ref": "#/$defs/jwtAlgorithm"
+                            },
+                            "jwk": {
+                              "$ref": "#/$defs/jwk"
+                            }
+                          }
+                        }
+                      },
+                      "answers": {
+                        "type": "string",
+                        "minLength": 1
                       }
                     }
                   }

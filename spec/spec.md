@@ -265,12 +265,17 @@ first that applies:
       transport carried nothing, is answered with `SESSION_REQUIRED`, whatever the procedure
       requires; its detail SHOULD say whether no credential came or one came and did not hold:
       `no credential came`, or `the credential does not hold`. A verifier that fails — it throws
-      or rejects, its key set cannot be reached — is answered with `PROCEDURE_FAILED`, and
-      reported, never with `SESSION_REQUIRED`, which would have its requester withdraw a
-      credential that holds (section 13.4);
+      or rejects, its key set's ask fails, unreached or unsettled at its deadline (section 13.8) —
+      is answered with `PROCEDURE_FAILED`, and reported, never with `SESSION_REQUIRED`, which
+      would have its requester withdraw a credential that holds (section 13.4);
    3. its admission, synchronous, on the call's session: answered with the admission's failure —
       `SESSION_REQUIRED`, `ACCESS_DENIED`, or another of the admission's block; `PROCEDURE_FAILED`
-      when the admission itself fails.
+      when the admission itself fails. An admission never answers `SESSION_REQUIRED` to a call that
+      presented a credential: the receiver answers its `SESSION_REQUIRED` to such a call with
+      `ACCESS_DENIED`, since the credential may hold and its requester would withdraw it.
+      `SESSION_REQUIRED` stays for a credential that does not resolve, at the second step, and for
+      a call that presented none, as an invalid token is answered 401 and a token short of its
+      scope 403 ([RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1)).
 6. A subscription opened on a connection that carries nothing back: `SUBSCRIPTION_UNSUPPORTED`.
 7. A payload, or the total a transfer declares, past the procedure's limit or the receiver's:
    `PAYLOAD_TOO_LARGE`. A transfer the receiver takes none of: the same.
@@ -604,8 +609,12 @@ in the clear.
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 5): a call never runs outside the session it presented. A procedure
 that requires a session tests the call's session, never the connection's: it refuses a call in none
-with `SESSION_REQUIRED`, and a call that presented a `JWT` is not in its connection's session,
-whatever that session holds. `ACCESS_DENIED` says that a session holds and is not allowed. A
+that presented no credential with `SESSION_REQUIRED`, and one that presented a credential it does
+not run in — a `JWT` or an `ELSEWHERE` a relay forwards without verifying (section 14.3) — with
+`ACCESS_DENIED`, since `SESSION_REQUIRED` would have its requester withdraw a credential that may
+hold (section 9.2, step 5). A call that presented a `JWT` is not in its connection's session,
+whatever that session holds. `ACCESS_DENIED` says that the call is not allowed as it came: a
+session holds and is not allowed, or a credential came that the admission does not take. A
 procedure that ends its connection's session ends it before it answers, so its own answer — or the
 failure of section 13.6, should one go out first — announces the end.
 
@@ -632,12 +641,13 @@ ends at once.
 13.8. A side verifies a `JWT` one way, as an access token of RFC 9068's profile in JWS Compact
 Serialization (RFC 7515), as RFC 8725 recommends. The application gives its keys, each a JWK
 (RFC 7517) with its issuer and its one algorithm, `ES256` or `HS256` (RFC 8725 §3.1), and its
-audience, or a set of them, as a relay that verifies holds those of its destinations
-(section 14.3): keys given without an audience, on a side whose relay does not verify, are the
-application's fault, refused as the side is built. The side reads the wall clock, _W_, a whole
-number of milliseconds since the epoch, once, as the token's signature has verified (step 7), so a
-verification that waits is judged as it ends. It takes these steps in this order, and the first that fails refuses the token for the reason it
-names:
+audience; a relay that verifies holds a token it forwards to the set of its destinations' audiences
+instead (section 14.3). Keys or a key set given without an audience are the application's fault,
+refused as the side is built, whatever its relay does: a request to the side itself, naming no
+destination, would hold its token to no audience, and refuse it. The side reads the wall clock,
+_W_, a whole number of milliseconds since the epoch, once, as the token's signature has verified
+(step 7), so a verification that waits is judged as it ends. It takes these steps in this order, and
+the first that fails refuses the token for the reason it names:
 
 1. `token`: the token is three parts apart by a period, each base64url without padding (RFC 4648
    §5) whose bits past its last byte are zero, and its header and its claims set are each a JSON
@@ -676,17 +686,38 @@ A key not shaped for its algorithm — an `ES256` one that is not `EC` on `P-256
 bytes each, an `HS256` one that is not `oct`, its `k` 32 bytes at least (RFC 7518 §3.2) — is the
 application's fault, never the token's: the verifier fails, and refuses nothing.
 
-A side may be given a key set besides its keys: asked for an issuer, it answers that issuer's keys
-(RFC 7517 §5), each a JWK with its one algorithm, and may wait. The keys it answered are held for
-that issuer beside the application's, until its next answer for that issuer replaces them, and
-step 4 finds a key among both: a token without a `kid` finds one only when its issuer has one key,
-the held ones counted. The side asks it for a token's `iss` when the token's `kid` names none of
-these keys, once a minute at most for that issuer: an ask sets a deadline a minute on, on its
-monotonic reading (decision 0011), before which no other goes for that issuer. A call that finds an
-ask under way waits on it, and its cancel ends its own wait, never the ask. A `kid` none names once
-the set answered, or before the deadline, is refused at step 4; while that issuer's last ask failed,
-the verifier fails instead (section 9.2, step 5), as when the set cannot be reached. The side
-fetches nothing itself: the key set is the application's to fetch.
+A side may be given a key set besides its keys, with the issuers it answers for, one at least; a
+key set given with none is the application's fault, refused as the side is built. Asked for one of
+them, with a signal, it answers that issuer's keys (RFC 7517 §5), each a JWK with its one
+algorithm, and may wait. The side asks it for no other issuer, compared octet for octet: a token
+whose `iss` it does not name is judged at once by the keys there are, asking nothing, so no peer
+has it asked for an issuer of the peer's choosing. The side asks it once a minute at most for an
+issuer: an ask sets that issuer's deadline a minute on, on the side's monotonic reading
+(decision 0011), and its signal aborts at that deadline. An ask that fails — the key set throws or
+rejects, answers what is not keys shaped for their algorithms, or comes to its deadline unsettled,
+what it settles to after being dropped — fails the verifier of every call that waits on it
+(section 9.2, step 5), as a key set that cannot be reached does.
+
+The keys an answer gave are held for its issuer, beside the application's, in place of those its
+last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
+reading is before the answer's plus 600,000 ms, and an ask that fails replaces none of them. The
+application's own keys are held for good. Step 4 finds a key among the application's keys and the
+held keys that serve.
+
+A token the keys that serve verify waits for nothing. One of an issuer the key set names, which they
+do not verify, waits for that issuer's keys while its key does not serve: while its `kid` names none
+of its issuer's keys that serve, whatever another issuer's key names, as a verifier asks again for a
+`kid` it does not know (OpenID Connect Core 1.0 §10.1.1); or, without a `kid`, while its issuer's
+held keys are past their ten minutes. It waits on its issuer's ask under way, when one is;
+otherwise, before that issuer's deadline, for the deadline and the ask that goes then, shared by
+every call that waits — at a deadline no call waits for, none goes; otherwise, on an ask that goes
+at once. As an ask answers, each call that waits on it is judged again: one whose key now serves, or
+whose ask went after its token came, is verified against the keys that serve, so a `kid` that answer
+did not name is refused then, at step 4 or past it; any other waits on, for the deadline and the ask
+then, since an ask that went before its token came may not know its key. A call's own signal — its
+cancel, which its requester's timeout sends as well (section 9.9), or its connection closing
+(section 9.10) — ends its own wait, never the ask. The side fetches nothing itself: the key set is
+the application's to fetch.
 
 _Vectors: `jwtVerdicts`._
 
@@ -716,12 +747,13 @@ and their values are equal, octet for octet — a `JWT`'s `{ issuer, sid }` or `
 credential resolves to the identifier of a session its connection keeps moves that end to the later
 of the two, in whatever order resolutions settle, and runs with it: a credential renewed keeps its
 subscriptions. One that resolves to a session not kept runs with its own end, and keeps it once it
-subscribes. The application ends a credential's session by its identifier, as a token's revocation
-does ([RFC 7009](https://www.rfc-editor.org/rfc/rfc7009)), on every connection that keeps it; a
-credential that still holds opens it anew. A session that ends — at its end, by its identifier, or
-with its connection — ends the subscriptions it bounds (section 13.6). A token under a subscription,
-its `exp` an hour past the reading that times its session, arms 3,660,000 ms; one 30 days past,
-2,147,483,647 ms, then 444,576,353.
+subscribes. The application ends a credential's session by its identifier: that session ends on
+every connection that keeps it, and the subscriptions it bounds with it, and nothing else. Ending a
+session refuses no credential, so a credential that still holds opens it anew — a call that resolved
+to it before it ended, and subscribes as it is answered after, among them (section 13.6). A session
+that ends — at its end, by its identifier, or with its connection — ends the subscriptions it
+bounds (section 13.6). A token under a subscription, its `exp` an hour past the reading that times
+its session, arms 3,660,000 ms; one 30 days past, 2,147,483,647 ms, then 444,576,353.
 
 13.10. A side resolves an `ELSEWHERE` by its verifier, the application's: a side given none takes
 no `ELSEWHERE` (section 9.2, step 5). It asks the verifier once per request that presents one and
@@ -791,9 +823,11 @@ opening, before any of its payload crosses — as section 9.2's credential, admi
    3. `beforeRoute`, synchronous, on the call's session. A relay with no `beforeRoute` admits
       nobody: `ACCESS_DENIED`. A server's relay admits by default with `requireSessionOrCredential`:
       a call in leg A's connection's session, or one whose header presents a `JWT`, or an
-      `ELSEWHERE` its transport carried, read from its credential scheme alone; any other, with
-      `SESSION_REQUIRED`. `requireSession` in its place tests the call's session (section 13.5), so
-      it refuses every credential the relay forwards without verifying.
+      `ELSEWHERE` its transport carried, read from its credential scheme alone; any other, a call
+      in none that presented none, with `SESSION_REQUIRED`. `requireSession` in its place tests the
+      call's session (section 13.5), so it refuses every credential the relay forwards without
+      verifying, with `ACCESS_DENIED`, as section 9.2 answers an admission's refusal of a call that
+      presented a credential: the credential may hold, and this relay does not take it unverified.
 
    A requester not admitted learns only whether the relay has any destination, when it presents
    none or `OPAQUE`, or presents anything to a relay that verifies: a `JWT` passes the default

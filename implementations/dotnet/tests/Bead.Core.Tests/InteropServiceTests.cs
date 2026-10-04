@@ -9,7 +9,8 @@ namespace Bead.Tests;
 /// <summary>
 /// <see cref="InteropService"/>'s credentials: the ELSEWHERE verifier of
 /// <c>credentials.elsewhere</c>, by its grammar, on the clock its server is given, by the rows the
-/// TypeScript side's verifier answers alike.
+/// TypeScript side's verifier answers alike; and the key set of <c>credentials.jwt</c>, each issuer
+/// it names answered as its words say.
 /// </summary>
 public sealed class InteropServiceTests
 {
@@ -101,5 +102,57 @@ public sealed class InteropServiceTests
         }
 
         Assert.Equal(outcome, await verifying.WaitAsync(Patience, Cancelled));
+    }
+
+    [Fact]
+    public async Task The_interop_service_s_key_set_answers_each_issuer_it_names_as_its_words_say_on_its_server_s_clock_whatever_its_signal_and_fails_at_once_for_any_other()
+    {
+        const string KeysIssuer = "https://keys.interop.bead.example";
+        const string RotatedIssuer = "https://rotated.interop.bead.example";
+        const string StalledIssuer = "https://stalled.interop.bead.example";
+
+        var second = TimeSpan.FromMilliseconds(1_000);
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        var keySet = InteropService.CredentialsOf(clock).KeySet!;
+
+        using var ended = new CancellationTokenSource();
+
+        await ended.CancelAsync();
+        Assert.Equal([KeysIssuer, RotatedIssuer, StalledIssuer], keySet.Issuers);
+
+        // the rotated issuer's keys at its first ask alone; the stalled one's never, no timer armed
+        var asked = new[] { keySet.Ask(KeysIssuer, ended.Token).AsTask(), keySet.Ask(RotatedIssuer, ended.Token).AsTask(), keySet.Ask(RotatedIssuer, ended.Token).AsTask() };
+        var stalling = keySet.Ask(StalledIssuer, ended.Token).AsTask();
+
+        Assert.Equal([second, second, second], clock.Dues());
+        await clock.Advance(second - TimeSpan.FromMilliseconds(1));
+        Assert.DoesNotContain(asked, (asking) =>
+        {
+            return asking.IsCompleted;
+        });
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+
+        var answered = await Task.WhenAll(asked).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([1, 1, 0], answered.Select((keys) =>
+        {
+            return keys.Count;
+        }));
+        Assert.All(answered.Take(2), (keys) =>
+        {
+            Assert.Equal("018c0ae5-4d9b-471b-bfd6-eef314bc7037", keys[0].Jwk.GetProperty("kid").GetString());
+        });
+        Assert.NotEqual(answered[0][0].Jwk.GetProperty("k").GetString(), answered[1][0].Jwk.GetProperty("k").GetString());
+        Assert.False(stalling.IsCompleted);
+        Assert.Empty(clock.Dues());
+
+        // its asks counted per key set built: another server's answers its first anew
+        var another = InteropService.CredentialsOf(clock).KeySet!.Ask(RotatedIssuer, ended.Token).AsTask();
+
+        await clock.Advance(second);
+        Assert.Single(await another.WaitAsync(Patience, Cancelled));
+
+        // asked for an issuer it does not name, it fails at once
+        Assert.True(keySet.Ask("https://unnamed.interop.bead.example", ended.Token).AsTask().IsFaulted);
     }
 }

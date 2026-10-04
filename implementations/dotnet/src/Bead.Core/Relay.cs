@@ -396,7 +396,7 @@ internal sealed class Relay
             return Failure.OfProtocol(ProtocolCode.AccessDenied, "this relay admits nobody: it has no beforeRoute");
         }
 
-        return beforeRoute.Admits(request) ? null : beforeRoute.Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+        return beforeRoute.RefusalOf(request);
     }
 
     // what leg B presents for what leg A presents (spec 14.2): none for none or OPAQUE, whatever its

@@ -437,11 +437,11 @@ export interface IRouterServer<
     failure: IFailure;
   }): Promise<void>;
   /**
-   * Ends a credential's session by its identifier, as a token's revocation does (RFC 7009), on every
-   * connection that keeps it: each subscription it bounds ends with SESSION_REQUIRED on its call id,
-   * a call still in flight left to its own answer. Resolves once each failure was tried; one that
-   * cannot go out is reported to `error`. One no connection keeps ends nothing, and a credential
-   * that still holds opens it anew.
+   * Ends a credential's session by its identifier on every connection that keeps it, and nothing
+   * else (spec 13.9): each subscription it bounds ends with SESSION_REQUIRED on its call id, a call
+   * still in flight left to its own answer. Resolves once each failure was tried; one that cannot go
+   * out is reported to `error`. One no connection keeps ends nothing. Ending refuses no credential:
+   * one that still holds opens its session anew.
    */
   endSession(identifier: SessionIdentifier): Promise<void>;
   emit<K extends ROUTER_SERVER_EVENTS>(event: K, ...params: RouterServerEventMap[K]): boolean;
@@ -542,8 +542,8 @@ export interface IRouterServerOptions {
    * What it resolves a request presenting a `JWT` or an `ELSEWHERE` with, on its clock: a `JWT`'s
    * keys, audience and key set, an `ELSEWHERE`'s verifier. A scheme it is given nothing for is
    * refused, CREDENTIAL_UNSUPPORTED. Given a `JWT`'s keys or key set, its limits hold 1,024 bytes of
-   * chunk and envelope at least, and its audience is given unless its relay verifies, or it is a
-   * {@link ProgrammerError}, as is a key not shaped for its algorithm.
+   * chunk and envelope at least, and its audience is given, whatever its relay does, or it is a
+   * {@link ProgrammerError}, as are a key not shaped for its algorithm and a key set given no issuer.
    */
   credentials?: ICredentials | undefined;
   /** What a paced subscription queues at most: {@link PACING_DEFAULTS}' where it says nothing. */

@@ -118,9 +118,13 @@ public sealed partial class RouterClientTests
 
         var keySet = new Credentials
         {
-            KeySet = (_) =>
+            KeySet = new JwtKeySet
             {
-                return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
+                Issuers = ["https://keys.example"],
+                Ask = (_, _) =>
+                {
+                    return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
+                },
             },
         };
 

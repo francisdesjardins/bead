@@ -22,6 +22,29 @@ public sealed record JwtSetKey
 }
 
 /// <summary>
+/// A key set (RFC 7517 §5), the application's to fetch: the issuers it answers for, and how it is
+/// asked for the keys of one of them. The side asks it for no other issuer.
+/// </summary>
+public sealed record JwtKeySet
+{
+    /// <summary>
+    /// The issuers it answers for, one at least, each compared to a token's <c>iss</c> octet for
+    /// octet; none, or one that is no string, is an <see cref="ArgumentException"/> as the side is
+    /// built. A token of any other issuer is judged at once by the keys there are.
+    /// </summary>
+    public required IReadOnlyList<string> Issuers { get; init; }
+
+    /// <summary>
+    /// Asks it for one of <see cref="Issuers"/>, with a signal cancelled at the ask's deadline, a
+    /// minute after it went on the side's monotonic reading, should it still be unsettled then: it
+    /// answers that issuer's keys, and may wait. One that throws or faults, answers what is not keys
+    /// shaped for their algorithms, or is still unsettled at its deadline fails the calls that wait
+    /// on it, PROCEDURE_FAILED; what it settles to after its deadline is dropped.
+    /// </summary>
+    public required Func<string, CancellationToken, ValueTask<IReadOnlyList<JwtSetKey>>> Ask { get; init; }
+}
+
+/// <summary>
 /// The credential's session an <see cref="CredentialScheme.Elsewhere"/>'s verifier makes of what a
 /// request's transport carried (spec 13.10): its identifier's <see cref="Id"/>, its data, which the
 /// call carries, and its end.
@@ -66,18 +89,20 @@ public sealed record Credentials
     /// <summary>
     /// The audience a <see cref="CredentialScheme.Jwt"/>'s <c>aud</c> names, the receiver's: given
     /// with keys or a key set, or they are an <see cref="ArgumentException"/> as the side is built,
-    /// unless its relay verifies, holding its destinations' audiences instead (spec 13.8, 14.3).
+    /// whatever its relay does; a relay that verifies holds a token it forwards to its destinations'
+    /// audiences instead (spec 13.8, 14.3).
     /// </summary>
     public string? Audience { get; init; }
 
     /// <summary>
-    /// The key set, asked for an issuer when a token's <c>kid</c> names none of the keys held, once a
-    /// minute at most for that issuer; it answers that issuer's keys, and may wait. What it answered
-    /// is held for that issuer, beside <see cref="Keys"/>, until its next answer for it. One that
-    /// throws or faults fails the calls that wait on it, and those of that issuer until its minute
-    /// passed: PROCEDURE_FAILED. The application fetches; the side fetches nothing.
+    /// The key set, asked for an issuer it names once a minute at most: for a token of that issuer
+    /// whose <c>kid</c> names none of that issuer's keys that serve, or that names no <c>kid</c>
+    /// while the keys held for that issuer are past their ten minutes. What an answer gave is held
+    /// for its issuer, beside <see cref="Keys"/>, in place of what the last gave, and serves ten
+    /// minutes from that answer; an ask that fails replaces nothing, and fails the calls that wait on
+    /// it, PROCEDURE_FAILED (spec 13.8). The application fetches; the side fetches nothing.
     /// </summary>
-    public Func<string, ValueTask<IReadOnlyList<JwtSetKey>>>? KeySet { get; init; }
+    public JwtKeySet? KeySet { get; init; }
 
     /// <summary>
     /// The <see cref="CredentialScheme.Elsewhere"/>'s verifier, asked once per request presenting it

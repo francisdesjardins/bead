@@ -886,26 +886,22 @@ export interface IElsewhereSession {
 
 /**
  * What a side resolves a request's `JWT` and `ELSEWHERE` with (spec 9.2, step 5): a `JWT`'s keys,
- * each with its issuer and its one algorithm, its audience, and the key set the side asks for a
- * `kid` no key it holds names; an `ELSEWHERE`'s verifier. The side takes a `JWT` once given keys or
- * a key set, and an `ELSEWHERE` once given its verifier; it verifies on the clock it runs on.
+ * each with its issuer and its one algorithm, its audience, and the key set the side asks for the
+ * keys of an issuer it names; an `ELSEWHERE`'s verifier. The side takes a `JWT` once given keys or a
+ * key set, and an `ELSEWHERE` once given its verifier; it verifies on the clock it runs on.
  */
 export interface ICredentials {
   /**
    * The audience a `JWT` names for this side (RFC 7519 §4.1.3); one that names none is refused.
-   * Given with keys or a key set, unless the side's relay verifies against the audiences of its
-   * destinations: keys without one are a {@link ProgrammerError}, as the side is built.
+   * Given with keys or a key set, whatever the side's relay does: keys without one are a
+   * {@link ProgrammerError}, as the side is built, since a request to the side itself would hold its
+   * token to no audience.
    */
   readonly audience?: string | undefined;
-  /** The keys a `JWT` is verified with (spec 13.8). */
+  /** The keys a `JWT` is verified with (spec 13.8), held for good. */
   readonly keys?: readonly IJwtKey[] | undefined;
-  /**
-   * Asked for an issuer, its keys, each a JWK with its one algorithm (RFC 7517 §5), which it may
-   * wait for. Its answer is held for that issuer until its next one, asked once a minute at most for
-   * an issuer, when a token's `kid` names no key held. One that throws or rejects fails the calls
-   * that wait on it, and those of its issuer until the minute is over.
-   */
-  readonly keySet?: ((issuer: string) => PromiseLike<readonly IJwtSetKey[]>) | undefined;
+  /** The key set the side asks for the keys of the issuers it names (spec 13.8). */
+  readonly keySet?: IJwtKeySet | undefined;
   /**
    * The `ELSEWHERE` verifier: given what its call's transport carried, whole, and its call's signal,
    * it settles with the credential's session, or with none when the credential does not hold. Asked
@@ -919,6 +915,23 @@ export interface ICredentials {
         signal: AbortSignal
       ) => IElsewhereSession | undefined | PromiseLike<IElsewhereSession | undefined>)
     | undefined;
+}
+
+/**
+ * A key set (RFC 7517 §5), the application's to fetch, given with the issuers it answers for, one at
+ * least: the side asks it for no other, compared octet for octet, so a token whose `iss` it does not
+ * name is judged at once by the keys there are. Asked once a minute at most for an issuer, when a
+ * token's `kid` names none of its issuer's keys that serve — or, without a `kid`, when the keys held
+ * for its issuer are past their ten minutes — its answer is held for that issuer ten minutes, in
+ * place of the last. An ask's signal aborts at its deadline, a minute after it went. One that throws
+ * or rejects, answers what is not keys shaped for their algorithms, or comes to its deadline
+ * unsettled fails the calls that wait on it, and replaces no key held.
+ */
+export interface IJwtKeySet {
+  /** Asked for one of its issuers, with a signal, that issuer's keys, which it may wait for. */
+  readonly ask: (issuer: string, signal: AbortSignal) => PromiseLike<readonly IJwtSetKey[]>;
+  /** The issuers it answers for, one at least, each a string. */
+  readonly issuers: readonly string[];
 }
 
 /** A key a key set answers for the issuer it was asked for: a JWK, and its one algorithm. */
