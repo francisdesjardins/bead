@@ -176,8 +176,12 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     { below: 'its transport', layer: "a server's router" }
   );
   const emitter = createEmitter<RouterServerEventMap>();
-  // what resolves a JWT and an ELSEWHERE, on the router's clock: a key not shaped is refused here
-  const credentials = createCredentialResolver(options?.credentials, { clock });
+  // what resolves a JWT and an ELSEWHERE, on the router's clock: a key not shaped, and keys without
+  // an audience unless its relay verifies against its destinations', are refused here
+  const credentials = createCredentialResolver(options?.credentials, {
+    clock,
+    relayVerifies: options?.relay?.verifies === true,
+  });
   // the credentials' sessions its connections keep, each while it holds a subscription
   const credentialSessions = createCredentialSessions({
     clock,

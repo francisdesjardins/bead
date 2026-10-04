@@ -1,10 +1,16 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
 namespace Bead.Tests;
 
 /// <summary>
 /// <see cref="RouterServer"/>'s credentials: an <c>ELSEWHERE</c> resolved by its verifier from what
 /// its transport carried (spec 13.10), in a later turn, its cancel and its close told by its signal;
-/// what a command presents, failed before it goes when its transport cannot carry it (spec 13.4);
-/// and the limits a side that takes a <c>JWT</c> holds (spec 12.2).
+/// a <c>JWT</c> verified against the keys its key set answers (spec 13.8); what a command presents,
+/// failed before it goes when its transport cannot carry it (spec 13.4); and what a side that takes a
+/// <c>JWT</c> is built with: its audience, and limits that hold its header (spec 12.2).
 /// </summary>
 public sealed partial class RouterServerTests
 {
@@ -12,7 +18,65 @@ public sealed partial class RouterServerTests
 
     private const string Carried = "Interop sub=ada";
 
+    private const string Issuer = "https://hs256.example";
+
+    private const string Audience = "bead-interop";
+
+    // an HS256 key of 32 bytes, and its JWK, which names it by the kid "first"
+    private static readonly byte[] Secret = [.. Enumerable.Repeat((byte)1, 32)];
+
+    private static readonly JsonElement Jwk = JsonSerializer.SerializeToElement(
+        new Dictionary<string, string> { ["k"] = Base64Url.EncodeToString(Secret), ["kid"] = "first", ["kty"] = "oct" });
+
     // helpers
+
+    // an HS256 access token of the issuer for ada, under the key "first", its exp `exp` seconds since
+    // the epoch
+    private static string JwtOf(long exp)
+    {
+        var part = (object value) =>
+        {
+            return Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
+        };
+        var header = part(new Dictionary<string, string> { ["alg"] = "HS256", ["kid"] = "first", ["typ"] = "at+jwt" });
+        var claims = part(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = exp, ["iss"] = Issuer, ["sub"] = "ada" });
+        var signature = HMACSHA256.HashData(Secret, Encoding.ASCII.GetBytes($"{header}.{claims}"));
+
+        return $"{header}.{claims}.{Base64Url.EncodeToString(signature)}";
+    }
+
+    // a router whose JWTs verify against its key set alone, which answers the key "first" once
+    // `answer` settles, counting its asks in `asks`, on the first connection: echo answers its
+    // session's sub, counting the calls it ran in `ran`
+    private void StartAsking((TaskCompletionSource<IReadOnlyList<JwtSetKey>> Answer, Counts Counts) asking)
+    {
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Audience = Audience,
+                KeySet = (_) =>
+                {
+                    asking.Counts.Asks += 1;
+
+                    return new ValueTask<IReadOnlyList<JwtSetKey>>(asking.Answer.Task);
+                },
+            },
+        });
+        _transport.Open(First);
+        EchoOf((request, response) =>
+        {
+            asking.Counts.Ran += 1;
+
+            return response.Answer(request.Session?.Identifier?.Sub ?? "none");
+        });
+    }
+
+    // a token of the key "first" that holds for a minute from the test's wall clock
+    private string Holding()
+    {
+        return JwtOf(_time.GetUtcNow().ToUnixTimeSeconds());
+    }
 
     // a router whose ELSEWHERE verifier is `verify`, on the first connection, its echo answering in
     // the session its call resolved to, by the id it carries
@@ -34,7 +98,8 @@ public sealed partial class RouterServerTests
 
     // a router whose ELSEWHERE verifier holds a value "id +n" as the session of that id, its end n
     // milliseconds past the wall clock as it verifies, on the first connection: news subscribes,
-    // then answers — a request of `hold` once `_released` — and echo answers its session's id and end
+    // then answers — a request of `hold` once `_released`, one of `late` subscribing only then — and
+    // echo answers its session's id and end
     private void StartKeeping()
     {
         Start(new RouterServerOptions
@@ -52,6 +117,11 @@ public sealed partial class RouterServerTests
         _transport.Open(First);
         NotifierOf(async (request, response) =>
         {
+            if (request.Payload == "late")
+            {
+                await _released.Task;
+            }
+
             await response.RegisterNotification();
 
             if (request.Payload == "hold")
@@ -77,6 +147,16 @@ public sealed partial class RouterServerTests
     {
         _time.Advance(TimeSpan.FromMilliseconds(milliseconds));
         await Settle();
+    }
+
+    // holds the router's scheduler until `release` is set: what is posted meanwhile runs after, in
+    // the order it came
+    private void Hold(ManualResetEventSlim release)
+    {
+        _scheduler.Post(() =>
+        {
+            release.Wait(Patience);
+        });
     }
 
     // definition
@@ -131,6 +211,48 @@ public sealed partial class RouterServerTests
         _released.SetResult();
         await Settle();
         Assert.Equal(["first result 5 ok", "first failure 5 SessionRequired"], SentSince());
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Ends_nothing_in_the_turn_after_its_end_was_reached_for_a_session_forgotten_or_renewed_meanwhile()
+    {
+        using var renewing = new ManualResetEventSlim();
+        using var forgetting = new ManualResetEventSlim();
+
+        StartKeeping();
+
+        // renewed: a call resolved as its end was reached settles before that end is taken, and
+        // arms its timer
+        SubscribeElsewhere(First, (1, "ada +1000"));
+        await Settle();
+        Hold(renewing);
+        DeliverElsewhere(First, (3, "ada +5000"));
+        _time.Advance(TimeSpan.FromMilliseconds(1_000));
+        renewing.Set();
+        await Settle();
+        Assert.Equal(["first result 1 ok", "first result 3 ada 5000"], SentSince());
+        await AdvanceBy(4_999);
+        Assert.Empty(SentSince());
+        await AdvanceBy(1);
+        Assert.Equal(["first failure 1 SessionRequired"], SentSince());
+
+        // forgotten: its last subscription cancelled as its end was reached, and a call that
+        // resolved before subscribes it anew, with its own end, before that end is taken
+        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(SubscribingOf(5, "late"), Credential.Elsewhere())), "bob +5000"));
+        SubscribeElsewhere(First, (7, "bob +1000"));
+        await Settle();
+        Hold(forgetting);
+        _time.Advance(TimeSpan.FromMilliseconds(1_000));
+        Deliver(First, CancelOf(7));
+        _released.SetResult();
+        forgetting.Set();
+        await Settle();
+        Assert.Equal(["first result 7 ok", "first result 5 ok"], SentSince());
+        await AdvanceBy(3_999);
+        Assert.Empty(SentSince());
+        await AdvanceBy(1);
+        Assert.Equal(["first failure 5 SessionRequired"], SentSince());
         Assert.Empty(Reported());
     }
 
@@ -472,5 +594,194 @@ public sealed partial class RouterServerTests
             Limits = small,
         });
         Assert.Equal(512, Router.Limits.ChunkBytes);
+    }
+
+    [Fact]
+    public void Refuses_as_it_is_built_keys_or_a_key_set_without_an_audience_unless_its_relay_verifies()
+    {
+        var keys = new Credentials { Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = Jwk }] };
+        var keySet = new Credentials
+        {
+            KeySet = (_) =>
+            {
+                return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
+            },
+        };
+
+        foreach (var credentials in new[] { keys, keySet })
+        {
+            foreach (var relay in new[] { null, new RelayOptions { Verifies = false } })
+            {
+                Assert.Throws<ArgumentException>(() =>
+                {
+                    Start(new RouterServerOptions { Credentials = credentials, Relay = relay });
+                });
+            }
+
+            // a relay that verifies holds the audiences of its destinations instead
+            Start(new RouterServerOptions { Credentials = credentials, Relay = new RelayOptions { Verifies = true } });
+            Assert.Empty(Router.Destinations());
+            Router.Dispose();
+        }
+
+        // an ELSEWHERE's verifier needs none
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Verify = (_, _) =>
+                {
+                    return ValueTask.FromResult<ElsewhereSession?>(null);
+                },
+            },
+        });
+    }
+
+    [Fact]
+    public async Task Answers_a_subscribing_call_whose_JWT_s_end_passes_before_its_answer_with_its_RESULT_then_SESSION_REQUIRED_and_its_client_withdraws_nothing()
+    {
+        var withdrawn = new List<CredentialScheme>();
+        var clientEnd = new ClientEnd(_transport);
+        var entered = 0;
+        var resolved = new TaskCompletionSource();
+        var news = new StandingNotification(News);
+        var flash = new StandingNotification(Other);
+
+        // its end, E = exp + 60 s, a second past the wall clock as it resolves
+        var token = JwtOf(_time.GetUtcNow().ToUnixTimeSeconds() - 59);
+
+        // a resolver entered, on the router's scheduler: once both are, both resolved
+        void Enter()
+        {
+            entered += 1;
+
+            if (entered == 2)
+            {
+                resolved.SetResult();
+            }
+        }
+
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials { Audience = Audience, Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = Jwk }] },
+        });
+        _transport.Peer = clientEnd;
+        _transport.Open(First);
+
+        // ! news subscribes in flight once released past its end, and answers a turn later; flash's
+        // answer alone subscribes it
+        NotifierOf(async (_, response) =>
+        {
+            Enter();
+            await _released.Task;
+            await response.RegisterNotification();
+            await Task.Yield();
+            await response.Answer("subscribed");
+        });
+        NotifierOf(
+            async (_, response) =>
+            {
+                Enter();
+                await _released.Task;
+                await response.Answer("subscribed");
+            },
+            Other);
+
+        using var client = new RouterClient(
+            clientEnd,
+            new RouterClientOptions { Credential = Credential.Jwt(token), ResolverScheduler = _scheduler, Scheduler = _scheduler });
+
+        client.CredentialWithdrawn += withdrawn.Add;
+
+        var subscribing = new[] { news, flash }.Select(async (notification) =>
+        {
+            await client.RegisterNotification(notification);
+
+            var request = new RouterRequest(notification.Procedure, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(5) }) { Subscribes = notification };
+
+            return TextOf((await client.Request(ReadOnlyMemory<byte>.Empty, request)).Payload);
+        }).ToList();
+
+        // both resolved before their end, and wait in their resolvers while the wall clock passes it
+        await resolved.Task.WaitAsync(Patience, Cancelled);
+        await AdvanceBy(1_000);
+        _released.SetResult();
+        Assert.Equal(["subscribed", "subscribed"], await Task.WhenAll(subscribing).WaitAsync(Patience, Cancelled));
+        await Settle();
+
+        // each call's RESULT goes first, its FAILURE behind it, never a FAILURE on a call still owed
+        // its answer
+        var sent = SentSince();
+
+        foreach (var callId in new[] { 1, 3 })
+        {
+            Assert.Equal(
+                [$"first result {callId} subscribed", $"first failure {callId} SessionRequired"],
+                sent.Where((answer) =>
+                {
+                    return answer.EndsWith($" {callId} subscribed", StringComparison.Ordinal) || answer.EndsWith($" {callId} SessionRequired", StringComparison.Ordinal);
+                }));
+        }
+
+        Assert.Equal(4, sent.Count);
+        Assert.All(new[] { news, flash }, (notification) =>
+        {
+            Assert.Equal([(ushort?)ProtocolCode.SessionRequired], notification.Dropped.Select((failure) =>
+            {
+                return failure?.Code;
+            }));
+        });
+        Assert.Empty(withdrawn);
+        Assert.Equal(Credential.Jwt(token), client.Credential);
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Answers_nothing_to_a_call_cancelled_while_it_waits_on_its_key_set_whose_ask_goes_on_for_the_others()
+    {
+        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+        var counts = new Counts();
+
+        StartAsking((answer, counts));
+
+        Deliver(First, Presenting(RequestOf(1), Credential.Jwt(Holding())));
+        Deliver(First, Presenting(RequestOf(3), Credential.Jwt(Holding())));
+        await Settle();
+        Deliver(First, CancelOf(1));
+        await Settle();
+        answer.SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }]);
+        await Settle();
+
+        Assert.Equal(["first result 3 ada"], SentSince());
+        Assert.Equal((1, 1), (counts.Asks, counts.Ran));
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Dispatches_nothing_and_runs_no_resolver_for_a_JWT_call_that_waits_on_its_key_set_as_the_router_is_disposed()
+    {
+        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+        var counts = new Counts();
+
+        StartAsking((answer, counts));
+
+        Deliver(First, Presenting(RequestOf(1), Credential.Jwt(Holding())));
+        await Settle();
+        Router.Dispose();
+        await Settle();
+        answer.SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }]);
+        await Settle();
+
+        Assert.Empty(SentSince());
+        Assert.Equal((1, 0), (counts.Asks, counts.Ran));
+        Assert.Empty(Reported());
+    }
+
+    // what a key set and a resolver were asked
+    private sealed class Counts
+    {
+        public int Asks { get; set; }
+
+        public int Ran { get; set; }
     }
 }

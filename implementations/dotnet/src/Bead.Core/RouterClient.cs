@@ -98,7 +98,8 @@ public sealed record RouterClientOptions
     /// <summary>
     /// What it resolves a command's <see cref="CredentialScheme.Jwt"/> and
     /// <see cref="CredentialScheme.Elsewhere"/> with, as a server does a request's; it takes no other
-    /// when none.
+    /// when none. JWT keys or a key set come with their audience, or they are an
+    /// <see cref="ArgumentException"/> (spec 13.8).
     /// </summary>
     public Credentials? Credentials { get; init; }
 
@@ -164,7 +165,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
         Transport = transport;
         _callbacks = options?.ResolverScheduler ?? new SerialScheduler();
-        _resolver = new CredentialResolver(options?.Credentials, clock);
+        _resolver = new CredentialResolver(options?.Credentials, (clock, false));
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions

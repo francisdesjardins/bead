@@ -1163,6 +1163,33 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Is_secure_as_its_application_says_what_stands_in_front_of_it_whatever_it_listens_on_and_by_what_it_listens_on_when_it_says_nothing()
+    {
+        using var key = System.Security.Cryptography.ECDsa.Create();
+        using var certificate = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=bead.example", key, System.Security.Cryptography.HashAlgorithmName.SHA256)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        await using var underTls = new HttpTransportServer(new HttpTransportServerOptions { Certificate = certificate, Secure = false });
+
+        // whether one bound to the loopback is secure, and one bound to nothing, which no listener
+        // makes secure
+        async Task<(bool Bound, bool Unbound)> SecuredBy(bool? secure)
+        {
+            await using var unbound = new HttpTransportServer(new HttpTransportServerOptions { Secure = secure });
+
+            await Start(new HttpTransportServerOptions { Secure = secure });
+
+            return (_server.IsSecure("any"), unbound.IsSecure("any"));
+        }
+
+        // nothing said, by its listener; TLS terminated before it, on another host; a proxy on the
+        // machine that serves the network in the clear, before a server of its own under TLS too
+        Assert.Equal((true, false), await SecuredBy(null));
+        Assert.Equal((true, true), await SecuredBy(true));
+        Assert.Equal((false, false), await SecuredBy(false));
+        Assert.False(underTls.IsSecure("any"));
+    }
+
+    [Fact]
     public async Task Answers_each_listen_it_holds_the_marked_404_as_it_stops_however_many()
     {
         await Start();

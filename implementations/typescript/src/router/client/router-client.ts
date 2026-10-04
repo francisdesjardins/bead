@@ -153,6 +153,13 @@ const defaultCredentialOf = (
   return Object.freeze({ ...credential });
 };
 
+/** Whether two defaults are one credential: the same scheme, and the same token or value carried. */
+const isSameCredential = (first: DefaultCredential, second: DefaultCredential): boolean => {
+  return first.scheme === CredentialScheme.JWT
+    ? second.scheme === CredentialScheme.JWT && first.token === second.token
+    : second.scheme === CredentialScheme.ELSEWHERE && first.carried === second.carried;
+};
+
 // definition
 
 /**
@@ -439,13 +446,14 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     core.receive(message, SERVER_CONNECTION_HANDLE);
   };
 
-  // a call that presented the default, refused SESSION_REQUIRED by the server, through relays or
-  // not, withdraws it while it is still the default: later calls present none by default, and the
-  // application hears of it by its scheme alone
+  // a call that presented the default, refused SESSION_REQUIRED through relays or not, withdraws it
+  // while it is still that credential by value, set again or not: later calls present none by
+  // default, and the application hears of it by its scheme alone
   const withdraw = (reason: unknown, presented: DefaultCredential | undefined): void => {
     if (
       presented !== undefined &&
-      presented === defaultCredential &&
+      defaultCredential !== undefined &&
+      isSameCredential(presented, defaultCredential) &&
       reason instanceof FailureError &&
       reason.origin !== 'local' &&
       reason.isProtocol(CLIENT_FAILURES.sessionRequired.code)

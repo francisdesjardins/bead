@@ -39,7 +39,8 @@ export interface IRouterClient<
    * The credential every call presents but one that gives its own, or `NONE` (spec 13.4): a `JWT`, or
    * an `ELSEWHERE` with what its transport carries beside each request; none when not given, and
    * once a call that presented it was refused SESSION_REQUIRED, which `credentialWithdrawn` tells.
-   * Given anew, it renews it: a refusal of a call that presented an older one withdraws nothing.
+   * A refusal withdraws it only while it is still the credential the refused call presented, by
+   * value: given other bytes since, it is kept; set again to the same bytes, it is withdrawn.
    * `OPAQUE`, which a call asks for alone, or a `JWT` past what its limits hold, is a
    * {@link ProgrammerError}, and nothing changes.
    */
@@ -51,8 +52,8 @@ export interface IRouterClient<
   readonly limits: IRouterLimits;
   /**
    * The session the server last announced; `undefined` before one, once the server announced its
-   * end, and after a close or a reconnection. The client learns it and never presents it: the
-   * connection is the session.
+   * end, and after a close or a reconnection. The client learns it, and presents it, `OPAQUE`, only
+   * on a call that asks for it: that call is bound to the session it knows.
    */
   readonly sessionToken: SessionToken | undefined;
   readonly transport: Transport;
@@ -129,7 +130,8 @@ export interface IRouterClientOptions {
   /**
    * What it resolves a command presenting a `JWT` or an `ELSEWHERE` with, as a server does: a
    * `JWT`'s keys, audience and key set, an `ELSEWHERE`'s verifier; a scheme it is given nothing for
-   * is refused, CREDENTIAL_UNSUPPORTED.
+   * is refused, CREDENTIAL_UNSUPPORTED. Keys or a key set without an audience are a
+   * {@link ProgrammerError}: a client relays nothing.
    */
   credentials?: ICredentials | undefined;
   /**
@@ -167,7 +169,7 @@ export interface IRouterClientTransportLike {
 /** An envelope as the router sent or took it. */
 export interface IRouterDebugInfo {
   direction: DebugDirection;
-  /** A copy, without its session token. */
+  /** A copy, its credential reported by its scheme alone. */
   header: RedactedHeader;
 }
 

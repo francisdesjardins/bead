@@ -88,7 +88,7 @@ public sealed class CredentialResolverTests
     {
         var clock = new FakeTimeProvider(Start);
 
-        return (new CredentialResolver(new Credentials { Verify = verify }, clock), clock);
+        return (new CredentialResolver(new Credentials { Verify = verify }, (clock, false)), clock);
     }
 
     // definition
@@ -99,7 +99,7 @@ public sealed class CredentialResolverTests
         var clock = new FakeTimeProvider(Start);
         var resolver = new CredentialResolver(
             new Credentials { Audience = Audience, Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) }] },
-            clock);
+            (clock, false));
         var session = await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null)))));
 
         Assert.Equal(new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = Issuer, Sub = "grace" }, session!.Identifier);
@@ -118,8 +118,8 @@ public sealed class CredentialResolverTests
         var clock = new FakeTimeProvider(Start);
         var keys = new[] { new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) } };
 
-        Assert.Equal([CredentialScheme.Opaque], new CredentialResolver(null, clock).Schemes);
-        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], new CredentialResolver(new Credentials { Audience = Audience, Keys = keys }, clock).Schemes);
+        Assert.Equal([CredentialScheme.Opaque], new CredentialResolver(null, (clock, false)).Schemes);
+        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], new CredentialResolver(new Credentials { Audience = Audience, Keys = keys }, (clock, false)).Schemes);
         Assert.Equal(
             [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere],
             new CredentialResolver(
@@ -135,7 +135,7 @@ public sealed class CredentialResolverTests
                         return ValueTask.FromResult<ElsewhereSession?>(null);
                     },
                 },
-                clock).Schemes);
+                (clock, false)).Schemes);
     }
 
     [Fact]
@@ -146,12 +146,50 @@ public sealed class CredentialResolverTests
 
         Assert.Throws<ArgumentException>(() =>
         {
-            return new CredentialResolver(new Credentials { Audience = Audience, Keys = [key with { Jwk = JwkOf((First[..31], null)) }] }, clock);
+            return new CredentialResolver(new Credentials { Audience = Audience, Keys = [key with { Jwk = JwkOf((First[..31], null)) }] }, (clock, false));
         });
         Assert.Throws<ArgumentException>(() =>
         {
-            return new CredentialResolver(new Credentials { Audience = "\ud800", Keys = [key] }, clock);
+            return new CredentialResolver(new Credentials { Audience = "\ud800", Keys = [key] }, (clock, false));
         });
+    }
+
+    [Fact]
+    public void Refuses_as_it_is_built_keys_or_a_key_set_given_without_an_audience_unless_its_side_s_relay_verifies()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keys = new Credentials { Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) }] };
+        var keySet = new Credentials
+        {
+            KeySet = (_) =>
+            {
+                return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
+            },
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new CredentialResolver(keys, (clock, false));
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new CredentialResolver(keySet, (clock, false));
+        });
+
+        // a relay that verifies holds its destinations' audiences; an ELSEWHERE's verifier needs none
+        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], new CredentialResolver(keys, (clock, true)).Schemes);
+        Assert.Equal([CredentialScheme.Opaque, CredentialScheme.Jwt], new CredentialResolver(keySet, (clock, true)).Schemes);
+        Assert.Equal(
+            [CredentialScheme.Opaque, CredentialScheme.Elsewhere],
+            new CredentialResolver(
+                new Credentials
+                {
+                    Verify = (_, _) =>
+                    {
+                        return ValueTask.FromResult<ElsewhereSession?>(null);
+                    },
+                },
+                (clock, false)).Schemes);
     }
 
     [Fact]
@@ -186,7 +224,7 @@ public sealed class CredentialResolverTests
                     return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }]);
                 },
             },
-            clock);
+            (clock, false));
         var key = new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((Second, "second")) };
         var twoKeyed = new CredentialResolver(
             new Credentials
@@ -198,7 +236,7 @@ public sealed class CredentialResolverTests
                     return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }]);
                 },
             },
-            clock);
+            (clock, false));
 
         // none held yet: a kid-less token asks nothing, and finds no key
         Assert.Null(await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null))))));
@@ -234,7 +272,7 @@ public sealed class CredentialResolverTests
                     return asked.Count == 1 ? ValueTask.FromResult(answers[0]) : new ValueTask<IReadOnlyList<JwtSetKey>>(later.Task);
                 },
             },
-            clock);
+            (clock, false));
         var first = Credential.Jwt(TokenOf((First, "first")));
         var second = Credential.Jwt(TokenOf((Second, "second")));
 
@@ -274,7 +312,7 @@ public sealed class CredentialResolverTests
                     return new ValueTask<IReadOnlyList<JwtSetKey>>(answer.Task);
                 },
             },
-            clock);
+            (clock, false));
         var token = Credential.Jwt(TokenOf((First, "first")));
 
         using var leaving = new CancellationTokenSource();
@@ -313,7 +351,7 @@ public sealed class CredentialResolverTests
                         : ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf((First, "first")) }]);
                 },
             },
-            clock);
+            (clock, false));
         var token = Credential.Jwt(TokenOf((First, "first")));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>

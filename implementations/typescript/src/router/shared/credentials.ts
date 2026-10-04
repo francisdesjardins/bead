@@ -3,6 +3,7 @@
 // dependencies
 
 import type { IClock } from '../../transport/shared/clock';
+import { createPromise } from '../../transport/shared/create-promise';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { CredentialScheme } from './constants';
 import {
@@ -40,8 +41,9 @@ export interface ICredentialResolver {
    * The credential's session a request presenting a `JWT` or an `ELSEWHERE` resolves to, frozen —
    * its identifier, its data, its end — or `undefined` when its credential does not hold. Rejects
    * when its verifier fails: an `ELSEWHERE`'s that throws, rejects or settles with what is no
-   * session, or a key set whose ask for its issuer failed within the minute. No rejection carries
-   * the credential.
+   * session, or a key set whose ask for its issuer failed within the minute; and with a
+   * `CancelError` as `signal` aborts while it waits on a key set's ask, which goes on for the
+   * others. No rejection carries the credential.
    */
   resolve(request: ICredentialRequest, signal: AbortSignal): Promise<ICallSession | undefined>;
 }
@@ -95,16 +97,19 @@ export const assertLimitsHoldJwt = ({
 
 /**
  * The resolver of a side's `JWT`s and `ELSEWHERE`s, from its credentials, on its clock: a `JWT`
- * verified as section 13.8 states, its key found among the keys given and those its key set answered
- * for its issuer, a key set asked once a minute at most for an issuer, an ask under way shared, and a
- * call's cancel never cancelling it; an `ELSEWHERE` asked of its verifier with what its transport
- * carried, its session's end held rounded up, and one the wall clock reached as it settles not
- * holding (section 13.10). A key not shaped for its algorithm, or an audience that is not a string
- * of well-formed Unicode, is a {@link ProgrammerError}, as the resolver is built.
+ * verified as section 13.8 states, the wall clock read as its signature has verified, its key found
+ * among the keys given and those its key set answered for its issuer, a key set asked once a minute
+ * at most for an issuer, an ask under way shared, and a call's cancel ending its own wait, never the
+ * ask; an `ELSEWHERE` asked of its verifier with what its transport carried, its session's end held
+ * rounded up, and one the wall clock reached as it settles not holding (section 13.10). A key not
+ * shaped for its algorithm, an audience that is not a string of well-formed Unicode, and keys or a
+ * key set given without an audience on a side whose relay does not verify — `relayVerifies`, which
+ * holds the audiences of its destinations instead — are each a {@link ProgrammerError}, as the
+ * resolver is built.
  */
 export const createCredentialResolver = (
   credentials: ICredentials | undefined,
-  { clock }: { clock: IClock }
+  { clock, relayVerifies = false }: { clock: IClock; relayVerifies?: boolean | undefined }
 ): ICredentialResolver => {
   const { audience, keySet, keys = [], verify } = credentials ?? {};
   const takesJwt = keys.length > 0 || keySet !== undefined;
@@ -117,6 +122,14 @@ export const createCredentialResolver = (
 
   if (audience !== undefined && !isAudience(audience)) {
     throw new ProgrammerError('an audience is a string of well-formed Unicode');
+  }
+
+  // ! keys held to no audience would refuse every JWT SESSION_REQUIRED, which withdraws a client's
+  // default: the application's fault, told as the side is built, never charged to a token
+  if (takesJwt && audience === undefined && !relayVerifies) {
+    throw new ProgrammerError(
+      "a side given a JWT's keys or a key set is given its audience too, unless its relay verifies against those of its destinations"
+    );
   }
 
   // the wall clock's reading, a whole number of milliseconds, a fraction dropped
@@ -159,8 +172,9 @@ export const createCredentialResolver = (
   };
 
   // the key set's keys for `issuer`, asked once a minute at most: a call that finds an ask under way
-  // waits on it; within the minute, none goes, and while the last failed, the call fails
-  const awaitKeySet = async (issuer: string): Promise<void> => {
+  // waits on it, until its signal aborts; within the minute, none goes, and while the last failed,
+  // the call fails
+  const awaitKeySet = async (issuer: string, signal: AbortSignal): Promise<void> => {
     const now = clock.performance.now();
     let entry = issuers.get(issuer);
 
@@ -189,7 +203,17 @@ export const createCredentialResolver = (
       });
     }
 
-    await entry.asking;
+    const { asking } = entry;
+
+    // * a call's cancel ends its own wait, never the ask the others wait on
+    if (asking !== undefined) {
+      await createPromise(
+        (resolve) => {
+          void asking.then(resolve);
+        },
+        { signal }
+      );
+    }
 
     if (entry.failure !== undefined) {
       throw new Error(`the key set's last ask for ${JSON.stringify(issuer)} failed`, {
@@ -199,15 +223,15 @@ export const createCredentialResolver = (
   };
 
   // a token's verdict against the keys held; a `kid` none names asks its issuer's key set, then the
-  // token is verified again against what it answered
+  // token is verified again against what it answered, the wall clock read as each signature verified
   const verdictOf = async (
     token: string,
-    audiences: string | readonly string[]
+    { audiences, signal }: { audiences: string | readonly string[]; signal: AbortSignal }
   ): Promise<JwtVerdict> => {
     const verdict = await verifyJwt(token, {
       audience: audiences,
       keys: keysHeld(),
-      now: wallNow(),
+      now: wallNow,
     });
 
     if (verdict.holds || verdict.reason !== JwtRefusal.KID || keySet === undefined) {
@@ -228,16 +252,16 @@ export const createCredentialResolver = (
       return verdict;
     }
 
-    await awaitKeySet(issuer);
+    await awaitKeySet(issuer, signal);
 
-    return verifyJwt(token, { audience: audiences, keys: keysHeld(), now: wallNow() });
+    return verifyJwt(token, { audience: audiences, keys: keysHeld(), now: wallNow });
   };
 
   const resolveJwt = async (
     token: string,
-    audiences: string | readonly string[]
+    request: { audiences: string | readonly string[]; signal: AbortSignal }
   ): Promise<ICallSession | undefined> => {
-    const verdict = await verdictOf(token, audiences);
+    const verdict = await verdictOf(token, request);
 
     if (!verdict.holds) {
       return undefined;
@@ -303,7 +327,7 @@ export const createCredentialResolver = (
 
     resolve: ({ audience: given, credential, transportCredential }, signal) => {
       if (credential.scheme === CredentialScheme.JWT && 'token' in credential) {
-        return resolveJwt(credential.token, given ?? audience ?? []);
+        return resolveJwt(credential.token, { audiences: given ?? audience ?? [], signal });
       }
 
       if (credential.scheme === CredentialScheme.ELSEWHERE && transportCredential !== undefined) {

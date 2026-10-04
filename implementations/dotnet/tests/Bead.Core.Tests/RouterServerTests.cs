@@ -2076,9 +2076,11 @@ public sealed partial class RouterServerTests : IDisposable
         }
     }
 
-    // a notification as a client's router would hold it, which nothing triggers
+    // a notification as a client's router would hold it, which nothing triggers, and what dropped it
     private sealed class StandingNotification(Procedure procedure) : INotificationLike
     {
+        public List<Failure?> Dropped { get; } = [];
+
         public Procedure Procedure
         {
             get
@@ -2102,6 +2104,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         public void Drop(Failure? failure)
         {
+            Dropped.Add(failure);
         }
     }
 
@@ -2144,6 +2147,15 @@ public sealed partial class RouterServerTests : IDisposable
         public event Action<TransportMessage>? Message;
 
         public event Action<bool, bool>? Close;
+
+        // in memory, it never leaves the machine
+        public bool IsSecure
+        {
+            get
+            {
+                return true;
+            }
+        }
 
         public void Deliver(ReadOnlyMemory<byte> bytes)
         {

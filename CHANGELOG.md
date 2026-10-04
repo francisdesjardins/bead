@@ -82,14 +82,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its issuer and its algorithm, its audience, and a key set the side asks for a `kid` it holds no
   key of, once a minute at most for an issuer, its answer held and an ask under way shared; and an
   `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the transport carried and the call's
-  signal. A side given a `JWT`'s keys holds its limits to 1,024 bytes at least (section 12.2).
+  signal. A side given a `JWT`'s keys holds its limits to 1,024 bytes at least (section 12.2), and
+  keys or a key set given without an audience are refused as the side is built, unless its relay
+  verifies. A `JWT`'s verdict reads the wall clock once its signature has verified.
 - A client's credential, `credential`, `Credential`, by default and per call: `NONE`, `OPAQUE`, a
   `JWT` or an `ELSEWHERE`. A default withdrawn once a call that presented it is refused
-  `SESSION_REQUIRED` tells its application, `credentialWithdrawn`, `CredentialWithdrawn`; a call
+  `SESSION_REQUIRED`, while it is still, by value, the credential that call presented, tells its
+  application, `credentialWithdrawn`, `CredentialWithdrawn`; a call
   presenting an `ELSEWHERE` over a transport that carries none, or a bearer credential in the clear
   off the machine, fails before it goes, `DESTINATION_UNREACHABLE`, as does a server's command over
   HTTP. A transport says whether it carries a credential and whether it is secure,
-  `carriesCredential` and `isSecure`, on both sides.
+  `carriesCredential` and `isSecure`, on both sides, and a server's transport may be told what
+  stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy in the clear.
 - A relay forwards a credential, and its destination verifies it (section 14): its default
   admission is `requireSessionOrCredential`, `RequireSessionOrCredential`; a destination is
   registered with the audience it verifies; `verifies`, `Verifies`, has the relay verify what it

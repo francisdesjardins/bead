@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { ProgrammerError } from '../../../transport/shared/errors';
+import { CancelError, ProgrammerError } from '../../../transport/shared/errors';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { CredentialScheme } from '../constants';
 import { assertLimitsHoldJwt, createCredentialResolver, JWT_LIMIT_BYTES } from '../credentials';
@@ -82,10 +82,14 @@ test.describe('createCredentialResolver', () => {
 
     expect(schemesOf(undefined)).toEqual([[], false]);
     expect(schemesOf({ audience: AUDIENCE })).toEqual([[], false]);
-    expect(schemesOf({ keys: [KEY] })).toEqual([[CredentialScheme.JWT], true]);
-    expect(schemesOf({ keySet: createKeySet().keySet })).toEqual([[CredentialScheme.JWT], true]);
+    expect(schemesOf({ audience: AUDIENCE, keys: [KEY] })).toEqual([[CredentialScheme.JWT], true]);
+    expect(schemesOf({ audience: AUDIENCE, keySet: createKeySet().keySet })).toEqual([
+      [CredentialScheme.JWT],
+      true,
+    ]);
     expect(
       schemesOf({
+        audience: AUDIENCE,
         keys: [KEY],
         verify: () => {
           return Promise.resolve(undefined);
@@ -179,12 +183,15 @@ test.describe('createCredentialResolver', () => {
     const cancelled = new AbortController();
     const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
 
-    void resolver.resolve(named, cancelled.signal);
-
+    const leaving = resolver.resolve(named, cancelled.signal);
     const waiting = resolver.resolve(named, new AbortController().signal);
 
     await sleep(0);
     cancelled.abort();
+
+    // its wait ends at its cancel, before the ask settles
+    await expect(leaving).rejects.toBeInstanceOf(CancelError);
+
     asks[0]?.settle.resolve([SET_KEY]);
 
     expect(await waiting).toMatchObject({ identifier: { sub: 'grace' } });
@@ -398,6 +405,33 @@ test.describe('createCredentialResolver', () => {
     expect(() => {
       return createCredentialResolver({ audience: '\ud800', keys: [KEY] }, { clock });
     }).toThrow(ProgrammerError);
+  });
+
+  test('refuses as it is built keys or a key set given without an audience, unless its side’s relay verifies', () => {
+    const clock = createTestClock(NOW);
+    const { keySet } = createKeySet();
+
+    for (const credentials of [{ keys: [KEY] }, { keySet }]) {
+      expect(() => {
+        return createCredentialResolver(credentials, { clock });
+      }).toThrow(ProgrammerError);
+      // a relay that verifies holds the audiences of its destinations instead
+      expect(createCredentialResolver(credentials, { clock, relayVerifies: true }).takesJwt).toBe(
+        true
+      );
+    }
+
+    // an ELSEWHERE's verifier needs none
+    expect(
+      createCredentialResolver(
+        {
+          verify: () => {
+            return Promise.resolve(undefined);
+          },
+        },
+        { clock }
+      ).schemes
+    ).toEqual([CredentialScheme.ELSEWHERE]);
   });
 });
 

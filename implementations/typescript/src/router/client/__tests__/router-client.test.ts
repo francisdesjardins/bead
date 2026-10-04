@@ -7,6 +7,7 @@ import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { toSessionToken } from '../../shared/identifiers';
 import type {
   Announcement,
+  DefaultCredential,
   Envelope,
   INotificationLike,
   IProcedure,
@@ -376,7 +377,7 @@ test.describe('createRouterClient', () => {
       await expect(asking).resolves.toMatchObject({ payload: new Uint8Array(100) });
     });
 
-    test('learns the session from every answer, paired or not, keeps it, loses it, and never presents it', async () => {
+    test('learns the session from every answer, paired or not, keeps it, loses it, and presents it on no call that does not ask for it', async () => {
       const { close, deliver, emitter, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
       const errors = recordErrors(router);
@@ -682,7 +683,10 @@ test.describe('createRouterClient', () => {
         return createRouterClient(transport, { credential: JWT, limits });
       }).toThrow(/limits do not hold together/);
       expect(() => {
-        return createRouterClient(transport, { credentials: { keys: [key] }, limits });
+        return createRouterClient(transport, {
+          credentials: { audience: 'https://bead.example', keys: [key] },
+          limits,
+        });
       }).toThrow(/limits do not hold together/);
 
       using small = createRouterClient(transport, { credential: ELSEWHERE, limits });
@@ -691,6 +695,30 @@ test.describe('createRouterClient', () => {
         small.credential = JWT;
       }).toThrow(ProgrammerError);
       expect(small.credential).toEqual(ELSEWHERE);
+    });
+
+    test('refuses as it is built keys or a key set without an audience', () => {
+      const { transport } = createScriptedTransport();
+      const key = {
+        algorithm: 'HS256',
+        issuer: 'https://issuer.example',
+        jwk: { k: 'A'.repeat(43), kty: 'oct' },
+      } as const;
+      const keySet = () => {
+        return Promise.resolve([]);
+      };
+
+      for (const credentials of [{ keys: [key] }, { keySet }]) {
+        expect(() => {
+          return createRouterClient(transport, { credentials });
+        }).toThrow(ProgrammerError);
+
+        using router = createRouterClient(transport, {
+          credentials: { ...credentials, audience: 'https://bead.example' },
+        });
+
+        expect(router.credential).toBeUndefined();
+      }
     });
 
     test('withdraws its default once a call that presented it is refused SESSION_REQUIRED: the next call presents none, and credentialWithdrawn fires once, its scheme alone', async () => {
@@ -766,6 +794,36 @@ test.describe('createRouterClient', () => {
 
       expect(withdrawn).toEqual([]);
       expect(router.credential).toEqual(RENEWED_JWT);
+    });
+
+    test('withdraws a default set again to the same bytes by a late refusal, and keeps one given other bytes', async () => {
+      const cases: [given: DefaultCredential, isKept: boolean][] = [
+        [{ scheme: CredentialScheme.JWT, token: JWT.token }, false],
+        [RENEWED_JWT, true],
+        [{ carried: ELSEWHERE.carried, scheme: CredentialScheme.ELSEWHERE }, false],
+        [{ carried: `${ELSEWHERE.carried}, renewed`, scheme: CredentialScheme.ELSEWHERE }, true],
+      ];
+
+      for (const [given, isKept] of cases) {
+        const scripted = createScriptedTransport();
+        const presented = given.scheme === CredentialScheme.JWT ? JWT : ELSEWHERE;
+        using router = createRouterClient(scripted.transport, { credential: presented });
+        const withdrawn: unknown[][] = [];
+
+        router.on('credentialWithdrawn', (...told) => {
+          withdrawn.push(told);
+        });
+
+        const refused = router.request(new Uint8Array(0), { options, procedure: service });
+
+        // set again while the call was on its way: a copy, never the object the call presented
+        router.credential = given;
+        scripted.deliver(sessionRequiredOf(1));
+        await expect(refused).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+
+        expect(router.credential).toEqual(isKept ? given : undefined);
+        expect(withdrawn).toEqual(isKept ? [] : [[given.scheme]]);
+      }
     });
 
     test('withdraws nothing when a call that presented its own credential is refused SESSION_REQUIRED', async () => {

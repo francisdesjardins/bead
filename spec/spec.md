@@ -576,8 +576,9 @@ present by default: a `JWT`, or an `ELSEWHERE` with what its transport carries b
 none, whatever the default. A default is withdrawn once a call that presented it is refused
 `SESSION_REQUIRED`, whatever relays the refusal crossed: the client presents none by default from
 then on, and tells its application, by the credential's scheme alone, so the call that renews it
-goes out without it. A refusal withdraws only the credential its call presented, never a default
-given anew since; and a failure that ends a subscription once answered (section 13.6) withdraws
+goes out without it. A refusal withdraws the default only while it is still the credential its call
+presented, the same scheme and the same bytes: a default given other bytes since is kept, and one
+set again to the same bytes is withdrawn with it; and a failure that ends a subscription once answered (section 13.6) withdraws
 nothing, since a session the application ended leaves a credential that may still hold. A client
 receiving a command resolves its credential as a server does (section 9.2, step 5), the session it
 learned standing for its connection's.
@@ -595,7 +596,10 @@ server listens on — `localhost` or a name that ends in `.localhost`, compared 
 an IPv4 address in 127.0.0.0/8, or `::1`, as the W3C's
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
 potentially trustworthy; or when it never leaves the machine, a Web Worker or a router called in
-process. Any other leaves the machine in the clear.
+process. Any other leaves the machine in the clear. A server cannot tell what stands in front of it:
+its application MAY say so, and is then believed whatever the server listens on — TLS terminated
+before it, which makes it secure, or a proxy that serves the network in the clear, which leaves it
+in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 5): a call never runs outside the session it presented. A procedure
@@ -629,8 +633,10 @@ ends at once.
 Serialization (RFC 7515), as RFC 8725 recommends. The application gives its keys, each a JWK
 (RFC 7517) with its issuer and its one algorithm, `ES256` or `HS256` (RFC 8725 §3.1), and its
 audience, or a set of them, as a relay that verifies holds those of its destinations
-(section 14.3); the side reads the wall clock, _W_, a whole number of milliseconds since the epoch.
-It takes these steps in this order, and the first that fails refuses the token for the reason it
+(section 14.3): keys given without an audience, on a side whose relay does not verify, are the
+application's fault, refused as the side is built. The side reads the wall clock, _W_, a whole
+number of milliseconds since the epoch, once, as the token's signature has verified (step 7), so a
+verification that waits is judged as it ends. It takes these steps in this order, and the first that fails refuses the token for the reason it
 names:
 
 1. `token`: the token is three parts apart by a period, each base64url without padding (RFC 4648
@@ -695,9 +701,10 @@ step, on the clock its side runs on (decision 0011):
    dropped, so no fraction reaches a timer;
 3. as its session comes to be kept, by a reading of its own apart from the one its verdict took, as
    a renewal moves _E_, and at its timer's due, the side reads _W_ again, never counting down, and
-   takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends then, with no timer armed; otherwise it arms a
-   timer of min(_R_, 2³¹ − 1) ms in place of the one before, so an end is never refused for its
-   distance, and a wall clock set by hand takes effect at the next due;
+   takes _R_ = _E_ − _W_: at _R_ ≤ 0 the session ends in a turn of its own, past the answer that kept
+   it, with no timer armed; otherwise it arms a timer of min(_R_, 2³¹ − 1) ms in place of the one
+   before, so an end is never refused for its distance, and a wall clock set by hand takes effect at
+   the next due;
 4. an `ELSEWHERE` whose end _W_ has reached when its verification settles does not hold:
    `SESSION_REQUIRED` (section 13.10).
 

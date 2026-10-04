@@ -60,7 +60,8 @@ public interface IRouterServerTransport
 
     /// <summary>
     /// Whether a connection is secure — its listener under TLS, or bound to the loopback, or within
-    /// the machine (spec 13.4): a command presenting a bearer credential needs one. None is by default.
+    /// the machine, or as its application says what stands in front of it (spec 13.4): a command
+    /// presenting a bearer credential needs one. None is by default.
     /// </summary>
     bool IsSecure(string connectionHandle)
     {
@@ -111,7 +112,9 @@ public sealed record RouterServerOptions
     /// <see cref="CredentialScheme.Elsewhere"/> with, on its clock; it takes no other when none. A
     /// request presenting a scheme it takes none of is refused CREDENTIAL_UNSUPPORTED. Given JWT keys
     /// or a key set, its limits hold a chunk's envelope and an envelope of 1,024 bytes at least, or
-    /// they do not hold together, an <see cref="ArgumentException"/> (spec 12.2).
+    /// they do not hold together, an <see cref="ArgumentException"/> (spec 12.2); and they come with
+    /// their audience, unless its relay verifies, or they are an <see cref="ArgumentException"/>
+    /// (spec 13.8).
     /// </summary>
     public Credentials? Credentials { get; init; }
 
@@ -195,7 +198,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             });
         _sessionTokenOf = options?.SessionTokenOf;
         _sessionOf = options?.SessionOf;
-        _resolver = new CredentialResolver(options?.Credentials, clock);
+        _resolver = new CredentialResolver(options?.Credentials, (clock, options?.Relay?.Verifies ?? false));
         _credentialSchemes = [.. (options?.CredentialSchemes ?? []).Concat(_resolver.Schemes).Distinct().Order()];
         _core = new RouterCore(
             new Port(this),

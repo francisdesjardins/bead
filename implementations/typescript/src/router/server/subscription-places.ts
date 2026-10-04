@@ -39,7 +39,8 @@ export interface ISubscriptionPlaces {
   /**
    * The calls a session's end ends on its connection — its connection's session, or a credential's,
    * by its identifier: each established subscription it holds, and each call of it waiting, which no
-   * longer waits. A call in flight is left to its own answer.
+   * longer waits. A call in flight, registered from the moment it subscribes and still owed its
+   * answer, is left to that answer.
    */
   drop(subscriber: ISubscriber): CallId[];
   /** The subscribing calls in flight and those waiting for a place, counted, and their connections. */
@@ -281,12 +282,13 @@ export const createSubscriptionPlaces = ({
         return holder;
       }
 
-      notifications.register(procedure, call);
-
       const calls = inFlight.get(call.connectionHandle) ?? new Set<CallId>();
 
+      // ! in flight before it is registered: what its registration sets going — a session's end it
+      // reached, say — drops no call still owed its answer
       calls.add(call.callId);
       inFlight.set(call.connectionHandle, calls);
+      notifications.register(procedure, call);
 
       return call.callId;
     },

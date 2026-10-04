@@ -77,6 +77,14 @@ public sealed record HttpTransportServerOptions
     public X509Certificate2? Certificate { get; init; }
 
     /// <summary>
+    /// What stands in front of it, which it cannot tell (spec 13.4): true for TLS terminated before
+    /// it, which makes its connections secure; false for a proxy that serves the network in the
+    /// clear, which leaves them in the clear; none to judge by its certificate and the address it
+    /// listens on. Believed whatever it listens on.
+    /// </summary>
+    public bool? Secure { get; init; }
+
+    /// <summary>
     /// What the stack built on it runs on, its timers among them; the system's clock when none. A
     /// stop's grace bounds the platform's own, on the real clock.
     /// </summary>
@@ -161,8 +169,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private readonly TransportServerLife _life = new();
     private WebApplication? _application;
 
-    // whether its listener is secure: under TLS, wherever it listens, or bound to the loopback as it
-    // starts
+    // whether its connections are secure: as its application says what stands in front of it, or,
+    // when it says nothing, under TLS, wherever it listens, or bound to the loopback as it starts
     private volatile bool _isSecure;
 
     /// <summary>
@@ -188,7 +196,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), given.MaximumWaitingExchanges));
         _options = given with { ExchangeTimeout = exchangeTimeout, InactivityTimeout = inactivityTimeout, MaximumWait = maximumWait };
-        _isSecure = _options.Certificate is not null;
+        _isSecure = _options.Secure ?? _options.Certificate is not null;
         _clock = _options.Clock ?? TimeProvider.System;
     }
 
@@ -376,7 +384,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
             bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
-            _isSecure = TransportSecurity.IsSecure((_options.Certificate is not null, start.Address));
+            _isSecure = _options.Secure ?? TransportSecurity.IsSecure((_options.Certificate is not null, start.Address));
         }
         catch
         {
@@ -444,8 +452,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     /// <summary>
-    /// Whether a connection is secure, judged from its listener, never from what a name resolves to
-    /// (spec 13.4): under TLS, its certificate given, or bound to a loopback address.
+    /// Whether a connection is secure (spec 13.4): as <see cref="HttpTransportServerOptions.Secure"/>
+    /// says, when given; otherwise judged from its listener, never from what a name resolves to,
+    /// under TLS, its certificate given, or bound to a loopback address.
     /// </summary>
     public bool IsSecure(string connectionHandle)
     {

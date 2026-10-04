@@ -1202,6 +1202,52 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ]);
   });
 
+  test('is secure as its application says what stands in front of it, whatever it listens on, and by what it listens on when it says nothing', async () => {
+    const securedBy = async ({
+      address,
+      isTls = false,
+      secure,
+    }: {
+      address: string;
+      isTls?: boolean;
+      secure?: boolean;
+    }) => {
+      const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
+      const server = createHTTPTransportServer({
+        createServer: (listener) => {
+          const created = fake.createServer(listener);
+
+          return isTls ? Object.assign(created, { addContext: () => {} }) : created;
+        },
+        ...(secure === undefined ? {} : { secure }),
+      });
+      const starting = server.start({ address, port: 50_000 });
+
+      fake.listen();
+      await starting;
+
+      try {
+        return server.isSecure('type=HTTP;ip=192.0.2.9;ordinal=1');
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all([
+        securedBy({ address: '127.0.0.1' }),
+        securedBy({ address: '0.0.0.0' }),
+        // TLS terminated before it, on another host
+        securedBy({ address: '0.0.0.0', secure: true }),
+        // a proxy on the machine, or a server of its own under TLS, that serves the network in the
+        // clear
+        securedBy({ address: '127.0.0.1', secure: false }),
+        securedBy({ address: '192.0.2.1', isTls: true, secure: false }),
+        securedBy({ address: '127.0.0.1', secure: true }),
+      ])
+    ).toEqual([true, false, true, false, false, true]);
+  });
+
   test('listens on the port it was asked for, reports it when the server reports none, takes a late error as its own, and closes its sessions as it stops', async () => {
     const fake = createFakeHTTPServer({ address: null });
     const server = createHTTPTransportServer({ createServer: fake.createServer });

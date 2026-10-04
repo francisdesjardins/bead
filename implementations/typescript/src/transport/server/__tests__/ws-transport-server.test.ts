@@ -446,6 +446,39 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     }
   });
 
+  test('is secure as its application says what stands in front of it, whatever it listens on, and by what it listens on when it says nothing', async () => {
+    const securedBy = async ({ address, secure }: { address: string; secure?: boolean }) => {
+      const fake = createFakeWebSocketServer({ address: { address, port: 4_321 } });
+      const server = createWSTransportServer({
+        ...(secure === undefined ? {} : { secure }),
+        WebSocketServer: fake.FakeWebSocketServer,
+      });
+      const starting = server.start({ address, port: 4_321 });
+
+      fake.instances[0]?.emit('listening');
+      await starting;
+
+      try {
+        return server.isSecure(fake.connect(createFakeSocket()));
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all([
+        securedBy({ address: '127.0.0.1' }),
+        securedBy({ address: '0.0.0.0' }),
+        // TLS terminated before it, on another host
+        securedBy({ address: '0.0.0.0', secure: true }),
+        // a proxy on the machine that serves the network in the clear
+        securedBy({ address: '127.0.0.1', secure: false }),
+        securedBy({ address: '127.0.0.1', secure: true }),
+        securedBy({ address: '0.0.0.0', secure: false }),
+      ])
+    ).toEqual([true, false, true, false, true, false]);
+  });
+
   test('reports the port it was asked for when the server reports no port of its own', async () => {
     for (const address of ['/run/bead.sock', null]) {
       const fake = createFakeWebSocketServer({ address });

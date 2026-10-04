@@ -327,7 +327,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Learns_the_session_from_every_answer_paired_or_not_keeps_it_loses_it_and_never_presents_it()
+    public async Task Learns_the_session_from_every_answer_paired_or_not_keeps_it_loses_it_and_presents_it_on_no_call_that_does_not_ask_for_it()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);

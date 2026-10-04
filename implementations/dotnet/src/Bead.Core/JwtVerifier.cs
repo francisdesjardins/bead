@@ -85,7 +85,7 @@ public sealed record JwtKey
 
 /// <summary>
 /// What <see cref="JwtVerifier.VerifyJwt"/> holds a token to: the keys, the receiver's audiences, and
-/// the wall clock's reading, <em>W</em>, a whole number of milliseconds since the epoch.
+/// the means to read the wall clock, <em>W</em>, a whole number of milliseconds since the epoch.
 /// </summary>
 internal sealed record VerifyJwtProps
 {
@@ -98,8 +98,12 @@ internal sealed record VerifyJwtProps
     /// </summary>
     public required IReadOnlyCollection<string> Audiences { get; init; }
 
-    /// <summary>The wall clock's reading, in milliseconds since the epoch.</summary>
-    public required long Now { get; init; }
+    /// <summary>
+    /// Reads the wall clock, in milliseconds since the epoch: once, as the token's signature has
+    /// verified (step 7), so a verification that waits is judged as it ends; never for a token
+    /// refused before.
+    /// </summary>
+    public required Func<long> Now { get; init; }
 }
 
 /// <summary>A <c>JWT</c>'s session's identifier: its issuer with its <c>sid</c>, else with its <c>sub</c>.</summary>
@@ -469,10 +473,11 @@ internal static class JwtVerifier
             && aud.EnumerateArray().Any(named);
     }
 
-    // steps 8 to 13 of section 13.8, on a token whose signature verified under its key
-    private static JwtVerdict VerdictOf(JsonElement claims, (JwtKey Key, VerifyJwtProps Props) verified)
+    // steps 8 to 13 of section 13.8, on a token whose signature verified under its key, against the
+    // wall clock read as it did, W
+    private static JwtVerdict VerdictOf(JsonElement claims, (JwtKey Key, IReadOnlyCollection<string> Audiences, long Now) verified)
     {
-        var (key, props) = verified;
+        var (key, audiences, now) = verified;
 
         if (!string.Equals(StringOf(claims, "iss"), key.Issuer, StringComparison.Ordinal))
         {
@@ -481,18 +486,18 @@ internal static class JwtVerifier
 
         if (MillisecondsOf(claims, "exp") is not { } expiry
             || expiry > Largest - LeewayMilliseconds
-            || props.Now >= expiry + LeewayMilliseconds)
+            || now >= expiry + LeewayMilliseconds)
         {
             return Refused(JwtRefusal.Exp);
         }
 
         if (claims.TryGetProperty("nbf", out _)
-            && (MillisecondsOf(claims, "nbf") is not { } start || props.Now + LeewayMilliseconds < start))
+            && (MillisecondsOf(claims, "nbf") is not { } start || now + LeewayMilliseconds < start))
         {
             return Refused(JwtRefusal.Nbf);
         }
 
-        if (!NamesAudience(claims, props.Audiences))
+        if (!NamesAudience(claims, audiences))
         {
             return Refused(JwtRefusal.Aud);
         }
@@ -637,6 +642,7 @@ internal static class JwtVerifier
             return Refused(JwtRefusal.Signature);
         }
 
-        return VerdictOf(claims.RootElement, (key, props));
+        // * W, read once, as the signature has verified
+        return VerdictOf(claims.RootElement, (key, props.Audiences, props.Now()));
     }
 }

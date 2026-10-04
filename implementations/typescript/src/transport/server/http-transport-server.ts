@@ -464,6 +464,7 @@ export const createHTTPTransportServer = (
     maximumWaitingExchanges = MAXIMUM_WAITING_EXCHANGES,
     origins = [],
     pathname = PATHNAME,
+    secure,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
@@ -1144,6 +1145,7 @@ export const createHTTPTransportServer = (
             typeof (httpServer as { addContext?: unknown } | undefined)?.addContext === 'function'
           );
         },
+        secure,
         type: TRANSPORT_HTTP,
 
         start: async ({ address, findOpenPort, port, signal }) => {

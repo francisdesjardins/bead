@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
@@ -16,6 +17,7 @@ import type {
   Envelope,
   ICredentials,
   IElsewhereSession,
+  INotificationLike,
   IProcedure,
   OutgoingEnvelope,
   RouterLimitsOptions,
@@ -44,6 +46,8 @@ import {
   ProtocolCode,
   SERVER_FAILURES,
   TimeoutError,
+  type IJwtKey,
+  type IJwtSetKey,
   type IRouterServerTransportLike,
 } from '../router-server';
 
@@ -2206,6 +2210,62 @@ test.describe('createRouterServer, credentials', () => {
   const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
   const CARRIED = 'Interop sub=ada';
 
+  const NOW = Date.parse('2026-01-01T00:00:00Z');
+  const AUDIENCE = 'https://bead.example';
+  const ISSUER = 'https://issuer.example';
+  const SET_ISSUER = 'https://keys.example';
+  const SET_KID = 'set-1';
+  // keys of these tests' own, 32 bytes each: one given, one its key set answers
+  const SECRET = Buffer.alloc(32, 1);
+  const SET_SECRET = Buffer.alloc(32, 2);
+  const KEY: IJwtKey = Object.freeze({
+    algorithm: 'HS256',
+    issuer: ISSUER,
+    jwk: { k: SECRET.toString('base64url'), kty: 'oct' },
+  });
+  const SET_KEY: IJwtSetKey = Object.freeze({
+    algorithm: 'HS256',
+    jwk: { k: SET_SECRET.toString('base64url'), kid: SET_KID, kty: 'oct' },
+  });
+
+  /**
+   * An access token for grace, ending at `exp`, in seconds: under {@link KEY}, or, naming `kid`,
+   * under the key the key set answers for {@link SET_ISSUER}.
+   */
+  const jwtOf = (exp: number, kid?: string): string => {
+    const part = (value: object): string => {
+      return Buffer.from(JSON.stringify(value)).toString('base64url');
+    };
+    const header = part({ alg: 'HS256', typ: 'at+jwt', ...(kid === undefined ? {} : { kid }) });
+    const claims = part({
+      aud: AUDIENCE,
+      exp,
+      iss: kid === undefined ? ISSUER : SET_ISSUER,
+      sub: 'grace',
+    });
+    const signature = createHmac('sha256', kid === undefined ? SECRET : SET_SECRET)
+      .update(`${header}.${claims}`)
+      .digest('base64url');
+
+    return `${header}.${claims}.${signature}`;
+  };
+
+  /** A key set that records each issuer asked, and answers as each ask is settled. */
+  const createKeySet = () => {
+    const asks: { issuer: string; settle: PromiseWithResolvers<readonly IJwtSetKey[]> }[] = [];
+
+    return {
+      asks,
+      keySet: (issuer: string) => {
+        const settle = Promise.withResolvers<readonly IJwtSetKey[]>();
+
+        asks.push({ issuer, settle });
+
+        return settle.promise;
+      },
+    };
+  };
+
   /** Each failure sent: its call id, its code, its detail. */
   const failuresOf = (sent: ISentEnvelope[]) => {
     return sent.flatMap(({ envelope }) => {
@@ -2529,13 +2589,19 @@ test.describe('createRouterServer, credentials', () => {
 
     for (const credentials of [{ keys: [key] }, { keySet }]) {
       expect(() => {
-        return createRouterServer(transport, { credentials, limits });
+        return createRouterServer(transport, {
+          credentials: { ...credentials, audience: 'https://bead.example' },
+          limits,
+        });
       }).toThrow(/limits do not hold together/);
     }
 
     expect(() => {
       return createRouterServer(transport, {
-        credentials: { keys: [{ ...key, jwk: { k: 'A'.repeat(42), kty: 'oct' } }] },
+        credentials: {
+          audience: 'https://bead.example',
+          keys: [{ ...key, jwk: { k: 'A'.repeat(42), kty: 'oct' } }],
+        },
       });
     }).toThrow(ProgrammerError);
 
@@ -2550,6 +2616,31 @@ test.describe('createRouterServer, credentials', () => {
     });
 
     expect(router.limits.chunkBytes).toBe(1_000);
+  });
+
+  test('refuses as it is built keys or a key set without an audience, unless its relay verifies', () => {
+    const { transport } = createScriptedTransport();
+    const key = {
+      algorithm: 'HS256',
+      issuer: 'https://issuer.example',
+      jwk: { k: 'A'.repeat(43), kty: 'oct' },
+    } as const;
+    const keySet = () => {
+      return Promise.resolve([]);
+    };
+
+    for (const credentials of [{ keys: [key] }, { keySet }]) {
+      for (const relay of [undefined, { verifies: false }]) {
+        expect(() => {
+          return createRouterServer(transport, { credentials, relay });
+        }).toThrow(ProgrammerError);
+      }
+
+      // a relay that verifies holds the audiences of its destinations instead
+      using verifying = createRouterServer(transport, { credentials, relay: { verifies: true } });
+
+      expect(verifying.destinations()).toEqual([]);
+    }
   });
 
   test('holds one subscription a procedure per session of a connection, its connection’s and each credential’s, each notified alone, and ends a credential’s by its identifier', async () => {
@@ -2617,6 +2708,201 @@ test.describe('createRouterServer, credentials', () => {
       [1, undefined],
       [3, { id: 'ada', scheme: CredentialScheme.ELSEWHERE }],
     ]);
+  });
+
+  test('answers a subscribing call whose JWT’s end passes before its answer with its RESULT, then SESSION_REQUIRED, and its client withdraws nothing', async () => {
+    const clock = createTestClock(NOW);
+    const pipe = createPipedTransports({ connectionHandle: first });
+    // its end, exp plus 60 s, two minutes on
+    const credential = { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 60) } as const;
+    using server = createRouterServer(pipe.server, {
+      clock,
+      credentials: { audience: AUDIENCE, keys: [KEY] },
+    });
+    using client = createRouterClient(pipe.client, { clock, credential });
+    const serverServices = createServiceManager(server);
+    const flash: IProcedure = { ...news, procedureId: 7, procedureName: 'flash' };
+    const released = Promise.withResolvers<void>();
+    const withdrawn: unknown[] = [];
+    const dropped = new Map<string, number | undefined>();
+    const errors: unknown[] = [];
+    let entered = 0;
+
+    // news subscribes in flight once released, and answers a turn later; flash's answer alone
+    // subscribes it
+    serverServices.getNotificationResolver(news, { serializer: answering })(
+      async (_request, response) => {
+        entered += 1;
+        await released.promise;
+        response.registerNotification();
+        await sleep(0);
+
+        return response('subscribed');
+      }
+    );
+    serverServices.getNotificationResolver(flash, { serializer: answering })(
+      async (_request, response) => {
+        entered += 1;
+        await released.promise;
+
+        return response('subscribed');
+      }
+    );
+    client.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+    pipe.open();
+
+    const subscribing = [news, flash].map(async (procedure) => {
+      const notification: INotificationLike = {
+        ...procedure,
+        drop: (failure) => {
+          dropped.set(procedure.procedureName, failure?.code);
+        },
+        trigger: () => {
+          return Promise.resolve([]);
+        },
+      };
+
+      await client.registerNotification(notification);
+
+      const { payload } = await client.request(new Uint8Array(0), {
+        options,
+        procedure,
+        subscribes: notification,
+      });
+
+      return text.decode(payload);
+    });
+
+    // both resolved before their end, and wait in their resolvers while the wall clock passes it
+    await expect
+      .poll(() => {
+        return entered;
+      })
+      .toBe(2);
+    clock.setSystemTime(NOW + 120_000);
+    released.resolve();
+
+    expect(await Promise.all(subscribing)).toEqual(['subscribed', 'subscribed']);
+    await expect
+      .poll(() => {
+        return dropped.size;
+      })
+      .toBe(2);
+
+    // each call's RESULT goes first, its FAILURE behind it, never a FAILURE on a call still owed its
+    // answer
+    const answers = answersOf(
+      pipe.sent.server.map((bytes) => {
+        return {
+          connectionHandle: first,
+          envelope: readEnvelope(bytes, {
+            failures: CLIENT_FAILURES,
+            maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+          }),
+        };
+      })
+    );
+
+    for (const callId of [1, 3]) {
+      expect(
+        answers.filter((answer) => {
+          return answer[2] === callId;
+        })
+      ).toEqual([
+        [first, 'result', callId, 'subscribed'],
+        [first, 'failure', callId, ProtocolCode.SESSION_REQUIRED],
+      ]);
+    }
+
+    expect(answers).toHaveLength(4);
+    expect(Object.fromEntries(dropped)).toEqual({
+      flash: ProtocolCode.SESSION_REQUIRED,
+      news: ProtocolCode.SESSION_REQUIRED,
+    });
+    expect(withdrawn).toEqual([]);
+    expect(client.credential).toEqual(credential);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers nothing to a call cancelled while it waits on its key set, whose ask goes on for the others', async () => {
+    const { asks, keySet } = createKeySet();
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: { audience: AUDIENCE, keySet },
+    });
+    const errors = recordErrors(router);
+    const presenting = {
+      credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600, SET_KID) },
+    } as const;
+
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(String((request.session?.data as { sub?: unknown } | undefined)?.sub));
+      }
+    );
+    deliver(first, requestOf(1, presenting));
+    deliver(first, requestOf(3, presenting));
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    deliver(first, cancelOf(1));
+    asks[0]?.settle.resolve([SET_KEY]);
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([[first, 'result', 3, 'grace']]);
+    expect(asks).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('dispatches nothing and runs no resolver for a JWT call that waits on its key set as the router is disposed', async () => {
+    const { asks, keySet } = createKeySet();
+    const { deliver, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: { audience: AUDIENCE, keySet },
+    });
+    const errors = recordErrors(router);
+    let resolved = 0;
+
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (_request, response) => {
+        resolved += 1;
+
+        return response('ran');
+      }
+    );
+    deliver(
+      first,
+      requestOf(1, {
+        credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600, SET_KID) },
+      })
+    );
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    router[Symbol.dispose]();
+    asks[0]?.settle.resolve([SET_KEY]);
+    // long enough for its key to be found and its signature verified, had its call gone on
+    await sleep(20);
+
+    expect(resolved).toBe(0);
+    expect(sent).toEqual([]);
+    expect(errors).toEqual([]);
   });
 });
 

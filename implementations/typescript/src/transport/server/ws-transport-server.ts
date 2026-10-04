@@ -76,6 +76,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload,
+    secure,
     WebSocketServer,
   } = options;
   const heartbeat = assertHeartbeat(givenHeartbeat);
@@ -195,6 +196,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     return {
       clock,
       defaults: START_DEFAULTS,
+      secure,
       type: TRANSPORT_WS,
 
       start: async ({ address, findOpenPort, port, signal }) => {

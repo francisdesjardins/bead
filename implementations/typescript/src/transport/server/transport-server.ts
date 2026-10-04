@@ -199,8 +199,12 @@ export const createTransportServer = <Socket extends object, Request>(
           .toArray()
       );
     },
+    // what its application says stands in front of it is believed first, whatever it listens on
     isSecure: () => {
-      return implementation.isSecure === true || isLoopbackHost(startOptions.address);
+      return (
+        implementation.secure ??
+        (implementation.isSecure === true || isLoopbackHost(startOptions.address))
+      );
     },
     gauges: () => {
       return mergeGauges([

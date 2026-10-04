@@ -16,13 +16,13 @@ export interface IJwtKey {
 
 /**
  * What {@link verifyJwt} holds a token to: the keys, the receiver's audience — or the set of them a
- * relay that verifies holds, any of which its `aud` may name — and the wall clock's reading, _W_, a
- * whole number of milliseconds since the epoch.
+ * relay that verifies holds, any of which its `aud` may name — and what reads the wall clock, _W_, a
+ * whole number of milliseconds since the epoch, once the token's signature verified.
  */
 export interface IVerifyJwtProps {
   readonly audience: string | readonly string[];
   readonly keys: readonly IJwtKey[];
-  readonly now: number;
+  readonly now: () => number;
 }
 
 // types
@@ -472,7 +472,8 @@ export const jwtStringOf = (object: Record<string, unknown>, name: string): stri
 /**
  * The verdict on `token`, a `JWT`: an access token of RFC 9068's profile in JWS Compact
  * Serialization (RFC 7515), verified as section 13.8 states, step by step, the first that fails
- * naming the verdict's reason. It settles in a later turn, Web Crypto's. Throws a
+ * naming the verdict's reason. The wall clock is read once, as its signature has verified, so a
+ * verification that waits is judged as it ends. It settles in a later turn, Web Crypto's. Throws a
  * {@link ProgrammerError} for a key not shaped for its algorithm, an audience — or one of a set —
  * that is not well-formed Unicode, or a reading that is not a whole number of milliseconds; rejects
  * for a key Web Crypto does not import, a point off its curve.
@@ -481,12 +482,6 @@ export const verifyJwt = async (
   token: string,
   { audience, keys, now }: IVerifyJwtProps
 ): Promise<JwtVerdict> => {
-  if (!Number.isSafeInteger(now)) {
-    throw new ProgrammerError(
-      `the wall clock's reading is a whole number of milliseconds, got ${String(now)}`
-    );
-  }
-
   const audiences: readonly unknown[] = typeof audience === 'string' ? [audience] : audience;
 
   if (
@@ -546,5 +541,14 @@ export const verifyJwt = async (
     return refused(JwtRefusal.SIGNATURE);
   }
 
-  return verdictOf(claims, { audiences: audiences as readonly string[], key, now });
+  // * W read once, as the signature has verified: never before a wait the verification made
+  const reading = now();
+
+  if (!Number.isSafeInteger(reading)) {
+    throw new ProgrammerError(
+      `the wall clock's reading is a whole number of milliseconds, got ${String(reading)}`
+    );
+  }
+
+  return verdictOf(claims, { audiences: audiences as readonly string[], key, now: reading });
 };

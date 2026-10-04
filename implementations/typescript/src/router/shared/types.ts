@@ -891,7 +891,11 @@ export interface IElsewhereSession {
  * a key set, and an `ELSEWHERE` once given its verifier; it verifies on the clock it runs on.
  */
 export interface ICredentials {
-  /** The audience a `JWT` names for this side (RFC 7519 §4.1.3); one that names none is refused. */
+  /**
+   * The audience a `JWT` names for this side (RFC 7519 §4.1.3); one that names none is refused.
+   * Given with keys or a key set, unless the side's relay verifies against the audiences of its
+   * destinations: keys without one are a {@link ProgrammerError}, as the side is built.
+   */
   readonly audience?: string | undefined;
   /** The keys a `JWT` is verified with (spec 13.8). */
   readonly keys?: readonly IJwtKey[] | undefined;

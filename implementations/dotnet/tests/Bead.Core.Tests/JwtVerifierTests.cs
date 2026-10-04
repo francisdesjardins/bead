@@ -94,7 +94,10 @@ public sealed class JwtVerifierTests
         {
             Keys = KeysOf(vector),
             Audiences = AudiencesOf(vector),
-            Now = MillisecondsOf(vector),
+            Now = () =>
+            {
+                return MillisecondsOf(vector);
+            },
         };
     }
 
@@ -166,6 +169,34 @@ public sealed class JwtVerifierTests
         Assert.Equal("reader", verdict.Claims.GetProperty("realm").GetProperty("roles")[0].GetString());
     }
 
+    [Fact]
+    public async Task Read_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
+    {
+        var vector = Vectors.Of("jwtVerdicts", Holding);
+        var token = vector.GetProperty("token").GetString()!;
+        var end = vector.GetProperty("verdict").GetProperty("end").GetInt64();
+        var reads = 0;
+
+        // .NET's crypto waits for nothing: the reading taken as the signature verified stands for
+        // a wall clock that went past the token's end meanwhile
+        var props = PropsOf(vector) with
+        {
+            Now = () =>
+            {
+                reads += 1;
+
+                return end;
+            },
+        };
+
+        Assert.Equal((JwtRefusal.Exp, 1), ((await JwtVerifier.VerifyJwt(token, props)).Reason, reads));
+
+        // one refused before its signature verified reads none
+        var forged = $"{token[..token.LastIndexOf('.')]}.{new string('A', 43)}";
+
+        Assert.Equal((JwtRefusal.Signature, 1), ((await JwtVerifier.VerifyJwt(forged, props)).Reason, reads));
+    }
+
     [Theory]
     [MemberData(nameof(UnshapedNames))]
     public async Task Throws_for_a_key_not_shaped_for_its_algorithm_whatever_the_token(string name)
@@ -173,7 +204,14 @@ public sealed class JwtVerifierTests
         var vector = Vectors.Of("jwtVerdicts", Holding);
         var (algorithm, jwk) = Unshaped[name];
         var key = new JwtKey { Issuer = "https://issuer.example", Algorithm = algorithm, Jwk = ElementOf(jwk) };
-        var props = PropsOf(vector) with { Keys = [.. KeysOf(vector), key], Now = 0 };
+        var props = PropsOf(vector) with
+        {
+            Keys = [.. KeysOf(vector), key],
+            Now = () =>
+            {
+                return 0;
+            },
+        };
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
         {

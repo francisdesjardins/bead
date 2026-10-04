@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createTestClock, delaysOn } from '../../../transport/shared/__tests__/fixtures';
@@ -106,7 +107,8 @@ test.describe('createCredentialSessions', () => {
     expect(ended).toEqual([{ connectionHandle: first, identifier: GRACE }]);
     expect(delaysOn(clock)).toEqual([]);
 
-    // one whose end passed as it comes to be kept ends then, with no timer
+    // one whose end passed as it comes to be kept ends then, with no timer, in a turn of its own:
+    // past the answer of the call that kept it
     sessions.notifications.register(news, {
       callId: 3,
       connectionHandle: second,
@@ -114,11 +116,16 @@ test.describe('createCredentialSessions', () => {
       identifier: GRACE,
     });
 
-    expect(ended).toHaveLength(2);
+    expect(ended).toHaveLength(1);
     expect(delaysOn(clock)).toEqual([]);
+
+    await sleep(0);
+
+    expect(ended).toHaveLength(2);
 
     // a call in flight as its session ended, answered, keeps it anew: ended at once, its end reached
     sessions.held({ callId: 3, connectionHandle: second, end: NOW, identifier: GRACE });
+    await sleep(0);
 
     expect(ended).toEqual([
       { connectionHandle: first, identifier: GRACE },
@@ -130,6 +137,36 @@ test.describe('createCredentialSessions', () => {
     sessions.held({ callId: 9, connectionHandle: second, end: undefined, identifier: GRACE });
 
     expect(sessions.gauges().counts).toEqual({ credentialSessions: 0, timedCredentialSessions: 0 });
+  });
+
+  test('ends nothing in the turn after its end was reached for a session forgotten or renewed meanwhile', async () => {
+    const { clock, ended, sessions } = createSessions();
+    const { notifications } = sessions;
+
+    // reached as it comes to be kept, then let go in the same turn
+    notifications.register(news, {
+      callId: 1,
+      connectionHandle: first,
+      end: NOW,
+      identifier: GRACE,
+    });
+    notifications.unregister(1, first);
+    await sleep(0);
+
+    expect(ended).toEqual([]);
+
+    // reached, then renewed in the same turn by a call resolving to a later end
+    notifications.register(news, {
+      callId: 3,
+      connectionHandle: first,
+      end: NOW,
+      identifier: GRACE,
+    });
+    sessions.resolved(sessionOf(NOW + 60_000), first);
+    await sleep(0);
+
+    expect(ended).toEqual([]);
+    expect(delaysOn(clock)).toEqual([60_000]);
   });
 
   test('moves a kept session’s end to the later of the two, in whatever order calls resolve, its timer armed anew; a call runs with the end kept', () => {

@@ -14,8 +14,9 @@ import type { INotificationManager, ISubscribingCall, ISubscriber } from './type
 
 /**
  * A credential's session a connection keeps (spec 13.9): its identifier, its end, the later of those
- * its calls resolved to — none for one without — the timer toward it, and the subscriptions it
- * holds, by call id.
+ * its calls resolved to — none for one without — the timer toward it, how many times it was timed,
+ * which an end reached and taken in a later turn holds to, and the subscriptions it holds, by call
+ * id.
  */
 interface IKept {
   readonly calls: Set<CallId>;
@@ -23,6 +24,7 @@ interface IKept {
   end: number | undefined;
   readonly identifier: SessionIdentifier;
   timer: TimeoutId | undefined;
+  timing: number;
 }
 
 /** The credentials' sessions of a server's connections, kept while they hold a subscription. */
@@ -44,7 +46,7 @@ export interface ICredentialSessions {
   gauges(): IGauges<TransportServerConnectionHandle>;
   /**
    * A subscribing call answered, its subscription held: its session kept, should it have ended
-   * while the call was in flight — and ended at once, should its end have been reached.
+   * while the call was in flight — and ended in a turn of its own, should its end have been reached.
    */
   held(
     call: Pick<ISubscribingCall, 'callId' | 'connectionHandle' | 'end'> & {
@@ -75,7 +77,8 @@ const laterOf = (first: number | undefined, second: number | undefined): number 
  * subscription it holds on its connection to its last, its end timed by reading the wall clock again
  * as it comes to be kept, as a renewal moves it, and at each due — a timer of the time left, at most
  * the longest one holds, in place of the one before — so a wall clock set by hand takes effect at the
- * next due. At its end, or by its identifier, `onEnd` ends what it bounds on its connection.
+ * next due. An end reached as it is read is taken in a turn of its own, past the answer of the call
+ * that kept it. At its end, or by its identifier, `onEnd` ends what it bounds on its connection.
  */
 export const createCredentialSessions = ({
   clock,
@@ -126,6 +129,7 @@ export const createCredentialSessions = ({
   const time = (session: IKept): void => {
     clock.clearTimeout(session.timer);
     session.timer = undefined;
+    session.timing += 1;
 
     if (session.end === undefined) {
       return;
@@ -133,8 +137,23 @@ export const createCredentialSessions = ({
 
     const remaining = session.end - Math.floor(clock.Date.now());
 
+    // ! ended in a turn of its own, no timer armed: a session kept by a subscribing call — its
+    // resolver's, or its answer's, which reaches its transport in the turn it goes — ends past that
+    // answer, never on a call still owed one; one timed again or forgotten meanwhile ends nothing
     if (remaining <= 0) {
-      return (void end(session), undefined);
+      const { timing } = session;
+
+      return (
+        queueMicrotask(() => {
+          if (
+            session.timing === timing &&
+            keptOf(session.identifier, session.connectionHandle) === session
+          ) {
+            void end(session);
+          }
+        }),
+        undefined
+      );
     }
 
     session.timer = clock.setTimeout(
@@ -179,6 +198,7 @@ export const createCredentialSessions = ({
       end: callEnd,
       identifier,
       timer: undefined,
+      timing: 0,
     };
 
     sessions.set(sessionKeyOf(identifier), created);

@@ -65,7 +65,8 @@ public sealed record Credentials
 
     /// <summary>
     /// The audience a <see cref="CredentialScheme.Jwt"/>'s <c>aud</c> names, the receiver's: given
-    /// with keys or a key set, or they are an <see cref="ArgumentException"/>.
+    /// with keys or a key set, or they are an <see cref="ArgumentException"/> as the side is built,
+    /// unless its relay verifies, holding its destinations' audiences instead (spec 13.8, 14.3).
     /// </summary>
     public string? Audience { get; init; }
 

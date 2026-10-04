@@ -1916,6 +1916,8 @@ export const createRouterCore = <Handle extends string>(
     },
     [Symbol.dispose]: () => {
       isDisposed = true;
+      // every connection's: each call answering aborted too, so what a resolution settles after
+      // dispatches nothing
       rejectPending(`${DISPOSED} before the answer`);
     },
   };

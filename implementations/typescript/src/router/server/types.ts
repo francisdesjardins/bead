@@ -522,7 +522,7 @@ export interface IRouterServer<
 export interface IRouterServerDebugInfo {
   connectionHandle: TransportServerConnectionHandle;
   direction: DebugDirection;
-  /** A copy, without its session token. */
+  /** A copy, its credential reported by its scheme alone. */
   header: RedactedHeader;
 }
 
@@ -542,8 +542,8 @@ export interface IRouterServerOptions {
    * What it resolves a request presenting a `JWT` or an `ELSEWHERE` with, on its clock: a `JWT`'s
    * keys, audience and key set, an `ELSEWHERE`'s verifier. A scheme it is given nothing for is
    * refused, CREDENTIAL_UNSUPPORTED. Given a `JWT`'s keys or key set, its limits hold 1,024 bytes of
-   * chunk and envelope at least, or it is a {@link ProgrammerError}, as is a key not shaped for its
-   * algorithm.
+   * chunk and envelope at least, and its audience is given unless its relay verifies, or it is a
+   * {@link ProgrammerError}, as is a key not shaped for its algorithm.
    */
   credentials?: ICredentials | undefined;
   /** What a paced subscription queues at most: {@link PACING_DEFAULTS}' where it says nothing. */

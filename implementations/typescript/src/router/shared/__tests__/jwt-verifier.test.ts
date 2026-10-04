@@ -66,6 +66,13 @@ const signed = (claims: object): string => {
   return `${signingInput}.${signature.digest('base64url')}`;
 };
 
+/** What reads the wall clock as `instant`: a vector's, or milliseconds since the epoch. */
+const readingOf = (instant: number | string): (() => number) => {
+  return () => {
+    return typeof instant === 'string' ? Date.parse(instant) : instant;
+  };
+};
+
 // definition
 
 // the vectors play once, as the C# side plays them: a retry would hide what fails there
@@ -74,7 +81,7 @@ test.describe.configure({ retries: 0 });
 test.describe('verifyJwt', () => {
   for (const { audience, keys, name, now, token, verdict } of VECTORS.jwtVerdicts) {
     test(`give ${name} its verdict`, async () => {
-      expect(await verifyJwt(token, { audience, keys, now: Date.parse(now) })).toEqual(verdict);
+      expect(await verifyJwt(token, { audience, keys, now: readingOf(now) })).toEqual(verdict);
     });
   }
 
@@ -84,7 +91,7 @@ test.describe('verifyJwt', () => {
       ...(JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as object),
       realm: { roles: ['reader'] },
     };
-    const verdict = await verifyJwt(signed(claims), { audience, keys, now: Date.parse(now) });
+    const verdict = await verifyJwt(signed(claims), { audience, keys, now: readingOf(now) });
 
     if (!verdict.holds) {
       throw new Error(`the token does not hold: ${verdict.reason}`);
@@ -107,7 +114,11 @@ test.describe('verifyJwt', () => {
       } as IJwtKey;
 
       await expect(
-        verifyJwt('', { audience: HOLDING.audience, keys: [...HOLDING.keys, key], now: 0 })
+        verifyJwt('', {
+          audience: HOLDING.audience,
+          keys: [...HOLDING.keys, key],
+          now: readingOf(0),
+        })
       ).rejects.toThrow(ProgrammerError);
     });
   }
@@ -116,7 +127,7 @@ test.describe('verifyJwt', () => {
     const { keys, now, token } = HOLDING;
 
     await expect(
-      verifyJwt(token, { audience: '\ud800', keys, now: Date.parse(now) })
+      verifyJwt(token, { audience: '\ud800', keys, now: readingOf(now) })
     ).rejects.toThrow(ProgrammerError);
   });
 
@@ -124,8 +135,38 @@ test.describe('verifyJwt', () => {
   test('throw a ProgrammerError for a reading that is not a whole number of milliseconds', async () => {
     const { audience, keys, now, token } = HOLDING;
 
-    await expect(verifyJwt(token, { audience, keys, now: Date.parse(now) + 0.5 })).rejects.toThrow(
-      ProgrammerError
-    );
+    await expect(
+      verifyJwt(token, { audience, keys, now: readingOf(Date.parse(now) + 0.5) })
+    ).rejects.toThrow(ProgrammerError);
+  });
+
+  test('read the wall clock once the signature verifies, so a verification that waits past a token’s end refuses it at exp', async () => {
+    const { audience, keys, now, token } = HOLDING;
+    const [header = '', claims = ''] = token.split('.');
+    const { exp } = JSON.parse(Buffer.from(claims, 'base64url').toString()) as { exp: number };
+    const readings: number[] = [];
+    let reading = Date.parse(now);
+    const readNow = (): number => {
+      readings.push(reading);
+
+      return reading;
+    };
+
+    // as it began, it held; it is judged as it ends, its end, exp plus 60 s, reached meanwhile
+    const verifying = verifyJwt(token, { audience, keys, now: readNow });
+
+    reading = Math.ceil(exp * 1_000) + 60_000;
+
+    expect(await verifying).toEqual({ holds: false, reason: 'exp' });
+    expect(readings).toEqual([reading]);
+
+    // one refused before its signature verified reads nothing
+    const forged = `${header}.${claims}.${'A'.repeat(43)}`;
+
+    expect(await verifyJwt(forged, { audience, keys, now: readNow })).toEqual({
+      holds: false,
+      reason: 'signature',
+    });
+    expect(readings).toHaveLength(1);
   });
 });

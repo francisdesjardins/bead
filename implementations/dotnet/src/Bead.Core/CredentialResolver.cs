@@ -30,17 +30,27 @@ internal sealed class CredentialResolver
     private readonly Dictionary<string, Issuer> _issuers = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// A resolver of <paramref name="credentials"/>, on <paramref name="clock"/>. A key not shaped
-    /// for its algorithm, or an audience that is not a string of well-formed Unicode, is an
-    /// <see cref="ArgumentException"/>, as it is built. Keys without an audience hold a token to
-    /// none: its <c>aud</c> names none, and it does not hold.
+    /// A resolver of <paramref name="credentials"/>, on its side's clock. A key not shaped for its
+    /// algorithm, an audience that is not a string of well-formed Unicode, and keys or a key set
+    /// given without an audience on a side whose relay does not verify — which holds the audiences
+    /// of its destinations instead — are each an <see cref="ArgumentException"/>, as it is built.
     /// </summary>
-    public CredentialResolver(Credentials? credentials, TimeProvider clock)
+    public CredentialResolver(Credentials? credentials, (TimeProvider Clock, bool RelayVerifies) side)
     {
         _credentials = credentials ?? new Credentials();
-        _clock = clock;
+        _clock = side.Clock;
         _audiences = _credentials.Audience is { } audience ? [audience] : [];
         JwtVerifier.AssertHeld((_credentials.Keys, _audiences));
+
+        // ! keys held to no audience would refuse every JWT SESSION_REQUIRED, which withdraws a
+        // client's default: the application's fault, told as the side is built, never charged to a
+        // token
+        if (_credentials is { TakesJwt: true, Audience: null } && !side.RelayVerifies)
+        {
+            throw new ArgumentException(
+                "a side given a JWT's keys or a key set is given its audience too, unless its relay verifies against those of its destinations",
+                nameof(credentials));
+        }
 
         var schemes = new List<CredentialScheme> { CredentialScheme.Opaque };
 
@@ -140,10 +150,11 @@ internal sealed class CredentialResolver
         }
     }
 
-    // the verdict on a token, against the keys held now and the wall clock read now
+    // the verdict on a token, against the keys held now and the wall clock read as its signature
+    // has verified
     private async ValueTask<JwtVerdict> VerdictOf(string token, IReadOnlyCollection<string> audiences)
     {
-        return await JwtVerifier.VerifyJwt(token, new VerifyJwtProps { Audiences = audiences, Keys = KeysHeld(), Now = Now() });
+        return await JwtVerifier.VerifyJwt(token, new VerifyJwtProps { Audiences = audiences, Keys = KeysHeld(), Now = Now });
     }
 
     // what the key set answered for `issuer`, asked when no ask went for it within the minute; a

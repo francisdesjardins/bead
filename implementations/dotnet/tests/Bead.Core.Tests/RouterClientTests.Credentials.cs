@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -105,6 +107,38 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
+    public void Refuses_as_it_is_built_keys_or_a_key_set_without_an_audience()
+    {
+        var key = new JwtKey
+        {
+            Algorithm = JwtAlgorithm.Hs256,
+            Issuer = "https://hs256.example",
+            Jwk = JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["k"] = new('A', 43), ["kty"] = "oct" }),
+        };
+
+        var keySet = new Credentials
+        {
+            KeySet = (_) =>
+            {
+                return ValueTask.FromResult<IReadOnlyList<JwtSetKey>>([]);
+            },
+        };
+
+        foreach (var credentials in new[] { new Credentials { Keys = [key] }, keySet })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new ScriptedRouter(new RouterClientOptions { Credentials = credentials });
+            });
+
+            // a client relays nothing: given its audience, it is built
+            using var scripted = new ScriptedRouter(new RouterClientOptions { Credentials = credentials with { Audience = "bead-interop" } });
+
+            Assert.Null(scripted.Router.Credential);
+        }
+    }
+
+    [Fact]
     public async Task Withdraws_its_default_once_a_call_that_presented_it_is_refused_SESSION_REQUIRED_the_next_call_presents_none_and_CredentialWithdrawn_fires_once_its_scheme_alone()
     {
         using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = DefaultJwt });
@@ -181,6 +215,45 @@ public sealed partial class RouterClientTests
 
         Assert.Empty(withdrawn);
         Assert.Equal(Credential.Jwt("d.e.f"), router.Credential);
+    }
+
+    [Fact]
+    public async Task Withdraws_a_default_set_again_to_the_same_bytes_by_a_late_refusal_and_keeps_one_given_other_bytes()
+    {
+        var elsewhere = Credential.Elsewhere("Interop sub=ada");
+        (Credential Given, bool IsKept)[] cases =
+        [
+            (Credential.Jwt(string.Concat("a.b", ".c")), false),
+            (Credential.Jwt("d.e.f"), true),
+            (Credential.Elsewhere(string.Concat("Interop ", "sub=ada")), false),
+            (Credential.Elsewhere("Interop sub=ada, renewed"), true),
+        ];
+
+        foreach (var (given, isKept) in cases)
+        {
+            using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = given.Scheme == CredentialScheme.Jwt ? DefaultJwt : elsewhere });
+            var (router, transport) = (scripted.Router, scripted.Transport);
+            var withdrawn = new List<CredentialScheme>();
+
+            router.CredentialWithdrawn += withdrawn.Add;
+
+            var refused = CallOf(router);
+
+            await scripted.Settle();
+
+            // set again while the call was on its way: by value, what it presented, or other bytes
+            router.Credential = given;
+            transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
+            await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return refused.WaitAsync(Patience, Cancelled);
+            });
+
+            List<CredentialScheme> told = isKept ? [] : [given.Scheme];
+
+            Assert.Equal(isKept ? given : (Credential?)null, router.Credential);
+            Assert.Equal(told, withdrawn);
+        }
     }
 
     [Fact]
