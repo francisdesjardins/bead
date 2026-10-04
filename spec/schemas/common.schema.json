@@ -48,6 +48,20 @@
       "minimum": 1,
       "maximum": 2147483647
     },
+    "differs": {
+      "description": "The rows of docs/support.md an entry crosses, each naming it, and the language each excuses from it.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["row", "language"],
+        "additionalProperties": false,
+        "properties": {
+          "row": { "type": "string", "minLength": 1 },
+          "language": { "enum": ["TypeScript", "C#"] }
+        }
+      }
+    },
     "clauses": {
       "description": "The units of spec/spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
       "type": "array",

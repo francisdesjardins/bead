@@ -756,53 +756,6 @@ public sealed class RelayTests
     }
 
     [Fact]
-    public async Task Holds_a_relay_s_timeout_and_a_destination_s_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_waiting_on()
-    {
-        foreach (var (given, outcome, held, refusal) in Durations.Of("a relay's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
-        {
-            if (outcome == DurationOutcome.Refused)
-            {
-                var relay = new TestRelay().Relay;
-                var target = new RecordingTarget();
-
-                foreach (var refused in new[]
-                {
-                    Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    {
-                        return relay.Register(target, new DestinationOptions { Timeout = given });
-                    }),
-                    Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    {
-                        return new TestRelay(new RelayOptions { Timeout = given });
-                    }),
-                })
-                {
-                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                    Assert.Equal(nameof(RelayOptions.Timeout), refused.ParamName);
-                }
-
-                continue;
-            }
-
-            // leg B waits the timeout held, a destination's as the relay's own
-            foreach (var (relayTimeout, timeout) in new (TimeSpan?, TimeSpan?)[] { (null, given), (given, null) })
-            {
-                var relay = new TestRelay(Admitting with { Timeout = relayTimeout ?? Infinite }).Relay;
-                var target = new RecordingTarget();
-
-                relay.Register(target, Seven with { Timeout = timeout });
-                await Handled(relay.HandlerOf(7), PropsOf(HeaderOf(1)));
-                Assert.Equal(
-                    [held!.Value],
-                    target.Asked.Select((asked) =>
-                    {
-                        return asked.Options.Timeout;
-                    }));
-            }
-        }
-    }
-
-    [Fact]
     public async Task Passes_nothing_on_to_a_connection_of_its_own_that_takes_no_request_of_the_relay_s()
     {
         var answers = new List<RouterAnswer>();

@@ -11,9 +11,13 @@ by a section of the spec, which names no other; every unit an entry cites is one
 clause, an item of its numbered list, a row of its table — and spec/uncited.txt lists exactly the
 units no entry cites; an advance follows a timer armed, and in the transports' cases ends on its due
 at the latest; each implementation's tests read every group, the conversations, the transports'
-cases, any of which may name the row of docs/support.md it crosses, and the clock cases; and no file
-git lists outside spec/, the tests and the interop service names a published test key. Exit 1 on
-any of them.
+cases, any of which may name the row of docs/support.md it crosses, and the clock cases; the
+durations name each place by one id and each input by one name, give every place an outcome for
+every input in their order, cite at each place only what it observes, and name, where they cross a
+row of docs/support.md, a row that names the file and them; each implementation plays them in one
+harness, which names every place, through one helper, which alone reads the file; and no file git
+lists outside spec/, the tests and the interop service names a published test key. Exit 1 on any of
+them.
 
   python spec/check.py --write-uncited
 
@@ -46,7 +50,7 @@ META = {'$schema', '$comment', 'specVersion'}
 
 # the units of spec.md no entry cites, which only a change to the files or the spec moves
 UNCITED = os.path.join(SPEC, 'uncited.txt')
-UNCITED_HEADER = ('# The units of spec/spec.md that no vector, conversation or case cites, in their order.\n'
+UNCITED_HEADER = ('# The units of spec/spec.md that no vector, conversation, case or place cites, in their order.\n'
                   '# spec/check.py fails when this list and the files disagree; --write-uncited writes it.\n')
 WRITE_UNCITED = '--write-uncited' in sys.argv[1:]
 
@@ -58,6 +62,16 @@ WHOLE = ('conversations', 'transports', 'clocks')
 SIDES = {
     'TypeScript': ('implementations/typescript/src', '.test.ts', r'\bVECTORS\.(\w+)', r"'[^']*\b{}\.json'"),
     'C#': ('implementations/dotnet/tests', '.cs', r'\bVectors\.(?:NamesOf|Of)\("(\w+)"', r'"{}\.json"'),
+}
+
+# the harness each side plays spec/durations.json in, and the helper beside it that alone reads the
+# file, for the harness and for the twins of its assertion: the harness names every place it plays, so
+# that one gone, or one that plays fewer, fails here (0014)
+DURATIONS_HARNESSES = {
+    'TypeScript': ('implementations/typescript/src/server/__tests__/durations.test.ts',
+                   'implementations/typescript/src/transport/shared/__tests__/durations.ts'),
+    'C#': ('implementations/dotnet/tests/Bead.Transport.Http.Tests/DurationsTests.cs',
+           'implementations/dotnet/tests/Shared/Durations.cs'),
 }
 
 # the matrix whose rows a case that crosses a platform's difference names
@@ -187,19 +201,86 @@ for response in documents['transports']['responses']:
         problems.append(f'transports: two responses named {response["name"]!r}')
     responses.add(response['name'])
 
-# a case that crosses a row of the matrix is named by that row
+# an entry that crosses a row of the matrix is named by that row, between backticks, as a word of its
+# own: a name found inside another word, or inside the row's title, names nothing
 with open(SUPPORT, encoding='utf-8') as file:
     rows = [line for line in file.read().splitlines() if line.startswith('| ')]
 
-for case in named['transports']:
-    for crossed in case.get('differs', []):
+
+# each row and name told once, however many entries cross it so
+told = set()
+
+
+def check_crossing(entry, crossings, *names):
+    for crossed in crossings:
         row = next((line for line in rows if line.split('|')[1].strip() == crossed['row']), None)
 
-        if row is None:
-            problems.append(f'transports: {case["name"]!r} crosses the row {crossed["row"]!r}, which docs/support.md '
-                            'does not have')
-        elif case['name'] not in row:
-            problems.append(f'transports: {case["name"]!r} crosses the row {crossed["row"]!r}, which does not name it')
+        if row is None and crossed['row'] not in told:
+            told.add(crossed['row'])
+            problems.append(f'{entry} crosses the row {crossed["row"]!r}, which docs/support.md does not have')
+
+        for name in names if row is not None else ():
+            if f'`{name}`' not in row and (crossed['row'], name) not in told:
+                told.add((crossed['row'], name))
+                problems.append(f'{entry} crosses the row {crossed["row"]!r}, which does not name `{name}`')
+
+
+for case in named['transports']:
+    check_crossing(f'transports: {case["name"]!r}', case.get('differs', []), case['name'])
+
+# ── The durations ───────────────────────────────────────────────────────────────────────────────
+
+durations = documents['durations']
+inputs = [entry['name'] for entry in durations['inputs']]
+places = durations['places']
+
+for twice in sorted({name for name in inputs if inputs.count(name) > 1}):
+    problems.append(f'durations: two inputs named {twice!r}')
+
+# a place is keyed by its id, which both harnesses' tables name
+ids = [place['id'] for place in places]
+
+for twice in sorted({each for each in ids if ids.count(each) > 1}):
+    problems.append(f'durations: two places of the id {twice}')
+
+for entry in durations['inputs']:
+    check_crossing(f'durations: the input {entry["name"]!r}', entry.get('differs', []), 'spec/durations.json',
+                   entry['name'])
+
+for place in places:
+    ways = [way['id'] for way in place['ways']]
+
+    for twice in sorted({way for way in ways if ways.count(way) > 1}):
+        problems.append(f'durations: {place["id"]} has two ways of the id {twice}')
+
+    for way in place['ways']:
+        check_crossing(f'durations: {place["id"]}, its way {way["id"]},', way.get('differs', []),
+                       'spec/durations.json', place['id'], way['id'])
+
+    if [outcome['input'] for outcome in place['outcomes']] != inputs:
+        problems.append(f'durations: {place["id"]} has not one outcome for each input, in the inputs\' order')
+
+    for outcome in place['outcomes']:
+        check_crossing(f'durations: {place["id"]}, at {outcome["input"]!r},', outcome.get('differs', []),
+                       'spec/durations.json', outcome['input'])
+
+    # a place cites a unit only for what it observes of it: 1.4, which holds and refuses its durations,
+    # the clause that says whether it may be without end, and the clause that states its default
+    default = place.get('default')
+    observed = {'1.4', place.get('neverClause', '1.4'), default['clause'] if default else '1.4'}
+
+    if set(place['clauses']) != observed:
+        problems.append(f'durations: {place["id"]} cites {", ".join(place["clauses"])}, where it observes '
+                        f'{", ".join(sorted(observed))}: 1.4, its neverClause and its default\'s clause')
+
+    # a default is read by building a way with nothing given, which a way that cannot leave its
+    # duration out never is
+    for way in default['ways'] if default else ():
+        if way not in ways:
+            problems.append(f'durations: {place["id"]} reads its default by the way {way}, which it does not have')
+        elif any(other['id'] == way and other.get('required') for other in place['ways']):
+            problems.append(f'durations: {place["id"]} reads its default by the way {way}, which cannot leave its '
+                            'duration out')
 
 # an advance follows a timer armed on the side's clock, since the last send, expect or advance, so the
 # timer it steps to is armed before the clock moves (0011)
@@ -266,8 +347,8 @@ for line in re.findall(r'^_Vectors:.*$', text, re.MULTILINE):
         elif part != 'every refusal':
             problems.append(f'spec.md: "{line}" names {part!r}, no group')
 
-for line in re.findall(r'^_(?:Conversations|Transports):.*$', text, re.MULTILINE):
-    found = re.fullmatch(r'_(?:Conversations|Transports): `spec/(\S+)\.json`\._', line)
+for line in re.findall(r'^_(?:Conversations|Transports|Durations):.*$', text, re.MULTILINE):
+    found = re.fullmatch(r'_(?:Conversations|Transports|Durations): `spec/(\S+)\.json`\._', line)
 
     if found is None or found.group(1) not in documents:
         problems.append(f'spec.md: {line!r} names no file of spec/')
@@ -329,6 +410,13 @@ for group, entries in named.items():
                 problems.append(f'{group}: {entry["name"]!r} cites {unit}, which spec.md does not have')
 
             citing.add(unit)
+
+for place in places:
+    for unit in place['clauses']:
+        if unit not in known:
+            problems.append(f'durations: {place["id"]} cites {unit}, which spec.md does not have')
+
+        citing.add(unit)
 
 uncited = [unit for unit in units if unit not in citing]
 
@@ -415,13 +503,50 @@ for side, (folder, suffix, group_pattern, file_pattern) in SIDES.items():
     for group in sorted(set(named) - read[side]):
         problems.append(f'{side}: its tests read no {group}')
 
+    # the durations, read by one helper alone and played by one harness, which names every place
+    harness, helper = DURATIONS_HARNESSES[side]
+    pattern = file_pattern.format('durations')
+    # the language's own files: '.test.ts' is a TypeScript file, '.cs' a C# one, never a project's
+    language = '.' + suffix.rsplit('.', 1)[-1]
+
+    for directory, children, names in os.walk(os.path.join(ROOT, folder)):
+        children[:] = [child for child in children if child not in ('bin', 'obj', 'node_modules')]
+
+        for name in sorted(names):
+            path = os.path.relpath(os.path.join(directory, name), ROOT).replace(os.sep, '/')
+
+            if name.endswith(language) and path != helper:
+                with open(os.path.join(directory, name), encoding='utf-8') as file:
+                    if re.search(pattern, file.read()):
+                        problems.append(f'{side}: {path} reads durations.json, which its helper, {helper}, alone '
+                                        'reads')
+
+    if not os.path.isfile(os.path.join(ROOT, helper)):
+        problems.append(f'{side}: its tests read no durations: {helper}, the helper that reads them, is missing')
+    else:
+        with open(os.path.join(ROOT, helper), encoding='utf-8') as file:
+            if not re.search(pattern, file.read()):
+                problems.append(f'{side}: {helper} does not read durations.json')
+
+    if not os.path.isfile(os.path.join(ROOT, harness)):
+        problems.append(f'{side}: its tests play no durations: {harness}, the harness, is missing')
+    else:
+        with open(os.path.join(ROOT, harness), encoding='utf-8') as file:
+            played = file.read()
+
+        for place in places:
+            if f"'{place['id']}'" not in played and f'"{place["id"]}"' not in played:
+                problems.append(f'{side}: its harness, {harness}, plays no {place["id"]}')
+
 if problems:
     report_and_exit()
 
 print(f'spec: {version}; {len(documents)} files, each under its schema; '
       f'{sum(len(vectors[group]) for group in groups)} vectors in {len(groups)} groups, each named by '
       f'the spec; {len(named["conversations"])} conversations; {len(named["transports"])} transports\' '
-      f'cases; {len(named["clocks"])} clock cases; {len(units) - len(uncited)} of the '
+      f'cases; {len(named["clocks"])} clock cases; {len(places)} places of durations, by '
+      f'{sum(len(place["ways"]) for place in places)} ways, each with an outcome for each of {len(inputs)} inputs; '
+      f'{len(units) - len(uncited)} of the '
       f'spec\'s {len(units)} units cited, the others listed in uncited.txt; {len(TEST_KEYS)} published test keys, '
       f'which none of the {len(tracked)} files git lists names outside spec/, the tests and the interop service.')
 
@@ -429,3 +554,5 @@ width = max(len(f'{group} ({len(entries)})') for group, entries in named.items()
 
 for group, entries in named.items():
     print(f'  {f"{group} ({len(entries)})":<{width}}  read by {", ".join(SIDES)}')
+
+print(f'  {f"durations ({len(places)})":<{width}}  played by {", ".join(SIDES)}, each in its harness')

@@ -10,7 +10,7 @@ import {
   PLATFORM_CLOCK,
 } from '../clock';
 import { ProgrammerError } from '../errors';
-import { durationsOf } from './fixtures';
+import { DURATIONS, givenOf, isExcused, outcomeOf, placeHolding, refusalOf } from './durations';
 
 test.describe('the clock', () => {
   test("the platform's is the globals themselves", () => {
@@ -43,22 +43,55 @@ test.describe('the clock', () => {
   test('holds a duration as a whole number of milliseconds from 1 to 2³¹ − 1, a fraction rounded to the nearest, a half up, 0 at once for a delay, and never where never has a meaning, refusing any other in one message', () => {
     expect(LONGEST_TIMER).toBe(2_147_483_647);
 
-    for (const [hold, outcomes] of [
-      [assertHeld, { never: 'never', zero: 'refused' }],
-      [assertHeldFinite, { never: 'refused', zero: 'refused' }],
-      [assertHeldDelay, { never: 'refused', zero: 'at once' }],
+    // each assertion over every input of the durations file, as a place that holds its durations so
+    for (const [hold, policy] of [
+      [assertHeld, { kind: 'timeout', never: 'taken' }],
+      [assertHeldFinite, { kind: 'timeout', never: 'refused' }],
+      [assertHeldDelay, { kind: 'delay', never: 'refused' }],
     ] as const) {
-      for (const { given, held, outcome, refusal } of durationsOf('a duration', outcomes)) {
+      const place = placeHolding(policy);
+
+      for (const input of DURATIONS.inputs) {
+        if (isExcused(place, { input })) {
+          continue;
+        }
+
+        const given = givenOf(input);
+        const { held, outcome } = outcomeOf(place, input);
+        const label = `${hold.name} ${input.name}`;
         const holding = (): number => {
           return hold('a duration', given);
         };
 
         if (outcome === 'refused') {
-          expect(holding, `${hold.name} ${String(given)}`).toThrow(new ProgrammerError(refusal));
+          expect(holding, label).toThrow(
+            new ProgrammerError(refusalOf(policy, { given, phrase: 'a duration' }))
+          );
         } else {
-          expect(holding(), `${hold.name} ${String(given)}`).toBe(held);
+          expect(holding(), label).toBe(outcome === 'at once' ? 0 : (held ?? Infinity));
         }
       }
+    }
+
+    // the one sentence of each, written out whole
+    for (const [policy, given, sentence] of [
+      [
+        { kind: 'timeout', never: 'taken' },
+        0,
+        'a duration is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 0',
+      ],
+      [
+        { kind: 'timeout', never: 'refused' },
+        Infinity,
+        'a duration is a number of milliseconds from 1 to 2147483647, not Infinity',
+      ],
+      [
+        { kind: 'delay', never: 'refused' },
+        0.5,
+        'a duration is 0 for at once, or a number of milliseconds from 1 to 2147483647, not 0.5',
+      ],
+    ] as const) {
+      expect(refusalOf(policy, { given, phrase: 'a duration' })).toBe(sentence);
     }
   });
 
@@ -68,10 +101,8 @@ test.describe('the clock', () => {
     expect(assertHeldDelay('a duration', 2.5)).toBe(3);
   });
 
-  test('refuses what is not a number at all, as a limit read from JSON may be, a string written in its quotes', () => {
+  test('refuses null and an object, which the durations file holds no input of, as it refuses what is not a number', () => {
     for (const [given, written] of [
-      ['1000', '"1000"'],
-      [true, 'true'],
       [null, 'null'],
       [{}, '[object Object]'],
     ] as const) {
@@ -100,6 +131,50 @@ test.describe('the clock', () => {
     }).toThrow(
       new ProgrammerError('a duration is a number of milliseconds from 1 to 2147483647, not -1')
     );
+  });
+
+  // a platform's difference: a JavaScript number holds the milliseconds as written, where a .NET
+  // `TimeSpan` truncates them to its ticks of 100 ns, which the C# side's twin shows
+  test('a duration finer than a tick is held as written on the TypeScript side, and truncated to its ticks on the C# side', () => {
+    expect(() => {
+      assertHeldDelay('a duration', 0.000_01);
+    }).toThrow(
+      new ProgrammerError(
+        'a duration is 0 for at once, or a number of milliseconds from 1 to 2147483647, not 0.00001'
+      )
+    );
+    expect(() => {
+      assertHeld('a duration', 0.000_01);
+    }).toThrow(
+      new ProgrammerError(
+        'a duration is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 0.00001'
+      )
+    );
+    expect(() => {
+      assertHeld('a duration', 2_147_483_647.000_01);
+    }).toThrow(
+      new ProgrammerError(
+        'a duration is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 2147483647.00001'
+      )
+    );
+  });
+
+  // a platform's difference: an option here may be any value, a limit read from JSON among them,
+  // where the C# side's is a `TimeSpan`, which holds none of these
+  test('a duration that is not a number is refused on the TypeScript side, and no TimeSpan on the C# side', () => {
+    for (const [given, written] of [
+      [Number.NaN, 'NaN'],
+      ['1000', '"1000"'],
+      [true, 'true'],
+    ] as const) {
+      expect(() => {
+        assertHeld('a duration', given);
+      }, written).toThrow(
+        new ProgrammerError(
+          `a duration is a number of milliseconds from 1 to 2147483647, or Infinity for never, not ${written}`
+        )
+      );
+    }
   });
 
   test('a layer runs on the clock of the one beneath it, unless given one, and refuses one that differs, naming both', () => {

@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace Bead.Tests;
 
 /// <summary>
@@ -910,64 +908,6 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Holds_a_reservation_and_a_cancel_s_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_taking_the_default_time_doing_nothing_for_one_refused()
-    {
-        // reserved while what comes on it is dropped in silence; free once it is reported unknown
-        async Task<bool> IsReserved(Peer peer, uint callId)
-        {
-            var reports = peer.Reports.Count;
-
-            await peer.Deliver(ResultOf(callId));
-
-            return peer.Reports.Count == reports;
-        }
-
-        foreach (var (given, outcome, held, refusal) in Durations.Of("a call id's reservation", (DurationOutcome.Refused, DurationOutcome.Never)))
-        {
-            var client = new Peer(RouterSide.Client);
-
-            if (outcome == DurationOutcome.Refused)
-            {
-                foreach (var refused in new[]
-                {
-                    Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    {
-                        client.Core.Reserve(new CallAddress(1, Handle), given);
-                    }),
-                    Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    {
-                        client.Core.Cancel(new CallAddress(3, Handle), given);
-                    }),
-                })
-                {
-                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                    Assert.Equal("timeout", refused.ParamName);
-                }
-
-                await client.Settle();
-                Assert.Empty(client.Sent);
-                Assert.False(await IsReserved(client, 1));
-                Assert.False(await IsReserved(client, 3));
-
-                continue;
-            }
-
-            // reserved for the duration held, or for the default time for infinite
-            var lasts = outcome == DurationOutcome.Taken ? held!.Value : TimeSpan.FromSeconds(5);
-
-            client.Core.Reserve(new CallAddress(1, Handle), given);
-            client.Core.Cancel(new CallAddress(3, Handle), given);
-            await client.Settle();
-            await client.Advance(lasts - TimeSpan.FromMilliseconds(1));
-            Assert.True(await IsReserved(client, 1));
-            Assert.True(await IsReserved(client, 3));
-            await client.Advance(TimeSpan.FromMilliseconds(1));
-            Assert.False(await IsReserved(client, 1));
-            Assert.False(await IsReserved(client, 3));
-        }
-    }
-
-    [Fact]
     public async Task Reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
     {
         var client = new Peer(RouterSide.Client);
@@ -1115,57 +1055,6 @@ public sealed partial class RouterCoreTests
         _ = client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo with { MaximumPayloadBytes = 1 }, TimeSpan.FromSeconds(5)))));
         await client.Settle();
         Assert.Equal([1u], drawn);
-    }
-
-    [Fact]
-    public async Task Holds_a_call_s_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_waiting_on_drawing_nothing_for_one_refused()
-    {
-        foreach (var (given, outcome, held, refusal) in Durations.Of("a call's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
-        {
-            var client = new Peer(RouterSide.Client);
-            var drawn = new List<uint>();
-            var asking = client.Core.Request(new byte[] { 1 }, CallOf(Handle, (Echo, given)) with { OnCallId = drawn.Add });
-
-            if (outcome == DurationOutcome.Refused)
-            {
-                var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-                {
-                    return asking;
-                });
-
-                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                Assert.Equal("Timeout", refused.ParamName);
-                await client.Settle();
-                Assert.Empty(drawn);
-                Assert.Empty(client.Sent);
-
-                continue;
-            }
-
-            await client.Settle();
-            Assert.Equal([1u], drawn);
-
-            // a duration held ends the call once it passed, its TimeoutException telling it; infinite
-            // waits on past the longest
-            if (outcome == DurationOutcome.Taken)
-            {
-                await client.Advance(held!.Value - TimeSpan.FromMilliseconds(1));
-                Assert.False(asking.IsCompleted);
-                await client.Advance(TimeSpan.FromMilliseconds(1));
-
-                var ended = await Assert.ThrowsAsync<TimeoutException>(() =>
-                {
-                    return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
-                });
-
-                Assert.Equal(string.Create(CultureInfo.InvariantCulture, $"no answer came in {held.Value.TotalMilliseconds} milliseconds"), ended.Message);
-            }
-            else
-            {
-                await client.Advance(Clocks.LongestTimer);
-                Assert.False(asking.IsCompleted);
-            }
-        }
     }
 
     [Fact]

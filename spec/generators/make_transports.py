@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 
+from bounds import DEFAULTS
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -14,7 +15,6 @@ SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
 SERVICE_ID = SERVICE['serviceId']
 PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in SERVICE['procedures']}
 
-MAXIMUM_ENVELOPE_BYTES = 16_778_240
 REQUEST, RESULT, FAILURE, NOTIFICATION = 16, 17, 18, 19
 PROTOCOL = 0
 SUBSCRIPTION_UNSUPPORTED, SESSION_REQUIRED, PAYLOAD_TOO_LARGE, PROCEDURE_FAILED = 22, 32, 34, 64
@@ -526,20 +526,7 @@ document = {
     ],
     'specVersion': spec_version(),
     'wallClock': '2026-01-01T00:00:00Z',
-    'defaults': {
-        'maximumConnections': 10_000,
-        'maximumConnectionsPerAddress': 64,
-        'maximumWaitingExchanges': 64,
-        'bodyBytesBudget': 268_435_456,
-        'maximumBodyBytes': MAXIMUM_ENVELOPE_BYTES,
-        'maximumOutboxBytes': 2 * MAXIMUM_ENVELOPE_BYTES,
-        'maximumWait': 30_000,
-        'exchangeTimeout': 300_000,
-        'inactivityTimeout': 300_000,
-        'connectionInactivityTimeout': 30_000,
-        'maximumMessageBytes': MAXIMUM_ENVELOPE_BYTES,
-        'heartbeat': 30_000,
-    },
+    'defaults': DEFAULTS,
     'responses': [
         {'name': name, 'pieces': pieces, 'status': status, 'fields': fields, 'body': body}
         for name, pieces, status, fields, body in responses

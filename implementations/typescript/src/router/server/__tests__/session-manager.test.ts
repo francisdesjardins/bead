@@ -3,11 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { DisconnectError } from '../../shared/errors';
 import { isSessionToken, toSessionToken } from '../../shared/identifiers';
-import {
-  createTestClock,
-  delaysOn,
-  durationsOf,
-} from '../../../transport/shared/__tests__/fixtures';
+import { createTestClock, delaysOn } from '../../../transport/shared/__tests__/fixtures';
 import {
   createSessionManager,
   createTimers,
@@ -703,98 +699,6 @@ test.describe('createSessionManager', () => {
       sessions.resetSessionInactivityTimeout(session, Infinity);
 
       expect(delaysOn(clock)).toEqual([2 ** 31 - 1]);
-    });
-
-    test('holds a timeout stored, updated or defaulted to a whole number of milliseconds, rounded, refusing 0, one left out taking the default, nothing changing for one refused', () => {
-      for (const { given, held, outcome, refusal } of durationsOf('an inactivity timeout', {
-        never: 'never',
-        zero: 'refused',
-      })) {
-        const clock = createTestClock();
-        using sessions = createSessionManager<IUser>({ clock });
-        const session = sessions.set(sessions.create(first));
-        const armed = delaysOn(clock);
-        const label = String(given);
-        const storing = () => {
-          return sessions.set({ ...sessions.create(second), connectionInactivityTimeout: given });
-        };
-        const updating = () => {
-          return sessions.updateSessionInactivityTimeout({
-            ...session,
-            sessionInactivityTimeout: given,
-          });
-        };
-
-        if (outcome === 'refused') {
-          expect(storing, label).toThrow(new ProgrammerError(refusal));
-          expect(updating, label).toThrow(new ProgrammerError(refusal));
-          expect([sessions.has(second), sessions.get(first), delaysOn(clock)], label).toEqual([
-            false,
-            session,
-            armed,
-          ]);
-
-          continue;
-        }
-
-        // stored held
-        expect(
-          [storing().connectionInactivityTimeout, updating()?.sessionInactivityTimeout],
-          label
-        ).toEqual([held, held]);
-      }
-
-      // a default is had by leaving a timeout out, so 0 is no default
-      for (const name of ['connectionInactivityTimeout', 'sessionInactivityTimeout'] as const) {
-        for (const { given, held, outcome, refusal } of durationsOf(name, {
-          never: 'never',
-          zero: 'refused',
-        })) {
-          const defaulting = (): number | undefined => {
-            using built = createSessionManager<IUser>({ [name]: given });
-
-            return built.set({ ...built.create(first), [name]: undefined })[name];
-          };
-
-          if (outcome === 'refused') {
-            expect(defaulting, `${name} ${String(given)}`).toThrow(new ProgrammerError(refusal));
-          } else {
-            expect(defaulting(), `${name} ${String(given)}`).toBe(held);
-          }
-        }
-      }
-    });
-
-    test('holds a reset to a whole number of milliseconds, rounded, refusing 0, leaving the timer as it was for one refused', () => {
-      for (const { given, held, outcome, refusal } of durationsOf(
-        'a connection inactivity timeout',
-        { never: 'never', zero: 'refused' }
-      )) {
-        const clock = createTestClock();
-        using sessions = createSessionManager<IUser>({ clock });
-        const session = sessions.set({
-          ...sessions.create(first),
-          sessionInactivityTimeout: 1_000,
-        });
-        const resetting = () => {
-          sessions.resetConnectionInactivityTimeout(session, given);
-        };
-
-        if (outcome === 'refused') {
-          expect(resetting, String(given)).toThrow(new ProgrammerError(refusal));
-          expect(delaysOn(clock), String(given)).toEqual([1_000]);
-        } else {
-          resetting();
-
-          expect(delaysOn(clock), String(given)).toEqual(
-            held !== undefined && Number.isFinite(held)
-              ? [held, 1_000].toSorted((a, b) => {
-                  return a - b;
-                })
-              : [1_000]
-          );
-        }
-      }
     });
 
     test('removing every listener does not unhook the timers', async () => {

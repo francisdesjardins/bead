@@ -6,7 +6,6 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
-using Bead.Tests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.Time.Testing;
@@ -450,28 +449,11 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // what a close timeout holds or refuses is the durations' file's to play: infinite arms no
+    // timer, and a peer that does not answer its close is waited on without end
     [Fact]
-    public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_infinite_waiting_on_its_peer_without_end()
+    public async Task Waits_on_its_peer_without_end_for_a_close_timeout_of_infinity_arming_no_timer()
     {
-        foreach (var (given, outcome, _, refusal) in Durations.Of("a close timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
-        {
-            if (outcome == DurationOutcome.Refused)
-            {
-                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                {
-                    return new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = given });
-                });
-
-                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                Assert.Equal(nameof(WebSocketTransportServerOptions.CloseTimeout), refused.ParamName);
-            }
-            else
-            {
-                await using var taken = new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = given });
-            }
-        }
-
-        // infinite arms no timer: a peer that does not answer its close is waited on without end
         await Start(new WebSocketTransportServerOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
 
         var (client, connectionHandle) = await Connect();
@@ -963,8 +945,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // a heartbeat refused is the durations' file's to play
     [Fact]
-    public async Task Pings_nothing_with_a_heartbeat_of_infinity_and_refuses_one_no_timer_holds()
+    public async Task Pings_nothing_with_a_heartbeat_of_infinity()
     {
         foreach (var (heartbeat, isPinging) in new[] { (TimeSpan.FromMilliseconds(200), true), (Timeout.InfiniteTimeSpan, false) })
         {
@@ -993,14 +976,6 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             {
                 Assert.Single(_server.ConnectionHandles);
             }
-        }
-
-        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
-        {
-            Assert.Throws<ArgumentOutOfRangeException>(() =>
-            {
-                return new WebSocketTransportServer(new WebSocketTransportServerOptions { Heartbeat = heartbeat });
-            });
         }
     }
 

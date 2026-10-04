@@ -26,14 +26,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- the transports' cases: the file both implementations' tests read -->
+    <!-- the transports' cases and the durations: the files both implementations' tests read -->
     <Content Include="../../../../spec/transports.json" Link="transports.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/durations.json" Link="durations.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- the clock the conformance files' harnesses give the side under test, shared with the conversations' -->
     <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
-    <!-- the durations every place is held to, each place's outcomes its own -->
+    <!-- what reads the durations, for the harness that plays every place -->
     <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
   </ItemGroup>
 </Project>

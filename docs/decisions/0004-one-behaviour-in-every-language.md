@@ -25,10 +25,12 @@ holds what a server of the interop service, `spec/interop-service.json`, does wi
 send, over one connection or several: the envelopes it answers, what it reports, and the silence it
 keeps; `spec/transports.json` holds what a transport's server does at its edge, over HTTP and over a
 WebSocket: the exchanges and the messages it takes, and what it gives back; `spec/clocks.json` holds
-what every side's test clock does when a case advances it. Every implementation's tests read them
-from `spec/`, never a copy: an entry one side does not read is one nobody checks. Four generators
-write them, `spec/generators/make_vectors.py`, `make_conversations.py`, `make_transports.py` and
-`make_clocks.py`, and regenerating gives the same bytes: nothing drawn at random is in them.
+what every side's test clock does when a case advances it; `spec/durations.json` holds what every
+place that takes a duration an application gives a side makes of every input. Every
+implementation's tests read them from `spec/`, never a copy: an entry one side does not read is one
+nobody checks. Five generators write them, `spec/generators/make_vectors.py`,
+`make_conversations.py`, `make_transports.py`, `make_clocks.py` and `make_durations.py`, and
+regenerating gives the same bytes: nothing drawn at random is in them.
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
 interop service over WebSocket and over HTTP, and each implementation's client calls every other's

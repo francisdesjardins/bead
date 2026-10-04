@@ -7,20 +7,13 @@ import {
 } from '../../server/http-transport-server';
 import type { TransportServerConnectionHandle } from '../../server/types';
 import {
-  CancelError,
   ConnectError,
   GenericError,
   ProgrammerError,
   ReadyStateError,
   TimeoutError,
 } from '../../shared/errors';
-import { LONGEST_TIMER } from '../../shared/clock';
-import {
-  createTestClock,
-  durationsOf,
-  tcpSocketsClosed,
-  timersUntil,
-} from '../../shared/__tests__/fixtures';
+import { createTestClock, tcpSocketsClosed, timersUntil } from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -640,62 +633,6 @@ test.describe('createHTTPTransportClient', () => {
     expect(fake.calls[1]?.init.signal?.aborted).toBe(true);
     expect(performance.now() - started).toBeGreaterThanOrEqual(DISCONNECT_TIMEOUT - 50);
     expect([client.isClosed(), armed]).toEqual([true, []]);
-  });
-
-  test('holds its connect’s timeout to a whole number of milliseconds on its clock, rounded, Infinity never timing out, refusing 0 and any other and moving nothing', async () => {
-    for (const { given, held, outcome, refusal } of durationsOf("a connect's timeout", {
-      never: 'never',
-      zero: 'refused',
-    })) {
-      const clock = createTestClock();
-      const fake = createFakeFetch();
-      const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
-      const controller = new AbortController();
-      const label = String(given);
-      let isSettled = false;
-      const connecting = client
-        .connect({ host, port: 8_080, signal: controller.signal, timeout: given })
-        .catch((reason: unknown) => {
-          return reason;
-        })
-        .finally(() => {
-          isSettled = true;
-        });
-
-      if (outcome === 'refused') {
-        expect(await connecting, label).toEqual(new ProgrammerError(refusal));
-        // nothing moved, and nothing is kept for a reconnection
-        expect([fake.calls, client.isUninitialized()], label).toEqual([[], true]);
-        await expect(client.reconnect(), label).rejects.toThrow('transport was never connected');
-
-        continue;
-      }
-
-      // a duration held times the connect out once it passed, its TimeoutError telling it; never
-      // waits on past the longest
-      if (outcome === 'taken' && held !== undefined) {
-        await clock.tickAsync(held - 1);
-
-        expect(client.isConnecting(), label).toBe(true);
-
-        await clock.tickAsync(1);
-
-        const ended = await connecting;
-
-        expect(ended, label).toBeInstanceOf(TimeoutError);
-        expect(ended, label).toHaveProperty('timeout', held);
-      } else {
-        await clock.tickAsync(LONGEST_TIMER);
-
-        expect([isSettled, client.isConnecting()], label).toEqual([false, true]);
-
-        controller.abort();
-
-        expect(await connecting, label).toBeInstanceOf(CancelError);
-      }
-
-      expect(client.isClosed(), label).toBe(true);
-    }
   });
 
   test('settles its send on the head of the answer, before its body is in, and hears the answer once it is', async () => {
@@ -1428,26 +1365,6 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     expect([fake.calls[0]?.init.headers[LISTEN_HEADER], fake.calls.length]).toEqual(['?1', 1]);
     await client.disconnect({ isQuick: true });
-  });
-
-  test('holds a wait, a pause and an inactivity timeout to a whole number of milliseconds, rounded, 0 at once for a wait and a pause and refused for the inactivity timeout, Infinity for the inactivity timeout alone', () => {
-    for (const [option, outcomes] of [
-      ['inactivityTimeout', { never: 'never', zero: 'refused' }],
-      ['pause', { never: 'refused', zero: 'at once' }],
-      ['wait', { never: 'refused', zero: 'at once' }],
-    ] as const) {
-      for (const { given, outcome, refusal } of durationsOf(option, outcomes)) {
-        const building = () => {
-          return createHTTPTransportClient({ [option]: given });
-        };
-
-        if (outcome === 'refused') {
-          expect(building, `${option} ${String(given)}`).toThrow(new ProgrammerError(refusal));
-        } else {
-          expect(building, `${option} ${String(given)}`).not.toThrow();
-        }
-      }
-    }
   });
 
   test('says nothing of listening, and never listens, when told not to', async () => {

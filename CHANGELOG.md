@@ -115,6 +115,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its identifier, and `endSessionsOf` an issuer's, `register` takes the audience its destination
   verifies, and `ticks` and `tick` hold per session. 221 vectors in 10 groups, where 123 were in 9;
   142 conversations, where 89 were; 56 transports' cases, where 50 were.
+- `spec/durations.json`, its schema and its generator (decision 0014): what each of the 21 places
+  that take a duration an application gives a side makes of each of 19 inputs, by each of the 31
+  ways its surface takes it — held, at once, never, its default, or refused and why — which each
+  side plays in one harness, through one helper that alone reads the file. The generator plays both
+  platforms' conversions, JavaScript's arithmetic and .NET's truncation to ticks, and fails on an
+  outcome either reaches otherwise unless it crosses a row of the support matrix, and on an input
+  in seconds within a tick of a half. `spec/check.py` holds every place to an outcome for each
+  input, to the clauses it observes and nothing else, and to a harness on each side that names it;
+  a `differs` names a row that names its entry between backticks, and moves to
+  `common.schema.json`; the `spec` job regenerates the file, and the bounds' defaults it shares with
+  the transports' file come from one module of the generators.
 
 ### Changed
 
@@ -215,6 +226,13 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 - Section 15.4 says that a connect is of Bead's type, as both servers take it.
 - Section 15.7 says that a request handed on is never refused, and that a cut which overtakes its
   200 head leaves its exchange lost; a transports' case may expect a status `orLost`.
+- Section 1.4 refuses a value that is no number, and says what a delay is: a wait before an act —
+  a pause, a reconnection's wait, the `wait` a client's listens ask — never without end. Section
+  15.12 says that a client times its own inactivity by `inactivityTimeout`, 5 minutes by default,
+  which section 15.10 names; section 1 names its file, `spec/durations.json`. The support matrix
+  gains three rows — a duration finer than a tick and a duration that is not a number, platform, and
+  a reconnection's delay given as a number, open — and the rows of -1 ms and of the Web Worker name
+  what of the file crosses them.
 
 ### Fixed
 

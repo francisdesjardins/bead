@@ -47,6 +47,7 @@ jobs:
       - run: python spec/generators/make_conversations.py
       - run: python spec/generators/make_transports.py
       - run: python spec/generators/make_clocks.py
+      - run: python spec/generators/make_durations.py
       - run: git diff --exit-code -- spec
       - name: No file the generators wrote is new
         run: test -z "$(git status --porcelain -- spec)"

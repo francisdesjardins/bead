@@ -84,15 +84,16 @@ share, above all `spec/`, which both read in their tests.
 [`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each of
 its sections names the vector groups that check it. Beside it:
 
-| File                                                | What it holds                                                                                                                                        |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                 | 221 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts |
-| [`conversations.json`](spec/conversations.json)     | 142 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets         |
-| [`transports.json`](spec/transports.json)           | 56 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                             |
-| [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                             |
-| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, its procedures, what its relay admits and forwards, and the credentials it verifies                       |
+| File                                                | What it holds                                                                                                                                                           |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`vectors.json`](spec/vectors.json)                 | 221 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                    |
+| [`conversations.json`](spec/conversations.json)     | 142 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                            |
+| [`transports.json`](spec/transports.json)           | 56 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                |
+| [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                                                |
+| [`durations.json`](spec/durations.json)             | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why |
+| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, its procedures, what its relay admits and forwards, and the credentials it verifies                                          |
 
-Both implementations read these files from `spec/` in their tests; neither keeps a copy. Four
+Both implementations read these files from `spec/` in their tests; neither keeps a copy. Five
 generators write them, and regenerating must give the same bytes:
 
 ```sh
@@ -100,6 +101,7 @@ python spec/generators/make_vectors.py
 python spec/generators/make_conversations.py
 python spec/generators/make_transports.py
 python spec/generators/make_clocks.py
+python spec/generators/make_durations.py
 git diff --exit-code -- spec
 ```
 

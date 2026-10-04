@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
-import { createTestClock, durationsOf } from '../../../transport/shared/__tests__/fixtures';
+import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { CancelError, TimeoutError } from '../../../transport/shared/errors';
 import { createSessionManager } from '../../server/session-manager';
@@ -326,65 +326,6 @@ test.describe('createServiceManager', () => {
         { destinationId: 2, signal, timeout: 9 },
         { timeout: REQUEST_DEFAULTS.timeout },
       ]);
-    });
-
-    test('holds its default timeout as it is built, rounded, refusing 0, Infinity waiting on, building nothing for one refused', async () => {
-      for (const { given, held, outcome, refusal } of durationsOf("a call's default timeout", {
-        never: 'never',
-        zero: 'refused',
-      })) {
-        const { calls, router } = createFakeRouter();
-        const building = () => {
-          return createServiceManager(router, { defaults: { timeout: given } });
-        };
-
-        if (outcome === 'refused') {
-          expect(building, String(given)).toThrow(new ProgrammerError(refusal));
-
-          continue;
-        }
-
-        await building().getRequest(echo, { serializer })({ text: 'a' })();
-
-        expect(calls.request[0]?.request.options.timeout, String(given)).toBe(held);
-      }
-    });
-
-    test('holds a call’s own timeout as it applies the defaults, traced and sent alike, refusing 0 before the trace and the deprecation, Infinity waiting on', async () => {
-      for (const { given, held, outcome, refusal } of durationsOf("a call's timeout", {
-        never: 'never',
-        zero: 'refused',
-      })) {
-        const { calls, router } = createFakeRouter();
-        const manager = createServiceManager(router);
-        const seen = recordDebug(manager);
-        const deprecated: unknown[] = [];
-        const label = String(given);
-
-        manager.on('deprecated', (procedure) => {
-          deprecated.push(procedure);
-        });
-
-        const calling = manager.getRequest(
-          { ...echo, deprecation: {} },
-          { serializer }
-        )({ text: 'a' })({ timeout: given });
-
-        if (outcome === 'refused') {
-          await expect(calling, label).rejects.toThrow(new ProgrammerError(refusal));
-          expect([seen, deprecated, calls.request], label).toEqual([[], [], []]);
-
-          continue;
-        }
-
-        await calling;
-
-        // 1.4 ms is traced as 1, the very timeout the router is handed
-        expect(
-          [seen[0]?.info.options?.timeout, calls.request[0]?.request.options.timeout],
-          label
-        ).toEqual([held, held]);
-      }
     });
 
     test('on a server’s router, names the connection it goes to, as the types require', async () => {

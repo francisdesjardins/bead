@@ -1,71 +1,190 @@
 using System.Globalization;
+using System.Text.Json;
 
 namespace Bead.Tests;
 
 /// <summary>
-/// What a place makes of a duration it is given: holds it as a number of milliseconds, takes it as
-/// at once — a delay's zero — or as never, or refuses it.
+/// An input of <c>spec/durations.json</c>, as this side is given it: a <see cref="TimeSpan"/>, or
+/// none where a <see cref="TimeSpan"/> cannot hold it at all; and whether a row of the support
+/// matrix excuses this side from it.
 /// </summary>
-internal enum DurationOutcome
-{
-    /// <summary>The place holds it, in whole milliseconds.</summary>
-    Taken,
+internal sealed record DurationInput(string Name, TimeSpan? Given, bool IsExcused);
 
-    /// <summary>The place takes it as at once, a delay's zero.</summary>
-    AtOnce,
-
-    /// <summary>The place takes it as never.</summary>
-    Never,
-
-    /// <summary>The place refuses it.</summary>
-    Refused,
-}
+/// <summary>A way a place takes its duration: its id, stable in the place, whether its duration cannot be left out, and whether this side lacks it.</summary>
+internal sealed record DurationWay(string Id, bool IsRequired, bool IsExcused);
 
 /// <summary>
-/// The durations every place is held to (spec 1.4), the TypeScript side's <c>durationsOf</c> as
-/// TimeSpans: NaN aside, which a TimeSpan cannot hold, and -1 ms aside, which is
-/// <see cref="Timeout.InfiniteTimeSpan"/> here and a negative there; 0.41 s and 2.01 s as a user
-/// writes them, the TypeScript side's <c>0.41 * 1000</c> and <c>2.01 * 1000</c> twins.
+/// The default a clause states for a place: what it holds, <see cref="Timeout.InfiniteTimeSpan"/>
+/// for never, and the ways built with nothing given to read it.
+/// </summary>
+internal sealed record DurationDefault(TimeSpan Held, IReadOnlyList<string> Ways);
+
+/// <summary>
+/// What a place makes of an input: held, at once, never, default, taken or refused; what it
+/// holds, where it holds one; and whether this side reaches another, which a row of the support
+/// matrix says.
+/// </summary>
+internal sealed record PlaceOutcome(string Input, string Outcome, TimeSpan? Held, bool IsExcused);
+
+/// <summary>
+/// A place that takes a duration an application gives a side: its id, its kind, a delay or a
+/// timeout; what it makes of never, taken, refused or its default; its ways, its default, what of
+/// it is observed, held or its refusal alone, and its outcome for each input, in the inputs' order.
+/// </summary>
+internal sealed record DurationPlace(string Id, (string Kind, string Never) Policy, IReadOnlyList<DurationWay> Ways, DurationDefault? Default, string Observed, IReadOnlyList<PlaceOutcome> Outcomes);
+
+/// <summary>
+/// Bead's durations, <c>spec/durations.json</c>, read whole (decision 0014): its inputs, each as a
+/// <see cref="TimeSpan"/> is given it, and its places, typed; what this side is excused from; and
+/// the words of a refusal, this side's own, which the file leaves to each side. The harness and the
+/// twins of <see cref="Clocks"/>' assertions read the file through it alone.
 /// </summary>
 internal static class Durations
 {
-    // each row's outcome and what it holds, but zero's and infinite's outcomes, which the place says
-    private static readonly (TimeSpan Given, DurationOutcome? Outcome, TimeSpan? Held)[] Table =
-    [
-        (TimeSpan.Zero, null, TimeSpan.Zero),
-        (TimeSpan.FromMilliseconds(0.5), DurationOutcome.Refused, null),
-        (TimeSpan.FromMilliseconds(1), DurationOutcome.Taken, TimeSpan.FromMilliseconds(1)),
-        (TimeSpan.FromMilliseconds(1.4), DurationOutcome.Taken, TimeSpan.FromMilliseconds(1)),
-        (TimeSpan.FromMilliseconds(1.5), DurationOutcome.Taken, TimeSpan.FromMilliseconds(2)),
-        (TimeSpan.FromSeconds(0.41), DurationOutcome.Taken, TimeSpan.FromMilliseconds(410)),
-        (TimeSpan.FromSeconds(2.01), DurationOutcome.Taken, TimeSpan.FromMilliseconds(2010)),
-        (Clocks.LongestTimer, DurationOutcome.Taken, Clocks.LongestTimer),
-        (Clocks.LongestTimer + TimeSpan.FromMilliseconds(0.5), DurationOutcome.Refused, null),
-        (Timeout.InfiniteTimeSpan, null, Timeout.InfiniteTimeSpan),
-        (TimeSpan.FromMilliseconds(-2), DurationOutcome.Refused, null),
-    ];
+    // constants
+
+    // the language a differs names to excuse this side
+    private const string Language = "C#";
+
+    private static readonly JsonElement Root = Load();
+
+    // helpers
+
+    private static JsonElement Load()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "durations.json")));
+
+        return document.RootElement.Clone();
+    }
+
+    // whether an entry's differs names this side
+    private static bool IsExcused(JsonElement entry)
+    {
+        return entry.TryGetProperty("differs", out var differs) && differs.EnumerateArray().Any((difference) =>
+        {
+            return difference.GetProperty("language").GetString() == Language;
+        });
+    }
+
+    // an input as a TimeSpan is given it: the double overloads, each platform's arithmetic, never as
+    // .NET spells it; NaN and a value that is no number, none
+    private static TimeSpan? GivenOf(JsonElement input)
+    {
+        if (input.TryGetProperty("milliseconds", out var milliseconds))
+        {
+            return TimeSpan.FromMilliseconds(milliseconds.GetDouble());
+        }
+
+        if (input.TryGetProperty("seconds", out var seconds))
+        {
+            return TimeSpan.FromSeconds(seconds.GetDouble());
+        }
+
+        if (input.TryGetProperty("never", out _))
+        {
+            return Timeout.InfiniteTimeSpan;
+        }
+
+        return null;
+    }
+
+    private static TimeSpan? HeldOf(JsonElement entry)
+    {
+        if (entry.TryGetProperty("held", out var held))
+        {
+            return TimeSpan.FromMilliseconds(held.GetInt64());
+        }
+
+        return null;
+    }
+
+    private static DurationPlace ReadPlace(JsonElement place)
+    {
+        DurationDefault? byDefault = null;
+
+        if (place.TryGetProperty("default", out var stated))
+        {
+            byDefault = new DurationDefault(
+                stated.TryGetProperty("milliseconds", out var milliseconds) ? TimeSpan.FromMilliseconds(milliseconds.GetInt64()) : Timeout.InfiniteTimeSpan,
+                [.. stated.GetProperty("ways").EnumerateArray().Select((way) =>
+                {
+                    return way.GetString()!;
+                })]);
+        }
+
+        return new DurationPlace(
+            place.GetProperty("id").GetString()!,
+            (place.GetProperty("kind").GetString()!, place.GetProperty("never").GetString()!),
+            [.. place.GetProperty("ways").EnumerateArray().Select((way) =>
+            {
+                return new DurationWay(way.GetProperty("id").GetString()!, way.TryGetProperty("required", out _), IsExcused(way));
+            })],
+            byDefault,
+            place.GetProperty("observed").GetString()!,
+            [.. place.GetProperty("outcomes").EnumerateArray().Select((outcome) =>
+            {
+                return new PlaceOutcome(outcome.GetProperty("input").GetString()!, outcome.GetProperty("outcome").GetString()!, HeldOf(outcome), IsExcused(outcome));
+            })]);
+    }
+
+    // definition
+
+    /// <summary>The file's inputs, in its order.</summary>
+    public static IReadOnlyList<DurationInput> Inputs { get; } = [.. Root.GetProperty("inputs").EnumerateArray().Select((input) =>
+    {
+        return new DurationInput(input.GetProperty("name").GetString()!, GivenOf(input), IsExcused(input));
+    })];
+
+    /// <summary>The file's places, in its order.</summary>
+    public static IReadOnlyList<DurationPlace> Places { get; } = [.. Root.GetProperty("places").EnumerateArray().Select(ReadPlace)];
+
+    /// <summary>The input of that name.</summary>
+    public static DurationInput InputOf(string name)
+    {
+        return Inputs.Single((input) =>
+        {
+            return input.Name == name;
+        });
+    }
+
+    /// <summary>The place of that id.</summary>
+    public static DurationPlace PlaceOf(string id)
+    {
+        return Places.Single((place) =>
+        {
+            return place.Id == id;
+        });
+    }
 
     /// <summary>
-    /// The durations as the place that names its duration <c>What</c> meets them: from 1 ms to the
-    /// ceiling held, rounded to the nearest whole millisecond, a half away from zero; under a
-    /// millisecond, a negative and past the ceiling refused; zero and infinite as <c>Zero</c> and
-    /// <c>Never</c> say. Each refusal is the one message every place words alike, which offers 0
-    /// for at once where zero is, and infinite for never where never is.
+    /// What this side plays of a place, by each way it has: each input it is given, with the place's
+    /// outcome for it, but those a row of the support matrix excuses it from, on the input or on the
+    /// place's outcome for it. A way it lacks says so itself.
     /// </summary>
-    public static IReadOnlyList<(TimeSpan Given, DurationOutcome Outcome, TimeSpan? Held, string? Refusal)> Of(string what, (DurationOutcome Zero, DurationOutcome Never) outcomes)
+    public static IReadOnlyList<(DurationInput Input, PlaceOutcome Outcome)> Played(DurationPlace place)
     {
-        var zero = outcomes.Zero == DurationOutcome.Refused ? "" : "0 for at once, or ";
-        var never = outcomes.Never == DurationOutcome.Refused ? "" : ", or infinite for never";
+        ArgumentNullException.ThrowIfNull(place);
 
-        return Table.Select((row) =>
+        return [.. Inputs.Zip(place.Outcomes).Where((played) =>
         {
-            var outcome = row.Outcome ?? (row.Given == TimeSpan.Zero ? outcomes.Zero : outcomes.Never);
-            var written = row.Given == Timeout.InfiniteTimeSpan ? "infinite" : row.Given.TotalMilliseconds.ToString(CultureInfo.InvariantCulture);
-            var refusal = outcome == DurationOutcome.Refused
-                ? $"{what} is {zero}a number of milliseconds from 1 to 2147483647{never}, not {written}"
-                : null;
+            return !played.First.IsExcused && !played.Second.IsExcused;
+        })];
+    }
 
-            return (row.Given, outcome, outcome == DurationOutcome.Refused ? null : row.Held, refusal);
-        }).ToList();
+    /// <summary>
+    /// The words of this side's refusal of a duration at a place, the one sentence for every
+    /// reason: the place's phrase, then what it takes — 0 for at once at a delay, and infinite for
+    /// never where never is not refused — then the duration as given, a fraction written with a dot
+    /// whatever the culture, never written <c>infinite</c> rather than -1.
+    /// </summary>
+    public static string RefusalOf((string Phrase, DurationPlace Place) of, TimeSpan given)
+    {
+        ArgumentNullException.ThrowIfNull(of.Place);
+
+        var zero = of.Place.Policy.Kind == "delay" ? "0 for at once, or " : "";
+        var never = of.Place.Policy.Never == "refused" ? "" : ", or infinite for never";
+        var written = given == Timeout.InfiniteTimeSpan ? "infinite" : given.TotalMilliseconds.ToString(CultureInfo.InvariantCulture);
+
+        return $"{of.Phrase} is {zero}a number of milliseconds from 1 to 2147483647{never}, not {written}";
     }
 }

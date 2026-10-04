@@ -146,48 +146,72 @@ public sealed class ClocksTests
 
     // the clock
 
-    // -1 ms is .NET's infinite, so -2 ms stands for a negative; a TimeSpan holds no NaN
+    // every input of the durations' file, through its helper, as the place of the file each
+    // assertion holds a duration as: a timeout that takes never, a timeout or a bound that refuses
+    // it, and a delay; what a row of the support matrix excuses this side from, its twins below show
     [Fact]
     public void Holds_a_duration_as_a_whole_number_of_milliseconds_from_1_to_2_31_minus_1_a_fraction_rounded_to_the_nearest_a_half_up_0_at_once_for_a_delay_and_never_where_never_has_a_meaning_refusing_any_other_in_one_message()
     {
         Assert.Equal(TimeSpan.FromMilliseconds(2_147_483_647), Clocks.LongestTimer);
 
-        var holds = new (Func<TimeSpan, TimeSpan> Hold, (DurationOutcome Zero, DurationOutcome Never) Outcomes)[]
+        var holds = new (Func<TimeSpan, TimeSpan> Hold, DurationPlace Place)[]
         {
             ((duration) =>
             {
                 return Clocks.AssertHeld(("a duration", "Duration"), duration);
-            }, (DurationOutcome.Refused, DurationOutcome.Never)),
+            }, Durations.PlaceOf("call.timeout")),
             ((duration) =>
             {
                 return Clocks.AssertHeldFinite(("a duration", "Duration"), duration);
-            }, (DurationOutcome.Refused, DurationOutcome.Refused)),
+            }, Durations.PlaceOf("router.transferInactivityTimeout")),
             ((duration) =>
             {
                 return Clocks.AssertHeldDelay(("a duration", "Duration"), duration);
-            }, (DurationOutcome.AtOnce, DurationOutcome.Refused)),
+            }, Durations.PlaceOf("httpTransportClient.wait")),
         };
 
-        foreach (var (hold, outcomes) in holds)
+        foreach (var (hold, place) in holds)
         {
-            foreach (var (given, outcome, held, refusal) in Durations.Of("a duration", outcomes))
+            foreach (var (input, outcome) in Durations.Played(place))
             {
-                if (outcome == DurationOutcome.Refused)
+                var given = input.Given!.Value;
+
+                if (outcome.Outcome == "refused")
                 {
                     var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
                     {
                         hold(given);
                     });
 
-                    Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                    Assert.StartsWith(Durations.RefusalOf(("a duration", place), given), refused.Message, StringComparison.Ordinal);
                     Assert.Equal("Duration", refused.ParamName);
                 }
                 else
                 {
-                    Assert.Equal(held, hold(given));
+                    var held = outcome.Outcome switch
+                    {
+                        "at once" => TimeSpan.Zero,
+                        "never" => Timeout.InfiniteTimeSpan,
+                        _ => outcome.Held!.Value,
+                    };
+
+                    Assert.Equal((place.Id, input.Name, held), (place.Id, input.Name, hold(given)));
                 }
             }
         }
+
+        // one sentence of each offer, written out whole
+        Assert.Equal(
+            [
+                "a duration is a number of milliseconds from 1 to 2147483647, or infinite for never, not 0",
+                "a duration is a number of milliseconds from 1 to 2147483647, not infinite",
+                "a duration is 0 for at once, or a number of milliseconds from 1 to 2147483647, not 0.5",
+            ],
+            [
+                Durations.RefusalOf(("a duration", holds[0].Place), TimeSpan.Zero),
+                Durations.RefusalOf(("a duration", holds[1].Place), Timeout.InfiniteTimeSpan),
+                Durations.RefusalOf(("a duration", holds[2].Place), TimeSpan.FromMilliseconds(0.5)),
+            ]);
     }
 
     [Fact]
@@ -207,11 +231,46 @@ public sealed class ClocksTests
     public void A_duration_of_minus_1_ms_is_refused_on_the_TypeScript_side_and_never_on_the_CSharp_side()
     {
         Assert.Equal(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(-1));
+        Assert.Equal(Timeout.InfiniteTimeSpan, Durations.InputOf("-1 ms").Given);
         Assert.Equal(Timeout.InfiniteTimeSpan, Clocks.AssertHeld(("a duration", "Duration"), TimeSpan.FromMilliseconds(-1)));
         Assert.StartsWith("a duration is a number of milliseconds from 1 to 2147483647, not infinite", Assert.Throws<ArgumentOutOfRangeException>(() =>
         {
             Clocks.AssertHeldFinite(("a duration", "Duration"), TimeSpan.FromMilliseconds(-1));
         }).Message, StringComparison.Ordinal);
+    }
+
+    // a platform's difference: a TimeSpan counts ticks of 100 ns, and .NET truncates to them what it
+    // is given, where the TypeScript side's twin holds the milliseconds as written, and refuses both
+    // under the floor and past the ceiling
+    [Fact]
+    public void A_duration_finer_than_a_tick_is_held_as_written_on_the_TypeScript_side_and_truncated_to_its_ticks_on_the_CSharp_side()
+    {
+        var under = Durations.InputOf("0.00001 ms, under a tick").Given!.Value;
+        var past = Durations.InputOf("0.00001 ms past the ceiling").Given!.Value;
+
+        Assert.Equal((TimeSpan.Zero, Clocks.LongestTimer), (under, past));
+
+        // at once at a delay, refused as 0 elsewhere; the ceiling, held
+        Assert.Equal(TimeSpan.Zero, Clocks.AssertHeldDelay(("a duration", "Duration"), under));
+        Assert.StartsWith("a duration is a number of milliseconds from 1 to 2147483647, or infinite for never, not 0", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            Clocks.AssertHeld(("a duration", "Duration"), under);
+        }).Message, StringComparison.Ordinal);
+        Assert.Equal(Clocks.LongestTimer, Clocks.AssertHeld(("a duration", "Duration"), past));
+    }
+
+    // a platform's difference: a TimeSpan holds no NaN, nor a string or a boolean, which the
+    // TypeScript side's twin refuses, not a number
+    [Fact]
+    public void A_duration_that_is_not_a_number_is_refused_on_the_TypeScript_side_and_no_TimeSpan_on_the_CSharp_side()
+    {
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return TimeSpan.FromMilliseconds(double.NaN);
+        });
+        Assert.Equal<TimeSpan?>(
+            [null, null, null],
+            [Durations.InputOf("NaN").Given, Durations.InputOf("\"1000\"").Given, Durations.InputOf("true").Given]);
     }
 
     // the test clock: what Bead never arms fails a test, on the TypeScript side's test clock as on
