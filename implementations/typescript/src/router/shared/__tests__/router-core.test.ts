@@ -11,6 +11,7 @@ import { LONGEST_TIMER } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   CLIENT_FAILURES,
+  CredentialScheme,
   EnvelopeKind,
   FailureScope,
   LIMIT_DEFAULTS,
@@ -53,6 +54,11 @@ const options = { timeout: 1_000 };
 
 const TOKEN = toSessionToken(new Uint8Array(16).fill(1));
 const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
+
+// what an answer announces: the session, by its token; another; its end
+const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
+const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });
+const ENDED = Object.freeze({ scheme: CredentialScheme.NONE });
 
 /** The bytes a hexadecimal string spells, spaces aside. */
 const fromHexadecimal = (text: string): Uint8Array => {
@@ -711,8 +717,8 @@ test.describe('createRouterCore', () => {
 
       core.receive(fromHexadecimal('0A 10 00 03  00 00 00 03  00 02 00 01'), 'a');
       core.receive(fromHexadecimal('00 10 00 03  00 00 00 03  00 02 00 01'), 'a');
-      // a reserved bit
-      core.receive(fromHexadecimal('A1 10 08 03  00 00 00 05  00 02 00 01'), 'a');
+      // the kept bit
+      core.receive(fromHexadecimal('A1 10 01 03  00 00 00 05  00 02 00 01'), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.ENVELOPE_MALFORMED]]);
@@ -1747,11 +1753,11 @@ test.describe('createRouterCore', () => {
 
       expect(
         sent.map(({ envelope }) => {
-          const header = envelope?.header as { sessionToken?: unknown } | undefined;
+          const header = envelope?.header as { credential?: unknown } | undefined;
 
-          return header !== undefined && 'sessionToken' in header ? header.sessionToken : 'none';
+          return header !== undefined && 'credential' in header ? header.credential : 'none';
         })
-      ).toEqual([TOKEN, 'none', OTHER_TOKEN, null, 'none', 'none']);
+      ).toEqual([OPAQUE, 'none', OTHER_OPAQUE, ENDED, 'none', 'none']);
     });
 
     test('announce again what an answer that did not go out announced', async () => {
@@ -1778,8 +1784,8 @@ test.describe('createRouterCore', () => {
           return envelope?.header;
         })
       ).toEqual([
-        { callId: 1, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
-        { callId: 3, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
+        { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT },
+        { callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT },
       ]);
     });
 
@@ -1823,8 +1829,8 @@ test.describe('createRouterCore', () => {
           return envelope?.header;
         })
       ).toEqual([
-        { callId: 1, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
-        { callId: 3, kind: EnvelopeKind.RESULT, sessionToken: OTHER_TOKEN },
+        { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT },
+        { callId: 3, credential: OTHER_OPAQUE, kind: EnvelopeKind.RESULT },
         { callId: 5, kind: EnvelopeKind.RESULT },
       ]);
     });
@@ -1860,8 +1866,8 @@ test.describe('createRouterCore', () => {
           return envelope?.header;
         })
       ).toEqual([
-        { callId: 1, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
-        { callId: 3, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
+        { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT },
+        { callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT },
       ]);
     });
 
@@ -1894,9 +1900,9 @@ test.describe('createRouterCore', () => {
       ).toEqual([{ callId: 1, kind: EnvelopeKind.RESULT }]);
     });
 
-    test('trace what goes out and what comes in without its session token', async () => {
+    test('trace what goes out and what comes in without its credential, its scheme alone', async () => {
       const headers: unknown[] = [];
-      const { control, port } = createPort({
+      const { control, port, sent } = createPort({
         trace: (direction, { header }) => {
           headers.push([direction, header]);
         },
@@ -1913,7 +1919,7 @@ test.describe('createRouterCore', () => {
       );
       core.receive(
         envelopeOf({
-          header: { ...headerOf(3), sessionToken: TOKEN },
+          header: { ...headerOf(3), credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } },
           kind: EnvelopeKind.REQUEST,
           payload: new Uint8Array(0),
         } satisfies OutgoingEnvelope),
@@ -1921,10 +1927,16 @@ test.describe('createRouterCore', () => {
       );
 
       expect(headers).toEqual([
-        ['tx', { callId: 1, hasSessionToken: true, kind: EnvelopeKind.RESULT }],
-        ['rx', { ...headerOf(3), hasSessionToken: true }],
+        ['tx', { callId: 1, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT }],
+        ['rx', { ...headerOf(3), credentialScheme: CredentialScheme.JWT }],
       ]);
       expect(JSON.stringify(headers)).not.toContain(TOKEN);
+      expect(JSON.stringify(headers)).not.toContain('a.b.c');
+      expect(sent[0]?.envelope?.header).toEqual({
+        callId: 1,
+        credential: OPAQUE,
+        kind: EnvelopeKind.RESULT,
+      });
     });
   });
 
@@ -2800,7 +2812,7 @@ test.describe('createRouterCore', () => {
       const failure = { code: 1, detail, scope: FailureScope.APPLICATION };
 
       for (const [limits, length] of [
-        [{ chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 }, 36],
+        [{ chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 }, 32],
         [{ maximumDetailBytes: 10 }, 10],
       ] as const) {
         const { port, sent } = createPort();
@@ -3592,20 +3604,20 @@ test.describe('createRouterCore', () => {
         );
       };
 
-      // a request's header takes 12 bytes; a result's 8, and 16 more for a session it may announce
+      // a request's header takes 12 bytes; a result's 8, and 20 more for an announcement it may carry
       void ask(52);
       void ask(53);
       core.receive(requestOf(1), 'a');
       core.receive(requestOf(3), 'a');
-      void settledOf(answerOf(answering, { payload: new Uint8Array(40) }));
-      void settledOf(answerOf(answering, { index: 1, payload: new Uint8Array(41) }));
+      void settledOf(answerOf(answering, { payload: new Uint8Array(36) }));
+      void settledOf(answerOf(answering, { index: 1, payload: new Uint8Array(37) }));
       await sleep(0);
 
       expect(piecesOf(sent)).toEqual([
         [EnvelopeKind.REQUEST, 2, undefined, 52],
         [EnvelopeKind.REQUEST, 4, 53, 44],
-        [EnvelopeKind.RESULT, 1, undefined, 40],
-        [EnvelopeKind.RESULT, 3, 41, 32],
+        [EnvelopeKind.RESULT, 1, undefined, 36],
+        [EnvelopeKind.RESULT, 3, 37, 28],
       ]);
 
       const none = createAnswering({ maximumTransfers: 0 });
@@ -3618,7 +3630,7 @@ test.describe('createRouterCore', () => {
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
         detail: 'a payload of 53 bytes goes as a transfer, which this side sends none of',
       });
-      await expect(answerOf(none, { payload: new Uint8Array(41) })).rejects.toMatchObject({
+      await expect(answerOf(none, { payload: new Uint8Array(37) })).rejects.toMatchObject({
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
       });
       expect(none.sent).toEqual([]);
@@ -3691,10 +3703,10 @@ test.describe('createRouterCore', () => {
 
       expect(seen).toHaveLength(2);
       expect(piecesOf(sent)).toEqual([
-        [EnvelopeKind.RESULT, 1, 150, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
-        [EnvelopeKind.CHUNK, 1, 80, 48],
-        [EnvelopeKind.CHUNK, 1, 128, 22],
+        [EnvelopeKind.RESULT, 1, 150, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
+        [EnvelopeKind.CHUNK, 1, 76, 48],
+        [EnvelopeKind.CHUNK, 1, 124, 26],
       ]);
       expect(payloadOf(sent, 1)).toEqual(payload);
       expect(Math.max(...sizes)).toBeLessThanOrEqual(64);
@@ -3754,11 +3766,11 @@ test.describe('createRouterCore', () => {
         [EnvelopeKind.CHUNK, 2, 92, 48],
         [EnvelopeKind.CHUNK, 2, 140, 48],
         [EnvelopeKind.CHUNK, 2, 188, 12],
-        [EnvelopeKind.RESULT, 1, 200, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
-        [EnvelopeKind.CHUNK, 1, 80, 48],
-        [EnvelopeKind.CHUNK, 1, 128, 48],
-        [EnvelopeKind.CHUNK, 1, 176, 24],
+        [EnvelopeKind.RESULT, 1, 200, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
+        [EnvelopeKind.CHUNK, 1, 76, 48],
+        [EnvelopeKind.CHUNK, 1, 124, 48],
+        [EnvelopeKind.CHUNK, 1, 172, 28],
       ]);
       expect([payloadOf(sent, 2), payloadOf(sent, 1)]).toEqual([payload, payload]);
       // the chunks go inside the opening's send, whose credit came back as it went, and one after the
@@ -3783,8 +3795,8 @@ test.describe('createRouterCore', () => {
       await expect(responding).rejects.toBeInstanceOf(CancelError);
       expect(seen[0]?.signal.aborted).toBe(true);
       expect(piecesOf(sent)).toEqual([
-        [EnvelopeKind.RESULT, 1, 150, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
+        [EnvelopeKind.RESULT, 1, 150, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
       ]);
       expect(reported).toEqual([]);
     });
@@ -3813,8 +3825,8 @@ test.describe('createRouterCore', () => {
 
       await expect(Promise.all(answers)).resolves.toEqual([expect.any(CancelError), undefined]);
       expect(piecesOf(sent)).toEqual([
-        [EnvelopeKind.RESULT, 1, 150, 32],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
+        [EnvelopeKind.RESULT, 1, 150, 28],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
       ]);
       expect(codesOf(reported)).toEqual([['failed behind its answer', 'a']]);
     });
@@ -4122,9 +4134,9 @@ test.describe('createRouterCore', () => {
       ]);
       expect(piecesOf(sent)).toEqual([
         [EnvelopeKind.REQUEST, 2, 200, 44],
-        [EnvelopeKind.RESULT, 1, 150, 32],
+        [EnvelopeKind.RESULT, 1, 150, 28],
         [EnvelopeKind.CHUNK, 2, 44, 48],
-        [EnvelopeKind.CHUNK, 1, 32, 48],
+        [EnvelopeKind.CHUNK, 1, 28, 48],
       ]);
       expect(reported).toEqual([]);
     });
@@ -4283,22 +4295,22 @@ test.describe('createRouterCore', () => {
       } as const;
 
       await expect(
-        core.respond({ payload: new Uint8Array(41) }, subscribing)
+        core.respond({ payload: new Uint8Array(37) }, subscribing)
       ).rejects.toMatchObject({
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
         detail: "a subscription's result goes in one envelope, of 64 bytes at most",
       });
       await expect(
         core.respond(
-          { payload: new Uint8Array(41) },
+          { payload: new Uint8Array(37) },
           { connectionHandle: 'a', header: headerOf(3) }
         )
       ).rejects.toBeInstanceOf(ProgrammerError);
       // in one envelope, it goes
-      await core.respond({ payload: new Uint8Array(40) }, subscribing);
+      await core.respond({ payload: new Uint8Array(36) }, subscribing);
 
       expect(told).toEqual(['told']);
-      expect(piecesOf(sent)).toEqual([[EnvelopeKind.RESULT, 1, undefined, 40]]);
+      expect(piecesOf(sent)).toEqual([[EnvelopeKind.RESULT, 1, undefined, 36]]);
     });
 
     test('announce a session on a result’s opening, which leaves room for it within its envelope', async () => {
@@ -4316,11 +4328,11 @@ test.describe('createRouterCore', () => {
       core.receive(creditOf(1, 100), 'a');
       await responding;
 
-      expect(sizes).toEqual([64, 64, 36]);
+      expect(sizes).toEqual([64, 64, 40]);
       expect(sent[0]?.envelope?.kind === EnvelopeKind.RESULT && sent[0].envelope.header).toEqual({
         callId: 1,
+        credential: OPAQUE,
         kind: EnvelopeKind.RESULT,
-        sessionToken: TOKEN,
         total: 100,
       });
     });
@@ -4368,7 +4380,7 @@ test.describe('createRouterCore', () => {
       expect(await asking).toBeInstanceOf(DisconnectError);
       expect(piecesOf(sent)).toEqual([
         [EnvelopeKind.REQUEST, 2, 200, 44],
-        [EnvelopeKind.RESULT, 1, 150, 32],
+        [EnvelopeKind.RESULT, 1, 150, 28],
       ]);
       expect(reported).toEqual([]);
     });

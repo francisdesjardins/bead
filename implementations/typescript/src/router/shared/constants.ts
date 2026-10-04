@@ -37,22 +37,36 @@ export const EnvelopeKind = Object.freeze({
 
 /**
  * The flags of an envelope's header, in its third byte. Those of the low nibble add a block, laid
- * out in the order of their bits: SESSION, the 16 bytes of a session token, on a request, a result
- * or a failure; DESTINATION, 4 bytes, on a request alone; TRANSFER, 8 bytes, the whole payload's
- * length, on a request or a result that opens a transfer; 0x08 is kept for a block to come. Those of
- * the high nibble add none: SUBSCRIPTION, on a request alone, says the request opens a subscription,
- * which a server subscribes no other request to; PACED, on that request, asks for its
+ * out in the order of their bits: DESTINATION, 4 bytes, on a request alone; TRANSFER, 8 bytes, the
+ * whole payload's length, on a request or a result that opens a transfer; CREDENTIAL, last, a
+ * credential of a scheme, on a request, a result or a failure; 0x01 is kept for a block to come.
+ * Those of the high nibble add none: SUBSCRIPTION, on a request alone, says the request opens a
+ * subscription, which a server subscribes no other request to; PACED, on that request, asks for its
  * notifications as credited, and on a credit says it counts notifications; MORE, on a chunk alone,
  * says more chunks follow it; 0x80 is kept. A flag its kind does not take makes the envelope
  * malformed.
  */
 export const EnvelopeFlag = Object.freeze({
-  SESSION: 0x01,
   DESTINATION: 0x02,
   TRANSFER: 0x04,
+  CREDENTIAL: 0x08,
   SUBSCRIPTION: 0x10,
   PACED: 0x20,
   MORE: 0x40,
+} as const);
+
+/**
+ * What a CREDENTIAL block holds, in its first 2 bytes, named as HTTP names an authentication scheme
+ * (RFC 9110 §11.1): NONE, on an answer alone, says its connection's session ended; OPAQUE, a
+ * session's token; JWT, on a request alone, a token in JWS Compact Serialization (RFC 7515);
+ * ELSEWHERE, on a request alone, a credential its transport carried. 4 to 65535 are the schemes to
+ * come, read whole on a request.
+ */
+export const CredentialScheme = Object.freeze({
+  NONE: 0,
+  OPAQUE: 1,
+  JWT: 2,
+  ELSEWHERE: 3,
 } as const);
 
 /** Whose code a failure's is: the protocol's, or the procedure's own. */
@@ -178,6 +192,7 @@ export type DROPPED_EVENT = typeof DROPPED_EVENT;
 export type TRIGGER_EVENT = typeof TRIGGER_EVENT;
 
 export type CALL_ID_RANGES = typeof CALL_ID_RANGES;
+export type CredentialScheme = (typeof CredentialScheme)[keyof typeof CredentialScheme];
 export type EnvelopeFlag = (typeof EnvelopeFlag)[keyof typeof EnvelopeFlag];
 export type EnvelopeKind = (typeof EnvelopeKind)[keyof typeof EnvelopeKind];
 export type EnvelopeLayout = (typeof EnvelopeLayout)[keyof typeof EnvelopeLayout];

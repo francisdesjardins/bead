@@ -4,8 +4,8 @@ using System.Buffers.Text;
 namespace Bead;
 
 /// <summary>
-/// A session's token: 16 bytes, never all zero, which say a session ended. Written as unpadded
-/// base64url, as the vectors write it.
+/// A session's token, the credential of scheme <see cref="CredentialScheme.Opaque"/>: 16 bytes, never
+/// all zero. Written as unpadded base64url.
 /// </summary>
 public readonly record struct SessionToken
 {
@@ -21,7 +21,7 @@ public readonly record struct SessionToken
 
     /// <summary>
     /// The token 16 bytes spell. Throws an <see cref="ArgumentException"/> for any other length, or
-    /// for 16 zero bytes, which say a session ended.
+    /// for 16 zero bytes, which are no token.
     /// </summary>
     public static SessionToken FromBytes(ReadOnlySpan<byte> bytes)
     {
@@ -139,44 +139,5 @@ public readonly record struct SessionToken
         {
             throw new InvalidOperationException("the default session token is no token");
         }
-    }
-}
-
-/// <summary>
-/// What an answer says of its connection's session, when it changed: the token it changed to, or
-/// that it ended — the TypeScript side's <c>sessionToken</c>, <c>null</c> once ended.
-/// </summary>
-public readonly record struct SessionAnnouncement
-{
-    private SessionAnnouncement(SessionToken token)
-    {
-        Token = token;
-    }
-
-    /// <summary>The announcement that the session ended: 16 zero bytes.</summary>
-    public static SessionAnnouncement Ended { get; }
-
-    /// <summary>The token the session changed to; none once it ended.</summary>
-    public SessionToken? Token { get; }
-
-    /// <summary>Whether the session ended.</summary>
-    public bool IsEnded
-    {
-        get
-        {
-            return Token is null;
-        }
-    }
-
-    /// <summary>The announcement of <paramref name="token"/>.</summary>
-    public static SessionAnnouncement Of(SessionToken token)
-    {
-        return new SessionAnnouncement(token);
-    }
-
-    /// <summary>The announcement of <paramref name="token"/>.</summary>
-    public static implicit operator SessionAnnouncement(SessionToken token)
-    {
-        return Of(token);
     }
 }

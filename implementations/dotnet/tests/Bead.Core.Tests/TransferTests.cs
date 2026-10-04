@@ -69,11 +69,21 @@ public sealed class TransferTests
         Assert.Equal(1_048_560, Transfer.ChunkPayloadBytes(limits, ChunkHeaderBytes));
         Assert.Equal(1_008, Transfer.ChunkPayloadBytes(limits with { ChunkBytes = 1_024 }, ChunkHeaderBytes));
 
-        // an opening: a request, with and without a destination, and an answer with its session
-        int[] openings = [20, 24, 32];
+        // an opening: a request, without and with a destination, and a result announcing a session
+        IEnvelopeHeader[] openingHeaders =
+        [
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Total = 0 },
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, DestinationId = 1, Total = 0 },
+            new ResultHeader { CallId = 2, Total = 0, Credential = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw") },
+        ];
+        var openings = openingHeaders.Select((header) =>
+        {
+            return EnvelopeCodec.HeaderBytesOf(header);
+        }).ToArray();
 
+        Assert.Equal([20, 24, 36], openings);
         Assert.Equal(
-            [1_048_556, 1_048_552, 1_048_544],
+            [1_048_556, 1_048_552, 1_048_540],
             openings.Select((bytes) =>
             {
                 return Transfer.ChunkPayloadBytes(limits, bytes);

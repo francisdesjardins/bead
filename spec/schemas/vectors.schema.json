@@ -280,7 +280,7 @@
         "destinationId": { "$ref": "common.schema.json#/$defs/u32" },
         "opensSubscription": { "type": "boolean" },
         "paced": { "type": "boolean" },
-        "sessionToken": { "$ref": "common.schema.json#/$defs/sessionToken" },
+        "credential": { "$ref": "#/$defs/presented" },
         "total": { "$ref": "common.schema.json#/$defs/u53" }
       }
     },
@@ -291,7 +291,7 @@
       "properties": {
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
         "kind": { "const": 17 },
-        "sessionToken": { "$ref": "#/$defs/announcement" },
+        "credential": { "$ref": "#/$defs/announcement" },
         "total": { "$ref": "common.schema.json#/$defs/u53" }
       }
     },
@@ -302,7 +302,7 @@
       "properties": {
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
         "kind": { "const": 18 },
-        "sessionToken": { "$ref": "#/$defs/announcement" }
+        "credential": { "$ref": "#/$defs/announcement" }
       }
     },
     "notification": {
@@ -345,11 +345,15 @@
         "kind": { "const": 22 }
       }
     },
+    "presented": {
+      "description": "What a request presents: a credential of any scheme but NONE.",
+      "$ref": "common.schema.json#/$defs/credential",
+      "not": { "properties": { "scheme": { "const": "NONE" } } }
+    },
     "announcement": {
-      "description": "What an answer announces of its session: its token, or null for its end.",
-      "type": ["string", "null"],
-      "if": { "type": "string" },
-      "then": { "$ref": "common.schema.json#/$defs/sessionToken" }
+      "description": "What an answer announces of its connection's session: OPAQUE, its token; NONE, its end.",
+      "$ref": "common.schema.json#/$defs/credential",
+      "properties": { "scheme": { "enum": ["OPAQUE", "NONE"] } }
     }
   }
 }

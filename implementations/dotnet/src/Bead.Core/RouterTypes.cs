@@ -293,11 +293,17 @@ public enum DebugDirection
     Tx,
 }
 
-/// <summary>An envelope fit to be traced: its connection, and its header without its session token.</summary>
+/// <summary>
+/// An envelope fit to be traced: its connection, and its header without its credential, whose
+/// scheme alone it keeps.
+/// </summary>
 /// <param name="ConnectionHandle">The connection it went on.</param>
-/// <param name="Header">Its header, its token left out.</param>
-/// <param name="HasSessionToken">Whether it carried a token.</param>
-public readonly record struct TracedEnvelope(string ConnectionHandle, IEnvelopeHeader Header, bool HasSessionToken);
+/// <param name="Header">Its header, its credential left out.</param>
+/// <param name="CredentialScheme">The scheme of the credential it carried; none, it carried none.</param>
+public readonly record struct TracedEnvelope(
+    string ConnectionHandle,
+    IEnvelopeHeader Header,
+    CredentialScheme? CredentialScheme);
 
 /// <summary>An answer about to be written, and the handler its request was routed to.</summary>
 /// <param name="Target">The request it answers.</param>
@@ -408,7 +414,7 @@ public interface IRouterCorePort
         return null;
     }
 
-    /// <summary>Each envelope, out or in, its token left out.</summary>
+    /// <summary>Each envelope, out or in, its credential left out.</summary>
     void Trace(DebugDirection direction, TracedEnvelope envelope)
     {
     }

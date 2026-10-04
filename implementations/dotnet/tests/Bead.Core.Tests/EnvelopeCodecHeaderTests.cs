@@ -11,7 +11,8 @@ public sealed class EnvelopeCodecHeaderTests
 
     private static readonly SessionToken Token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
 
-    // what a writer refuses: a field out of its range, a flag its header does not hold together with
+    // what a writer refuses of a header's fields: one out of its range, a flag its header does not
+    // hold together with
     private static readonly Dictionary<string, IEnvelopeHeader> Unwritable = new()
     {
         ["a call id of 0"] = new ResultHeader { CallId = 0 },
@@ -21,16 +22,34 @@ public sealed class EnvelopeCodecHeaderTests
             new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, DestinationId = 0 },
         ["a request paced that opens no subscription"] =
             new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Paced = true },
-        ["a request presenting the default token"] =
-            new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, SessionToken = default(SessionToken) },
-        ["an answer announcing the default token"] =
-            new ResultHeader { CallId = 3, Session = SessionAnnouncement.Of(default) },
         ["a negative offset"] = new ChunkHeader { CallId = 7, Offset = -1, IsLast = true },
         ["an offset of 2^53"] = new ChunkHeader { CallId = 7, Offset = 1L << 53, IsLast = true },
         ["an end of 2^53"] = new CreditHeader { CallId = 7, CreditEnd = 1L << 53 },
         ["a total of 2^53"] = new ResultHeader { CallId = 3, Total = 1L << 53 },
         ["a negative total"] =
             new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Total = -1 },
+    };
+
+    // what a writer refuses of a credential, and sizing alike: a scheme its kind does not take, or
+    // what its scheme does not hold, a header past 1,020 bytes among it
+    private static readonly Dictionary<string, IEnvelopeHeader> UnwritableCredentials = new()
+    {
+        ["an OPAQUE token of 16 zero bytes on a request"] =
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = Credential.Opaque(default) },
+        ["an OPAQUE token of 16 zero bytes on a result"] =
+            new ResultHeader { CallId = 2, Credential = Credential.Opaque(default) },
+        ["NONE on a request"] =
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = Credential.None },
+        ["a JWT on a result"] = new ResultHeader { CallId = 2, Credential = Credential.Jwt("a") },
+        ["ELSEWHERE on a failure"] = new FailureHeader { CallId = 2, Credential = Credential.Elsewhere },
+        ["a scheme to come on a result"] =
+            new ResultHeader { CallId = 2, Credential = Credential.Of((CredentialScheme)4, []) },
+        ["a JWT of no character"] =
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = Credential.Jwt("") },
+        ["a JWT of a character past U+00FF"] =
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = Credential.Jwt("aĀ") },
+        ["a JWT of 1,005 characters"] =
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = Credential.Jwt(new string('a', 1_005)) },
     };
 
     // definition
@@ -50,8 +69,11 @@ public sealed class EnvelopeCodecHeaderTests
     /// <summary>The names of every vector of the <c>headerRefusals</c> group.</summary>
     public static TheoryData<string> HeaderRefusals { get; } = Vectors.NamesOf("headerRefusals");
 
-    /// <summary>The names of the headers a writer refuses.</summary>
+    /// <summary>The names of the headers a writer refuses for a field.</summary>
     public static TheoryData<string> UnwritableNames { get; } = new(Unwritable.Keys);
+
+    /// <summary>The names of the headers a writer refuses for their credential.</summary>
+    public static TheoryData<string> UnwritableCredentialNames { get; } = new(UnwritableCredentials.Keys);
 
     [Theory]
     [MemberData(nameof(Headers))]
@@ -163,7 +185,8 @@ public sealed class EnvelopeCodecHeaderTests
     [MemberData(nameof(UnwritableNames))]
     public void Refuses_to_write_a_header_and_writes_nothing(string name)
     {
-        var written = new byte[64];
+        // room for any header, so what is refused is the header, never the room
+        var written = new byte[1_024];
 
         Assert.ThrowsAny<ArgumentException>(() =>
         {
@@ -175,26 +198,80 @@ public sealed class EnvelopeCodecHeaderTests
         });
     }
 
-    [Fact]
-    public void Refuses_to_write_past_the_bytes_it_is_given()
+    // a platform's shape: what the TypeScript twin refuses besides, given by a caller without types,
+    // no value here holds. A token that is no session token's 16 bytes: SessionToken.Parse refuses
+    // it. Bytes beside ELSEWHERE: Credential.Of refuses a scheme from 0 to 3, its init accessors
+    // private. A scheme to come without its bytes: a ReadOnlyMemory<byte> is empty at the least, and
+    // empty is a scheme to come's. A scheme past 65535, or no integer: CredentialScheme is a ushort.
+    // No credential at all, null: a Credential? of null is no block, the TypeScript side's undefined
+    [Theory]
+    [MemberData(nameof(UnwritableCredentialNames))]
+    public void Refuses_a_credential_its_kind_does_not_take_or_its_scheme_does_not_hold(string name)
     {
-        var header = new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, SessionToken = Token };
+        // room for any header, so what is refused is the header, never the room
+        var written = new byte[1_024];
+        var header = UnwritableCredentials[name];
 
         Assert.Throws<ArgumentException>(() =>
         {
-            EnvelopeCodec.WriteHeader(header, new byte[27]);
+            EnvelopeCodec.WriteHeader(header, written);
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            EnvelopeCodec.HeaderBytesOf(header);
+        });
+        Assert.All(written, (value) =>
+        {
+            Assert.Equal(0, value);
+        });
+    }
+
+    [Fact]
+    public void Refuses_to_write_past_the_bytes_it_is_given()
+    {
+        var header = new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Credential = Token };
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            EnvelopeCodec.WriteHeader(header, new byte[31]);
         });
     }
 
     [Fact]
     public void Writes_a_session_announced_as_the_token_it_was_given()
     {
-        var written = new byte[24];
+        var written = new byte[28];
 
-        EnvelopeCodec.WriteHeader(new FailureHeader { CallId = 3, Session = Token }, written);
+        EnvelopeCodec.WriteHeader(new FailureHeader { CallId = 3, Credential = Token }, written);
 
         Assert.Equal(
-            Vectors.FromHexadecimal("A1 12 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"),
+            Vectors.FromHexadecimal("A1 12 08 07  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"),
+            written);
+    }
+
+    [Fact]
+    public void Reads_a_JWT_byte_0xE9_as_U00E9_and_writes_it_back_as_the_same_byte()
+    {
+        var bytes = Vectors.FromHexadecimal("A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  E9 00 00 00");
+        IEnvelopeHeader header = new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Credential = Credential.Jwt("é") };
+        var written = new byte[bytes.Length];
+
+        Assert.Equal((header, bytes.Length), EnvelopeCodec.ReadHeader(bytes, RouterSide.Server));
+        Assert.Equal(bytes.Length, EnvelopeCodec.WriteHeader(header, written));
+        Assert.Equal(bytes, written);
+    }
+
+    [Fact]
+    public void Writes_the_padding_over_whatever_the_bytes_held()
+    {
+        var written = Enumerable.Repeat((byte)0xFF, 20).ToArray();
+
+        EnvelopeCodec.WriteHeader(
+            new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Credential = Credential.Jwt("a") },
+            written);
+
+        Assert.Equal(
+            Vectors.FromHexadecimal("A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61 00 00 00"),
             written);
     }
 

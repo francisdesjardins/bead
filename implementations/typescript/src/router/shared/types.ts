@@ -8,6 +8,7 @@ import type {
   IGauges,
 } from '../../transport/shared/types';
 import type {
+  CredentialScheme,
   DEBUG_EVENT,
   DEPRECATED_EVENT,
   DROPPED_EVENT,
@@ -90,13 +91,13 @@ export interface IFailure {
 }
 
 /**
- * A failure's header: its call, and the block an answer may carry — the session, announced when it
- * changes, `null` once it ended. An answer names its call alone: never a destination.
+ * A failure's header: its call, and the block an answer may carry — its connection's session,
+ * announced when it changes. An answer names its call alone: never a destination.
  */
 export interface IFailureHeader {
   callId: CallId;
+  credential?: Announcement | undefined;
   kind: typeof EnvelopeKind.FAILURE;
-  sessionToken?: SessionToken | null | undefined;
 }
 
 /** A notification's header: the call id of the subscription it belongs to, and nothing more. */
@@ -121,19 +122,19 @@ export interface IReceivedFailure extends IFailure {
 
 /**
  * A request's header: its call, the procedure it asks for, and its blocks — where it goes behind
- * the peer, the session it presents, which a router that holds connections reads and ignores, and
- * the `total` of a payload it opens a transfer for: its own payload is then the transfer's first
- * bytes. `opensSubscription` says the call subscribes to the procedure's notifications: a server
+ * the peer, the `total` of a payload it opens a transfer for, its own payload then the transfer's
+ * first bytes, and the credential it presents, which a router that holds connections reads and
+ * ignores. `opensSubscription` says the call subscribes to the procedure's notifications: a server
  * subscribes the requester of no other request. `paced` asks for them as the requester credits
  * them, the first credited already.
  */
 export interface IRequestHeader extends IProcedureAddress {
   callId: CallId;
+  credential?: Credential | undefined;
   destinationId?: DestinationId | undefined;
   kind: typeof EnvelopeKind.REQUEST;
   opensSubscription?: true | undefined;
   paced?: true | undefined;
-  sessionToken?: SessionToken | undefined;
   total?: number | undefined;
 }
 
@@ -143,8 +144,8 @@ export interface IRequestHeader extends IProcedureAddress {
  */
 export interface IResultHeader {
   callId: CallId;
+  credential?: Announcement | undefined;
   kind: typeof EnvelopeKind.RESULT;
-  sessionToken?: SessionToken | null | undefined;
   total?: number | undefined;
 }
 
@@ -201,11 +202,27 @@ export interface IProcedureAddress {
 
 // types
 
+/** What an answer announces of its connection's session: `OPAQUE`, its token; `NONE`, its end. */
+export type Announcement =
+  | { scheme: typeof CredentialScheme.NONE }
+  | { scheme: typeof CredentialScheme.OPAQUE; token: SessionToken };
+
 /**
  * The call an envelope belongs to, from 1 to 0xffffffff: odd when a client opened it, even when a
  * server did. A subscription's notifications carry the call id of the request that subscribed.
  */
 export type CallId = number;
+
+/**
+ * A `CREDENTIAL` block: its scheme, and what it holds — an announcement's; a `JWT`'s token, one
+ * character per byte, as a relay passes it on; nothing, for `ELSEWHERE`; a scheme to come's bytes,
+ * read whole. Tell them apart by `token` or `bytes` first: a scheme to come is any number.
+ */
+export type Credential =
+  | Announcement
+  | { scheme: typeof CredentialScheme.JWT; token: string }
+  | { scheme: typeof CredentialScheme.ELSEWHERE }
+  | { bytes: Uint8Array; scheme: number };
 
 /** What a request is for behind the peer that takes it, from 1 to 0xffffffff; none, the peer. */
 export type DestinationId = number;
@@ -252,18 +269,20 @@ export type OutgoingEnvelope =
   | { header: IResultHeader; kind: typeof EnvelopeKind.RESULT; payload: Uint8Array };
 
 /**
- * A header fit to be traced or thrown: a copy, its session token left out, and whether it had one
- * said instead.
+ * A header fit to be traced or thrown: a copy, its credential left out, and its scheme said instead
+ * when it had one.
  */
-export type RedactedHeader = WithoutSessionToken<EnvelopeHeader> & { hasSessionToken: boolean };
+export type RedactedHeader = WithoutCredential<EnvelopeHeader> & {
+  credentialScheme?: number | undefined;
+};
 
 /** One entry per protocol failure a router raises, each keeping its own code. */
 type RouterFailureEntries = {
   readonly [Key in keyof FAILURE_KEYS]: IProtocolFailure<FAILURE_KEYS[Key]>;
 };
 
-/** Each header of `Header` without its session token, kept apart by kind. */
-type WithoutSessionToken<Header> = Header extends unknown ? Omit<Header, 'sessionToken'> : never;
+/** Each header of `Header` without its credential, kept apart by kind. */
+type WithoutCredential<Header> = Header extends unknown ? Omit<Header, 'credential'> : never;
 
 /** Which side of a connection a router is on: the one that connects, or the one that accepts. */
 export type RouterSide = 'client' | 'server';

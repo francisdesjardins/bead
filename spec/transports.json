@@ -2278,7 +2278,7 @@
               "kind": 17,
               "callId": 1,
               "payload": "22 61 64 61 22",
-              "session": "announced"
+              "credential": "OPAQUE"
             }
           },
           "on": "login"
@@ -2392,7 +2392,7 @@
               "kind": 17,
               "callId": 1,
               "payload": "22 61 64 61 22",
-              "session": "announced"
+              "credential": "OPAQUE"
             }
           },
           "on": "login"
@@ -2533,7 +2533,7 @@
               "kind": 17,
               "callId": 3,
               "payload": "22 61 64 61 22",
-              "session": "announced"
+              "credential": "OPAQUE"
             }
           },
           "on": "login"
@@ -2601,7 +2601,7 @@
                   "scope": 0,
                   "relays": 0
                 },
-                "session": "ended"
+                "credential": "NONE"
               }
             ]
           },
@@ -3013,7 +3013,7 @@
               "kind": 17,
               "callId": 1,
               "payload": "22 61 64 61 22",
-              "session": "announced"
+              "credential": "OPAQUE"
             }
           },
           "on": "socket"
@@ -3052,7 +3052,7 @@
                 "scope": 0,
                 "relays": 0
               },
-              "session": "ended"
+              "credential": "NONE"
             }
           },
           "on": "socket"
@@ -3115,7 +3115,7 @@
               "kind": 17,
               "callId": 1,
               "payload": "22 61 64 61 22",
-              "session": "announced"
+              "credential": "OPAQUE"
             }
           },
           "on": "socket"

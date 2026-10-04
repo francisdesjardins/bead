@@ -14,8 +14,8 @@ public sealed partial class RouterCoreTests
     // constants
 
     // limits that send a payload of more than 64 bytes as a transfer: an opening of a request
-    // carries 44 bytes of it, one of a result 32 — its session counted — and a chunk 48; a window
-    // of 128 bytes; 2 s without a chunk or a credit
+    // carries 44 bytes of it, one of a result 28 — the 20 bytes of an announcement counted — and a
+    // chunk 48; a window of 128 bytes; 2 s without a chunk or a credit
     private static readonly RouterLimits Chunked = RouterLimits.Default with
     {
         ChunkBytes = 64,
@@ -657,17 +657,17 @@ public sealed partial class RouterCoreTests
 
         await server.Settle();
         Assert.Equal(new ResultHeader { CallId = 1, Total = 100 }, server.Sent[^1].Header);
-        Assert.Equal(payload[..32], server.Sent[^1].Payload.ToArray());
+        Assert.Equal(payload[..28], server.Sent[^1].Payload.ToArray());
 
         // its call is open still: the same call id is refused
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
         Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, Assert.IsType<FailureException>(Assert.Single(server.Reports)).Code);
-        await server.Deliver(CreditOf(1, 80));
-        Assert.Equal([(32L, false)], ChunksOf(server.Sent));
+        await server.Deliver(CreditOf(1, 76));
+        Assert.Equal([(28L, false)], ChunksOf(server.Sent));
         Assert.False(answered.IsCompleted);
         await server.Deliver(CreditOf(1, 100));
         await answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        Assert.Equal([(32L, false), (80L, true)], ChunksOf(server.Sent));
+        Assert.Equal([(28L, false), (76L, true)], ChunksOf(server.Sent));
 
         // answered: a request on its call id is dispatched
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 3 } });
@@ -755,7 +755,7 @@ public sealed partial class RouterCoreTests
 
         var opening = server.Sent[^1];
 
-        Assert.Equal(new ResultHeader { CallId = 1, Total = 100, Session = server.Session }, opening.Header);
+        Assert.Equal(new ResultHeader { CallId = 1, Total = 100, Credential = server.Session }, opening.Header);
         Assert.Equal(64, EnvelopeCodec.WriteEnvelope(opening).Length);
     }
 
@@ -922,12 +922,12 @@ public sealed partial class RouterCoreTests
         {
             gate.Wait(TestContext.Current.CancellationToken);
         });
-        server.Core.Receive(EnvelopeCodec.WriteEnvelope(CreditOf(1, 80)), Handle);
+        server.Core.Receive(EnvelopeCodec.WriteEnvelope(CreditOf(1, 76)), Handle);
         server.Clock.Advance(TimeSpan.FromSeconds(2));
         gate.Set();
         await server.Settle();
         Assert.False(answered.IsCompleted);
-        Assert.Equal([(32L, false)], ChunksOf(server.Sent));
+        Assert.Equal([(28L, false)], ChunksOf(server.Sent));
     }
 
     [Fact]

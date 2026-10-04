@@ -1,13 +1,13 @@
 """Writes spec/vectors.json: Bead's conformance vectors, the one source every implementation's tests read."""
 import json
 import os
+import re
 
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vectors.json')
 
-TOKEN = 'AAECAwQFBgcICQoLDA0ODw'
 TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 ZEROS = '00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
 
@@ -17,8 +17,58 @@ KIND_UNSUPPORTED = 3
 ENVELOPE_TOO_LARGE = 4
 
 
+def hexadecimal(data):
+    return ' '.join(f'{byte:02X}' for byte in data)
+
+
 def ascii_hex(text):
-    return ' '.join(f'{byte:02X}' for byte in text.encode('utf-8'))
+    return hexadecimal(text.encode('utf-8'))
+
+
+# ── The CREDENTIAL block ────────────────────────────────────────────────────────────────────────
+
+NONE, OPAQUE, JWT, ELSEWHERE = 0, 1, 2, 3
+
+
+def block(scheme, data=b''):
+    """A CREDENTIAL block: its scheme and its length, 2 bytes each, its credential's bytes, then zero
+    bytes to the next word."""
+    parts = (hexadecimal(scheme.to_bytes(2, 'big') + len(data).to_bytes(2, 'big')), hexadecimal(data),
+             hexadecimal(bytes(-len(data) % 4)))
+    return '  '.join(part for part in parts if part)
+
+
+def header_of(kind, flags, call_id, *parts, words=None):
+    """A header, its parts after the prefix in their order, byte 3 counting them, or the words given."""
+    length = 8 + sum(len(part.split()) for part in parts)
+    words = length // 4 if words is None else words
+    return '  '.join([f'A1 {kind:02X} {flags:02X} {words:02X}', hexadecimal(call_id.to_bytes(4, 'big')), *parts])
+
+
+def parted(data, at):
+    """Bytes with the bar after the header byte 3 counts, `at` bytes from the start."""
+    start = [found.start() for found in re.finditer(r'[0-9A-F]{2}', data)][at]
+    return data[:start].rstrip() + ' | ' + data[start:]
+
+
+def jws_of(length):
+    """A token of `length` characters, shaped as JWS Compact Serialization writes one: a protected
+    header, {"alg":"HS256"}, a payload of filler, and a signature of HS256's 43 characters."""
+    return 'eyJhbGciOiJIUzI1NiJ9.' + 'A' * (length - 65) + '.' + 'B' * 43
+
+
+# the JWS of RFC 7515, appendix A.1: 179 characters, padded with one zero byte
+RFC_7515_JWS = ('eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9'
+                '.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ'
+                '.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
+
+# what a header leaves a credential: its 1,020 bytes less a request's 12 and its block's head of 4;
+# behind a destination and a total, 12 more
+MOST_JWT, MOST_JWT_BEHIND_BLOCKS = 1004, 992
+
+OPAQUE_BLOCK = block(OPAQUE, bytes(range(16)))
+SESSION = {'scheme': 'OPAQUE', 'bytes': TOKEN_BYTES}
+ENDED = {'scheme': 'NONE'}
 
 
 headers = [
@@ -29,25 +79,60 @@ headers = [
     ('a cancel', ['2.1', '3.1.7'], 'A1 16 00 02  00 00 00 05', {'callId': 5, 'kind': 22}),
     ('a request with a destination', ['4.1', '4.5'], 'A1 10 02 04  00 00 00 09  00 02 00 07  00 00 00 05',
      {'callId': 9, 'destinationId': 5, 'kind': 16, 'procedureId': 7, 'serviceId': 2}),
-    ('a result with a session', ['4.1', '4.2.2', '4.4'], f'A1 11 01 06  00 00 00 03  {TOKEN_BYTES}', {'callId': 3, 'kind': 17, 'sessionToken': TOKEN}),
-    ('a result that ends the session', ['4.4'], f'A1 11 01 06  00 00 00 03  {ZEROS}', {'callId': 3, 'kind': 17, 'sessionToken': None}),
-    ('a failure that ends the session', ['4.2.3', '4.4'], f'A1 12 01 06  00 00 00 03  {ZEROS}', {'callId': 3, 'kind': 18, 'sessionToken': None}),
-    ('a request with a session and a destination', ['4.1', '4.4', '4.5'], f'A1 10 03 08  00 00 00 07  00 02 00 01  {TOKEN_BYTES}  00 00 00 0C',
-     {'callId': 7, 'destinationId': 12, 'kind': 16, 'procedureId': 1, 'serviceId': 2, 'sessionToken': TOKEN}),
+    # the CREDENTIAL block, the last: a credential of each scheme on the kinds that take it
+    ('a request presenting an opaque token', ['4.1', '4.4', '4.4.2'], f'A1 10 08 08  00 00 00 03  00 02 00 01  {OPAQUE_BLOCK}',
+     {'callId': 3, 'credential': SESSION, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
+    ('a result announcing a session', ['4.1', '4.2.2', '4.4.2', '13.3'], f'A1 11 08 07  00 00 00 03  {OPAQUE_BLOCK}',
+     {'callId': 3, 'credential': SESSION, 'kind': 17}),
+    ('a result announcing that its session ended', ['4.4.1', '13.3'], 'A1 11 08 03  00 00 00 03  00 00 00 00',
+     {'callId': 3, 'credential': ENDED, 'kind': 17}),
+    ('a failure announcing a session', ['4.2.3', '4.4.2'], f'A1 12 08 07  00 00 00 03  {OPAQUE_BLOCK}',
+     {'callId': 3, 'credential': SESSION, 'kind': 18}),
+    ('a failure announcing that its session ended', ['4.2.3', '4.4.1'], 'A1 12 08 03  00 00 00 03  00 00 00 00',
+     {'callId': 3, 'credential': ENDED, 'kind': 18}),
+    ('a request with a destination, presenting an opaque token after it', ['4.1', '4.4.2', '4.5'],
+     f'A1 10 0A 09  00 00 00 07  00 02 00 01  00 00 00 0C  {OPAQUE_BLOCK}',
+     {'callId': 7, 'credential': SESSION, 'destinationId': 12, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
+    ('a request presenting a JWT, padded with one zero byte to its word', ['4.4', '4.4.3'],
+     header_of(0x10, 0x08, 3, '00 02 00 01', block(JWT, RFC_7515_JWS.encode('ascii'))),
+     {'callId': 3, 'credential': {'scheme': 'JWT', 'token': RFC_7515_JWS}, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
+    ('a request presenting a JWT of one byte, the least, padded with three', ['4.4', '4.4.3'],
+     'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00',
+     {'callId': 3, 'credential': {'scheme': 'JWT', 'token': 'a'}, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
+    ('a request presenting a JWT of 1,004 bytes, the most its header leaves', ['4.3', '4.4', '4.4.3'],
+     header_of(0x10, 0x08, 3, '00 02 00 01', block(JWT, jws_of(MOST_JWT).encode('ascii'))),
+     {'callId': 3, 'credential': {'scheme': 'JWT', 'token': jws_of(MOST_JWT)}, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
+    ('a request with a destination and a total, presenting a JWT after them', ['4.1', '4.4.3', '4.5', '4.6'],
+     header_of(0x10, 0x0E, 9, '00 02 00 07', '00 00 00 05', '00 00 00 00 00 00 10 00', block(JWT, RFC_7515_JWS.encode('ascii'))),
+     {'callId': 9, 'credential': {'scheme': 'JWT', 'token': RFC_7515_JWS}, 'destinationId': 5, 'kind': 16, 'procedureId': 7,
+      'serviceId': 2, 'total': 4096}),
+    ('a request with a destination and a total, presenting a JWT of 992 bytes, the most its header leaves', ['4.3', '4.4', '4.4.3'],
+     header_of(0x10, 0x0E, 9, '00 02 00 07', '00 00 00 05', '00 00 00 00 00 00 10 00',
+               block(JWT, jws_of(MOST_JWT_BEHIND_BLOCKS).encode('ascii'))),
+     {'callId': 9, 'credential': {'scheme': 'JWT', 'token': jws_of(MOST_JWT_BEHIND_BLOCKS)}, 'destinationId': 5, 'kind': 16,
+      'procedureId': 7, 'serviceId': 2, 'total': 4096}),
+    ('a request presenting ELSEWHERE, nothing in its block', ['4.4.4'], 'A1 10 08 04  00 00 00 03  00 02 00 01  00 03 00 00',
+     {'callId': 3, 'credential': {'scheme': 'ELSEWHERE'}, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
+    ('a request presenting a scheme to come, read whole and padded with two', ['4.4.5'],
+     'A1 10 08 06  00 00 00 03  00 02 00 01  00 04 00 06  01 02 03 04 05 06  00 00',
+     {'callId': 3, 'credential': {'scheme': 4, 'bytes': '01 02 03 04 05 06'}, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
+    ('a request presenting the last scheme to come, with no byte', ['1.1', '4.4.5'], 'A1 10 08 04  00 00 00 03  00 02 00 01  FF FF 00 00',
+     {'callId': 3, 'credential': {'scheme': 65535, 'bytes': ''}, 'kind': 16, 'procedureId': 1, 'serviceId': 2}),
     ('a request that opens a subscription', ['4.1', '4.8'], 'A1 10 10 03  00 00 00 03  00 02 00 01',
      {'callId': 3, 'kind': 16, 'opensSubscription': True, 'procedureId': 1, 'serviceId': 2}),
     ('a request that opens a subscription, paced', ['4.8'], 'A1 10 30 03  00 00 00 05  00 02 00 01',
      {'callId': 5, 'kind': 16, 'opensSubscription': True, 'paced': True, 'procedureId': 1, 'serviceId': 2}),
-    ('a request that opens a subscription, with a session and a destination', ['4.1', '4.4', '4.5', '4.8'],
-     f'A1 10 13 08  00 00 00 07  00 02 00 01  {TOKEN_BYTES}  00 00 00 0C',
-     {'callId': 7, 'destinationId': 12, 'kind': 16, 'opensSubscription': True, 'procedureId': 1, 'serviceId': 2, 'sessionToken': TOKEN}),
+    ('a request that opens a subscription, with a destination, presenting an opaque token', ['4.1', '4.4.2', '4.5', '4.8'],
+     f'A1 10 1A 09  00 00 00 07  00 02 00 01  00 00 00 0C  {OPAQUE_BLOCK}',
+     {'callId': 7, 'credential': SESSION, 'destinationId': 12, 'kind': 16, 'opensSubscription': True, 'procedureId': 1, 'serviceId': 2}),
     ('a request that opens a transfer', ['4.6'], 'A1 10 04 05  00 00 00 07  00 02 00 05  00 00 00 00 01 40 00 00',
      {'callId': 7, 'kind': 16, 'procedureId': 5, 'serviceId': 2, 'total': 20971520}),
     ('a request with a destination that opens a transfer of nothing', ['4.1', '4.5', '4.6'],
      'A1 10 06 06  00 00 00 09  00 02 00 07  00 00 00 05  00 00 00 00 00 00 00 00',
      {'callId': 9, 'destinationId': 5, 'kind': 16, 'procedureId': 7, 'serviceId': 2, 'total': 0}),
-    ('a result with a session that opens a transfer', ['4.1', '4.4', '4.6'], f'A1 11 05 08  00 00 00 03  {TOKEN_BYTES}  00 00 00 00 00 00 10 00',
-     {'callId': 3, 'kind': 17, 'sessionToken': TOKEN, 'total': 4096}),
+    ('a result that opens a transfer, announcing a session after its total', ['4.1', '4.4.2', '4.6'],
+     f'A1 11 0C 09  00 00 00 03  00 00 00 00 00 00 10 00  {OPAQUE_BLOCK}',
+     {'callId': 3, 'credential': SESSION, 'kind': 17, 'total': 4096}),
     ('a chunk with more to come', ['3.1.5', '4.9'], 'A1 14 40 04  00 00 00 07  00 00 00 00 00 0F FF EC',
      {'callId': 7, 'isLast': False, 'kind': 20, 'offset': 1048556}),
     ('the last chunk', ['3.1.5', '4.9'], 'A1 14 00 04  00 00 00 07  00 00 00 00 01 3F FE BC',
@@ -103,7 +188,12 @@ header_refusals = [
     ('a kind to come, 0x17', ['3.3', '5.1.6'], 'A1 17 00 02  00 00 00 03', KIND_UNSUPPORTED, None),
     ('a kind to come, 0x7F', ['3.3', '5.1.6'], 'A1 7F 00 02  00 00 00 03', KIND_UNSUPPORTED, None),
     ('a call id of 0', ['3.5', '5.1.7'], 'A1 11 00 02  00 00 00 00', MALFORMED, None),
-    ('the reserved bit 0x08 on a request', ['4.1', '4.2.1'], 'A1 10 08 03  00 00 00 03  00 02 00 01', MALFORMED, None),
+    ('the kept bit 0x01 on a request, 16 bytes after its procedure', ['4.1', '4.2.1'], f'A1 10 01 07  00 00 00 03  00 02 00 01  {TOKEN_BYTES}',
+     MALFORMED, 'a 0x10 envelope carries no flag 0x01'),
+    ('the kept bit 0x01 on a result, 16 bytes after its prefix', ['4.1', '4.2.2'], f'A1 11 01 06  00 00 00 03  {TOKEN_BYTES}',
+     MALFORMED, 'a 0x11 envelope carries no flag 0x01'),
+    ('the kept bit 0x01 on a failure, 16 bytes after its prefix', ['4.1', '4.2.3'], f'A1 12 01 06  00 00 00 03  {TOKEN_BYTES}',
+     MALFORMED, 'a 0x12 envelope carries no flag 0x01'),
     ('the bit 0x40 on a request', ['4.2.1'], 'A1 10 40 03  00 00 00 03  00 02 00 01', MALFORMED, None),
     ('the reserved bit 0x80 on a request', ['4.1', '4.2.1'], 'A1 10 80 03  00 00 00 03  00 02 00 01', MALFORMED, None),
     ('a request paced that opens no subscription', ['4.8'], 'A1 10 20 03  00 00 00 03  00 02 00 01', MALFORMED,
@@ -114,17 +204,21 @@ header_refusals = [
     ('a total on a notification', ['4.2.4'], 'A1 13 04 04  00 00 00 03  00 00 00 00 00 00 00 00', MALFORMED, None),
     ('a destination on a result', ['4.2.2', '4.5'], 'A1 11 02 03  00 00 00 03  00 00 00 05', MALFORMED, None),
     ('a destination on a failure', ['4.2.3', '4.5'], 'A1 12 02 03  00 00 00 03  00 00 00 05', MALFORMED, None),
-    ('a session on a cancel', ['4.2.7'], f'A1 16 01 06  00 00 00 05  {TOKEN_BYTES}', MALFORMED, None),
+    ('a credential on a cancel', ['4.2.7'], f'A1 16 08 07  00 00 00 05  {OPAQUE_BLOCK}', MALFORMED, 'a 0x16 envelope carries no flag 0x08'),
     ('a destination on a cancel', ['4.2.7'], 'A1 16 02 03  00 00 00 05  00 00 00 07', MALFORMED, None),
     ('a total on a cancel', ['4.2.7'], 'A1 16 04 04  00 00 00 05  00 00 00 00 00 00 00 08', MALFORMED, None),
     ('an offset of 2^53', ['1.2'], 'A1 14 00 04  00 00 00 07  00 20 00 00 00 00 00 00', MALFORMED, None),
     ('an end of 2^64 - 1', ['1.2'], 'A1 15 00 04  00 00 00 07  FF FF FF FF FF FF FF FF', MALFORMED, None),
     ('a chunk on call 0', ['3.5'], 'A1 14 00 04  00 00 00 00  00 00 00 00 00 00 00 00', MALFORMED, None),
     ('a credit on call 0', ['3.5'], 'A1 15 00 04  00 00 00 00  00 00 00 00 00 00 00 00', MALFORMED, None),
-    ('a session on a chunk', ['4.2.5'], f'A1 14 01 08  00 00 00 07  00 00 00 00 00 00 00 00  {TOKEN_BYTES}', MALFORMED, None),
+    ('a credential on a chunk', ['4.2.5'], f'A1 14 08 09  00 00 00 07  00 00 00 00 00 00 00 00  {OPAQUE_BLOCK}',
+     MALFORMED, 'a 0x14 envelope carries no flag 0x08'),
+    ('a credential on a credit', ['4.2.6'], f'A1 15 08 09  00 00 00 07  00 00 00 00 00 00 00 00  {OPAQUE_BLOCK}',
+     MALFORMED, 'a 0x15 envelope carries no flag 0x08'),
     ('a total on a credit', ['4.2.6'], 'A1 15 04 06  00 00 00 07  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 10', MALFORMED, None),
     ('MORE on a credit', ['4.2.6'], 'A1 15 40 04  00 00 00 07  00 00 00 00 00 00 00 00', MALFORMED, None),
-    ('the reserved bit 0x08 on a chunk', ['4.1', '4.2.5'], 'A1 14 08 04  00 00 00 07  00 00 00 00 00 00 00 00', MALFORMED, None),
+    ('the kept bit 0x01 on a chunk', ['4.1', '4.2.5'], 'A1 14 01 04  00 00 00 07  00 00 00 00 00 00 00 00',
+     MALFORMED, 'a 0x14 envelope carries no flag 0x01'),
     ('PACED on a chunk', ['4.2.5'], 'A1 14 20 04  00 00 00 07  00 00 00 00 00 00 00 00', MALFORMED, None),
     ('SUBSCRIPTION on a credit', ['4.2.6'], 'A1 15 10 04  00 00 00 07  00 00 00 00 00 00 00 00', MALFORMED, None),
     ('MORE on a result', ['4.2.2'], 'A1 11 40 02  00 00 00 07', MALFORMED, None),
@@ -134,7 +228,7 @@ header_refusals = [
                                  ('13', 'notification', '4.2.4'), ('16', 'cancel', '4.2.7'))
     for flag, flag_name in (('10', 'SUBSCRIPTION'), ('20', 'PACED'))
 ] + [
-    ('a session on a notification', ['4.2.4'], f'A1 13 01 06  00 00 00 03  {TOKEN_BYTES}', MALFORMED, None),
+    ('a credential on a notification', ['4.2.4'], f'A1 13 08 07  00 00 00 03  {OPAQUE_BLOCK}', MALFORMED, 'a 0x13 envelope carries no flag 0x08'),
     ('a destination on a notification', ['4.2.4'], 'A1 13 02 03  00 00 00 03  00 00 00 05', MALFORMED, None),
 ] + [
     (f'a header length of {words} words, not its blocks\'', ['4.3'], f'A1 10 00 {words}  00 00 00 03  00 02 00 01  00 00 00 00', MALFORMED, None)
@@ -144,7 +238,59 @@ header_refusals = [
     ('a destination running past the message', ['4.3'], 'A1 10 02 04  00 00 00 03  00 02 00 01  00 00', MALFORMED, None),
     ('a destination of 0', ['4.5'], 'A1 10 02 04  00 00 00 03  00 02 00 01  00 00 00 00', MALFORMED, None),
     ('a procedure of 0', ['4.7'], 'A1 10 00 03  00 00 00 03  00 02 00 00', MALFORMED, None),
-    ('a request presenting an ended session', ['4.4'], f'A1 10 01 07  00 00 00 03  00 02 00 01  {ZEROS}', MALFORMED, None),
+    # the CREDENTIAL block: a scheme on a kind that does not take it
+    ('NONE on a request', ['4.4', '4.4.1'], 'A1 10 08 04  00 00 00 03  00 02 00 01  00 00 00 00',
+     MALFORMED, 'a request presents a credential, never NONE'),
+    ('a JWT on a result', ['4.4.3'], 'A1 11 08 04  00 00 00 03  00 02 00 01  61  00 00 00', MALFORMED, 'an answer announces OPAQUE or NONE, not JWT'),
+    ('a JWT on a failure', ['4.4.3'], 'A1 12 08 04  00 00 00 03  00 02 00 01  61  00 00 00',
+     MALFORMED, 'an answer announces OPAQUE or NONE, not JWT'),
+    ('ELSEWHERE on a result', ['4.4.4'], 'A1 11 08 03  00 00 00 03  00 03 00 00', MALFORMED, 'an answer announces OPAQUE or NONE, not ELSEWHERE'),
+    ('ELSEWHERE on a failure', ['4.4.4'], 'A1 12 08 03  00 00 00 03  00 03 00 00', MALFORMED, 'an answer announces OPAQUE or NONE, not ELSEWHERE'),
+    ('the first scheme to come on a result', ['4.4.5'], 'A1 11 08 03  00 00 00 03  00 04 00 00',
+     MALFORMED, 'an answer announces OPAQUE or NONE, not scheme 4'),
+    ('the last scheme to come on a failure, with bytes', ['4.4.5'], 'A1 12 08 04  00 00 00 03  FF FF 00 02  01 02  00 00',
+     MALFORMED, 'an answer announces OPAQUE or NONE, not scheme 65535'),
+    # a length that is not its scheme's, each block padded to its word
+    ('an opaque token of 16 zero bytes on a request', ['4.4', '4.4.2', '13.2'], f'A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 10  {ZEROS}',
+     MALFORMED, 'an OPAQUE token is never all zero'),
+    ('an opaque token of 16 zero bytes on a result', ['4.4.2', '13.2'], f'A1 11 08 07  00 00 00 03  00 01 00 10  {ZEROS}',
+     MALFORMED, 'an OPAQUE token is never all zero'),
+    ('an opaque token of 15 bytes', ['4.4.2'], header_of(0x10, 0x08, 3, '00 02 00 01', block(OPAQUE, bytes(range(1, 16)))),
+     MALFORMED, 'an OPAQUE token is 16 bytes, not 15'),
+    ('an opaque token of 17 bytes', ['4.4.2'], header_of(0x10, 0x08, 3, '00 02 00 01', block(OPAQUE, bytes(range(1, 18)))),
+     MALFORMED, 'an OPAQUE token is 16 bytes, not 17'),
+    ('an opaque token of no byte, on a result', ['4.4.2'], 'A1 11 08 03  00 00 00 03  00 01 00 00', MALFORMED, 'an OPAQUE token is 16 bytes, not 0'),
+    ('a JWT of no byte', ['4.4.3'], 'A1 10 08 04  00 00 00 03  00 02 00 01  00 02 00 00', MALFORMED, 'a JWT is 1 byte at least'),
+    ('ELSEWHERE with 4 bytes', ['4.4.4'], 'A1 10 08 05  00 00 00 03  00 02 00 01  00 03 00 04  01 02 03 04',
+     MALFORMED, 'ELSEWHERE holds no byte, not 4'),
+    ('NONE with 4 bytes, on a result', ['4.4.1'], 'A1 11 08 04  00 00 00 03  00 00 00 04  00 00 00 00', MALFORMED, 'NONE holds no byte, not 4'),
+    # padding that is not zero
+    ('a JWT whose padding is not zero', ['4.4'], 'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 01',
+     MALFORMED, "a credential's padding is zero bytes"),
+    ('a scheme to come whose padding is not zero', ['4.4'], 'A1 10 08 06  00 00 00 03  00 02 00 01  00 04 00 05  01 02 03 04 05  80 00 00',
+     MALFORMED, "a credential's padding is zero bytes"),
+    # a block past the header's length, which counts it to the end of its padding exactly
+    ('CREDENTIAL on a request whose message ends before its block', ['4.3'], 'A1 10 08 03  00 00 00 03  00 02 00 01',
+     MALFORMED, "a 0x10 header of flags 0x08 holds its credential's head: 16 bytes at least, not 12"),
+    ("a block whose head the header's length does not hold, though the message does", ['4.3'],
+     'A1 10 08 03  00 00 00 03  00 02 00 01 | 00 03 00 00',
+     MALFORMED, "a 0x10 header of flags 0x08 holds its credential's head: 16 bytes at least, not 12"),
+    ('a JWT running past the message', ['4.3', '4.4'], 'A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 64  61 62 63 64  65 66 67 68',
+     MALFORMED, 'a 0x10 header of flags 0x08 is 116 bytes, not 24 of 24'),
+    ("a JWT running past the header's length, within the message", ['4.3', '4.4'],
+     parted(header_of(0x10, 0x08, 3, '00 02 00 01', block(JWT, b'abcdefghijklmnopqrstuvwxyz012345'), words=6), 24),
+     MALFORMED, 'a 0x10 header of flags 0x08 is 48 bytes, not 24 of 48'),
+    ('a JWT past the 1,020 bytes a header holds', ['4.3', '4.4'],
+     parted(header_of(0x10, 0x08, 3, '00 02 00 01', block(JWT, jws_of(MOST_JWT + 1).encode('ascii')), words=0xFF), 1020),
+     MALFORMED, 'a 0x10 header of flags 0x08 is 1024 bytes, not 1020 of 1024'),
+    ("a header a word longer than its block's padded end", ['4.3'],
+     'A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00  00 00 00 00',
+     MALFORMED, 'a 0x10 header of flags 0x08 is 20 bytes, not 24 of 24'),
+    ('a block whose stated length leaves byte 3 a word short', ['4.3'],
+     'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 05  61 62 63 64 | 65 00 00 00',
+     MALFORMED, 'a 0x10 header of flags 0x08 is 24 bytes, not 20 of 24'),
+    ('an announcement whose header is a word short of its block', ['4.3', '4.4.2'],
+     parted(f'A1 11 08 06  00 00 00 03  {OPAQUE_BLOCK}', 24), MALFORMED, 'a 0x11 header of flags 0x08 is 28 bytes, not 24 of 28'),
 ]
 
 envelopes = [
@@ -170,6 +316,14 @@ envelopes = [
      {'kind': 16, 'header': {'callId': 3, 'kind': 16, 'procedureId': 1, 'serviceId': 2, 'total': 41943040}, 'payload': '01'}),
     ('a result opening a transfer of nothing', ['4.6', '6.1'], 'A1 11 04 04  00 00 00 02  00 00 00 00 00 00 00 00',
      {'kind': 17, 'header': {'callId': 2, 'kind': 17, 'total': 0}, 'payload': ''}),
+    ('a request presenting a JWT, its payload after the padding', ['4.4.3', '6.1'],
+     f'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00 | {ascii_hex("hi")}',
+     {'kind': 16, 'header': {'callId': 3, 'credential': {'scheme': 'JWT', 'token': 'a'}, 'kind': 16, 'procedureId': 1, 'serviceId': 2},
+      'payload': ascii_hex('hi')}),
+    ('a failure announcing that its session ended, its record after the block', ['4.4.1', '6.2'],
+     f'A1 12 08 03  00 00 00 03  00 00 00 00 | 00 20 00 00  {ascii_hex("no session")}',
+     {'kind': 18, 'header': {'callId': 3, 'credential': ENDED, 'kind': 18},
+      'failure': {'code': 32, 'detail': 'no session', 'relays': 0, 'scope': 0}}),
     ('a chunk with more to come', ['4.9', '6.3'], 'A1 14 40 04  00 00 00 07  00 00 00 00 00 00 00 05 | 01 02 03',
      {'kind': 20, 'header': {'callId': 7, 'isLast': False, 'kind': 20, 'offset': 5}, 'payload': '01 02 03'}),
     ('a credit, nothing after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 0A',
@@ -228,7 +382,7 @@ document = {
     '$comment': [
         "Bead's conformance vectors: the bytes of envelopes and what they say, written once and read by every implementation's tests.",
         'Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.',
-        "A header is the fields an envelope's header carries; sessionToken is the token in base64url, or null for the end of a session.",
+        "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
         'kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.',
         "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
         "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",

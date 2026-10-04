@@ -45,7 +45,8 @@ public enum EnvelopeKind : byte
 
 /// <summary>
 /// The flags of an envelope, in its third byte. The low nibble adds blocks, in the order of their
-/// bits, and 0x08 is kept for a block to come; the high nibble adds none, and 0x80 is kept.
+/// bits, <see cref="Credential"/> last, and 0x01 is kept for a block to come; the high nibble adds
+/// none, and 0x80 is kept.
 /// </summary>
 [Flags]
 [SuppressMessage(
@@ -57,14 +58,18 @@ public enum EnvelopeFlags : byte
     /// <summary>No flag.</summary>
     None = 0,
 
-    /// <summary>A 16-byte block: the session a request presents, or an answer announces.</summary>
-    Session = 0x01,
-
     /// <summary>A 4-byte block: what a request is for behind the peer that takes it.</summary>
     Destination = 0x02,
 
     /// <summary>An 8-byte block: the total of a payload sent in parts.</summary>
     Transfer = 0x04,
+
+    /// <summary>
+    /// The last block, the one whose length varies: the credential a request presents, or the
+    /// session an answer announces — its scheme on 2 bytes, its length on 2, its bytes, then zero
+    /// bytes to the next 4-byte word.
+    /// </summary>
+    Credential = 0x08,
 
     /// <summary>The request opens a subscription.</summary>
     Subscription = 0x10,
@@ -76,6 +81,27 @@ public enum EnvelopeFlags : byte
 
     /// <summary>More chunks follow this one.</summary>
     More = 0x40,
+}
+
+/// <summary>
+/// The format of a credential, the first 2 bytes of a header's CREDENTIAL block, as HTTP's
+/// authentication scheme names one (RFC 9110 §11.1): a side never reads the bytes to learn what they
+/// are. The schemes from 4 to 65535 are the ones to come, which a value cast from their number
+/// holds.
+/// </summary>
+public enum CredentialScheme : ushort
+{
+    /// <summary>No credential: on an answer, that its connection's session ended. No byte.</summary>
+    None = 0,
+
+    /// <summary>The token of a connection's session: 16 bytes, never all zero.</summary>
+    Opaque = 1,
+
+    /// <summary>A token in JWS Compact Serialization (RFC 7515), a byte a character.</summary>
+    Jwt = 2,
+
+    /// <summary>The credential its transport carried beside the envelope. No byte.</summary>
+    Elsewhere = 3,
 }
 
 /// <summary>Whose code a failure's is: the protocol's, or the procedure's own.</summary>

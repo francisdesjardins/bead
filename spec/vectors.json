@@ -3,7 +3,7 @@
   "$comment": [
     "Bead's conformance vectors: the bytes of envelopes and what they say, written once and read by every implementation's tests.",
     "Bytes are hexadecimal, spaces aside; a bar parts a header from what follows it.",
-    "A header is the fields an envelope's header carries; sessionToken is the token in base64url, or null for the end of a session.",
+    "A header is the fields an envelope's header carries. credential is its CREDENTIAL block: its scheme, NONE, OPAQUE, JWT or ELSEWHERE by name, a scheme to come by its number; OPAQUE's bytes and a scheme to come's in bytes, in hexadecimal, a JWT's in token, a character a byte.",
     "kind: REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22. scope: PROTOCOL 0, APPLICATION 1.",
     "A refusal names the protocol code a reader answers with; its detail, where given, is what the TypeScript implementation says, and is informative: an implementation compares the code.",
     "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
@@ -90,59 +90,255 @@
       }
     },
     {
-      "name": "a result with a session",
-      "clauses": [
-        "4.1",
-        "4.2.2",
-        "4.4"
-      ],
-      "bytes": "A1 11 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "header": {
-        "callId": 3,
-        "kind": 17,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
-      }
-    },
-    {
-      "name": "a result that ends the session",
-      "clauses": [
-        "4.4"
-      ],
-      "bytes": "A1 11 01 06  00 00 00 03  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-      "header": {
-        "callId": 3,
-        "kind": 17,
-        "sessionToken": null
-      }
-    },
-    {
-      "name": "a failure that ends the session",
-      "clauses": [
-        "4.2.3",
-        "4.4"
-      ],
-      "bytes": "A1 12 01 06  00 00 00 03  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-      "header": {
-        "callId": 3,
-        "kind": 18,
-        "sessionToken": null
-      }
-    },
-    {
-      "name": "a request with a session and a destination",
+      "name": "a request presenting an opaque token",
       "clauses": [
         "4.1",
         "4.4",
+        "4.4.2"
+      ],
+      "bytes": "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a result announcing a session",
+      "clauses": [
+        "4.1",
+        "4.2.2",
+        "4.4.2",
+        "13.3"
+      ],
+      "bytes": "A1 11 08 07  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
+        "kind": 17
+      }
+    },
+    {
+      "name": "a result announcing that its session ended",
+      "clauses": [
+        "4.4.1",
+        "13.3"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 00 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "NONE"
+        },
+        "kind": 17
+      }
+    },
+    {
+      "name": "a failure announcing a session",
+      "clauses": [
+        "4.2.3",
+        "4.4.2"
+      ],
+      "bytes": "A1 12 08 07  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
+        "kind": 18
+      }
+    },
+    {
+      "name": "a failure announcing that its session ended",
+      "clauses": [
+        "4.2.3",
+        "4.4.1"
+      ],
+      "bytes": "A1 12 08 03  00 00 00 03  00 00 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "NONE"
+        },
+        "kind": 18
+      }
+    },
+    {
+      "name": "a request with a destination, presenting an opaque token after it",
+      "clauses": [
+        "4.1",
+        "4.4.2",
         "4.5"
       ],
-      "bytes": "A1 10 03 08  00 00 00 07  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 0C",
+      "bytes": "A1 10 0A 09  00 00 00 07  00 02 00 01  00 00 00 0C  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
       "header": {
         "callId": 7,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
         "destinationId": 12,
         "kind": 16,
         "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a JWT, padded with one zero byte to its word",
+      "clauses": [
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 31  00 00 00 03  00 02 00 01  00 02 00 B3  65 79 4A 30 65 58 41 69 4F 69 4A 4B 56 31 51 69 4C 41 30 4B 49 43 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 71 62 32 55 69 4C 41 30 4B 49 43 4A 6C 65 48 41 69 4F 6A 45 7A 4D 44 41 34 4D 54 6B 7A 4F 44 41 73 44 51 6F 67 49 6D 68 30 64 48 41 36 4C 79 39 6C 65 47 46 74 63 47 78 6C 4C 6D 4E 76 62 53 39 70 63 31 39 79 62 32 39 30 49 6A 70 30 63 6E 56 6C 66 51 2E 64 42 6A 66 74 4A 65 5A 34 43 56 50 2D 6D 42 39 32 4B 32 37 75 68 62 55 4A 55 31 70 31 72 5F 77 57 31 67 46 57 46 4F 45 6A 58 6B  00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a JWT of one byte, the least, padded with three",
+      "clauses": [
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "JWT",
+          "token": "a"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a JWT of 1,004 bytes, the most its header leaves",
+      "clauses": [
+        "4.3",
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 FF  00 00 00 03  00 02 00 01  00 02 03 EC  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 2E 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJhbGciOiJIUzI1NiJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request with a destination and a total, presenting a JWT after them",
+      "clauses": [
+        "4.1",
+        "4.4.3",
+        "4.5",
+        "4.6"
+      ],
+      "bytes": "A1 10 0E 34  00 00 00 09  00 02 00 07  00 00 00 05  00 00 00 00 00 00 10 00  00 02 00 B3  65 79 4A 30 65 58 41 69 4F 69 4A 4B 56 31 51 69 4C 41 30 4B 49 43 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 71 62 32 55 69 4C 41 30 4B 49 43 4A 6C 65 48 41 69 4F 6A 45 7A 4D 44 41 34 4D 54 6B 7A 4F 44 41 73 44 51 6F 67 49 6D 68 30 64 48 41 36 4C 79 39 6C 65 47 46 74 63 47 78 6C 4C 6D 4E 76 62 53 39 70 63 31 39 79 62 32 39 30 49 6A 70 30 63 6E 56 6C 66 51 2E 64 42 6A 66 74 4A 65 5A 34 43 56 50 2D 6D 42 39 32 4B 32 37 75 68 62 55 4A 55 31 70 31 72 5F 77 57 31 67 46 57 46 4F 45 6A 58 6B  00",
+      "header": {
+        "callId": 9,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        },
+        "destinationId": 5,
+        "kind": 16,
+        "procedureId": 7,
         "serviceId": 2,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
+        "total": 4096
+      }
+    },
+    {
+      "name": "a request with a destination and a total, presenting a JWT of 992 bytes, the most its header leaves",
+      "clauses": [
+        "4.3",
+        "4.4",
+        "4.4.3"
+      ],
+      "bytes": "A1 10 0E FF  00 00 00 09  00 02 00 07  00 00 00 05  00 00 00 00 00 00 10 00  00 02 03 E0  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 2E 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42",
+      "header": {
+        "callId": 9,
+        "credential": {
+          "scheme": "JWT",
+          "token": "eyJhbGciOiJIUzI1NiJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        },
+        "destinationId": 5,
+        "kind": 16,
+        "procedureId": 7,
+        "serviceId": 2,
+        "total": 4096
+      }
+    },
+    {
+      "name": "a request presenting ELSEWHERE, nothing in its block",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  00 03 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": "ELSEWHERE"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting a scheme to come, read whole and padded with two",
+      "clauses": [
+        "4.4.5"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 04 00 06  01 02 03 04 05 06  00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": 4,
+          "bytes": "01 02 03 04 05 06"
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
+      }
+    },
+    {
+      "name": "a request presenting the last scheme to come, with no byte",
+      "clauses": [
+        "1.1",
+        "4.4.5"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  FF FF 00 00",
+      "header": {
+        "callId": 3,
+        "credential": {
+          "scheme": 65535,
+          "bytes": ""
+        },
+        "kind": 16,
+        "procedureId": 1,
+        "serviceId": 2
       }
     },
     {
@@ -176,22 +372,25 @@
       }
     },
     {
-      "name": "a request that opens a subscription, with a session and a destination",
+      "name": "a request that opens a subscription, with a destination, presenting an opaque token",
       "clauses": [
         "4.1",
-        "4.4",
+        "4.4.2",
         "4.5",
         "4.8"
       ],
-      "bytes": "A1 10 13 08  00 00 00 07  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 0C",
+      "bytes": "A1 10 1A 09  00 00 00 07  00 02 00 01  00 00 00 0C  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
       "header": {
         "callId": 7,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
         "destinationId": 12,
         "kind": 16,
         "opensSubscription": true,
         "procedureId": 1,
-        "serviceId": 2,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw"
+        "serviceId": 2
       }
     },
     {
@@ -226,17 +425,20 @@
       }
     },
     {
-      "name": "a result with a session that opens a transfer",
+      "name": "a result that opens a transfer, announcing a session after its total",
       "clauses": [
         "4.1",
-        "4.4",
+        "4.4.2",
         "4.6"
       ],
-      "bytes": "A1 11 05 08  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00 00 00 00 00 00 10 00",
+      "bytes": "A1 11 0C 09  00 00 00 03  00 00 00 00 00 00 10 00  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
       "header": {
         "callId": 3,
+        "credential": {
+          "scheme": "OPAQUE",
+          "bytes": "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"
+        },
         "kind": 17,
-        "sessionToken": "AAECAwQFBgcICQoLDA0ODw",
         "total": 4096
       }
     },
@@ -578,13 +780,34 @@
       "code": 1
     },
     {
-      "name": "the reserved bit 0x08 on a request",
+      "name": "the kept bit 0x01 on a request, 16 bytes after its procedure",
       "clauses": [
         "4.1",
         "4.2.1"
       ],
-      "bytes": "A1 10 08 03  00 00 00 03  00 02 00 01",
-      "code": 1
+      "bytes": "A1 10 01 07  00 00 00 03  00 02 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x10 envelope carries no flag 0x01"
+    },
+    {
+      "name": "the kept bit 0x01 on a result, 16 bytes after its prefix",
+      "clauses": [
+        "4.1",
+        "4.2.2"
+      ],
+      "bytes": "A1 11 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x11 envelope carries no flag 0x01"
+    },
+    {
+      "name": "the kept bit 0x01 on a failure, 16 bytes after its prefix",
+      "clauses": [
+        "4.1",
+        "4.2.3"
+      ],
+      "bytes": "A1 12 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x12 envelope carries no flag 0x01"
     },
     {
       "name": "the bit 0x40 on a request",
@@ -663,12 +886,13 @@
       "code": 1
     },
     {
-      "name": "a session on a cancel",
+      "name": "a credential on a cancel",
       "clauses": [
         "4.2.7"
       ],
-      "bytes": "A1 16 01 06  00 00 00 05  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "code": 1
+      "bytes": "A1 16 08 07  00 00 00 05  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x16 envelope carries no flag 0x08"
     },
     {
       "name": "a destination on a cancel",
@@ -719,12 +943,22 @@
       "code": 1
     },
     {
-      "name": "a session on a chunk",
+      "name": "a credential on a chunk",
       "clauses": [
         "4.2.5"
       ],
-      "bytes": "A1 14 01 08  00 00 00 07  00 00 00 00 00 00 00 00  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "code": 1
+      "bytes": "A1 14 08 09  00 00 00 07  00 00 00 00 00 00 00 00  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x14 envelope carries no flag 0x08"
+    },
+    {
+      "name": "a credential on a credit",
+      "clauses": [
+        "4.2.6"
+      ],
+      "bytes": "A1 15 08 09  00 00 00 07  00 00 00 00 00 00 00 00  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x15 envelope carries no flag 0x08"
     },
     {
       "name": "a total on a credit",
@@ -743,13 +977,14 @@
       "code": 1
     },
     {
-      "name": "the reserved bit 0x08 on a chunk",
+      "name": "the kept bit 0x01 on a chunk",
       "clauses": [
         "4.1",
         "4.2.5"
       ],
-      "bytes": "A1 14 08 04  00 00 00 07  00 00 00 00 00 00 00 00",
-      "code": 1
+      "bytes": "A1 14 01 04  00 00 00 07  00 00 00 00 00 00 00 00",
+      "code": 1,
+      "detail": "a 0x14 envelope carries no flag 0x01"
     },
     {
       "name": "PACED on a chunk",
@@ -840,12 +1075,13 @@
       "code": 1
     },
     {
-      "name": "a session on a notification",
+      "name": "a credential on a notification",
       "clauses": [
         "4.2.4"
       ],
-      "bytes": "A1 13 01 06  00 00 00 03  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
-      "code": 1
+      "bytes": "A1 13 08 07  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x13 envelope carries no flag 0x08"
     },
     {
       "name": "a destination on a notification",
@@ -920,12 +1156,237 @@
       "code": 1
     },
     {
-      "name": "a request presenting an ended session",
+      "name": "NONE on a request",
+      "clauses": [
+        "4.4",
+        "4.4.1"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  00 00 00 00",
+      "code": 1,
+      "detail": "a request presents a credential, never NONE"
+    },
+    {
+      "name": "a JWT on a result",
+      "clauses": [
+        "4.4.3"
+      ],
+      "bytes": "A1 11 08 04  00 00 00 03  00 02 00 01  61  00 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not JWT"
+    },
+    {
+      "name": "a JWT on a failure",
+      "clauses": [
+        "4.4.3"
+      ],
+      "bytes": "A1 12 08 04  00 00 00 03  00 02 00 01  61  00 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not JWT"
+    },
+    {
+      "name": "ELSEWHERE on a result",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 03 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not ELSEWHERE"
+    },
+    {
+      "name": "ELSEWHERE on a failure",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 12 08 03  00 00 00 03  00 03 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not ELSEWHERE"
+    },
+    {
+      "name": "the first scheme to come on a result",
+      "clauses": [
+        "4.4.5"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 04 00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not scheme 4"
+    },
+    {
+      "name": "the last scheme to come on a failure, with bytes",
+      "clauses": [
+        "4.4.5"
+      ],
+      "bytes": "A1 12 08 04  00 00 00 03  FF FF 00 02  01 02  00 00",
+      "code": 1,
+      "detail": "an answer announces OPAQUE or NONE, not scheme 65535"
+    },
+    {
+      "name": "an opaque token of 16 zero bytes on a request",
+      "clauses": [
+        "4.4",
+        "4.4.2",
+        "13.2"
+      ],
+      "bytes": "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 10  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is never all zero"
+    },
+    {
+      "name": "an opaque token of 16 zero bytes on a result",
+      "clauses": [
+        "4.4.2",
+        "13.2"
+      ],
+      "bytes": "A1 11 08 07  00 00 00 03  00 01 00 10  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is never all zero"
+    },
+    {
+      "name": "an opaque token of 15 bytes",
+      "clauses": [
+        "4.4.2"
+      ],
+      "bytes": "A1 10 08 08  00 00 00 03  00 02 00 01  00 01 00 0F  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  00",
+      "code": 1,
+      "detail": "an OPAQUE token is 16 bytes, not 15"
+    },
+    {
+      "name": "an opaque token of 17 bytes",
+      "clauses": [
+        "4.4.2"
+      ],
+      "bytes": "A1 10 08 09  00 00 00 03  00 02 00 01  00 01 00 11  01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11  00 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is 16 bytes, not 17"
+    },
+    {
+      "name": "an opaque token of no byte, on a result",
+      "clauses": [
+        "4.4.2"
+      ],
+      "bytes": "A1 11 08 03  00 00 00 03  00 01 00 00",
+      "code": 1,
+      "detail": "an OPAQUE token is 16 bytes, not 0"
+    },
+    {
+      "name": "a JWT of no byte",
+      "clauses": [
+        "4.4.3"
+      ],
+      "bytes": "A1 10 08 04  00 00 00 03  00 02 00 01  00 02 00 00",
+      "code": 1,
+      "detail": "a JWT is 1 byte at least"
+    },
+    {
+      "name": "ELSEWHERE with 4 bytes",
+      "clauses": [
+        "4.4.4"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 03 00 04  01 02 03 04",
+      "code": 1,
+      "detail": "ELSEWHERE holds no byte, not 4"
+    },
+    {
+      "name": "NONE with 4 bytes, on a result",
+      "clauses": [
+        "4.4.1"
+      ],
+      "bytes": "A1 11 08 04  00 00 00 03  00 00 00 04  00 00 00 00",
+      "code": 1,
+      "detail": "NONE holds no byte, not 4"
+    },
+    {
+      "name": "a JWT whose padding is not zero",
       "clauses": [
         "4.4"
       ],
-      "bytes": "A1 10 01 07  00 00 00 03  00 02 00 01  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-      "code": 1
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 01",
+      "code": 1,
+      "detail": "a credential's padding is zero bytes"
+    },
+    {
+      "name": "a scheme to come whose padding is not zero",
+      "clauses": [
+        "4.4"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 04 00 05  01 02 03 04 05  80 00 00",
+      "code": 1,
+      "detail": "a credential's padding is zero bytes"
+    },
+    {
+      "name": "CREDENTIAL on a request whose message ends before its block",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 03  00 00 00 03  00 02 00 01",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 holds its credential's head: 16 bytes at least, not 12"
+    },
+    {
+      "name": "a block whose head the header's length does not hold, though the message does",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 03  00 00 00 03  00 02 00 01 | 00 03 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 holds its credential's head: 16 bytes at least, not 12"
+    },
+    {
+      "name": "a JWT running past the message",
+      "clauses": [
+        "4.3",
+        "4.4"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 64  61 62 63 64  65 66 67 68",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 116 bytes, not 24 of 24"
+    },
+    {
+      "name": "a JWT running past the header's length, within the message",
+      "clauses": [
+        "4.3",
+        "4.4"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 20  61 62 63 64 65 66 67 68 | 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 30 31 32 33 34 35",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 48 bytes, not 24 of 48"
+    },
+    {
+      "name": "a JWT past the 1,020 bytes a header holds",
+      "clauses": [
+        "4.3",
+        "4.4"
+      ],
+      "bytes": "A1 10 08 FF  00 00 00 03  00 02 00 01  00 02 03 ED  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 4A 39 2E 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 2E 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 | 42  00 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 1024 bytes, not 1020 of 1024"
+    },
+    {
+      "name": "a header a word longer than its block's padded end",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 06  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00  00 00 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 20 bytes, not 24 of 24"
+    },
+    {
+      "name": "a block whose stated length leaves byte 3 a word short",
+      "clauses": [
+        "4.3"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 05  61 62 63 64 | 65 00 00 00",
+      "code": 1,
+      "detail": "a 0x10 header of flags 0x08 is 24 bytes, not 20 of 24"
+    },
+    {
+      "name": "an announcement whose header is a word short of its block",
+      "clauses": [
+        "4.3",
+        "4.4.2"
+      ],
+      "bytes": "A1 11 08 06  00 00 00 03  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B | 0C 0D 0E 0F",
+      "code": 1,
+      "detail": "a 0x11 header of flags 0x08 is 28 bytes, not 24 of 28"
     }
   ],
   "envelopes": [
@@ -1087,6 +1548,52 @@
           "total": 0
         },
         "payload": ""
+      }
+    },
+    {
+      "name": "a request presenting a JWT, its payload after the padding",
+      "clauses": [
+        "4.4.3",
+        "6.1"
+      ],
+      "bytes": "A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61  00 00 00 | 68 69",
+      "envelope": {
+        "kind": 16,
+        "header": {
+          "callId": 3,
+          "credential": {
+            "scheme": "JWT",
+            "token": "a"
+          },
+          "kind": 16,
+          "procedureId": 1,
+          "serviceId": 2
+        },
+        "payload": "68 69"
+      }
+    },
+    {
+      "name": "a failure announcing that its session ended, its record after the block",
+      "clauses": [
+        "4.4.1",
+        "6.2"
+      ],
+      "bytes": "A1 12 08 03  00 00 00 03  00 00 00 00 | 00 20 00 00  6E 6F 20 73 65 73 73 69 6F 6E",
+      "envelope": {
+        "kind": 18,
+        "header": {
+          "callId": 3,
+          "credential": {
+            "scheme": "NONE"
+          },
+          "kind": 18
+        },
+        "failure": {
+          "code": 32,
+          "detail": "no session",
+          "relays": 0,
+          "scope": 0
+        }
       }
     },
     {

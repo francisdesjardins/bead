@@ -17,10 +17,10 @@ internal static class Vectors
         [EnvelopeKind.Request] =
         [
             "callId", "kind", "serviceId", "procedureId", "destinationId", "opensSubscription",
-            "paced", "sessionToken", "total",
+            "paced", "total", "credential",
         ],
-        [EnvelopeKind.Result] = ["callId", "kind", "sessionToken", "total"],
-        [EnvelopeKind.Failure] = ["callId", "kind", "sessionToken"],
+        [EnvelopeKind.Result] = ["callId", "kind", "total", "credential"],
+        [EnvelopeKind.Failure] = ["callId", "kind", "credential"],
         [EnvelopeKind.Notification] = ["callId", "kind"],
         [EnvelopeKind.Chunk] = ["callId", "kind", "offset", "isLast"],
         [EnvelopeKind.Credit] = ["callId", "kind", "creditEnd", "paced"],
@@ -51,17 +51,46 @@ internal static class Vectors
         return json.TryGetProperty(field, out var value) && value.GetBoolean();
     }
 
-    // absent, no block; null, the end of a session; a string, its token
-    private static SessionAnnouncement? SessionOf(JsonElement json)
+    // absent, no block; else its scheme, by name or, to come, by its number, and its credential:
+    // an OPAQUE token's bytes and a scheme to come's in hexadecimal, a JWT's token as its text
+    private static Credential? CredentialOf(JsonElement json)
     {
-        if (!json.TryGetProperty("sessionToken", out var value))
+        if (!json.TryGetProperty("credential", out var credential))
         {
             return null;
         }
 
-        return value.ValueKind == JsonValueKind.Null
-            ? SessionAnnouncement.Ended
-            : SessionToken.Parse(value.GetString()!);
+        var scheme = credential.GetProperty("scheme");
+        var name = scheme.ValueKind == JsonValueKind.Number ? null : scheme.GetString();
+        string[] read = name switch
+        {
+            "NONE" or "ELSEWHERE" => ["scheme"],
+            "JWT" => ["scheme", "token"],
+            _ => ["scheme", "bytes"],
+        };
+        var unknown = credential.EnumerateObject()
+            .Select((field) =>
+            {
+                return field.Name;
+            })
+            .Except(read)
+            .ToList();
+
+        Assert.True(unknown.Count == 0, $"a vector's credential says what no test reads: {string.Join(", ", unknown)}");
+
+        if (name is null)
+        {
+            return Credential.Of((CredentialScheme)scheme.GetUInt16(), BytesOf(credential, "bytes"));
+        }
+
+        return name switch
+        {
+            "NONE" => Credential.None,
+            "OPAQUE" => Credential.Opaque(SessionToken.FromBytes(BytesOf(credential, "bytes"))),
+            "JWT" => Credential.Jwt(credential.GetProperty("token").GetString()!),
+            "ELSEWHERE" => Credential.Elsewhere,
+            _ => throw new ArgumentException($"no credential scheme {name}", nameof(json)),
+        };
     }
 
     // definition
@@ -106,8 +135,9 @@ internal static class Vectors
     }
 
     /// <summary>
-    /// The header a vector writes, field by field: an absent token and a <c>null</c> one differ, as
-    /// a header without a session block and one that ends its session do.
+    /// The header a vector writes, field by field: an absent credential and one of scheme
+    /// <c>NONE</c> differ, as a header without a CREDENTIAL block and one that announces its
+    /// session's end do.
     /// </summary>
     public static IEnvelopeHeader HeaderOf(JsonElement json)
     {
@@ -136,22 +166,22 @@ internal static class Vectors
                 }),
                 OpensSubscription = IsSet(json, "opensSubscription"),
                 Paced = IsSet(json, "paced"),
-                SessionToken = SessionOf(json)?.Token,
                 Total = OptionalOf(json, "total", (value) =>
                 {
                     return value.GetInt64();
                 }),
+                Credential = CredentialOf(json),
             },
             EnvelopeKind.Result => new ResultHeader
             {
                 CallId = callId,
-                Session = SessionOf(json),
                 Total = OptionalOf(json, "total", (value) =>
                 {
                     return value.GetInt64();
                 }),
+                Credential = CredentialOf(json),
             },
-            EnvelopeKind.Failure => new FailureHeader { CallId = callId, Session = SessionOf(json) },
+            EnvelopeKind.Failure => new FailureHeader { CallId = callId, Credential = CredentialOf(json) },
             EnvelopeKind.Notification => new NotificationHeader { CallId = callId },
             EnvelopeKind.Chunk => new ChunkHeader
             {

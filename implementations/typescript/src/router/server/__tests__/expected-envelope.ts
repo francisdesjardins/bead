@@ -7,7 +7,7 @@
 
 import { readEnvelope } from '../../shared/envelope';
 import type { Envelope } from '../../shared/types';
-import { CLIENT_FAILURES, EnvelopeKind } from '../router-server';
+import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../router-server';
 
 // interfaces
 
@@ -18,7 +18,7 @@ export interface IExpected {
   isLast?: boolean;
   offset?: number;
   total?: number;
-  session?: 'announced' | 'ended';
+  credential?: 'NONE' | 'OPAQUE';
   failure?: { code: number; relays: number; scope: number };
   flags?: number | undefined;
   kind: number;
@@ -38,15 +38,18 @@ export const hexadecimalOf = (bytes: Uint8Array): string => {
     .join(' ');
 };
 
-/** What an answer announced of its connection's session: a token, its end, or nothing. */
-const sessionOf = (envelope: Envelope): Pick<IExpected, 'session'> => {
-  const { sessionToken } = envelope.header as { sessionToken?: string | null };
+/**
+ * What an answer announced of its connection's session, by its scheme alone, since its token is
+ * random: `OPAQUE`, a token; `NONE`, its end; nothing, no block.
+ */
+const announcementOf = (envelope: Envelope): Pick<IExpected, 'credential'> => {
+  const { credential } = envelope.header as { credential?: { scheme: number } };
 
-  if (sessionToken === undefined) {
+  if (credential === undefined) {
     return {};
   }
 
-  return { session: sessionToken === null ? 'ended' : 'announced' };
+  return { credential: credential.scheme === CredentialScheme.NONE ? 'NONE' : 'OPAQUE' };
 };
 
 // definition
@@ -71,7 +74,7 @@ export const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
       callId,
       failure: { code, relays, scope },
       kind: envelope.kind,
-      ...sessionOf(envelope),
+      ...announcementOf(envelope),
     };
   }
 
@@ -82,7 +85,7 @@ export const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
       callId,
       kind: envelope.kind,
       payload: hexadecimalOf(envelope.payload),
-      ...sessionOf(envelope),
+      ...announcementOf(envelope),
       ...(total === undefined ? {} : { total }),
     };
   }

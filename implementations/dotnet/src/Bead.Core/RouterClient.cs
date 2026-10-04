@@ -125,7 +125,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     /// <summary>What the router did: sent a request, took a response, took a notification.</summary>
     public event Action<RouterActivity>? Activity;
 
-    /// <summary>Each envelope, out or in, its token left out; nothing is built while none listens.</summary>
+    /// <summary>Each envelope, out or in, its credential left out; nothing is built while none listens.</summary>
     public event Action<DebugDirection, TracedEnvelope>? Debug;
 
     /// <inheritdoc/>
@@ -593,15 +593,15 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             return true;
         }
 
-        // the session is the server's to give: an answer announces it when it changes, and carries
-        // none otherwise. Only a result or a failure comes here
+        // the session is the server's to give: an answer announces it when it changes — OPAQUE,
+        // its token, NONE, its end — and carries none otherwise. Only a result or a failure comes here
         public void OnAnswerReceived(IEnvelopeHeader header, string connectionHandle)
         {
-            var session = header is ResultHeader result ? result.Session : ((FailureHeader)header).Session;
+            var announced = header is ResultHeader result ? result.Credential : ((FailureHeader)header).Credential;
 
-            if (session is { } announced)
+            if (announced is { } credential)
             {
-                client._sessionToken = announced.Token is { } token ? token : null;
+                client._sessionToken = credential.SessionToken is { } token ? token : null;
             }
         }
 

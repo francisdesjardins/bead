@@ -63,14 +63,14 @@ public sealed class RouterClientTests
         return new RequestHeader { CallId = callId, ServiceId = 2, ProcedureId = 1 };
     }
 
-    private static Envelope ResultOf(uint callId, SessionAnnouncement? session = null)
+    private static Envelope ResultOf(uint callId, Credential? announcement = null)
     {
-        return new Envelope { Header = new ResultHeader { CallId = callId, Session = session } };
+        return new Envelope { Header = new ResultHeader { CallId = callId, Credential = announcement } };
     }
 
-    private static Envelope FailureOf(uint callId, ProtocolCode code, SessionAnnouncement? session = null)
+    private static Envelope FailureOf(uint callId, ProtocolCode code, Credential? announcement = null)
     {
-        return new Envelope { Header = new FailureHeader { CallId = callId, Session = session }, Failure = Failure.OfProtocol(code) };
+        return new Envelope { Header = new FailureHeader { CallId = callId, Credential = announcement }, Failure = Failure.OfProtocol(code) };
     }
 
     private static Envelope NotificationOf(uint callId, byte value = 5)
@@ -216,7 +216,7 @@ public sealed class RouterClientTests
 
         using var router = new RouterClient(transport, new RouterClientOptions { Scheduler = scheduler, ResolverScheduler = scheduler });
 
-        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Session = Token } }));
+        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Credential = Token } }));
 
         var waiting = RequesterOf(new ServiceManager(router), "slow")(JsonOf("{\"milliseconds\":3600000}"))();
 
@@ -349,7 +349,7 @@ public sealed class RouterClientTests
         // the end announced loses it
         var second = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
 
-        transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired, SessionAnnouncement.Ended));
+        transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired, Credential.None));
 
         var ended = await Assert.ThrowsAsync<FailureException>(() =>
         {
@@ -367,7 +367,7 @@ public sealed class RouterClientTests
         Assert.Null(router.SessionToken);
         Assert.All(transport.Envelopes, (envelope) =>
         {
-            Assert.Null(Assert.IsType<RequestHeader>(envelope.Header).SessionToken);
+            Assert.Null(Assert.IsType<RequestHeader>(envelope.Header).Credential);
         });
     }
 
@@ -575,7 +575,7 @@ public sealed class RouterClientTests
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
         var given = TimeSpan.FromMilliseconds(20);
-        var ending = FailureOf(1, ProtocolCode.SessionRequired, SessionAnnouncement.Ended);
+        var ending = FailureOf(1, ProtocolCode.SessionRequired, Credential.None);
 
         var subscribing = await scripted.Subscribe(notification, Options with { Timeout = given });
 
@@ -762,7 +762,7 @@ public sealed class RouterClientTests
 
         // the session ended: the server ends the subscription, and announces the end; one on its way
         // behind it is dropped in silence
-        transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired, SessionAnnouncement.Ended));
+        transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired, Credential.None));
         transport.Deliver(NotificationOf(1));
         await scripted.Settle();
         Assert.Empty(scripted.Errors);
@@ -1232,15 +1232,15 @@ public sealed class RouterClientTests
     }
 
     [Fact]
-    public async Task Tells_each_envelope_out_and_in_with_its_header_and_never_its_session_token()
+    public async Task Tells_each_envelope_out_and_in_with_its_header_and_never_its_credential()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
-        var seen = new List<(DebugDirection Direction, IEnvelopeHeader Header, bool HasSessionToken)>();
+        var seen = new List<(DebugDirection Direction, IEnvelopeHeader Header, CredentialScheme? CredentialScheme)>();
 
         router.Debug += (direction, envelope) =>
         {
-            seen.Add((direction, envelope.Header, envelope.HasSessionToken));
+            seen.Add((direction, envelope.Header, envelope.CredentialScheme));
         };
 
         var answering = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
@@ -1249,7 +1249,7 @@ public sealed class RouterClientTests
         Assert.Equal(1u, (await answering.WaitAsync(Patience, Cancelled)).Header.CallId);
         await scripted.Settle();
         Assert.Equal(
-            [(DebugDirection.Tx, RequestHeaderOf(1), false), (DebugDirection.Rx, new ResultHeader { CallId = 1 }, true)],
+            [(DebugDirection.Tx, RequestHeaderOf(1), null), (DebugDirection.Rx, new ResultHeader { CallId = 1 }, CredentialScheme.Opaque)],
             seen);
     }
 
@@ -1852,7 +1852,7 @@ public sealed class RouterClientTests
         var first = RequesterOf(services, "echo")(JsonOf("null"))();
 
         await scheduler.WhenIdle();
-        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 1, Session = Token }, Payload = "null"u8.ToArray() }));
+        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 1, Credential = Token }, Payload = "null"u8.ToArray() }));
         await first.WaitAsync(Patience, Cancelled);
         Assert.Equal(Token, router.SessionToken);
 

@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createRouterServer } from '../../router/server/router-server';
 import { createSessionManager } from '../../router/server/session-manager';
-import { EnvelopeKind } from '../../router/shared/constants';
+import { CredentialScheme, EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf, readEnvelope } from '../../router/shared/envelope';
 import { toSessionToken } from '../../router/shared/identifiers';
 import { createServiceManager } from '../../router/shared/service-manager';
@@ -274,7 +274,14 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [{ callId: 1, kind: EnvelopeKind.FAILURE }, ProtocolCode.SESSION_REQUIRED],
-      [{ callId: 3, kind: EnvelopeKind.RESULT, sessionToken }, sessionToken],
+      [
+        {
+          callId: 3,
+          credential: { scheme: CredentialScheme.OPAQUE, token: sessionToken },
+          kind: EnvelopeKind.RESULT,
+        },
+        sessionToken,
+      ],
       [{ callId: 5, kind: EnvelopeKind.RESULT }, 'hi'],
     ]);
   });
@@ -309,11 +316,16 @@ test.describe('createServer', () => {
     expect(replaced).not.toBe(opened);
     expect(
       sent.map(({ envelope }) => {
-        const header = envelope?.header as { sessionToken?: unknown } | undefined;
+        const header = envelope?.header as { credential?: unknown } | undefined;
 
-        return header !== undefined && 'sessionToken' in header ? header.sessionToken : 'none';
+        return header !== undefined && 'credential' in header ? header.credential : 'none';
       })
-    ).toEqual([opened, replaced, null, 'none']);
+    ).toEqual([
+      { scheme: CredentialScheme.OPAQUE, token: opened },
+      { scheme: CredentialScheme.OPAQUE, token: replaced },
+      { scheme: CredentialScheme.NONE },
+      'none',
+    ]);
   });
 
   test('requireSession refuses a connection without a session, with SESSION_REQUIRED', async () => {
@@ -476,7 +488,7 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [
-        { callId: 3, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        { callId: 3, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
         ProtocolCode.SESSION_REQUIRED,
       ],
     ]);
@@ -663,7 +675,7 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [
-        { callId: 3, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        { callId: 3, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
         ProtocolCode.SESSION_REQUIRED,
       ],
     ]);

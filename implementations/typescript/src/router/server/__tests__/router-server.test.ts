@@ -8,6 +8,7 @@ import type { TransportServerConnectionHandle } from '../../../transport/server/
 import { createEmitter } from '../../../transport/shared/emitter';
 import type { Data } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
+import { headerBytesOf } from '../../shared/header';
 import { toSessionToken } from '../../shared/identifiers';
 import { createServiceManager } from '../../shared/service-manager';
 import type {
@@ -28,10 +29,12 @@ import {
   CancelError,
   CLIENT_FAILURES,
   createRouterServer,
+  CredentialScheme,
   DisconnectError,
   EnvelopeKind,
   FailureError,
   FailureScope,
+  LIMIT_DEFAULTS,
   ProgrammerError,
   ProtocolCode,
   SERVER_FAILURES,
@@ -90,6 +93,9 @@ const options = { timeout: 1_000 };
 
 const TOKEN = toSessionToken(new Uint8Array(16).fill(7));
 const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(8));
+
+// what an answer announces: the session, by its token
+const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 
 /** A client's request for `procedure`, on `callId`, carrying `payload`. */
 const requestOf = (
@@ -321,7 +327,7 @@ test.describe('createRouterServer', () => {
         [
           first,
           {
-            header: { callId: 31, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
+            header: { callId: 31, credential: OPAQUE, kind: EnvelopeKind.RESULT },
             kind: EnvelopeKind.RESULT,
             payload: text.encode('hi!'),
           },
@@ -440,7 +446,7 @@ test.describe('createRouterServer', () => {
         sent.map(({ envelope }) => {
           return envelope?.header;
         })
-      ).toEqual([{ callId: 3, kind: EnvelopeKind.RESULT, sessionToken: TOKEN }]);
+      ).toEqual([{ callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT }]);
     });
 
     test('are refused when nobody answers them, or they name a destination: this router relays nothing', async () => {
@@ -1233,9 +1239,13 @@ test.describe('createRouterServer', () => {
       using router = createRouterServer(transport);
       const services = createServiceManager(router);
       const errors = recordErrors(router);
-      // one byte past what a result's envelope holds whole, its session counted
-      const large = 'x'.repeat(1_048_553);
+      // one byte past what a result's envelope holds whole, its announcement counted: a chunk's
+      // 1 MiB less its header's 8 bytes and an announcement's 20
+      const large = 'x'.repeat(1_048_549);
 
+      expect(
+        headerBytesOf({ callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT }) + large.length
+      ).toBe(LIMIT_DEFAULTS.chunkBytes + 1);
       open(first);
       services.getNotificationResolver(news, { serializer: answering })((request, response) => {
         if (request.payload === 'explicit') {
@@ -1779,7 +1789,7 @@ test.describe('createRouterServer', () => {
         [
           first,
           ProtocolCode.SESSION_REQUIRED,
-          { callId: 1, kind: EnvelopeKind.FAILURE, sessionToken: null },
+          { callId: 1, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
         ],
         [first, ProtocolCode.SESSION_REQUIRED, { callId: 3, kind: EnvelopeKind.FAILURE }],
       ]);
@@ -1909,23 +1919,17 @@ test.describe('createRouterServer', () => {
     await sleep(0);
 
     expect(seen).toEqual([
+      ['rx', 'first', { callId: 9, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 }],
       [
-        'rx',
+        'tx',
         'first',
-        {
-          callId: 9,
-          hasSessionToken: false,
-          kind: EnvelopeKind.REQUEST,
-          procedureId: 1,
-          serviceId: 2,
-        },
+        { callId: 9, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT },
       ],
-      ['tx', 'first', { callId: 9, hasSessionToken: true, kind: EnvelopeKind.RESULT }],
     ]);
     expect(sent[0]?.envelope?.header).toEqual({
       callId: 9,
+      credential: OPAQUE,
       kind: EnvelopeKind.RESULT,
-      sessionToken: TOKEN,
     });
     expect(JSON.stringify(seen)).not.toContain(TOKEN);
   });
@@ -1945,7 +1949,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
       const told: unknown[] = [];
 
       client.router.on('debug', ({ direction, header }) => {
-        told.push([direction, header.kind, header.callId, header.hasSessionToken]);
+        told.push([direction, header.kind, header.callId, header.credentialScheme]);
       });
 
       try {
@@ -2030,13 +2034,13 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
         expect(unsubscribed).toEqual(['3 3']);
         expect(serverRouter.notifications.subscriptions()).toEqual([]);
-        expect(told).toContainEqual(['rx', EnvelopeKind.REQUEST, 2, false]);
+        expect(told).toContainEqual(['rx', EnvelopeKind.REQUEST, 2, undefined]);
         // announced once, on the first answer
         expect(
           told.filter((entry) => {
-            return (entry as unknown[])[3] === true;
+            return (entry as unknown[])[3] !== undefined;
           })
-        ).toEqual([['rx', EnvelopeKind.RESULT, 1, true]]);
+        ).toEqual([['rx', EnvelopeKind.RESULT, 1, CredentialScheme.OPAQUE]]);
 
         // a subscription again, which the connection takes away with it
         const dropped: unknown[] = [];

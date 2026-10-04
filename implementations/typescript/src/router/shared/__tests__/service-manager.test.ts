@@ -659,7 +659,7 @@ test.describe('createServiceManager', () => {
         cause: expect.any(SyntaxError),
         code: ProtocolCode.PAYLOAD_UNDECODABLE,
         destinationId: 4,
-        header: { callId: 7, hasSessionToken: false, kind: 0x11 },
+        header: { callId: 7, kind: 0x11 },
         origin: 'local',
         procedureAddress: { procedureId: 1, serviceId: 2 },
         scope: FailureScope.PROTOCOL,

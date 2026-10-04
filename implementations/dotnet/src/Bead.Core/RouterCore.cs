@@ -40,8 +40,9 @@ public sealed class RouterCore : IDisposable
 
     private const string Disposed = "the router was disposed";
 
-    // what a failure's envelope holds besides its detail: its header with a session, and its record
-    private const int FailureOverheadBytes = 28;
+    // what a failure's envelope holds besides its detail: its prefix, the announcement it may
+    // carry, and its record
+    private const int FailureOverheadBytes = 8 + Credential.AnnouncementBytes + 4;
 
     // a chunk's header: its prefix, then its offset
     private static readonly int ChunkHeaderBytes = EnvelopeCodec.HeaderBytesOf(new ChunkHeader { CallId = 1, IsLast = true, Offset = 0 });
@@ -178,15 +179,18 @@ public sealed class RouterCore : IDisposable
 
     // helpers
 
-    /// <summary>A header fit to be traced or thrown: its session left out, and whether it had a token.</summary>
-    internal static (IEnvelopeHeader Header, bool HasSessionToken) Redact(IEnvelopeHeader header)
+    /// <summary>
+    /// A header fit to be traced or thrown: its credential left out, and the scheme it was of; none
+    /// when it carried none.
+    /// </summary>
+    internal static (IEnvelopeHeader Header, CredentialScheme? CredentialScheme) Redact(IEnvelopeHeader header)
     {
         return header switch
         {
-            RequestHeader { SessionToken: not null } request => (request with { SessionToken = null }, true),
-            ResultHeader { Session: { } session } result => (result with { Session = null }, session.Token is not null),
-            FailureHeader { Session: { } session } failure => (failure with { Session = null }, session.Token is not null),
-            _ => (header, false),
+            RequestHeader { Credential: { } credential } request => (request with { Credential = null }, credential.Scheme),
+            ResultHeader { Credential: { } credential } result => (result with { Credential = null }, credential.Scheme),
+            FailureHeader { Credential: { } credential } failure => (failure with { Credential = null }, credential.Scheme),
+            _ => (header, null),
         };
     }
 
@@ -288,9 +292,9 @@ public sealed class RouterCore : IDisposable
                     envelope.Header);
             }
 
-            var (redacted, hasSessionToken) = Redact(announced.Header);
+            var (redacted, credentialScheme) = Redact(announced.Header);
 
-            _port.Trace(DebugDirection.Tx, new TracedEnvelope(connectionHandle, redacted, hasSessionToken));
+            _port.Trace(DebugDirection.Tx, new TracedEnvelope(connectionHandle, redacted, credentialScheme));
             sending = _port.Send(bytes, connectionHandle);
         }
         catch
@@ -338,10 +342,11 @@ public sealed class RouterCore : IDisposable
 
         _announced[connectionHandle] = current;
 
-        SessionAnnouncement session = current is { } token ? token : SessionAnnouncement.Ended;
+        // its token, once it opened or was drawn anew; NONE, once it ended
+        var announcement = current is { } token ? Credential.Opaque(token) : Credential.None;
         IEnvelopeHeader header = envelope.Header is ResultHeader result
-            ? result with { Session = session }
-            : (FailureHeader)envelope.Header with { Session = session };
+            ? result with { Credential = announcement }
+            : (FailureHeader)envelope.Header with { Credential = announcement };
 
         return (
             new Envelope { Header = header, Payload = envelope.Payload, Failure = envelope.Failure },
@@ -467,20 +472,20 @@ public sealed class RouterCore : IDisposable
     }
 
     // how a payload goes after its header: whole — none — or as a transfer, a result's header counted
-    // with the session it may announce; or not at all, and the failure says why
+    // with the announcement it may carry; or not at all, and the failure says why
     private (OutgoingTransfer? Transfer, Failure? Refusal) TransferOf(
         ReadOnlyMemory<byte> payload,
         (IEnvelopeHeader Header, int MaximumPayloadBytes) going)
     {
         var (header, maximumPayloadBytes) = going;
-        var sessionBytes = header is ResultHeader ? SessionToken.Bytes : 0;
+        var announcementBytes = header is ResultHeader ? Credential.AnnouncementBytes : 0;
 
         if (payload.Length > maximumPayloadBytes)
         {
             return (null, TooLargeOf(payload.Length, maximumPayloadBytes));
         }
 
-        if (EnvelopeCodec.HeaderBytesOf(header) + sessionBytes + payload.Length <= _wholeBytes)
+        if (EnvelopeCodec.HeaderBytesOf(header) + announcementBytes + payload.Length <= _wholeBytes)
         {
             return (null, null);
         }
@@ -497,7 +502,7 @@ public sealed class RouterCore : IDisposable
             ? request with { Total = payload.Length }
             : (ResultHeader)header with { Total = payload.Length };
 
-        return (new OutgoingTransfer(payload, (_wholeBytes - EnvelopeCodec.HeaderBytesOf(opening) - sessionBytes, _payloadBytesPerChunk)), null);
+        return (new OutgoingTransfer(payload, (_wholeBytes - EnvelopeCodec.HeaderBytesOf(opening) - announcementBytes, _payloadBytesPerChunk)), null);
     }
 
     private async Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, CoreRequest request)
@@ -1628,9 +1633,9 @@ public sealed class RouterCore : IDisposable
             return;
         }
 
-        var (redacted, hasSessionToken) = Redact(envelope.Header);
+        var (redacted, credentialScheme) = Redact(envelope.Header);
 
-        _port.Trace(DebugDirection.Rx, new TracedEnvelope(connectionHandle, redacted, hasSessionToken));
+        _port.Trace(DebugDirection.Rx, new TracedEnvelope(connectionHandle, redacted, credentialScheme));
 
         switch (envelope.Header)
         {

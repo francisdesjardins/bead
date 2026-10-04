@@ -1,6 +1,6 @@
 namespace Bead.Tests;
 
-/// <summary><see cref="SessionToken"/> and <see cref="SessionAnnouncement"/>.</summary>
+/// <summary><see cref="SessionToken"/>.</summary>
 public sealed class SessionTokenTests
 {
     // constants
@@ -36,7 +36,7 @@ public sealed class SessionTokenTests
     }
 
     [Fact]
-    public void Refuses_16_zero_bytes_which_say_a_session_ended()
+    public void Refuses_16_zero_bytes_which_are_no_token()
     {
         Assert.Throws<ArgumentException>(() =>
         {
@@ -76,18 +76,5 @@ public sealed class SessionTokenTests
             default(SessionToken).CopyTo(new byte[SessionToken.Bytes]);
         });
         Assert.Equal("", default(SessionToken).ToString());
-    }
-
-    [Fact]
-    public void Announces_a_token_or_the_end_of_its_session()
-    {
-        var token = SessionToken.Parse(Text);
-        SessionAnnouncement announced = token;
-
-        Assert.False(announced.IsEnded);
-        Assert.Equal(token, announced.Token);
-        Assert.Equal(SessionAnnouncement.Of(token), announced);
-        Assert.True(SessionAnnouncement.Ended.IsEnded);
-        Assert.Null(SessionAnnouncement.Ended.Token);
     }
 }

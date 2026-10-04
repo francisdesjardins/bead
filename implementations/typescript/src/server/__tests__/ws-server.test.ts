@@ -489,12 +489,12 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
   test('relay a call to the device once a session admits it, and bring back the device’s own failure, one relay more', async () => {
     await using relayed = await connectRelayed();
     const { client, deviceRouter, deviceServices } = relayed;
-    // whether each envelope the device took presented a session
-    const presented: boolean[] = [];
+    // the credential scheme each envelope the device took presented, none for none
+    const presented: (number | undefined)[] = [];
 
     deviceRouter.on('debug', ({ direction, header }) => {
       if (direction === 'rx') {
-        presented.push(header.hasSessionToken);
+        presented.push(header.credentialScheme);
       }
     });
     deviceServices.getRequestResolver(echo, { serializer: text })((request, response) => {
@@ -532,7 +532,7 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
       false
     );
     // the client's session stays on leg A: none crosses to the device
-    expect(presented).toEqual([false, false]);
+    expect(presented).toEqual([undefined, undefined]);
   });
 
   test('relay as the server’s options say: an admission of the application’s own, no session asked', async () => {

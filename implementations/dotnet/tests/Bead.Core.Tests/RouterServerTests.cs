@@ -1001,10 +1001,13 @@ public sealed partial class RouterServerTests : IDisposable
     [Fact]
     public async Task A_subscription_s_result_too_large_for_one_envelope_is_refused_answered_as_failed_and_subscribes_nothing()
     {
-        // one byte past what a result's envelope holds whole, its session counted: a chunk's
-        // 1 MiB less its header's 8 bytes and a session's 16
-        var large = new string('x', 1_048_553);
+        // one byte past what a result's envelope holds whole, its announcement counted: a chunk's
+        // 1 MiB less its header's 8 bytes and an announcement's 20
+        var large = new string('x', 1_048_549);
 
+        Assert.Equal(
+            RouterLimits.Default.ChunkBytes + 1,
+            EnvelopeCodec.HeaderBytesOf(new ResultHeader { CallId = 1, Credential = Token }) + large.Length);
         Start();
         _transport.Open(First);
         NotifierOf(async (request, response) =>
@@ -1420,7 +1423,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal(
             [
-                (First, new FailureHeader { CallId = 1, Session = SessionAnnouncement.Ended }),
+                (First, new FailureHeader { CallId = 1, Credential = Credential.None }),
                 (First, new FailureHeader { CallId = 3 }),
             ],
             _transport.Sent.Select((entry) =>
@@ -1541,11 +1544,11 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal(
             [
-                (DebugDirection.Rx, new TracedEnvelope(First, new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 }, false)),
-                (DebugDirection.Tx, new TracedEnvelope(First, new ResultHeader { CallId = 9 }, true)),
+                (DebugDirection.Rx, new TracedEnvelope(First, new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 }, null)),
+                (DebugDirection.Tx, new TracedEnvelope(First, new ResultHeader { CallId = 9 }, CredentialScheme.Opaque)),
             ],
             seen);
-        Assert.Equal(new ResultHeader { CallId = 9, Session = Token }, _transport.Sent[0].Envelope.Header);
+        Assert.Equal(new ResultHeader { CallId = 9, Credential = Token }, _transport.Sent[0].Envelope.Header);
     }
 
     // the TypeScript side links a WebSocket client and server over the wire; the test project

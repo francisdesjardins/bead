@@ -6,6 +6,7 @@ import type { Data } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { toSessionToken } from '../../shared/identifiers';
 import type {
+  Announcement,
   Envelope,
   INotificationLike,
   IProcedure,
@@ -22,6 +23,7 @@ import { envelopeOf } from '../../shared/__tests__/fixtures';
 import {
   CancelError,
   createRouterClient,
+  CredentialScheme,
   DisconnectError,
   EnvelopeKind,
   FailureError,
@@ -48,6 +50,10 @@ const options = { timeout: 1_000 };
 
 const TOKEN = toSessionToken(new Uint8Array(16).fill(1));
 
+// what an answer announces: the session, by its token; its end
+const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
+const ENDED = Object.freeze({ scheme: CredentialScheme.NONE });
+
 /** A request header of the server's, for procedure 1 of service 2. */
 const requestHeaderOf = (callId: number): IRequestHeader => {
   return { callId, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 };
@@ -56,15 +62,15 @@ const requestHeaderOf = (callId: number): IRequestHeader => {
 const resultOf = (
   callId: number,
   {
+    credential,
     payload = new Uint8Array(0),
-    sessionToken,
-  }: { payload?: Uint8Array; sessionToken?: typeof TOKEN | null } = {}
+  }: { credential?: Announcement; payload?: Uint8Array } = {}
 ): OutgoingEnvelope => {
   return {
     header: {
       callId,
       kind: EnvelopeKind.RESULT,
-      ...(sessionToken === undefined ? {} : { sessionToken }),
+      ...(credential === undefined ? {} : { credential }),
     },
     kind: EnvelopeKind.RESULT,
     payload,
@@ -310,7 +316,7 @@ test.describe('createRouterClient', () => {
       const asking = router.request(new Uint8Array(0), { options, procedure: service });
 
       deliver({
-        header: { callId: 1, kind: EnvelopeKind.RESULT, sessionToken: TOKEN, total: 100 },
+        header: { callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT, total: 100 },
         kind: EnvelopeKind.RESULT,
         payload: new Uint8Array(16),
       });
@@ -332,7 +338,7 @@ test.describe('createRouterClient', () => {
       const errors = recordErrors(router);
 
       // an answer to nothing still announces
-      deliver(resultOf(99, { sessionToken: TOKEN }));
+      deliver(resultOf(99, { credential: OPAQUE }));
 
       expect(router.sessionToken).toBe(TOKEN);
       expect(codesOf(errors)).toEqual([ProtocolCode.CALL_UNKNOWN]);
@@ -351,25 +357,25 @@ test.describe('createRouterClient', () => {
       // the end announced loses it
       deliver({
         failure: SERVER_FAILURES.sessionRequired,
-        header: { callId: 3, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        header: { callId: 3, credential: ENDED, kind: EnvelopeKind.FAILURE },
         kind: EnvelopeKind.FAILURE,
       });
       await expect(second).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
 
       expect(router.sessionToken).toBeUndefined();
 
-      deliver(resultOf(98, { sessionToken: TOKEN }));
+      deliver(resultOf(98, { credential: OPAQUE }));
       close();
 
       expect(router.sessionToken).toBeUndefined();
 
-      deliver(resultOf(97, { sessionToken: TOKEN }));
+      deliver(resultOf(97, { credential: OPAQUE }));
       emitter.emit('reconnect');
 
       expect(router.sessionToken).toBeUndefined();
       expect(
         sent.every((envelope) => {
-          return envelope !== undefined && !('sessionToken' in envelope.header);
+          return envelope !== undefined && !('credential' in envelope.header);
         })
       ).toBe(true);
     });
@@ -414,7 +420,7 @@ test.describe('createRouterClient', () => {
 
       const first = router.request(new Uint8Array(0), { options, procedure: service });
 
-      deliver(resultOf(1, { sessionToken: TOKEN }));
+      deliver(resultOf(1, { credential: OPAQUE }));
       await first;
 
       const waiting = router.request(new Uint8Array(0), { options, procedure: service });
@@ -696,7 +702,7 @@ test.describe('createRouterClient', () => {
       const notification = notificationOf([]);
       const ending: OutgoingEnvelope = {
         failure: SERVER_FAILURES.sessionRequired,
-        header: { callId: 1, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        header: { callId: 1, credential: ENDED, kind: EnvelopeKind.FAILURE },
         kind: EnvelopeKind.FAILURE,
       };
 
@@ -708,7 +714,7 @@ test.describe('createRouterClient', () => {
         subscribes: notification,
       });
 
-      deliver(resultOf(1, { sessionToken: TOKEN }));
+      deliver(resultOf(1, { credential: OPAQUE }));
       await subscribing;
       await router.unregisterNotification(notification);
 
@@ -935,12 +941,12 @@ test.describe('createRouterClient', () => {
         subscribes: notification,
       });
 
-      deliver(resultOf(1, { sessionToken: TOKEN }));
+      deliver(resultOf(1, { credential: OPAQUE }));
       await subscribing;
       // the session ended: the server ends the subscription, and announces the end
       deliver({
         failure: SERVER_FAILURES.sessionRequired,
-        header: { callId: 1, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        header: { callId: 1, credential: ENDED, kind: EnvelopeKind.FAILURE },
         kind: EnvelopeKind.FAILURE,
       });
       // one on its way behind it is dropped in silence
@@ -1638,12 +1644,12 @@ test.describe('createRouterClient', () => {
 
       const answering = router.request(new Uint8Array(0), { options, procedure: service });
 
-      deliver(resultOf(1, { sessionToken: TOKEN }));
+      deliver(resultOf(1, { credential: OPAQUE }));
 
       expect((await answering).header.callId).toBe(1);
       expect(seen).toEqual([
-        ['tx', { ...requestHeaderOf(1), hasSessionToken: false }],
-        ['rx', { callId: 1, hasSessionToken: true, kind: EnvelopeKind.RESULT }],
+        ['tx', requestHeaderOf(1)],
+        ['rx', { callId: 1, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT }],
       ]);
       expect(JSON.stringify(seen)).not.toContain(TOKEN);
     });

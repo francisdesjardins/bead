@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   CALL_ID_RANGES,
   CLIENT_FAILURES,
+  CredentialScheme,
   EnvelopeFlag,
   EnvelopeKind,
   EnvelopeLayout,
@@ -123,17 +124,24 @@ test.describe('the wire values', () => {
       CANCEL: 0x16,
     });
     expect(EnvelopeFlag).toEqual({
-      SESSION: 0x01,
       DESTINATION: 0x02,
       TRANSFER: 0x04,
+      CREDENTIAL: 0x08,
       SUBSCRIPTION: 0x10,
       PACED: 0x20,
       MORE: 0x40,
     });
+    expect(CredentialScheme).toEqual({ NONE: 0, OPAQUE: 1, JWT: 2, ELSEWHERE: 3 });
     expect(FailureScope).toEqual({ PROTOCOL: 0, APPLICATION: 1 });
     expect(SESSION_TOKEN_BYTES).toBe(16);
 
-    for (const table of [EnvelopeLayout, EnvelopeKind, EnvelopeFlag, FailureScope]) {
+    for (const table of [
+      EnvelopeLayout,
+      EnvelopeKind,
+      EnvelopeFlag,
+      CredentialScheme,
+      FailureScope,
+    ]) {
       expect(Object.isFrozen(table)).toBe(true);
     }
   });
@@ -166,7 +174,7 @@ test.describe('the wire values', () => {
     // a peer that splits nothing sends a whole payload in one envelope, the longest header before it
     expect(
       LIMIT_DEFAULTS.maximumEnvelopeBytes - LIMIT_DEFAULTS.maximumPayloadBytes
-    ).toBeGreaterThanOrEqual(40);
+    ).toBeGreaterThanOrEqual(1_020);
     // a chunk fits in an envelope, and a window holds two, so a sender waits on no credit it is owed
     expect(LIMIT_DEFAULTS.chunkBytes).toBeLessThanOrEqual(LIMIT_DEFAULTS.maximumEnvelopeBytes);
     expect(LIMIT_DEFAULTS.windowBytes).toBeGreaterThanOrEqual(2 * LIMIT_DEFAULTS.chunkBytes);

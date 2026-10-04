@@ -110,22 +110,23 @@ public sealed class ConversationsTests
         var callId = envelope.Header.CallId;
         var kind = (int)envelope.Kind;
 
-        var session = envelope.Header switch
+        // the scheme of what an answer announced, by its name: OPAQUE, a token, or NONE, its end
+        var credential = envelope.Header switch
         {
-            ResultHeader { Session: { } announced } => announced.IsEnded ? " ended" : " announced",
-            FailureHeader { Session: { } announced } => announced.IsEnded ? " ended" : " announced",
+            ResultHeader { Credential: { } announced } => $" {announced.Scheme.ToString().ToUpperInvariant()}",
+            FailureHeader { Credential: { } announced } => $" {announced.Scheme.ToString().ToUpperInvariant()}",
             _ => "",
         };
 
         if (envelope.Failure is { } failure)
         {
-            return $"{kind} {callId} failure {failure.Code} {(int)failure.Scope} through {failure.Relays}{session}";
+            return $"{kind} {callId} failure {failure.Code} {(int)failure.Scope} through {failure.Relays}{credential}";
         }
 
         return envelope.Header switch
         {
-            ResultHeader { Total: { } total } => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{session} total {total}",
-            ResultHeader or NotificationHeader => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{session}",
+            ResultHeader { Total: { } total } => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential} total {total}",
+            ResultHeader or NotificationHeader => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential}",
             ChunkHeader chunk => $"{kind} {callId} from {chunk.Offset}{(chunk.IsLast ? " last" : "")} {Convert.ToHexString(envelope.Payload.Span)}",
             CreditHeader credit => $"{kind} {callId} credit {credit.CreditEnd}",
 
@@ -141,11 +142,11 @@ public sealed class ConversationsTests
         var kind = expected.GetProperty("kind").GetInt32();
         var callId = expected.GetProperty("callId").GetUInt32();
 
-        var session = expected.TryGetProperty("session", out var announced) ? $" {announced.GetString()}" : "";
+        var credential = expected.TryGetProperty("credential", out var announced) ? $" {announced.GetString()}" : "";
 
         if (expected.TryGetProperty("failure", out var failure))
         {
-            return $"{kind} {callId} failure {failure.GetProperty("code").GetInt32()} {failure.GetProperty("scope").GetInt32()} through {failure.GetProperty("relays").GetInt32()}{session}";
+            return $"{kind} {callId} failure {failure.GetProperty("code").GetInt32()} {failure.GetProperty("scope").GetInt32()} through {failure.GetProperty("relays").GetInt32()}{credential}";
         }
 
         var hexadecimal = expected.TryGetProperty("payload", out var payload)
@@ -169,7 +170,7 @@ public sealed class ConversationsTests
 
         var total = expected.TryGetProperty("total", out var declared) ? $" total {declared.GetInt64()}" : "";
 
-        return hexadecimal is null ? $"{kind} {callId}" : $"{kind} {callId} {hexadecimal}{session}{total}";
+        return hexadecimal is null ? $"{kind} {callId}" : $"{kind} {callId} {hexadecimal}{credential}{total}";
     }
 
     // definition

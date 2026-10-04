@@ -52,14 +52,14 @@ def raw(data):
     return {'send': data}
 
 
-def result(call_id, value, session=None):
+def result(call_id, value, credential=None):
     return {'expect': {'kind': RESULT, 'callId': call_id, 'payload': text(value),
-                    **({'session': session} if session else {})}}
+                    **({'credential': credential} if credential else {})}}
 
 
-def failure(call_id, code, scope=PROTOCOL, session=None, relays=0):
+def failure(call_id, code, scope=PROTOCOL, credential=None, relays=0):
     return {'expect': {'kind': FAILURE, 'callId': call_id, 'failure': {'code': code, 'scope': scope, 'relays': relays},
-                    **({'session': session} if session else {})}}
+                    **({'credential': credential} if credential else {})}}
 
 
 def report(code):
@@ -118,6 +118,15 @@ QUEUE_OF_TWO = {'maximumQueuedNotifications': 2}
 SESSION_REQUIRED = 32
 TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 
+# what an answer announces, by the scheme of its CREDENTIAL block: a session's token, or its end
+OPENED, ENDED = 'OPAQUE', 'NONE'
+
+
+def presenting(call_id, procedure, value, block):
+    # a request whose CREDENTIAL block, the last, follows its procedure
+    words = 3 + len(block.split()) // 4
+    return json_request(call_id, procedure, value, flags=0x08, words=words, tail=block)
+
 
 def login(call_id, name):
     return json_request(call_id, 'login', '{"name":"%s"}' % name)
@@ -126,7 +135,7 @@ def login(call_id, name):
 SMALL = {'maximumEnvelopeBytes': 64, 'chunkBytes': 64, 'windowBytes': 128}
 
 # transfers in chunks of 64 bytes: an opening of a request carries 44 bytes of its payload, one of a
-# result 32 — its session counted — and a chunk 48
+# result 28 — the 20 bytes of an announcement counted — and a chunk 48
 CHUNKED = {'chunkBytes': 64, 'windowBytes': 128}
 CHUNK, CREDIT = 20, 21
 CHUNK_INVALID, CREDIT_EXCEEDED, TRANSFER_STALLED = 48, 49, 51
@@ -203,9 +212,11 @@ conversations = [
     ('an answer too large for one envelope, from a server that sends no transfer, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE', ['12.1'],
      {**SMALL, 'maximumTransfers': 0}, [
          json_request(1, 'bytes', '{"length":60}'), failure(1, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE)]),
-    ('a result that fits in one envelope only without the session an answer may announce is refused as one that does not', ['12.1'],
-     {**SMALL, 'maximumTransfers': 0}, [
-         json_request(1, 'bytes', '{"length":45}'), failure(1, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE)]),
+    # 8 bytes of prefix, 20 of an announcement and 36 of payload fill an envelope of 64; 37 do not
+    ('a result is counted with the 20 bytes of an announcement: one that fits only without them is refused as one that does not',
+     ['12.1'], {**SMALL, 'maximumTransfers': 0}, [
+         json_request(1, 'bytes', '{"length":34}'), result(1, '"' + 'x' * 34 + '"'),
+         json_request(3, 'bytes', '{"length":35}'), failure(3, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE)]),
     # 9.1: a server opens calls of its own, a command to its client, on its even call ids
     ('the server asks its client a command, and answers with what the client answered', ['9.1'], None, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), answer(2, '"noon"'), result(1, '"noon"')]),
@@ -271,18 +282,21 @@ conversations = [
     ('a procedure that requires a session refuses a connection without one with SESSION_REQUIRED', ['13.5'], None, [
         json_request(1, 'whoami', 'null'), failure(1, SESSION_REQUIRED)]),
     ('a session opened is announced by the next answer, and only by it', ['13.3'], None, [
-        login(1, 'ada'), result(1, '"ada"', 'announced'), json_request(3, 'whoami', 'null'), result(3, '"ada"')]),
+        login(1, 'ada'), result(1, '"ada"', OPENED), json_request(3, 'whoami', 'null'), result(3, '"ada"')]),
     ('a session ended is announced by the next answer, and only by it', ['13.3', '13.5'], None, [
-        login(1, 'ada'), result(1, '"ada"', 'announced'), json_request(3, 'logout', 'null'),
-        result(3, 'null', 'ended'), json_request(5, 'whoami', 'null'), failure(5, SESSION_REQUIRED)]),
+        login(1, 'ada'), result(1, '"ada"', OPENED), json_request(3, 'logout', 'null'),
+        result(3, 'null', ENDED), json_request(5, 'whoami', 'null'), failure(5, SESSION_REQUIRED)]),
     ('a session opened again is announced again, its token drawn anew', ['13.2', '13.3'], None, [
-        login(1, 'ada'), result(1, '"ada"', 'announced'), login(3, 'bob'), result(3, '"bob"', 'announced')]),
+        login(1, 'ada'), result(1, '"ada"', OPENED), login(3, 'bob'), result(3, '"bob"', OPENED)]),
     ('a session that ends ends its connection\'s subscriptions, the first answer to go out announcing it', ['13.6'], None, [
-        login(1, 'ada'), result(1, '"ada"', 'announced'), subscribe(3), result(3, 'null'),
-        json_request(5, 'logout', 'null'), failure(3, SESSION_REQUIRED, session='ended'), result(5, 'null'),
+        login(1, 'ada'), result(1, '"ada"', OPENED), subscribe(3), result(3, 'null'),
+        json_request(5, 'logout', 'null'), failure(3, SESSION_REQUIRED, credential=ENDED), result(5, 'null'),
         tick(7, 1), result(7, 'null')]),
-    ('a request presenting a session is read, and its session ignored', ['13.4'], None, [
-        json_request(1, 'echo', '"x"', flags=0x01, words=7, tail=TOKEN_BYTES), result(1, '"x"')]),
+    ('a request presenting a credential is read, and its credential ignored, whatever its scheme', ['13.4'], None, [
+        presenting(1, 'echo', '"x"', f'00 01 00 10  {TOKEN_BYTES}'), result(1, '"x"'),
+        presenting(3, 'echo', '"y"', '00 02 00 05  61 2E 62 2E 63  00 00 00'), result(3, '"y"'),
+        presenting(5, 'echo', '"z"', '00 03 00 00'), result(5, '"z"'),
+        presenting(7, 'echo', '"w"', '00 07 00 02  01 02  00 00'), result(7, '"w"')]),
     # 9.2, steps 1 and 2: what would answer another call
     ('a request on the server\'s own parity is reported, never answered', ['9.2.1'], None, [
         json_request(2, 'echo', 'null'), report(MALFORMED)]),
@@ -308,9 +322,9 @@ conversations = [
     ('a request of a layout to come, on the server\'s own parity, is reported', ['9.6.6'], None, [
         raw('A2 10 00 03  00 00 00 08  00 01 00 01'), report(LAYOUT_UNSUPPORTED)]),
     ('a malformed request is answered ENVELOPE_MALFORMED, on its call id', ['9.6.2'], None, [
-        raw('A1 10 08 03  00 00 00 09  00 01 00 01'), failure(9, MALFORMED)]),
+        raw('A1 10 01 03  00 00 00 09  00 01 00 01'), failure(9, MALFORMED)]),
     ('a malformed request on a call id still open is reported, never answered', ['9.6.6'], None, [
-        json_request(1, 'slow', SLOW), raw('A1 10 08 03  00 00 00 01  00 01 00 01'), report(MALFORMED),
+        json_request(1, 'slow', SLOW), raw('A1 10 01 03  00 00 00 01  00 01 00 01'), report(MALFORMED),
         cancel(1)]),
     ('a request past the envelope\'s bound is answered ENVELOPE_TOO_LARGE, on its call id', ['9.6.2'], SMALL, [
         json_request(1, 'echo', '"' + 'x' * 60 + '"'), failure(1, TOO_LARGE)]),
@@ -335,17 +349,17 @@ conversations = [
     ('a request that comes as a transfer is credited to its total, then answered by a transfer its client credits', ['12.3', '12.4', '12.5'], CHUNKED, [
         opening(1, 'echo', ECHOED[:44], 100), credited(1, 100),
         chunk_in(1, 44, ECHOED[44:92], False), chunk_in(1, 92, ECHOED[92:], True),
-        result_opening(1, ECHOED[:32], 100),
-        credit_in(1, 100), chunk_out(1, 32, ECHOED[32:80], False), chunk_out(1, 80, ECHOED[80:], True)]),
+        result_opening(1, ECHOED[:28], 100),
+        credit_in(1, 100), chunk_out(1, 28, ECHOED[28:76], False), chunk_out(1, 76, ECHOED[76:], True)]),
     ('a transfer is credited a window past the bytes received from the start, once half a window can go', ['12.4'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 44, LONG[44:92], False), chunk_in(1, 92, LONG[92:140], False), credited(1, 268),
         chunk_in(1, 188, LONG[188:236], False), chunk_in(1, 140, LONG[140:188], False), credited(1, 300),
         cancel(1)]),
     ('a result is sent as far as its credit, a full chunk at a time, and a credit lower than the last grants nothing', ['12.4', '12.5'], CHUNKED, [
-        json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:32], 100),
-        credit_in(1, 79), credit_in(1, 80), chunk_out(1, 32, ECHOED[32:80], False),
-        credit_in(1, 60), credit_in(1, 100), chunk_out(1, 80, ECHOED[80:], True)]),
+        json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:28], 100),
+        credit_in(1, 75), credit_in(1, 76), chunk_out(1, 28, ECHOED[28:76], False),
+        credit_in(1, 60), credit_in(1, 100), chunk_out(1, 76, ECHOED[76:], True)]),
     ('a chunk past its credit is answered CREDIT_EXCEEDED, and a late one under it is dropped in silence', ['12.6.2', '12.9.4'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 172, LONG[172:220], False), failure(1, CREDIT_EXCEEDED),
@@ -378,7 +392,7 @@ conversations = [
         opening(5, 'echo', LONG[:44], 200), failure(5, CAPACITY_EXCEEDED),
         cancel(1), credited(3, 172)]),
     ('a cancel ends the transfer of a result, and a credit after it is dropped in silence', ['12.7', '12.9.5'], CHUNKED, [
-        json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:32], 100),
+        json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:28], 100),
         cancel(1), credit_in(1, 100)]),
     # 12.7 to 12.9: a transfer's inactivity, on the server's clock. A restart shows by an advance past
     # the first due and short of the second, then a send, before which nothing more went. The first
@@ -395,15 +409,15 @@ conversations = [
     ('a command whose result comes as a transfer waits on the transfer\'s inactivity, not its own time; gone silent it ends as timed out, its call id reserved as long',
      ['9.9', '10.3', '12.7', '12.8', '12.9', '12.9.1', '12.9.4'], {**CHUNKED, 'transferInactivityTimeout': 20_000}, [
          json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
-         result_opening_in(2, LONG[:32], 300), credited(2, 160),
-         armed(20_000), advance(10_000), chunk_in(2, 32, LONG[32:80], False),
+         result_opening_in(2, LONG[:28], 300), credited(2, 156),
+         armed(20_000), advance(10_000), chunk_in(2, 28, LONG[28:76], False),
          armed(20_000), advance(20_000), cancelled(2), failure(1, PROCEDURE_FAILED), report('exception'),
-         chunk_in(2, 80, LONG[80:128], False), answer(2, '"late"'),
-         armed(20_000), advance(20_000), chunk_in(2, 80, LONG[80:128], False), report(CALL_UNKNOWN)]),
+         chunk_in(2, 76, LONG[76:124], False), answer(2, '"late"'),
+         armed(20_000), advance(20_000), chunk_in(2, 76, LONG[76:124], False), report(CALL_UNKNOWN)]),
     ('a result that gets no credit is ended TRANSFER_STALLED, a credit that grants setting it going again, one that grants nothing not',
      ['12.7', '12.8'], {**CHUNKED, 'transferInactivityTimeout': 15_000}, [
-         json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:32], 100),
-         armed(15_000), advance(5_000), credit_in(1, 80), chunk_out(1, 32, ECHOED[32:80], False),
+         json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:28], 100),
+         armed(15_000), advance(5_000), credit_in(1, 76), chunk_out(1, 28, ECHOED[28:76], False),
          armed(15_000), advance(12_000), credit_in(1, 60),
          armed(3_000), advance(3_000), failure(1, TRANSFER_STALLED), report(TRANSFER_STALLED)]),
 ]
@@ -437,7 +451,7 @@ def registered(call_id=1, destination=DEVICE):
 
 
 def logged_in(call_id=1):
-    return [on(login(call_id, 'ada'), 'client'), on(result(call_id, '"ada"', 'announced'), 'client')]
+    return [on(login(call_id, 'ada'), 'client'), on(result(call_id, '"ada"', OPENED), 'client')]
 
 
 def leg_b(call_id, procedure, value):
@@ -511,7 +525,7 @@ document = {
     '$comment': [
         "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
-        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. session, on an answer, says what it announced: announced for a token, which is random, ended for 16 zero bytes; none, nothing. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
+        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.',

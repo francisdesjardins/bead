@@ -711,6 +711,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   DEBUG_EVENT,
   DEPRECATED_EVENT,
   DROPPED_EVENT,
@@ -731,8 +732,10 @@ export { ProgrammerError } from '../../transport/shared/errors';
 export type { IEventIteratorOptions } from '../../transport/shared/types';
 export type {
   AdmissionFailure,
+  Announcement,
   CallId,
   ConnectionHandle,
+  Credential,
   DebugDirection,
   DebugFilterSource,
   DebugType,

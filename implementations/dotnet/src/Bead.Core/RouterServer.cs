@@ -146,7 +146,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// <summary>What the router did: sent a request, took a response, sent a notification.</summary>
     public event Action<RouterActivity, string>? Activity;
 
-    /// <summary>Each envelope, out or in, its token left out; nothing is built while none listens.</summary>
+    /// <summary>Each envelope, out or in, its credential left out; nothing is built while none listens.</summary>
     public event Action<DebugDirection, TracedEnvelope>? Debug;
 
     /// <inheritdoc/>

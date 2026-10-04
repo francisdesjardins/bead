@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { GenericError } from '../../../transport/shared/errors';
-import { CLIENT_FAILURES, FailureScope, ProtocolCode, SERVER_FAILURES } from '../constants';
+import {
+  CLIENT_FAILURES,
+  CredentialScheme,
+  FailureScope,
+  ProtocolCode,
+  SERVER_FAILURES,
+} from '../constants';
 import { DisconnectError, FailureError, failureErrorOf, redactHeader } from '../errors';
 import { toSessionToken } from '../identifiers';
 import type { IFailureHeader, IResultHeader } from '../types';
@@ -20,7 +26,11 @@ test.describe('FailureError', () => {
   const token = toSessionToken(new Uint8Array(16).fill(7));
 
   test('carries the failure and where it belongs, and keeps a redacted copy of the header', () => {
-    const header: IFailureHeader = { callId: 3, kind: 0x12, sessionToken: token };
+    const header: IFailureHeader = {
+      callId: 3,
+      credential: { scheme: CredentialScheme.OPAQUE, token },
+      kind: 0x12,
+    };
     const cause = new Error('underneath');
     const error = new FailureError(
       {
@@ -45,8 +55,12 @@ test.describe('FailureError', () => {
       scope: FailureScope.PROTOCOL,
       side: 'server',
     });
-    expect(error.header).toEqual({ callId: 3, hasSessionToken: true, kind: 0x12 });
-    expect(error.header).not.toHaveProperty('sessionToken');
+    expect(error.header).toEqual({
+      callId: 3,
+      credentialScheme: CredentialScheme.OPAQUE,
+      kind: 0x12,
+    });
+    expect(error.header).not.toHaveProperty('credential');
     expect(JSON.stringify(error)).not.toContain(token);
     expect(error.cause).toBe(cause);
   });
@@ -181,7 +195,7 @@ test.describe('failureErrorOf', () => {
       procedureAddress: { procedureId: 1, serviceId: 2 },
       side: 'server',
     });
-    expect(fromServer.header).toEqual({ callId: 3, hasSessionToken: false, kind: 0x12 });
+    expect(fromServer.header).toStrictEqual({ callId: 3, kind: 0x12 });
     expect(
       failureErrorOf(
         { code: 19, detail: '', relays: 0, scope: FailureScope.PROTOCOL },
@@ -206,24 +220,30 @@ test.describe('failureErrorOf', () => {
 });
 
 test.describe('redactHeader', () => {
-  test('leaves the token out and says whether there was one', () => {
+  test('leaves the credential out and says its scheme alone, when there was one', () => {
     const token = toSessionToken(new Uint8Array(16).fill(9));
-    const result: IResultHeader = { callId: 2, kind: 0x11, sessionToken: token };
-
-    expect(redactHeader(result)).toEqual({ callId: 2, hasSessionToken: true, kind: 0x11 });
-    // an ended session is announced, but names none
-    expect(redactHeader({ ...result, sessionToken: null })).toEqual({
+    const result: IResultHeader = {
       callId: 2,
-      hasSessionToken: false,
+      credential: { scheme: CredentialScheme.OPAQUE, token },
+      kind: 0x11,
+    };
+    const request = { callId: 1, kind: 0x10, procedureId: 1, serviceId: 2 } as const;
+
+    expect(redactHeader(result)).toStrictEqual({
+      callId: 2,
+      credentialScheme: CredentialScheme.OPAQUE,
       kind: 0x11,
     });
-    expect(redactHeader({ callId: 3, kind: 0x13 })).toEqual({
-      callId: 3,
-      hasSessionToken: false,
-      kind: 0x13,
-    });
+    // an ended session is announced, and names none
     expect(
-      redactHeader({ callId: 1, kind: 0x10, procedureId: 1, serviceId: 2, sessionToken: token })
-    ).toEqual({ callId: 1, hasSessionToken: true, kind: 0x10, procedureId: 1, serviceId: 2 });
+      redactHeader({ ...result, credential: { scheme: CredentialScheme.NONE } })
+    ).toStrictEqual({ callId: 2, credentialScheme: CredentialScheme.NONE, kind: 0x11 });
+    expect(redactHeader({ callId: 3, kind: 0x13 })).toStrictEqual({ callId: 3, kind: 0x13 });
+    expect(
+      redactHeader({ ...request, credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } })
+    ).toStrictEqual({ ...request, credentialScheme: CredentialScheme.JWT });
+    expect(
+      redactHeader({ ...request, credential: { bytes: new Uint8Array([1, 2]), scheme: 7 } })
+    ).toStrictEqual({ ...request, credentialScheme: 7 });
   });
 });

@@ -27,6 +27,7 @@ import type {
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   EnvelopeKind,
   FailureScope,
   LIMIT_DEFAULTS,
@@ -47,7 +48,9 @@ export {
 export type { TransportServerConnectionHandle } from '../../transport/server/types';
 export type {
   AdmissionFailure,
+  Announcement,
   CallId,
+  Credential,
   DebugFilterSource,
   DestinationId,
   EnvelopeHeader,

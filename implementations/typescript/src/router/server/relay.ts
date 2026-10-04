@@ -77,7 +77,7 @@ type Handle = TransportServerConnectionHandle;
 
 // constants
 
-// a request's header on leg B: no block, since it names no destination and presents no session
+// a request's header on leg B: no block, since it names no destination and presents no credential
 const REQUEST_HEADER_BYTES = headerBytesOf({
   callId: 1,
   kind: EnvelopeKind.REQUEST,

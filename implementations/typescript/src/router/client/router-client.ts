@@ -8,7 +8,7 @@ import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { CLOSE_EVENT, MESSAGE_EVENT, RECONNECT_EVENT } from '../../transport/shared/constants';
 import type { Data } from '../../transport/shared/types';
-import { CLIENT_FAILURES, EnvelopeKind } from '../shared/constants';
+import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../shared/constants';
 import { FailureError } from '../shared/errors';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
@@ -23,6 +23,7 @@ import type {
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   EnvelopeKind,
   FailureScope,
   LIMIT_DEFAULTS,
@@ -40,7 +41,9 @@ export {
   TimeoutError,
 } from '../../transport/shared/errors';
 export type {
+  Announcement,
   CallId,
+  Credential,
   DebugFilterSource,
   DestinationId,
   EnvelopeHeader,
@@ -287,9 +290,10 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       },
       // the session is the server's to give: an answer announces it when it changes, and carries
       // none otherwise
-      onAnswerReceived: (header) => {
-        if (header.sessionToken !== undefined) {
-          sessionToken = header.sessionToken ?? undefined;
+      onAnswerReceived: ({ credential }) => {
+        if (credential !== undefined) {
+          sessionToken =
+            credential.scheme === CredentialScheme.OPAQUE ? credential.token : undefined;
         }
       },
       report,

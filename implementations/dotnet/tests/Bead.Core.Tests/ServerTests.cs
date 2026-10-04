@@ -201,7 +201,7 @@ public sealed class ServerTests : IAsyncLifetime
 
         var answer = _transport.Read(0);
 
-        Assert.Equal(new ResultHeader { CallId = 1, Session = Server.Sessions.SessionTokenOf(Handle) }, answer.Header);
+        Assert.Equal(new ResultHeader { CallId = 1, Credential = Server.Sessions.SessionTokenOf(Handle) }, answer.Header);
 
         // the session timeout ends it, its subscription with SESSION_REQUIRED, the end announced
         await Advance(TimeSpan.FromSeconds(1));
@@ -209,7 +209,7 @@ public sealed class ServerTests : IAsyncLifetime
 
         var ended = _transport.Read(1);
 
-        Assert.Equal(new FailureHeader { CallId = 1, Session = SessionAnnouncement.Ended }, ended.Header);
+        Assert.Equal(new FailureHeader { CallId = 1, Credential = Credential.None }, ended.Header);
         Assert.Equal((ushort)ProtocolCode.SessionRequired, ended.Failure!.Code);
         Assert.Empty(_transport.Closed);
 
@@ -323,7 +323,7 @@ public sealed class ServerTests : IAsyncLifetime
         // over HTTP, the failure is what the listen held brings back
         var ended = _transport.Read(2);
 
-        Assert.Equal(new FailureHeader { CallId = 3, Session = SessionAnnouncement.Ended }, ended.Header);
+        Assert.Equal(new FailureHeader { CallId = 3, Credential = Credential.None }, ended.Header);
         Assert.Equal((ushort)ProtocolCode.SessionRequired, ended.Failure!.Code);
         Assert.False(Server.Sessions.Has(Handle));
         await Advance(TimeSpan.FromSeconds(1));
@@ -367,7 +367,7 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Empty(_transport.Sent);
 
         await Deliver(RequestOf(3, ("echo", false)));
-        Assert.Equal(new ResultHeader { CallId = 3, Session = Server.Sessions.SessionTokenOf(Handle) }, _transport.Read(0).Header);
+        Assert.Equal(new ResultHeader { CallId = 3, Credential = Server.Sessions.SessionTokenOf(Handle) }, _transport.Read(0).Header);
     }
 
     // no twin in server.test.ts: the TypeScript side shows this on its router's core and on its
@@ -379,7 +379,7 @@ public sealed class ServerTests : IAsyncLifetime
         Start(Timeout.InfiniteTimeSpan);
         _transport.Open(Handle);
         await Deliver(RequestOf(1, ("login", false), "{\"name\":\"ada\"}"));
-        Assert.NotNull(((ResultHeader)_transport.Read(0).Header).Session);
+        Assert.NotNull(((ResultHeader)_transport.Read(0).Header).Credential);
 
         // a connection of the same handle, with no session, was told nothing: its answer announces nothing
         _transport.CloseFromPeer(Handle);
@@ -403,7 +403,7 @@ public sealed class ServerTests : IAsyncLifetime
         _transport.Open(Handle);
         Server.Sessions.Set(Server.Sessions.Create(Handle) with { SessionToken = TokenOf(4) });
         await Deliver(RequestOf(1, ("echo", false)));
-        Assert.Equal(new ResultHeader { CallId = 1, Session = TokenOf(4) }, _transport.Read(0).Header);
+        Assert.Equal(new ResultHeader { CallId = 1, Credential = TokenOf(4) }, _transport.Read(0).Header);
     }
 
     [Fact]

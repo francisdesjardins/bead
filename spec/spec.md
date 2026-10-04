@@ -81,29 +81,53 @@ subscription's notifications carry the call id of the request that opened it.
 _Vectors: `headers`, `reads`, `headerRefusals`._
 
 4.1. The low nibble of the flags adds blocks, laid out after the kind's own part in the order of
-their bits: `SESSION` 0x01 (16 bytes), `DESTINATION` 0x02 (4 bytes), `TRANSFER` 0x04 (8 bytes). 0x08
+their bits: `DESTINATION` 0x02 (4 bytes), `TRANSFER` 0x04 (8 bytes), then `CREDENTIAL` 0x08 (4 bytes
+and its credential, to the next 4-byte word), the last block and the one whose length varies. 0x01
 is kept for a block to come. The high nibble adds none: `SUBSCRIPTION` 0x10, `PACED` 0x20, `MORE`
-0x40, and 0x80 is kept. A header's length follows from its kind and `flags & 0x0F` alone.
+0x40, and 0x80 is kept. A header's length follows from its kind, `flags & 0x0F`, and, with
+`CREDENTIAL`, the length its block states.
 
 4.2. Each kind takes these flags, and a reader MUST refuse any other with `ENVELOPE_MALFORMED`, kept
 bits included:
 
-| Kind           | Flags it takes                                                |
-| -------------- | ------------------------------------------------------------- |
-| `REQUEST`      | `SESSION`, `DESTINATION`, `TRANSFER`, `SUBSCRIPTION`, `PACED` |
-| `RESULT`       | `SESSION`, `TRANSFER`                                         |
-| `FAILURE`      | `SESSION`                                                     |
-| `NOTIFICATION` | none                                                          |
-| `CHUNK`        | `MORE`                                                        |
-| `CREDIT`       | `PACED`                                                       |
-| `CANCEL`       | none                                                          |
+| Kind           | Flags it takes                                                   |
+| -------------- | ---------------------------------------------------------------- |
+| `REQUEST`      | `DESTINATION`, `TRANSFER`, `CREDENTIAL`, `SUBSCRIPTION`, `PACED` |
+| `RESULT`       | `TRANSFER`, `CREDENTIAL`                                         |
+| `FAILURE`      | `CREDENTIAL`                                                     |
+| `NOTIFICATION` | none                                                             |
+| `CHUNK`        | `MORE`                                                           |
+| `CREDIT`       | `PACED`                                                          |
+| `CANCEL`       | none                                                             |
 
-4.3. The header's length, byte 3 times 4, MUST be the prefix, the kind's own part and its blocks,
-and MUST NOT run past the message. A reader MUST refuse any other with `ENVELOPE_MALFORMED`.
+4.3. The header's length, byte 3 times 4, MUST be the prefix, the kind's own part and its blocks, to
+the end of the `CREDENTIAL` block's padding, and MUST NOT run past the message: 1,020 bytes at most,
+the 255 words byte 3 counts. A reader MUST refuse any other with `ENVELOPE_MALFORMED`, as it does a
+header whose length does not hold the first 4 bytes of its `CREDENTIAL` block, which state that
+block's length.
 
-4.4. `SESSION`: on a request, the session it presents; on an answer, the session announced when it
-changed. 16 zero bytes announce that the session ended, which only an answer does: a reader MUST
-refuse them on a request with `ENVELOPE_MALFORMED`.
+4.4. `CREDENTIAL`: a credential of a scheme, laid out as a TLS extension is
+([RFC 8446 §4.2](https://www.rfc-editor.org/rfc/rfc8446#section-4.2)): its credential scheme on 2
+bytes, its length on 2, the credential's bytes, then zero bytes to the next 4-byte word. A
+credential scheme names a format, as HTTP's authentication scheme does
+([RFC 9110 §11.1](https://www.rfc-editor.org/rfc/rfc9110#section-11.1)), so a side never reads the
+bytes to learn what they are. A request presents a credential, and an answer announces its
+connection's session (section 13.3):
+
+| Scheme      | Name        | Its bytes                                   | Length                      | On a request | On a result or a failure              |
+| ----------- | ----------- | ------------------------------------------- | --------------------------- | ------------ | ------------------------------------- |
+| 0           | `NONE`      | none                                        | 0                           | malformed    | taken: its connection's session ended |
+| 1           | `OPAQUE`    | a session's token (section 13.2)            | 16, never all zero          | taken        | taken                                 |
+| 2           | `JWT`       | a token in JWS Compact Serialization        | 1 to what the header leaves | taken        | malformed                             |
+| 3           | `ELSEWHERE` | none: its credential is not in the envelope | 0                           | taken        | malformed                             |
+| 4 to 65,535 | to come     | a format to come's, read whole              | 0 to what the header leaves | taken        | malformed                             |
+
+A `JWT`'s bytes are its token's characters, base64url and periods, as JWS Compact Serialization
+writes them ([RFC 7515 §7.1](https://www.rfc-editor.org/rfc/rfc7515#section-7.1)). What the header
+leaves a credential is its 1,020 bytes less all that comes before: 1,004 bytes on a request with no
+other block, 992 on one with a destination and a total. A reader MUST refuse with
+`ENVELOPE_MALFORMED` a scheme on a kind that does not take it, a length that is not its scheme's, an
+`OPAQUE` of 16 zero bytes, padding that is not zero, and a block that runs past the header's length.
 
 4.5. `DESTINATION`: what the request is for behind the peer that takes it, never 0. A reader MUST
 refuse 0 with `ENVELOPE_MALFORMED`. An answer names its call alone, and carries none.
@@ -121,7 +145,9 @@ with `ENVELOPE_MALFORMED`. `PACED` on a credit says it counts notifications, not
 4.9. `MORE` on a chunk says more chunks follow it; without it, the chunk is the last.
 
 4.10. A writer MUST NOT write what a reader refuses: no call id, destination id, service id or
-procedure id of 0, no flag a kind does not take, and no ended session on a request.
+procedure id of 0, no flag a kind does not take, no credential of a scheme its kind does not take —
+`NONE` on a request, any but `OPAQUE` and `NONE` on an answer — nor of a length not its scheme's, no
+`OPAQUE` of 16 zero bytes, and no header past 1,020 bytes.
 
 ## 5. Reading an envelope
 
@@ -135,7 +161,8 @@ _Vectors: `headerRefusals`, `envelopeRefusals`, `reads`._
 4. A kind from 0x80: the envelope is skipped, and nothing after it is checked.
 5. A kind from 0x10; else `ENVELOPE_MALFORMED`.
 6. A kind of section 3.1; else `KIND_UNSUPPORTED`.
-7. Everything else; else `ENVELOPE_MALFORMED`.
+7. Everything else, the header's length among it, which its kind, its flags and its `CREDENTIAL`
+   block's own length give; else `ENVELOPE_MALFORMED`.
 
 5.2. Within step 7 the order is not observable, since every check refuses with the same code. The
 failure's detail SHOULD say which check failed, and is informative.
@@ -171,7 +198,8 @@ the character the cut fell in. It MUST keep a leading U+FEFF as a character, and
 that are not UTF-8 as U+FFFD, as the WHATWG Encoding Standard decodes them, rather than refuse the
 failure they explain.
 
-7.4. A writer MUST cut the detail at `maximumDetailBytes`, on a character's boundary, and write a
+7.4. A writer MUST cut the detail at `maximumDetailBytes`, and at `maximumEnvelopeBytes` less 32
+bytes — its prefix, an announcement's block and its record — on a character's boundary, and write a
 lone surrogate as U+FFFD.
 
 7.5. A relay that passes a failure on writes one relay more than it received. The side that raised
@@ -366,11 +394,11 @@ came.
 _Conversations: `spec/conversations.json`._
 
 12.1. A payload whose envelope would pass `chunkBytes` goes as a transfer: a request's, or a
-result's, whose header is counted with the SESSION block an answer may carry, whether it carries
-one or not. A notification, a failure, and the result of a request that opens a subscription
-(section 11.6) always go in one envelope. A side that sends no transfer fails a request whose
-payload would need one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a
-result with `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
+result's, whose header is counted with the 20 bytes of an announcement, whether it carries one or
+not. A notification, a failure, and the result of a request that opens a subscription (section 11.6)
+always go in one envelope. A side that sends no transfer fails a request whose payload would need
+one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a result with
+`PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
 
 12.2. Both ends of a connection set their limits alike: nothing announces them.
 
@@ -483,12 +511,12 @@ its data, and its timeouts.
 by no other connection.
 
 13.3. A server announces a connection's session on the next answer — a result or a failure — that
-goes out after it changed: its token once it opened or was drawn anew, 16 zero bytes once it ended.
-An answer that announces nothing carries no SESSION block. An answer that did not go out announced
-nothing.
+goes out after it changed, in its `CREDENTIAL` block: `OPAQUE`, its token, once it opened or was
+drawn anew; `NONE` once it ended. An answer announces no other scheme, and one that announces
+nothing carries no `CREDENTIAL` block. An answer that did not go out announced nothing.
 
 13.4. A client learns the session from the answers, and never presents it: the connection is the
-session. A server reads a SESSION block on a request, and ignores it.
+session. A server reads a `CREDENTIAL` block on a request, whatever its scheme, and ignores it.
 
 13.5. A procedure that requires a session refuses a connection without one with
 `SESSION_REQUIRED`. A procedure that ends a session ends it before it answers, so its own answer —

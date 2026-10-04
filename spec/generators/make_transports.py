@@ -50,13 +50,17 @@ def cancel(call_id):
     return f'A1 16 00 02  {word(call_id, 4)}'
 
 
-def result(call_id, value, session=None):
-    return {'kind': RESULT, 'callId': call_id, 'payload': text(value), **({'session': session} if session else {})}
+# what an answer announces, by the scheme of its CREDENTIAL block: a session's token, or its end
+OPENED, ENDED = 'OPAQUE', 'NONE'
 
 
-def failure(call_id, code, scope=PROTOCOL, session=None):
+def result(call_id, value, credential=None):
+    return {'kind': RESULT, 'callId': call_id, 'payload': text(value), **({'credential': credential} if credential else {})}
+
+
+def failure(call_id, code, scope=PROTOCOL, credential=None):
     return {'kind': FAILURE, 'callId': call_id, 'failure': {'code': code, 'scope': scope, 'relays': 0},
-            **({'session': session} if session else {})}
+            **({'credential': credential} if credential else {})}
 
 
 def notification(call_id, value):
@@ -281,14 +285,14 @@ cases = [
     ('a listen held keeps a session\'s connection from its connection timeout, which counts anew from the listen\'s end',
      ['13.7', '15.1', '15.9'], None, [
          *drawn(listening=True), post('login', request(1, 'login', '{"name":"ada","connectionTimeout":10000}')),
-         answered('login', result(1, '"ada"', 'announced')), armed(10_000), advance(4000),
+         answered('login', result(1, '"ada"', OPENED)), armed(10_000), advance(4000),
          listen('listen', 0, 20000), armed(20_000), advance(20_000), expect('listen', 204, body=''),
          armed(10_000), advance(10_000), until('connections', 0),
          post('after', request(3, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
     ('a session\'s connection outlives the server\'s own connection timeout, and once its session ends takes it, counted from the end',
      ['13.7', '15.12.10'], {'connectionInactivityTimeout': 10_000}, [
          *drawn(), post('login', request(1, 'login', '{"name":"ada","sessionTimeout":20000}')),
-         answered('login', result(1, '"ada"', 'announced')),
+         answered('login', result(1, '"ada"', OPENED)),
          armed(20_000), advance(15_000),
          post('echo', request(3, 'echo', '"x"')), answered('echo', result(3, '"x"')),
          armed(20_000), advance(20_000), armed(10_000), advance(10_000), until('connections', 0),
@@ -299,11 +303,11 @@ cases = [
      ['13.6', '13.7', '15.1'], None, [
          *drawn(listening=True), post('subscribe', SUBSCRIBE), answered('subscribe', result(1, 'null')),
          post('login', request(3, 'login', '{"name":"ada","sessionTimeout":15000}')),
-         answered('login', result(3, '"ada"', 'announced')),
+         answered('login', result(3, '"ada"', OPENED)),
          listen('first', 0, 5000), until('listens', 1), armed(5000), advance(5000), expect('first', 204, body=''),
          listen('listen', 0, 20000), until('listens', 1), armed(10_000), advance(10_000),
          expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'},
-                batch=[failure(1, SESSION_REQUIRED, session='ended')])]),
+                batch=[failure(1, SESSION_REQUIRED, credential=ENDED)])]),
 ]
 
 # ── WebSocket ───────────────────────────────────────────────────────────────────────────────────
@@ -362,15 +366,15 @@ websocket = [
      ['11.7.2', '13.6', '13.7'], {}, [
          *upgrade(),
          message('socket', binary=request(1, 'login', '{"name":"ada","sessionTimeout":10000,"connectionTimeout":20000}')),
-         heard('socket', envelope=result(1, '"ada"', 'announced')),
+         heard('socket', envelope=result(1, '"ada"', OPENED)),
          message('socket', binary=request(3, 'ticks', 'null', flags=0x10)), heard('socket', envelope=result(3, 'null')),
-         armed(10_000), advance(10_000), heard('socket', envelope=failure(3, SESSION_REQUIRED, session='ended')),
+         armed(10_000), advance(10_000), heard('socket', envelope=failure(3, SESSION_REQUIRED, credential=ENDED)),
          message('socket', binary=request(5, 'whoami', 'null')), heard('socket', envelope=failure(5, SESSION_REQUIRED))]),
     ('a session\'s connection, silent past its connection timeout, is closed with 1000, each message starting it anew',
      ['13.7', '15.3'], {}, [
          *upgrade(),
          message('socket', binary=request(1, 'login', '{"name":"ada","connectionTimeout":10000}')),
-         heard('socket', envelope=result(1, '"ada"', 'announced')),
+         heard('socket', envelope=result(1, '"ada"', OPENED)),
          armed(10_000), advance(6000),
          message('socket', binary=request(3, 'echo', '"x"')), heard('socket', envelope=result(3, '"x"')),
          armed(10_000), advance(6000),

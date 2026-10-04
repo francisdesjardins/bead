@@ -101,8 +101,11 @@ const CHUNK_HEADER_BYTES = headerBytesOf({
 
 const DISPOSED = 'the router was disposed';
 
-// what a failure's envelope holds besides its detail: its header with a session, and its record
-const FAILURE_OVERHEAD_BYTES = 28;
+// what an answer's announcement adds to its header: a credential's head, then a session's token
+const ANNOUNCEMENT_BYTES = 4 + SESSION_TOKEN_BYTES;
+
+// what a failure's envelope holds besides its detail: its prefix, an announcement, and its record
+const FAILURE_OVERHEAD_BYTES = 32;
 
 // what the limits hold to together, each as the failure that says it does not
 const LIMIT_RULES: readonly { holds: (limits: IRouterLimits) => boolean; rule: string }[] =
@@ -469,7 +472,7 @@ export const createRouterCore = <Handle extends string>(
   };
 
   // how a payload goes after `header`: whole — `undefined` — or as a transfer, a result's header
-  // counted with the session it may announce; or not at all, and the failure says why
+  // counted with the announcement it may carry; or not at all, and the failure says why
   const transferOf = (
     payload: Uint8Array,
     {
@@ -477,13 +480,13 @@ export const createRouterCore = <Handle extends string>(
       maximumPayloadBytes,
     }: { header: IRequestHeader | IResultHeader; maximumPayloadBytes: number }
   ): IOutgoingTransfer | IProtocolFailure | undefined => {
-    const sessionBytes = header.kind === EnvelopeKind.RESULT ? SESSION_TOKEN_BYTES : 0;
+    const announcementBytes = header.kind === EnvelopeKind.RESULT ? ANNOUNCEMENT_BYTES : 0;
 
     if (payload.length > maximumPayloadBytes) {
       return tooLargeOf(payload.length, maximumPayloadBytes);
     }
 
-    if (headerBytesOf(header) + sessionBytes + payload.length <= wholeBytes) {
+    if (headerBytesOf(header) + announcementBytes + payload.length <= wholeBytes) {
       return undefined;
     }
 
@@ -495,7 +498,8 @@ export const createRouterCore = <Handle extends string>(
     }
 
     return createOutgoingTransfer(payload, {
-      openingBytes: wholeBytes - headerBytesOf({ ...header, total: payload.length }) - sessionBytes,
+      openingBytes:
+        wholeBytes - headerBytesOf({ ...header, total: payload.length }) - announcementBytes,
       payloadBytesPerChunk,
     });
   };

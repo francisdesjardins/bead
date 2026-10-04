@@ -30,13 +30,14 @@ is what WebSocket carries it in. Every layout from `0xA1` to `0xAF` keeps the pr
 a reader that does not read a layout still knows the call to refuse it on.
 
 **The flags split on a nibble.** The low one adds blocks, laid out after the kind's own part in the
-order of their bits: SESSION `0x01`, a 16-byte token; DESTINATION `0x02`, 4 bytes on a request;
-TRANSFER `0x04`, a payload's 8-byte total; and `0x08` kept for a block to come. The high one adds
-none: SUBSCRIPTION `0x10`, on a request that opens a subscription; PACED `0x20`
+order of their bits: DESTINATION `0x02`, 4 bytes on a request; TRANSFER `0x04`, a payload's 8-byte
+total; CREDENTIAL `0x08`, a credential of a scheme, the last block and the one whose length varies
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)); and `0x01` kept for a block to come.
+The high one adds none: SUBSCRIPTION `0x10`, on a request that opens a subscription; PACED `0x20`
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)); MORE `0x40`, on a chunk that another
-follows; and `0x80` kept. A reader knows a header's length from its kind and `flags & 0x0F` alone,
-and a bit of the high nibble never moves an offset. Each flag is allowed on its kinds alone, and any
-other makes the envelope malformed.
+follows; and `0x80` kept. A reader knows a header's length from its kind, `flags & 0x0F`, and, with
+CREDENTIAL, the length its block states, and a bit of the high nibble never moves an offset. Each
+flag is allowed on its kinds alone, and any other makes the envelope malformed.
 
 **A call id pairs everything.** It is odd when a client opened the call and even when a server did,
 so the two sides never draw the same one, and a subscription's notifications carry the call id of

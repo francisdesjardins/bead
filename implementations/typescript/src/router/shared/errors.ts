@@ -3,6 +3,7 @@
 import { GenericError } from '../../transport/shared/errors';
 import { FailureScope, ProtocolCode } from './constants';
 import type {
+  Credential,
   DestinationId,
   EnvelopeHeader,
   FailureOrigin,
@@ -20,7 +21,7 @@ import type {
 /** Where a failure belongs, besides what it says: the call it failed and the envelope that said it. */
 interface IFailureErrorOptions extends ErrorOptions {
   destinationId?: DestinationId | undefined;
-  /** Kept redacted: a copy, without its session token. */
+  /** Kept redacted: a copy, without its credential. */
   header?: EnvelopeHeader | undefined;
   procedureAddress?: IProcedureAddress | undefined;
 }
@@ -70,12 +71,16 @@ const messageOf = ({
 };
 
 /**
- * `header` fit to be traced or thrown: a copy without its session token, saying whether it had one.
+ * `header` fit to be traced or thrown: a copy without its credential, saying its scheme alone when it
+ * had one.
  */
 export const redactHeader = (header: EnvelopeHeader): RedactedHeader => {
-  const { sessionToken, ...rest } = header as EnvelopeHeader & { sessionToken?: unknown };
+  const { credential, ...rest } = header as EnvelopeHeader & { credential?: Credential };
 
-  return { ...rest, hasSessionToken: typeof sessionToken === 'string' };
+  return {
+    ...rest,
+    ...(credential === undefined ? {} : { credentialScheme: credential.scheme }),
+  };
 };
 
 // definition

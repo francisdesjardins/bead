@@ -3,7 +3,7 @@
   "$comment": [
     "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
     "A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client's connection.",
-    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. session, on an answer, says what it announced: announced for a token, which is random, ended for 16 zero bytes; none, nothing. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
+    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too. A failure compares its code, its scope and the relays it crossed; its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
     "report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen. A connection closed and opened again is a new connection under the same name.",
@@ -313,7 +313,7 @@
       ]
     },
     {
-      "name": "a result that fits in one envelope only without the session an answer may announce is refused as one that does not",
+      "name": "a result is counted with the 20 bytes of an announcement: one that fits only without them is refused as one that does not",
       "clauses": [
         "12.1"
       ],
@@ -325,12 +325,22 @@
       },
       "steps": [
         {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 34 35 7D"
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 33 34 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 22"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 33 35 7D"
         },
         {
           "expect": {
             "kind": 18,
-            "callId": 1,
+            "callId": 3,
             "failure": {
               "code": 64,
               "scope": 0,
@@ -1330,7 +1340,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           }
         },
         {
@@ -1360,7 +1370,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           }
         },
         {
@@ -1371,7 +1381,7 @@
             "kind": 17,
             "callId": 3,
             "payload": "6E 75 6C 6C",
-            "session": "ended"
+            "credential": "NONE"
           }
         },
         {
@@ -1405,7 +1415,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           }
         },
         {
@@ -1416,7 +1426,7 @@
             "kind": 17,
             "callId": 3,
             "payload": "22 62 6F 62 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           }
         }
       ]
@@ -1435,7 +1445,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           }
         },
         {
@@ -1460,7 +1470,7 @@
               "scope": 0,
               "relays": 0
             },
-            "session": "ended"
+            "credential": "NONE"
           }
         },
         {
@@ -1483,19 +1493,49 @@
       ]
     },
     {
-      "name": "a request presenting a session is read, and its session ignored",
+      "name": "a request presenting a credential is read, and its credential ignored, whatever its scheme",
       "clauses": [
         "13.4"
       ],
       "steps": [
         {
-          "send": "A1 10 01 07  00 00 00 01  00 01 00 01  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F | 22 78 22"
+          "send": "A1 10 08 08  00 00 00 01  00 01 00 01  00 01 00 10  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F | 22 78 22"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 1,
             "payload": "22 78 22"
+          }
+        },
+        {
+          "send": "A1 10 08 06  00 00 00 03  00 01 00 01  00 02 00 05  61 2E 62 2E 63  00 00 00 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 05  00 01 00 01  00 03 00 00 | 22 7A 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 7A 22"
+          }
+        },
+        {
+          "send": "A1 10 08 05  00 00 00 07  00 01 00 01  00 07 00 02  01 02  00 00 | 22 77 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 77 22"
           }
         }
       ]
@@ -1714,7 +1754,7 @@
       ],
       "steps": [
         {
-          "send": "A1 10 08 03  00 00 00 09  00 01 00 01"
+          "send": "A1 10 01 03  00 00 00 09  00 01 00 01"
         },
         {
           "expect": {
@@ -1739,7 +1779,7 @@
           "send": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
         },
         {
-          "send": "A1 10 08 03  00 00 00 01  00 01 00 01"
+          "send": "A1 10 01 03  00 00 00 01  00 01 00 01"
         },
         {
           "report": 1
@@ -1932,7 +1972,7 @@
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65",
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
             "total": 100
           }
         },
@@ -1943,18 +1983,18 @@
           "expect": {
             "kind": 20,
             "callId": 1,
-            "offset": 32,
+            "offset": 28,
             "isLast": false,
-            "payload": "66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
           }
         },
         {
           "expect": {
             "kind": 20,
             "callId": 1,
-            "offset": 80,
+            "offset": 76,
             "isLast": true,
-            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+            "payload": "78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
           }
         }
       ]
@@ -2028,23 +2068,23 @@
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65",
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
             "total": 100
           }
         },
         {
-          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 4F"
+          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 4B"
         },
         {
-          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 50"
+          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 4C"
         },
         {
           "expect": {
             "kind": 20,
             "callId": 1,
-            "offset": 32,
+            "offset": 28,
             "isLast": false,
-            "payload": "66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
           }
         },
         {
@@ -2057,9 +2097,9 @@
           "expect": {
             "kind": 20,
             "callId": 1,
-            "offset": 80,
+            "offset": 76,
             "isLast": true,
-            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+            "payload": "78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
           }
         }
       ]
@@ -2426,7 +2466,7 @@
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65",
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
             "total": 100
           }
         },
@@ -2560,13 +2600,13 @@
           }
         },
         {
-          "send": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65"
+          "send": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
         },
         {
           "expect": {
             "kind": 21,
             "callId": 2,
-            "creditEnd": 160
+            "creditEnd": 156
           }
         },
         {
@@ -2578,7 +2618,7 @@
           "advance": 10000
         },
         {
-          "send": "A1 14 40 04  00 00 00 02  00 00 00 00 00 00 00 20 | 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+          "send": "A1 14 40 04  00 00 00 02  00 00 00 00 00 00 00 1C | 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
         },
         {
           "until": {
@@ -2609,7 +2649,7 @@
           "report": "exception"
         },
         {
-          "send": "A1 14 40 04  00 00 00 02  00 00 00 00 00 00 00 50 | 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+          "send": "A1 14 40 04  00 00 00 02  00 00 00 00 00 00 00 4C | 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73"
         },
         {
           "send": "A1 11 00 02  00 00 00 02 | 22 6C 61 74 65 22"
@@ -2623,7 +2663,7 @@
           "advance": 20000
         },
         {
-          "send": "A1 14 40 04  00 00 00 02  00 00 00 00 00 00 00 50 | 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+          "send": "A1 14 40 04  00 00 00 02  00 00 00 00 00 00 00 4C | 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73"
         },
         {
           "report": 20
@@ -2649,7 +2689,7 @@
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65",
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
             "total": 100
           }
         },
@@ -2662,15 +2702,15 @@
           "advance": 5000
         },
         {
-          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 50"
+          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 4C"
         },
         {
           "expect": {
             "kind": 20,
             "callId": 1,
-            "offset": 32,
+            "offset": 28,
             "isLast": false,
-            "payload": "66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61"
+            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
           }
         },
         {
@@ -2731,7 +2771,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -2798,7 +2838,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -2869,7 +2909,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -2982,7 +3022,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3037,7 +3077,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3093,7 +3133,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3149,7 +3189,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3294,7 +3334,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3362,7 +3402,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3431,7 +3471,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3497,7 +3537,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },
@@ -3572,7 +3612,7 @@
             "kind": 17,
             "callId": 1,
             "payload": "22 61 64 61 22",
-            "session": "announced"
+            "credential": "OPAQUE"
           },
           "on": "client"
         },

@@ -169,7 +169,7 @@
         "kind": { "const": 17 },
         "callId": { "$ref": "common.schema.json#/$defs/u32" },
         "payload": { "$ref": "common.schema.json#/$defs/bytes" },
-        "session": { "$ref": "#/$defs/session" },
+        "credential": { "$ref": "#/$defs/announcement" },
         "total": { "$ref": "common.schema.json#/$defs/u53" }
       }
     },
@@ -191,7 +191,7 @@
             "relays": { "$ref": "common.schema.json#/$defs/u8" }
           }
         },
-        "session": { "$ref": "#/$defs/session" }
+        "credential": { "$ref": "#/$defs/announcement" }
       }
     },
     "notification": {
@@ -235,9 +235,9 @@
         "callId": { "$ref": "common.schema.json#/$defs/u32" }
       }
     },
-    "session": {
-      "description": "What an answer announced of its connection's session: a token, which is random, or its end. Absent, nothing.",
-      "enum": ["announced", "ended"]
+    "announcement": {
+      "description": "The scheme of the CREDENTIAL block an answer carried, what it announced of its connection's session: OPAQUE, its token, which is random; NONE, its end. Absent, it carried none.",
+      "enum": ["OPAQUE", "NONE"]
     }
   }
 }
