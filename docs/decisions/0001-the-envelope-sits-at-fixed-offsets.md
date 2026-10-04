@@ -60,7 +60,9 @@ codes from a procedure's.
 
 **Every bit this layout does not define refuses the envelope as malformed**, and so do bytes after
 the header of a kind that carries no payload, a credit's or a cancel's, and a chunk that carries
-none.
+none. A credential scheme to come is no bit: its block is read whole, by the length it states, and
+the request is refused at admission, `CREDENTIAL_UNSUPPORTED`, which names the schemes the side
+takes ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
 **A payload larger than an envelope goes as a transfer, in this same layout**, as HTTP/2 splits a
 stream into frames rather than sending one frame of a 64-bit length. The request or the result that
@@ -112,26 +114,28 @@ protocol's own PING control frame at an interval and drops a connection that lea
 **A transport that keeps no connection draws one.** Over HTTP, and over any such transport to come,
 the transport draws a 16-byte token from a cryptographic source when a client connects, and the
 client presents it on every exchange. The router, the sessions and the relays see a connection, as
-over a socket, so a client still never presents its session. The token is worth the session it
-holds: it crosses only TLS off the machine, and no URL, handle, detail or log carries it. Such a
-transport reads three things of an envelope and nothing else, its layout, its kind and its call id,
-in the prefix every layout keeps, to hand an answer to the exchange that carried its request, as
-HTTP/2 hands a frame to its stream by an id at a fixed offset (RFC 9113 §4.1). An exchange waits
-only for the answer to a request of the peer's parity; any other ends at once and empty, a cancel's
-included, so a cancel is still never answered. An exchange lost closes the connection at both ends,
-as a socket that drops does, and a client's send settles on the head of its answer, so a relay
-still tells a request never tried, refused by a status the transport marks as its own, from one lost
-after, which any other status is: an intermediary's may come once the request ran. What the server
-sends of its own has no exchange to go on, so it waits, numbered, in the connection's outbox, for
-its client to listen: to ask for it by an exchange of its own, which the server holds until
-something comes, long polling as RFC 6202 lays it out rather than a response held open. Each listen
-acknowledges what its client heard whole; what it did not comes again, as a stream's lost frames are
-sent again (RFC 9000 §13.3). The client reads a batch as it comes and bounds each envelope alone, as
-HTTP/2 bounds its frames and never its streams (RFC 9113 §4.2). A client says at connect, once for
-the connection's life, whether it listens, and the server says it back, as a WebSocket subprotocol
-is chosen once (RFC 6455 §4.2.2): to one that does not listen, a request that opens a subscription
-is refused, `SUBSCRIPTION_UNSUPPORTED`. A transfer, whose credit would have to come back as its
-request goes, is not taken.
+over a socket, and the token names the connection and nothing else: a call presents its session or
+its credential in its own header, or in its exchange's `Authorization`
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). The token is worth the session its
+connection holds: it crosses only TLS off the machine, and no URL, handle, detail or log carries it.
+Such a transport reads three things of an envelope and nothing else, its layout, its kind and its
+call id, in the prefix every layout keeps, to hand an answer to the exchange that carried its
+request, as HTTP/2 hands a frame to its stream by an id at a fixed offset (RFC 9113 §4.1). An
+exchange waits only for the answer to a request of the peer's parity; any other ends at once and
+empty, a cancel's included, so a cancel is still never answered. An exchange lost closes the
+connection at both ends, as a socket that drops does, and a client's send settles on the head of its
+answer, so a relay still tells a request never tried, refused by a status the transport marks as its
+own, from one lost after, which any other status is: an intermediary's may come once the request
+ran. What the server sends of its own has no exchange to go on, so it waits, numbered, in the
+connection's outbox, for its client to listen: to ask for it by an exchange of its own, which the
+server holds until something comes, long polling as RFC 6202 lays it out rather than a response held
+open. Each listen acknowledges what its client heard whole; what it did not comes again, as a
+stream's lost frames are sent again (RFC 9000 §13.3). The client reads a batch as it comes and
+bounds each envelope alone, as HTTP/2 bounds its frames and never its streams (RFC 9113 §4.2). A
+client says at connect, once for the connection's life, whether it listens, and the server says it
+back, as a WebSocket subprotocol is chosen once (RFC 6455 §4.2.2): to one that does not listen, a
+request that opens a subscription is refused, `SUBSCRIPTION_UNSUPPORTED`. A transfer, whose credit
+would have to come back as its request goes, is not taken.
 
 **What does not read goes through one gate**: a request whose prefix reads, of the peer's parity, on
 a call id neither open nor held, is answered with a failure on that call id; an answer of this
@@ -169,12 +173,18 @@ other whose exchanges race: the router would drop it as naming no call, and the 
 The transport of the side that answers buries such a call id for the least a requester reserves one,
 5 seconds, and drops the request that comes under it; HTTP's does.
 
-**A session is a 128-bit token drawn from a cryptographic source**, announced on an answer only when
-it changes, and never presented by a client: over a connection, the connection is the session.
+**A connection's session is a 128-bit token drawn from a cryptographic source**, announced on an
+answer only when it changes, and presented by a client only on a call that asks for it, `OPAQUE`, so
+that call runs in no other session; a credential's session is what a verifier makes of a credential
+a call presents, and is never announced
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
-**Every requester behind a relay shares its leg B**: one session at the target, one space of call
-ids, and the target's transfer places. The relay's admission, which sees the procedure and the
-destination, is where each requester's rights are checked; the target sees the relay alone.
+**Every requester behind a relay shares its leg B**: one space of call ids, and the target's
+transfer places. One that presents none or `OPAQUE` shares its session at the target too: the
+relay's admission, which sees the procedure and the destination, is where its rights are checked,
+and the target sees the relay alone. One that presents a `JWT` or an `ELSEWHERE` runs at the target
+in the session its own credential resolves to, which the target verifies
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
 **A payload is bounded by the router's limits, not by the envelope**: 16,777,216 bytes by default,
 and more when both ends are set so. One whose envelope would pass a chunk, 1 MiB, goes as a

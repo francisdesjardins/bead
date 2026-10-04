@@ -26,10 +26,11 @@ Nothing is published yet.
 
 A client and its server talk in more ways than requests and answers. The server pushes changes the
 client must keep up with. A large file goes up while other calls carry on. A call is cancelled
-halfway. A session outlives a dropped connection, and the server sometimes has to ask the client
-something. Bead carries all of it in one small binary envelope, whatever carries the envelope:
-WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and a publish/subscribe
-broker (coming).
+halfway. A call presents its own credential — a signed token, say — which outlives a dropped
+connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
+the client something. Bead carries all of it in one small binary envelope, whatever carries the
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and a
+publish/subscribe broker (coming).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -39,8 +40,9 @@ broker (coming).
   one. A queue past its bound ends the subscription out loud, never in silence.
 - **Large payloads under credit.** A transfer goes in chunks, as fast as its receiver credits them,
   beside the calls still under way.
-- **Everything a conversation needs**: cancel, sessions, relays, and commands, the server's own
-  calls to the client.
+- **Everything a conversation needs**: cancel, sessions, a credential on each call — a JWT, or
+  what its transport carries — relays that forward it to the destination that verifies it, and
+  commands, the server's own calls to the client.
 - **One behaviour in every language.** The spec, its 221 vectors and 134 conversations are the
   contract. The TypeScript and C# implementations both play them, and call each other in CI over
   both transports.
@@ -88,7 +90,7 @@ its sections names the vector groups that check it. Beside it:
 | [`conversations.json`](spec/conversations.json)     | 134 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets         |
 | [`transports.json`](spec/transports.json)           | 56 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                             |
 | [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                             |
-| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, and its procedures                                                                                        |
+| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, its procedures, what its relay admits and forwards, and the credentials it verifies                       |
 
 Both implementations read these files from `spec/` in their tests; neither keeps a copy. Four
 generators write them, and regenerating must give the same bytes:

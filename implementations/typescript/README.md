@@ -45,8 +45,8 @@ a connection is alive is its transport's to know.
 import { WebSocketServer } from 'ws';
 
 const server = createWSTransportServer({ WebSocketServer });
-server.on('message', (data, connectionHandle) => {
-  void server.send(data, connectionHandle);
+server.on('message', ({ data }, connectionHandle) => {
+  void server.send({ data }, connectionHandle);
 });
 const { port } = await server.start({ findOpenPort: true });
 
@@ -59,8 +59,19 @@ client.on('close', (clean) => {
   }
 });
 await client.connect({ host: 'localhost', port });
-await client.send('hello');
+await client.send({ data: 'hello' });
 ```
+
+What a transport carries, both ways, is a message, `{ data, credential }`: an envelope, and the
+credential the transport carries beside it, which a request presenting `ELSEWHERE` stands for. Over
+HTTP it is the `Authorization` of the `POST` that carries a request — see [HTTP](#http); a WebSocket
+and a Web Worker carry none, either way. Each end says what it can carry, so its router fails before
+it goes a call whose credential it cannot: `carriesCredential`, and `isSecure`, judged by what the
+end was given, never by what a name resolves to — a client by the URL of its connect, under TLS
+(`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`); a
+server, per connection, by what it listens on — a loopback host, or, over HTTP, a server under TLS —
+and nothing tells it that TLS stands in front of it; a worker always, since it never leaves the
+machine.
 
 Each end takes its time from a `clock`: the part of the globals Bead calls — `setTimeout`,
 `clearTimeout`, `setInterval`, `clearInterval`, `Date.now` and `performance.now` — in their own
@@ -138,14 +149,14 @@ far a request went:
 | 3    | `KIND_UNSUPPORTED`         | the kind is one to come, or one this side does not take                                                                                                                                   |
 | 4    | `ENVELOPE_TOO_LARGE`       | the envelope is larger than this peer reads                                                                                                                                               |
 | 16   | `DESTINATION_UNKNOWN`      | the request names a destination its relay has none of — or its router relays nothing                                                                                                      |
-| 17   | `DESTINATION_UNREACHABLE`  | the relay could not hand the request to its destination: nothing was tried                                                                                                                |
+| 17   | `DESTINATION_UNREACHABLE`  | the relay could not hand the request to its destination, or a transport cannot carry its credential — leg B's, or the requester's own: nothing was tried                                  |
 | 18   | `SERVICE_UNKNOWN`          | no resolver is registered for the service                                                                                                                                                 |
 | 19   | `PROCEDURE_UNKNOWN`        | the service is known, the procedure is not                                                                                                                                                |
 | 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                    |
 | 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                        |
 | 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP                                                                             |
 | 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                      |
-| 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header                                                                                                                                        |
+| 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header and the call's session                                                                                                                 |
 | 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                           |
 | 35   | `CAPACITY_EXCEEDED`        | every call id of the side is in use or reserved, or the transfers received hold every place or the budget                                                                                 |
 | 36   | `CREDENTIAL_UNSUPPORTED`   | the request presents a credential of a scheme the side takes none of, and its detail names those it takes                                                                                 |
@@ -164,23 +175,51 @@ so `isProtocol(codes)` passes and `isProtocol(codes, side)` never does.
 is laid out this way.
 
 `router-client` runs over any transport that meets `IRouterClientTransportLike`, and learns the
-session the server announces — only when it changes, on an answer. A request runs in the session
-its connection holds, and presents the one the client learned only when its options ask,
-`credential: { scheme: CredentialScheme.OPAQUE }`: that call is bound to that session, and refused
-`SESSION_REQUIRED` should it have ended or been opened anew, rather than run in another; one that
-asks before any session fails before it goes. A request may name a `destinationId`, what it is for
-behind the peer, which a server's relay passes on to it — see [Relays](#relays). `router-server`
-runs over any transport server that meets `IRouterServerTransportLike`: it sends its own requests
-to the connection their options name — the types require one — and notifies the connections
-subscribed to a procedure.
+session the server announces — only when it changes, on an answer. A request presents the
+credential its options give, or the client's default, in its header's CREDENTIAL block. The
+default, `credential` among a client's options, is a `JWT`, `{ scheme: CredentialScheme.JWT,
+token }`, or an `ELSEWHERE`, `{ scheme: CredentialScheme.ELSEWHERE, carried }`, whose value the
+transport carries beside each request; a request's own `credential` wins over it, and `{ scheme:
+CredentialScheme.NONE }` presents none. The session the client learned is presented only when a
+request's options ask, `credential: { scheme: CredentialScheme.OPAQUE }`, never by default: that
+call is bound to that session, and refused `SESSION_REQUIRED` should it have ended or been opened
+anew, rather than run in another; one that asks before any session fails before it goes. A call
+presenting none runs in whatever session its connection holds.
+
+A default is withdrawn once a call that presented it is refused `SESSION_REQUIRED`, whatever relays
+the refusal crossed: the router presents none by default from then on, and emits
+`credentialWithdrawn` with the credential's scheme alone, never its bytes, so the application renews
+it, and the call that renews it goes out without it. A refusal withdraws only the credential its
+call presented, never a default given anew since, and a failure that ends an answered subscription
+withdraws nothing. A call whose credential its transport cannot carry fails before it goes,
+`DESTINATION_UNREACHABLE`, nothing tried and its credential kept: an `ELSEWHERE` over a transport
+that carries none, a `JWT` or an `ELSEWHERE` over one that is not secure, since a bearer credential
+crosses only TLS off the machine (RFC 6750 §5.3).
+
+```ts
+const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
+
+client.router.on('credentialWithdrawn', () => {
+  void signIn().then((renewed) => {
+    client.router.credential = { scheme: CredentialScheme.JWT, token: renewed };
+  });
+});
+```
+
+A request may name a `destinationId`, what it is for behind the peer, which a server's relay passes
+on to it — see [Relays](#relays). `router-server` runs over any transport server that meets
+`IRouterServerTransportLike`: it sends its own requests to the connection their options name — the
+types require one — and notifies the connections subscribed to a procedure.
 
 A subscription is the call that made it, left open. The request says it opens one: a client sets the
 SUBSCRIPTION flag on a call that subscribes a notification, and a server subscribes the requester of
 no other request. A notification's resolver subscribes its requester with
 `response.registerNotification()`, which gives the call id of the subscription — the request's own
-when it is the connection's first subscription to that procedure, and the one it holds otherwise; a
-successful answer subscribes it all the same, a failure undoes it, and `unsubscribe({
-connectionHandle, callId })` takes it away. The first subscription is the one kept. An ordinary
+when it is its session's first subscription to that procedure on the connection, and the one that
+session holds otherwise; a successful answer subscribes it all the same, a failure undoes it, and
+`unsubscribe({ connectionHandle, callId })` takes it away. A connection holds one subscription per
+procedure and per session: its connection's session, which a call presenting none shares, and each
+credential's, by its identifier; the first subscription is the one kept. An ordinary
 request to the same procedure gets its answer and subscribes nothing, on either side; a callback
 that calls `registerNotification()` for one throws a `ProgrammerError`, so its requester is answered
 as failed. A client that unregisters a subscription with no `unsubscribe` acknowledged — none given,
@@ -229,16 +268,20 @@ with a code from 1 to 65,535, or a refusal of admission from its router's table.
 the protocol's other failures; a code out of that range, or a refusal from the other side's table,
 fails the resolver, and the request is answered as `PROCEDURE_FAILED`. A `beforeRequest` admits a
 request only by returning `true`: anything else refuses it, with the `refusal` the function carries,
-or with `ACCESS_DENIED`. It sees the request's header and its connection, never its payload: its
-router asks it through the resolver's `admit` before the payload is read — or comes, for a
-transfer — so a request refused is never decoded, and a resolver called by a router that asked
-nothing asks it itself, first. A callback's `request.signal` is aborted when its call ends before its
-answer — a `CancelError` when its requester cancels it, a `DisconnectError` when its connection
-closes — so it may stop: its answer would go nowhere, and what it throws then is not reported. A
-listener of that signal that throws is an uncaught exception, which a peer's cancel can set off.
-Under `server/`, the session manager keeps each connection's session — its token, 16 bytes drawn
-from `crypto`, its data and two inactivity timers — and the notification manager who is subscribed
-to what, by connection and call id.
+or with `ACCESS_DENIED`. It is synchronous, and sees the request's header, its connection and the
+call's session, `session`, never its payload: its router asks it through the resolver's `admit`
+once the request's credential resolved and before the payload is read — or comes, for a transfer —
+so a request refused is never decoded, and a resolver called by a router that asked nothing asks it
+itself, first. An admission of the application's own reads the session's data — a token's claims,
+say — and a callback receives the same session, as `request.session`. A callback's
+`request.signal` is aborted when its call ends before its answer — a `CancelError` when its
+requester cancels it, a `DisconnectError` when its connection closes — so it may stop: its answer
+would go nowhere, and what it throws then is not reported. A listener of that signal that throws is
+an uncaught exception, which a peer's cancel can set off. Under `server/`, the session manager
+keeps each connection's session — its token, 16 bytes drawn from `crypto`, its data and two
+inactivity timers — the notification manager who is subscribed to what, by connection, call id and
+session, and `credential-sessions.ts` each credential's session that bounds a subscription, its end
+timed on the router's clock.
 
 `client` puts the three layers together, bottom up — the transport, the router built on it, the
 services built on the router — each replaceable on its own. `ws-client` is that over WebSocket, and
@@ -311,34 +354,73 @@ client.services.on('debug', filterDebug(statistics.listener, 'd(rx)'));
 console.log(statistics.durations());
 ```
 
-`server` does the same on the other side, and adds the sessions: a session is made by a request —
-the resolver that opens one stores it — and every message of its connection is activity for it. Its
-token is announced to the connection on the next answer after it changes, and its end the same way:
-a procedure that closes a session deletes it before it answers. Its connection timeout closes the
-connection, its session timeout ends the session — the connection takes the server's own timeout,
-counted from that end, and each of its subscriptions is ended with `SESSION_REQUIRED`, which its
-client hears as `dropped` — and a connection that closes takes its session; a session stored once its
-connection closed goes at once. A session stored without its timeouts holds both without end: the
-application gives its own, OWASP ASVS 4.0.3 V3.3.2's for one that authenticates, 30 minutes of
-inactivity at level 2, 15 at level 3. A connection that never opens a session is closed once silent
-for the server's `connectionInactivityTimeout`, when it has one. Over HTTP a listen held is no
-silence: no connection timeout runs while one is, and each counts anew from its end, while a session
-timeout counts messages alone. Each request runs in its call's session, which its admission reads
-and its callback receives as `session`: its connection's, its data a copy the call keeps, when it
-presents none or that session's token, compared in constant time; any other token is refused
-`SESSION_REQUIRED`, whatever its procedure requires. The router asks `sessionOf` for it once per
-request, before `beforeRequest`, and a scheme it takes none of is refused `CREDENTIAL_UNSUPPORTED`.
-`requireSession` is the `beforeRequest` of every other procedure: it tests the call's session, and
-refuses a call in none with `SESSION_REQUIRED`; composed with `&&`, it loses that refusal and the
-composition refuses with `ACCESS_DENIED` — a caller that wants to keep it puts `refusal` on its own
-function. The server
-asks a client with a command, `getCommand`, which names the connection; the client runs it with
-`getCommandResolver`. A command left unanswered past its timeout closes its connection when the
-server's `closeOnCommandTimeout` says so, or the command's own `closeOnTimeout`. `ws-server` is the
-server over WebSocket:
+`server` does the same on the other side, and adds the sessions. A call runs in a session of one of
+two kinds. A connection's session is made by a request — the resolver that opens one, a procedure
+that checks credentials say, stores it — and every message of its connection is activity for it.
+Its token is announced to the connection on the next answer after it changes, and its end the same
+way: a procedure that closes a session deletes it before it answers. Its connection timeout closes
+the connection, its session timeout ends the session — the connection takes the server's own
+timeout, counted from that end, and each subscription the session bounds is ended with
+`SESSION_REQUIRED`, which its client hears as `dropped` — and a connection that closes takes its
+sessions; a session stored once its connection closed goes at once. A session stored without its
+timeouts holds both without end: the application gives its own, OWASP ASVS 4.0.3 V3.3.2's for one
+that authenticates, 30 minutes of inactivity at level 2, 15 at level 3. A connection without a
+connection's session — none yet, or its session ended, whatever credentials its calls present — is
+closed once silent for the server's `connectionInactivityTimeout`, when it has one. Over HTTP a
+listen held is no silence: no connection timeout runs while one is, and each counts anew from its
+end, while a session timeout counts messages alone.
+
+A credential's session is what the server's `credentials` make of a credential a request presents, a
+`JWT` or an `ELSEWHERE`: its identifier, a record — `{ scheme, issuer, sid }`, else `{ scheme,
+issuer, sub }`, for a `JWT`, `{ scheme, id }` for an `ELSEWHERE` — the data of the credential the
+call presented, and its end, in milliseconds since the epoch; it is never announced. `credentials`
+holds a `JWT`'s `keys`, each a JWK with its issuer and its one algorithm, `ES256` or `HS256`, and
+its `audience`; `keySet(issuer)`, asked for a token's issuer when its `kid` names no key held, once
+a minute at most for that issuer; and an `ELSEWHERE`'s `verify(carried, signal)`, given what the
+transport carried, which settles with `{ id, data, end }`, or with none when the credential does not
+hold. The server verifies a `JWT` one way, as an access token of RFC 9068's profile (spec 13.8), on
+its own clock, and takes the schemes it is given something for: a request presenting another is
+refused `CREDENTIAL_UNSUPPORTED`, whose detail names those it takes. A credential's session has no
+inactivity timeout: no message, listen or silence moves its end, and it ends at its end, with its
+connection, or by `server.router.endSession(identifier)`, which ends it and the subscriptions it
+bounds on every connection that keeps it; a credential that still holds opens it anew. The server
+keeps one, and times its end, only while it bounds a subscription, and a call whose credential
+resolves to the same identifier moves that end to the later of the two: a credential renewed keeps
+its subscriptions.
+
+Each request runs in its call's session, which its admission reads and its callback receives as
+`session`: its connection's, its data a copy the call keeps, when it presents none or that
+session's token as `OPAQUE`, compared in constant time; a credential's, with its own credential's
+data — a `JWT`'s claims set, frozen — when it presents a `JWT` or an `ELSEWHERE`, never its
+connection's. A credential that does not hold — another token, an expired `JWT` — is refused
+`SESSION_REQUIRED`, whatever its procedure requires, and a verifier that fails `PROCEDURE_FAILED`,
+reported. A server's router resolves it once per request, its call id held, before
+`beforeRequest`: none and `OPAQUE` by its `sessionOf(request, signal)` — the server's gives the
+connection's session from its sessions — in the turn the request came; a `JWT` or an `ELSEWHERE`
+by its `credentials`, in a later turn, whether its verifier waits or not. A cancel, or its
+connection's close, meanwhile aborts the signal its verifier holds, and what it settles to then is
+dropped. `requireSession` is the `beforeRequest` of every other procedure: it tests the call's
+session, never the connection's, and refuses a call in none with `SESSION_REQUIRED`; composed with
+`&&`, it loses that refusal and the composition refuses with `ACCESS_DENIED` — a caller that wants
+to keep it puts `refusal` on its own function.
+
+The server asks a client with a command, `getCommand`, which names the connection; the client runs
+it with `getCommandResolver`, and resolves the command's credential as a server does, by the
+`credentials` among its own options, the session it learned standing for its connection's. None of
+this package's server transports carries a credential beside an envelope it sends, so a command
+presenting `ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does
+over a connection that is not secure. A command left unanswered past its timeout closes its
+connection when the server's `closeOnCommandTimeout` says so, or the command's own
+`closeOnTimeout`. `ws-server` is the server over WebSocket:
 
 ```ts
-const server = createWSServer({ transport: { WebSocketServer } });
+const server = createWSServer({
+  credentials: {
+    audience: 'https://api.example.com',
+    keys: [{ algorithm: 'ES256', issuer: 'https://id.example.com', jwk }],
+  },
+  transport: { WebSocketServer },
+});
 
 await server.transport.start({ port });
 ```
@@ -407,10 +489,12 @@ The limits are options of each router and each facade — `createClient(layers, 
 `createWSClient({ limits })`, `createServer(layers, { limits })`, `createWSServer({ limits })` — and
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
 from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a timeout a timer
-holds. Nothing announces them yet: both ends of a connection are set alike. A transport that carries
-transfers delimits its messages, knows the envelope's size at both ends, delivers every chunk and
-credit — in any order, a copy tolerated — and carries both ways. WebSocket does all four. The router
-copies every payload it reads, so a transport may use its buffers again once `receive` returns.
+holds; and, on a side that takes or presents a `JWT`, a chunk and an envelope of 1,024 bytes at
+least, since its header holds 1,020. Nothing announces them yet: both ends of a connection are set
+alike. A transport that carries transfers delimits its messages, knows the envelope's size at both
+ends, delivers every chunk and credit — in any order, a copy tolerated — and carries both ways.
+WebSocket does all four. The router copies every payload it reads, so a transport may use its
+buffers again once `receive` returns.
 
 What comes late is dropped in silence where it is known for late, and reported elsewhere:
 
@@ -428,21 +512,45 @@ What comes late is dropped in silence where it is known for late, and reported e
 A server's router relays a request that names a destination registered in it, as a gateway does for
 what stands behind it: each destination answers the same procedures, and the requester picks one by
 its destination — `getRequest(procedure, …)(payload)({ destinationId })`.
-`registerDestination(target, { destinationId?, label?, timeout? })` names a client router the relay
-calls through, or `{ connectionHandle }`, a connection of its own it asks by a command, and gives
-the destination: given, or drawn, never 0. `destinations()` lists them, for the application to
-publish. A destination on a connection dies with it: once that connection closes, it is unreachable,
-whoever connects under the same handle next, until the application unregisters it and registers the
+`registerDestination(target, { audience?, destinationId?, label?, timeout? })` names a client router
+the relay calls through, or `{ connectionHandle }`, a connection of its own it asks by a command,
+and gives the destination: given, or drawn, never 0. Its `audience` is the one the destination
+verifies, as a resource is named for a token (RFC 8707); a destination registered with none takes
+no credential the relay forwards. `destinations()` lists them, for the application to publish. A
+destination on a connection dies with it: once that connection closes, it is unreachable, whoever
+connects under the same handle next, until the application unregisters it and registers the
 newcomer anew.
 
 The relay terminates each leg. Leg A, from the requester, and leg B, to the target, each have their
-own call ids, limits and session; what crosses is the payload's bytes, undecoded, and the answer. A
-request is asked `beforeRoute` on its header first — a server's `requireSession` by default; a
-router's relay admits nobody without one — then its destination is looked up, then it is held to the
-smaller of the two legs' limits. Every refusal falls on the opening, and a requester not admitted
-learns only whether the relay has any destination. A cancel on leg A, or its connection gone,
-cancels leg B, which waits as long as its destination says, the relay's `timeout` at most — by
-default, on: the requester's own timeout governs, end to end, by its cancel.
+own call ids, limits and session; what crosses is the payload's bytes, undecoded, the answer, and a
+bearer credential, which the relay forwards and its destination verifies:
+
+| Leg A presents | The relay                                                                                                        | Leg B presents                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| none, `OPAQUE` | resolves it to leg A's connection's session, which its admission checks                                          | none: it runs in leg B's session at the target                                                      |
+| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless the relay verifies | the same bytes                                                                                      |
+| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries a credential      | `ELSEWHERE`, what leg A's transport carried moved to leg B's as it came: over HTTP, `Authorization` |
+
+A request is taken in this order, on its opening. Its credential first: a scheme the relay neither
+resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `OPAQUE` that does not hold, or an
+`ELSEWHERE` that carried nothing, `SESSION_REQUIRED`; a `JWT`, and an `ELSEWHERE` its transport
+carried, go on unresolved, unless the relay's `verifies` has it verify them besides, with its
+router's `credentials` — a `JWT` against the audiences its destinations were registered with — so
+that one that does not hold is refused `SESSION_REQUIRED` there. Then `beforeRoute`, on its header
+and the call's session: a server's `requireSessionOrCredential` by default, which admits a call in
+leg A's connection's session, or one presenting a `JWT` or an `ELSEWHERE`, by its scheme alone;
+`requireSession` in its place refuses, `SESSION_REQUIRED`, every credential the relay forwards
+without verifying, and a router's relay admits nobody without one. Then its destination is looked
+up. Then its credential is held to what leg B carries: a `JWT` whose `aud` does not name its
+destination's audience, a destination registered with none, an `ELSEWHERE` over a leg B that carries
+no credential, a `JWT` or an `ELSEWHERE` over a leg B that leaves the machine in the clear, each
+refused `DESTINATION_UNREACHABLE`, nothing tried. Then it is held to the smaller of the two legs'
+limits, leg B's header counted with its credential, call by call. Every refusal falls on the
+opening. A requester presenting none or `OPAQUE` that is not admitted learns only whether the relay
+has any destination; a `JWT` passes the default admission of a relay that does not verify on its
+scheme alone, whatever its bytes. A cancel on leg A, or its connection gone, cancels leg B, which
+waits as long as its destination says, the relay's `timeout` at most — by default, on: the
+requester's own timeout governs, end to end, by its cancel.
 
 | Leg B                                                                        | Leg A answers                                  |
 | ---------------------------------------------------------------------------- | ---------------------------------------------- |
@@ -457,12 +565,14 @@ The relay's own failures name no address behind it: why leg B failed goes to the
 event, with leg A's connection.
 
 A failure through a relay counts the relays it crossed, and its side is not known. Every requester
-behind a relay shares its leg B: one session at the target, one space of call ids, and the target's
-transfer places — so `beforeRoute`, which sees the procedure and the destination, is where each
-requester's rights are checked. An answer names its call alone: a destination, which means
-something to its relay only, is malformed on a RESULT or a FAILURE. A relay carries no
-subscription yet — a request that opens one is refused, `SUBSCRIPTION_UNSUPPORTED` — and forms no
-chain: leg B names no destination, so no loop can form.
+behind a relay that presents none or `OPAQUE` shares its leg B: one session at the target, one space
+of call ids, and the target's transfer places — so `beforeRoute`, which sees the procedure and the
+destination, is where each such requester's rights are checked. One that presents a `JWT` or an
+`ELSEWHERE` shares leg B's call ids and transfer places alike, and runs at the target in the session
+its own credential resolves to there, never in leg B's. An answer names its call alone: a
+destination, which means something to its relay only, is malformed on a RESULT or a FAILURE. A relay
+carries no subscription yet — a request that opens one is refused, `SUBSCRIPTION_UNSUPPORTED` — and
+forms no chain: leg B names no destination, so no loop can form.
 
 ### HTTP
 
@@ -470,11 +580,12 @@ chain: leg B names no destination, so no loop can form.
 connection — so the transport draws one. A `POST /bead` with no body connects: the server draws 16
 bytes from `crypto` and answers 201 with them, in base64url, in `bead-connection-token`; each
 exchange after presents that token, and a `DELETE` ends the connection. The router, the sessions and
-the relays see a connection, as over a socket: what the transport presents is its connection's
-token, a secret that enters no handle — `type=HTTP;ip=…;ordinal=…`
-names the connection — no event and no report. `createHTTPTransportServer({ createServer })` takes
-the server's factory — `node:http`'s, `node:https`'s, or `node:http2`'s with `allowHTTP1` — as the
-WebSocket one takes `WebSocketServer`, and the application sets its timeouts.
+the relays see a connection, as over a socket. The connection's token names the connection and
+nothing else — no session, no credential — and is a secret that enters no handle —
+`type=HTTP;ip=…;ordinal=…` names the connection — no event and no report.
+`createHTTPTransportServer({ createServer })` takes the server's factory — `node:http`'s,
+`node:https`'s, or `node:http2`'s with `allowHTTP1` — as the WebSocket one takes `WebSocketServer`,
+and the application sets its timeouts.
 
 Each `POST` carries one envelope, of type `application/prs.bead`, and its answer comes back in the
 body of a 200 — a FAILURE too, since a failure travels once, in its envelope. The transport reads
@@ -485,6 +596,21 @@ ends 204 at once. Exchanges keep no order between them, so a cancel may come bef
 transport buries that call id for 5 seconds, the least a requester reserves one, and drops the
 request that comes under it — a client's call ids alone, and so many of them; a cancel that comes
 while its upload is still coming ends that exchange empty once its body is in, never handed on.
+
+A request's credential crosses in the `Authorization` of the `POST` that carries it (RFC 9110
+§11.6.2). The client writes the credential its router gives, as it is given, and refuses before it
+goes one no field can carry — anything but visible ASCII, spaces and tabs — its connection kept. The
+server hands the router the field's value with the request, as it came, whole, its auth-scheme
+included and its surrounding spaces and tabs removed; an empty field carries none. No other
+exchange's is read, so two calls of one connection may present two credentials, and a token is
+renewed without connecting again; a `POST` with two `Authorization` fields is refused 400,
+`malformed`, before its body is read, since the field is no list to combine (RFC 9110 §5.3). An
+answer, and what a listen brings back, carry none: a server's command presenting `ELSEWHERE` fails
+before it goes. A relay that calls a destination through an HTTP client writes in its `POST`, for a
+request presenting `ELSEWHERE`, the `Authorization` leg A carried, as it came; what came beside any
+other request stays at the relay. The client is secure under `https` or to a loopback host, by the
+URL of its connect; the server under TLS — built on `node:https`'s server, or `node:http2`'s
+`createSecureServer` — or on a loopback host it listens on.
 
 A client's `send` settles on the head of its answer, so a caller — a relay, say — knows whether the
 server had the envelope: a 2xx resolves, the server sending its head as it hands the request on.
@@ -498,28 +624,30 @@ from one alive, as a WebSocket's heartbeat does: a connection with no exchange u
 minutes closes, and, by `createHTTPServer`'s default, one without a session silent for 30 seconds,
 a listen held being no silence: the transport emits `listen` as it holds one and as it ends.
 
-| Status | `bead-refusal`                       | Says                                                                                                                                                                   |
-| ------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 200    |                                      | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                      |
-| 201    |                                      | a connection drawn, its token in `bead-connection-token`                                                                                                               |
-| 204    |                                      | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                  |
-| 400    | `malformed`                          | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity; a listen's count that is none, or an `after` past what was sent |
-| 403    | `host-refused`, `origin-refused`     | a host not among `hosts`; a browser's exchange from an origin neither the server's nor among `origins`                                                                 |
-| 404    | `path-unknown`, `connection-unknown` | not the path; the connection is gone                                                                                                                                   |
-| 405    | `method-refused`                     | neither `GET`, `POST` nor `DELETE`, which `Allow` names                                                                                                                |
-| 409    | `call-waiting`, `listen-undeclared`  | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                        |
-| 413    | `too-large`                          | a body past the envelope's limit                                                                                                                                       |
-| 415    | `type-refused`                       | not `application/prs.bead`, or encoded                                                                                                                                 |
-| 429    | `busy`                               | too many requests waiting on one connection, or exchanges under way                                                                                                    |
-| 503    | `busy`                               | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                              |
+| Status | `bead-refusal`                       | Says                                                                                                                                                                                                             |
+| ------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    |                                      | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                |
+| 201    |                                      | a connection drawn, its token in `bead-connection-token`                                                                                                                                                         |
+| 204    |                                      | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                            |
+| 400    | `malformed`                          | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent |
+| 403    | `host-refused`, `origin-refused`     | a host not among `hosts`; a browser's exchange from an origin neither the server's nor among `origins`                                                                                                           |
+| 404    | `path-unknown`, `connection-unknown` | not the path; the connection is gone                                                                                                                                                                             |
+| 405    | `method-refused`                     | neither `GET`, `POST` nor `DELETE`, which `Allow` names                                                                                                                                                          |
+| 409    | `call-waiting`, `listen-undeclared`  | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                  |
+| 413    | `too-large`                          | a body past the envelope's limit                                                                                                                                                                                 |
+| 415    | `type-refused`                       | not `application/prs.bead`, or encoded                                                                                                                                                                           |
+| 429    | `busy`                               | too many requests waiting on one connection, or exchanges under way                                                                                                                                              |
+| 503    | `busy`                               | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                        |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
 `maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
 read at once across them all. `hosts` names the hosts a request may name, which a page that rebinds
 its name to the server's address cannot pass. `origins` names the origins a browser's exchange may
 come from besides the server's own, for a proxy that rewrites the host; it answers no CORS, so a
-page of another origin is not served yet. `isProxyTrusted` takes the address a proxy on the same
-machine forwards in `x-forwarded-for` for the client's, which the bound per address counts.
+page of another origin is not served yet, and a page presents `ELSEWHERE` to its own origin alone:
+`Authorization` is no field a browser sends across origins without a preflight. `isProxyTrusted`
+takes the address a proxy on the same machine forwards in `x-forwarded-for` for the client's, which
+the bound per address counts.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,
@@ -569,16 +697,18 @@ closes the connection.
 
 `worker-transport-client` and `worker-transport-server` carry Bead between a page and a Web Worker,
 for a server that runs beside its page with no backend — a demo, a playground, a test. A client
-connects by posting `bead-connect` to the worker with one end of a `MessageChannel`; that port is the
-connection, `type=WORKER;ip=local;ordinal=n`, which the server accepts with `bead-open`. Envelopes
-go both ways as bytes, each copied and its buffer transferred, so no one else's is taken; either end
-ends the connection with `bead-close`, since a port does not tell its close. It is two-way, in order,
-and carries transfers, as a socket does. The server's `start` listens at once, before anything is
-awaited, so a connect the worker hears as its script runs is not lost; the worker's other messages
-are left to it. A worker's `error` loses the client's connection, and the server is told; a worker
-terminated without a word is not heard. `createWorkerServer({ transport: { scope: self } })` in the
-worker and `createWorkerClient({ transport: { worker } })` in the page are the facades. This one is
-a page's own: a server in C# has no counterpart to mirror.
+connects by posting `bead-connect` to the worker with one end of a `MessageChannel`; that port is
+the connection, `type=WORKER;ip=local;ordinal=n`, which the server accepts with `bead-open`.
+Envelopes go both ways as bytes, each copied and its buffer transferred, so no one else's is taken;
+either end ends the connection with `bead-close`, since a port does not tell its close. It is
+two-way, in order, and carries transfers, as a socket does. It carries no credential beside an
+envelope, and never leaves the machine: a `JWT` crosses it, and an `ELSEWHERE` fails before it goes.
+The server's `start` listens at once, before anything is awaited, so a connect the worker hears as
+its script runs is not lost; the worker's other messages are left to it. A worker's `error` loses
+the client's connection, and the server is told; a worker terminated without a word is not heard.
+`createWorkerServer({ transport: { scope: self } })` in the worker and `createWorkerClient({
+transport: { worker } })` in the page are the facades. This one is a page's own: a server in C# has
+no counterpart to mirror.
 
 ### What a server holds
 
@@ -587,7 +717,8 @@ a page's own: a server in C# has no counterpart to mirror.
 the router's calls waited on and answered, the call ids it reserved, its transfers and the bytes
 they hold, its subscriptions in flight, waiting or notified, those paced whose credit is spent and
 what they queue — all together, and the fullest queue, at its bounds — its destinations, and the
-sessions.
+credentials' sessions it keeps and those of them timed, `credentialSessions` and
+`timedCredentialSessions` — and the connections' sessions.
 Nothing of it names a connection: no handle, token or address leaves the process. Each layer also
 says how many connections it keeps anything for that the transport no longer holds — an orphan,
 which is a leak — and what it found that should never be, such as timers kept through
@@ -701,8 +832,9 @@ sequenceDiagram
 5. The last callback taken away calls the notification's `unsubscribe`, the application's own
    request, then `router.unregisterNotification`: the call id is reserved, and cancelled unless
    `unsubscribe` was acknowledged. On the server, `unsubscribe` or the cancel takes the
-   subscription away. A session that ends sends `SESSION_REQUIRED` on each subscription
-   (`dropSubscriptions`); the client's `onUnpairedFailure` drops the notification, and tells its
+   subscription away. A session that ends sends `SESSION_REQUIRED` on each subscription it bounds
+   — a connection's session through `dropSubscriptions`, a credential's at its end or by
+   `endSession` — and the client's `onUnpairedFailure` drops the notification, and tells its
    callbacks through `dropped`.
 
 ```mermaid
@@ -736,9 +868,9 @@ sequenceDiagram
   S-->>C: NOTIFICATION · 7 · article 7, change 45
 ```
 
-A place is the one subscription a connection holds to a procedure. The first call to take it keeps
-it; one answered while the holder is still in flight waits, and takes the place should the holder
-fall:
+A place is the one subscription a connection holds to a procedure in one session: its connection's,
+or a credential's. The first call to take it keeps it; one answered while the holder is still in
+flight waits, and takes the place should the holder fall:
 
 ```mermaid
 stateDiagram-v2
@@ -760,20 +892,21 @@ router's `respond`.
 **The names, and the words they are chosen over.** Every name says one thing, and none is
 abbreviated ([0003](../../docs/decisions/0003-one-word-one-meaning.md)).
 
-| Not                           | Bead says                               | Why                                                                                                             |
-| ----------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| message id                    | `callId`                                | one number pairs a request, its answer, its cancel and its notifications: odd from a client, even from a server |
-| frame, frame type             | envelope, `kind`                        | a frame is what WebSocket carries the envelope in                                                               |
-| header version                | the layout byte, `0xA1`                 | the first byte says how the rest is laid out                                                                    |
-| error info beside the payload | a FAILURE, whose payload is the failure | a failure travels once                                                                                          |
-| function id, function name    | `procedureId`, `procedureName`          | no abbreviation                                                                                                 |
-| service version               | `serviceRevision`                       | the version is the protocol's                                                                                   |
-| device id                     | `destinationId`                         | what is behind the peer, which a relay passes the call on to                                                    |
-| session id                    | an `OPAQUE` `credential`                | 16 bytes, announced only when it changes                                                                        |
-| notification id               | the subscribing call's `callId`         | nothing of it travels in a payload                                                                              |
-| req, res, err                 | `request`, `response`, `failure`        | no abbreviation                                                                                                 |
-| exclude self                  | `exclude`                               | it names the connection to leave out                                                                            |
-| an error with a code          | `FailureError`                          | it says its side, its scope and where it was raised                                                             |
+| Not                           | Bead says                               | Why                                                                                                                                             |
+| ----------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| message id                    | `callId`                                | one number pairs a request, its answer, its cancel and its notifications: odd from a client, even from a server                                 |
+| frame, frame type             | envelope, `kind`                        | a frame is what WebSocket carries the envelope in                                                                                               |
+| header version                | the layout byte, `0xA1`                 | the first byte says how the rest is laid out                                                                                                    |
+| error info beside the payload | a FAILURE, whose payload is the failure | a failure travels once                                                                                                                          |
+| function id, function name    | `procedureId`, `procedureName`          | no abbreviation                                                                                                                                 |
+| service version               | `serviceRevision`                       | the version is the protocol's                                                                                                                   |
+| device id                     | `destinationId`                         | what is behind the peer, which a relay passes the call on to                                                                                    |
+| session id                    | an `OPAQUE` `credential`                | 16 bytes, announced only when it changes                                                                                                        |
+| auth type, token type         | a credential scheme, `credentialScheme` | a type is a media type's or a language's, and a bare scheme a URI's: the credential scheme names a format, as HTTP's authentication scheme does |
+| notification id               | the subscribing call's `callId`         | nothing of it travels in a payload                                                                                                              |
+| req, res, err                 | `request`, `response`, `failure`        | no abbreviation                                                                                                                                 |
+| exclude self                  | `exclude`                               | it names the connection to leave out                                                                                                            |
+| an error with a code          | `FailureError`                          | it says its side, its scope and where it was raised                                                                                             |
 
 Four names mean exactly this, and no more. `hasNotification` asks whether the router holds this very
 notification, not any of its procedure's. `registerNotification` holds a notification on a client's
@@ -809,10 +942,13 @@ five changes, once subscribed, shows the two ways to follow one: the counter's s
 as two notifications, the first and the latest; its signal, "it changed", comes five times, and the
 page merges it into two reads.
 
-Its security is a fake JSON Web Token. The demo's identity provider signs one by HMAC-SHA256 with a
-secret drawn at each start; `login` checks its algorithm, its signature, in constant time, then its
-expiry, and keeps its claims in the connection's session. A read needs a session, by
-`requireSession`; a write needs the `write` permission, by a `beforeRequest` of its own. A reader's
-glyph upload, 8 MiB, is refused at its opening over WebSocket — one REQUEST, one FAILURE, and no chunk;
-over HTTP, its body crosses first — and a reader's
-token edited to say it writes keeps a signature that no longer matches, and is refused.
+Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
+presents its token as a `JWT` on every call, its client's default `credential`, and the server
+verifies it through its `credentials`, its key and its audience, so each call runs in its
+credential's session. What a procedure admits reads that session, never the payload: a read needs a
+session, by `requireSession`; a write needs a token whose `scope` holds `write`, by a
+`beforeRequest` that reads `session.data`. A token that does not hold — its signature no longer
+matching, its time past — is refused `SESSION_REQUIRED`, which withdraws it: `credentialWithdrawn`
+tells the page, which asks to sign in again. No published test key signs a demo's token, and its
+verifier refuses one. A reader's glyph upload, 8 MiB, is refused at its opening over WebSocket — one
+REQUEST, one FAILURE, and no chunk; over HTTP, its body crosses first.
