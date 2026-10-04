@@ -3,9 +3,9 @@
 // dependencies
 
 import type { IClock, TimeoutId } from '../../transport/shared/clock';
-import { createPromise } from '../../transport/shared/create-promise';
-import { ProgrammerError, TimeoutError } from '../../transport/shared/errors';
+import { ProgrammerError, TimeoutError, toCancelError } from '../../transport/shared/errors';
 import { CredentialScheme } from './constants';
+import { CapacityError } from './errors';
 import {
   assertJwtKey,
   type IJwtKey,
@@ -41,32 +41,35 @@ export interface ICredentialResolver {
    * The credential's session a request presenting a `JWT` or an `ELSEWHERE` resolves to, frozen —
    * its identifier, its data, its end — or `undefined` when its credential does not hold. Rejects
    * when its verifier fails: an `ELSEWHERE`'s that throws, rejects or settles with what is no
-   * session, or a key set's ask the call waited on that failed; and with a `CancelError` as
-   * `signal` aborts while it waits for a key set, whose ask goes on for the others. No rejection
-   * carries the credential.
+   * session, or a key set's ask the call waited on that failed; with a {@link CapacityError} when it
+   * would wait for its issuer's keys past the calls its key set lets wait for them; and with a
+   * `CancelError` as `signal` aborts while it waits for a key set, whose ask goes on for the others.
+   * No rejection carries the credential.
    */
   resolve(request: ICredentialRequest, signal: AbortSignal): Promise<ICallSession | undefined>;
 }
 
-/** One ask of a key set for an issuer. */
-interface IKeySetAsk {
-  /** What aborts its signal at its deadline, while it is unsettled. */
-  readonly controller: AbortController;
-  /** Settles once the ask answered or failed, never rejecting. */
-  readonly done: Promise<void>;
-  /** Why it failed, once it did. */
-  failure: unknown;
-  readonly issuer: string;
-  /** Whether it answered or failed: what it settles to after is dropped. */
-  isSettled: boolean;
-  /** Settles it, failed with `failure`, or answered without one; once alone. */
-  readonly settle: (failure?: unknown) => void;
+/** A call that waits for its issuer's keys, which holds its place among those its key set lets wait. */
+interface IWaiter {
+  /** The calls it waits among, its ask's or its deadline's; none once it left them. */
+  among: Set<IWaiter> | undefined;
+  /** Whether its token's header carries a `kid`. */
+  readonly hasKid: boolean;
+  /** Whether the ask it waits on went after its token came: that ask's answer is its last word. */
+  isAfter: boolean;
+  /** Its token's `kid`; none for one that is no string, which names no key. */
+  readonly kid: string | undefined;
+  /** Settles once it is to be judged again; rejects once its ask failed, or as it leaves. */
+  readonly released: PromiseWithResolvers<void>;
 }
 
-/** The calls that wait for an issuer's deadline, and the ask that goes then, which they share. */
-interface IDeadlineWait {
-  readonly next: PromiseWithResolvers<IKeySetAsk>;
-  waiters: number;
+/** One ask of a key set for an issuer, and the calls that wait on it. */
+interface IKeySetAsk {
+  /** What aborts its signal as its deadline is reached, while it is unsettled. */
+  readonly controller: AbortController;
+  /** Whether it answered or failed: what it settles to after is dropped. */
+  isSettled: boolean;
+  readonly waiters: Set<IWaiter>;
 }
 
 /** What a side holds of an issuer its key set names. */
@@ -80,11 +83,14 @@ interface IIssuerKeys {
   /** The keys the last answer gave, which serve ten minutes from it. */
   held: readonly IJwtKey[];
   readonly issuer: string;
+  /** The calls that wait for the deadline, and the ask that goes then. */
+  next: Set<IWaiter>;
   /** The deadline's timer, armed while an ask is unsettled or a call waits for the deadline. */
   timer: TimeoutId | undefined;
-  /** The calls that wait for the deadline, while any does. */
-  waiting: IDeadlineWait | undefined;
 }
+
+/** What an ask settled to: its keys, or why it failed. */
+type AskOutcome = { failure: unknown } | { keys: readonly IJwtKey[] };
 
 // constants
 
@@ -97,6 +103,10 @@ const KEY_SET_INTERVAL = 60_000;
 
 // how long the keys a key set answered serve, from its answer, in milliseconds
 const KEY_SET_HOLD = 600_000;
+
+// the most calls that wait for one issuer's keys at once: when its key set does not say, and ever
+const KEY_SET_WAITING_CALLS = 64;
+const MOST_WAITING_CALLS = 2_147_483_647;
 
 // the refusals that come before a token's key is looked for: no key set's answer moves them
 const BEFORE_KEY: ReadonlySet<JwtRefusal> = new Set([
@@ -116,16 +126,23 @@ const isAudience = (audience: unknown): audience is string => {
 };
 
 /**
- * The issuers `keySet` answers for, none without one: given with its ask and one issuer at least,
- * each a string; any other is a {@link ProgrammerError}, the application's fault, as the side is
- * built.
+ * The issuers `keySet` answers for, none without one, and the most calls that wait for one issuer's
+ * keys at once: given with its ask and one issuer at least, each a string, and that most a whole
+ * number from 1 to 2³¹ − 1, 64 when not given; any other is a {@link ProgrammerError}, the
+ * application's fault, as the side is built.
  */
-const issuersOf = (keySet: IJwtKeySet | undefined): ReadonlySet<string> => {
+const keySetOf = (
+  keySet: IJwtKeySet | undefined
+): { issuers: ReadonlySet<string>; maximumWaitingCalls: number } => {
   if (keySet === undefined) {
-    return new Set();
+    return { issuers: new Set(), maximumWaitingCalls: KEY_SET_WAITING_CALLS };
   }
 
-  const { ask, issuers } = keySet as Partial<IJwtKeySet>;
+  const {
+    ask,
+    issuers,
+    maximumWaitingCalls = KEY_SET_WAITING_CALLS,
+  } = keySet as Partial<IJwtKeySet>;
 
   if (
     typeof ask !== 'function' ||
@@ -140,7 +157,17 @@ const issuersOf = (keySet: IJwtKeySet | undefined): ReadonlySet<string> => {
     );
   }
 
-  return new Set(issuers);
+  if (
+    !Number.isInteger(maximumWaitingCalls) ||
+    maximumWaitingCalls < 1 ||
+    maximumWaitingCalls > MOST_WAITING_CALLS
+  ) {
+    throw new ProgrammerError(
+      `a key set's maximumWaitingCalls is a whole number from 1 to ${String(MOST_WAITING_CALLS)}, not ${String(maximumWaitingCalls)}`
+    );
+  }
+
+  return { issuers: new Set(issuers), maximumWaitingCalls };
 };
 
 /**
@@ -187,15 +214,21 @@ export const assertLimitsHoldJwt = ({
  * clock reached as it settles not holding (section 13.10).
  *
  * The key set is asked for the issuers it names alone, once a minute at most for an issuer, on the
- * monotonic reading: an ask sets that issuer's deadline a minute on, its signal aborting then, and
- * one still unsettled then has failed. Its answer serves ten minutes. A token waits for its issuer's
- * keys while its `kid` names none of them that serve — or, without a `kid`, while those held are
- * past their ten minutes — on the ask under way, else for the deadline and the ask then, shared,
- * else on an ask that goes at once; judged again as that ask answers, it is refused once an ask that
- * went after it came did not name its key. A call's cancel ends its own wait, never the ask. A key
- * not shaped for its algorithm, an audience that is not a string of well-formed Unicode, a key set
- * given without an issuer, and keys or a key set given without an audience, whatever the side's
- * relay does, are each a {@link ProgrammerError}, as the resolver is built.
+ * monotonic reading: an ask sets that issuer's deadline a minute past the reading at which it goes.
+ * The deadline is reached once the reading is at it or past it, wherever that issuer's state is read
+ * — as a call comes to wait, as an answer comes, as its timer fires — and never as a call leaves:
+ * an ask still unsettled then has failed, its signal aborted, what it settles to dropped, and the
+ * calls that waited for the deadline have the next ask go. An answer serves ten minutes. A token
+ * refused at its key or past it waits for its issuer's keys while its `kid` names none of them that
+ * serve — or, without a `kid`, while none of them serve — on the ask under way, else for the
+ * deadline and the ask then, shared, else on an ask that goes at once; as that ask answers, it is
+ * judged again once its key serves or the ask went after it came, and waits on for the deadline
+ * otherwise, keeping its place. At most `maximumWaitingCalls` wait for one issuer's keys at once: one
+ * more is refused with a {@link CapacityError}, in the turn it would have waited. A call's cancel
+ * ends its own wait, never the ask. A key not shaped for its algorithm, an audience that is not a
+ * string of well-formed Unicode, a key set given without an issuer or with a `maximumWaitingCalls`
+ * out of its bounds, and keys or a key set given without an audience, whatever the side's relay
+ * does, are each a {@link ProgrammerError}, as the resolver is built.
  */
 export const createCredentialResolver = (
   credentials: ICredentials | undefined,
@@ -208,24 +241,23 @@ export const createCredentialResolver = (
     assertJwtKey(key);
   }
 
+  const { issuers: named, maximumWaitingCalls } = keySetOf(keySet);
   // what the side holds of each issuer its key set names, compared octet for octet
   const issuers = new Map(
-    issuersOf(keySet)
-      .values()
-      .map((issuer): [string, IIssuerKeys] => {
-        return [
+    named.values().map((issuer): [string, IIssuerKeys] => {
+      return [
+        issuer,
+        {
+          answered: 0,
+          asking: undefined,
+          deadline: -Infinity,
+          held: [],
           issuer,
-          {
-            answered: 0,
-            asking: undefined,
-            deadline: -Infinity,
-            held: [],
-            issuer,
-            timer: undefined,
-            waiting: undefined,
-          },
-        ];
-      })
+          next: new Set(),
+          timer: undefined,
+        },
+      ];
+    })
   );
 
   if (audience !== undefined && !isAudience(audience)) {
@@ -260,92 +292,160 @@ export const createCredentialResolver = (
     ];
   };
 
+  // the keys of an issuer that serve: the application's of that issuer, and those its key set
+  // answered, for their ten minutes
+  const issuerKeysOf = (entry: IIssuerKeys): readonly IJwtKey[] => {
+    return [
+      ...keys.filter((key) => {
+        return key.issuer === entry.issuer;
+      }),
+      ...(isServing(entry) ? entry.held : []),
+    ];
+  };
+
+  // whether a token's key does not serve among `serving`, its issuer's keys, so that it waits for
+  // them: its kid names none of them, whatever another's names; without a kid, there are none. A kid
+  // that is no string names none, and waits for nothing
+  const needs = (
+    serving: readonly IJwtKey[],
+    { hasKid, kid }: Pick<IWaiter, 'hasKid' | 'kid'>
+  ): boolean => {
+    if (!hasKid) {
+      return serving.length === 0;
+    }
+
+    return (
+      kid !== undefined &&
+      !serving.some((key) => {
+        return key.jwk.kid === kid;
+      })
+    );
+  };
+
+  // the calls that wait for an issuer's keys, on its ask under way and for its deadline together
+  const waitingOf = ({ asking, next }: IIssuerKeys): number => {
+    return (asking?.waiters.size ?? 0) + next.size;
+  };
+
   const disarm = (entry: IIssuerKeys): void => {
     clock.clearTimeout(entry.timer);
     entry.timer = undefined;
   };
 
-  // one ask of the key set for the issuer, at once, setting its deadline a minute on and taking the
-  // calls that waited for one: its answer held, or its failure kept, never thrown
-  const askNow = (entry: IIssuerKeys): IKeySetAsk => {
-    const { promise: done, resolve } = Promise.withResolvers<void>();
-    const { waiting } = entry;
-    const ask: IKeySetAsk = {
-      controller: new AbortController(),
-      done,
-      failure: undefined,
-      issuer: entry.issuer,
-      isSettled: false,
+  // an ask settled, its answer held in place of the last: each call that waits on it is judged
+  // again once its key serves or the ask went after it came, and waits for the deadline otherwise,
+  // keeping its place; a failure fails them all, and replaces nothing held
+  const settle = (
+    entry: IIssuerKeys,
+    { ask, outcome }: { ask: IKeySetAsk; outcome: AskOutcome }
+  ): void => {
+    ask.isSettled = true;
+    entry.asking = undefined;
 
-      settle: (failure) => {
-        if (ask.isSettled) {
-          return;
-        }
+    if ('keys' in outcome) {
+      entry.held = outcome.keys;
+      entry.answered = clock.performance.now();
+    }
 
-        ask.isSettled = true;
-        ask.failure = failure;
+    for (const waiter of ask.waiters) {
+      waiter.among = undefined;
 
-        if (entry.asking === ask) {
-          entry.asking = undefined;
-        }
+      if ('failure' in outcome) {
+        waiter.released.reject(
+          new Error(`the key set's ask for ${JSON.stringify(entry.issuer)} failed`, {
+            cause: outcome.failure,
+          })
+        );
+      } else if (waiter.isAfter || !needs(issuerKeysOf(entry), waiter)) {
+        waiter.released.resolve();
+      } else {
+        waiter.among = entry.next;
+        entry.next.add(waiter);
+      }
+    }
 
-        if (entry.waiting === undefined) {
-          disarm(entry);
-        }
+    ask.waiters.clear();
 
-        resolve();
-      },
-    };
+    if (entry.next.size === 0) {
+      disarm(entry);
+    }
+  };
 
+  // ! a key set that throws as it is asked fails as one that rejects: this function is async. It
+  // settles the ask with the answer, unless a deadline that answer reached settled it first
+  const answer = async (entry: IIssuerKeys, ask: IKeySetAsk): Promise<void> => {
+    let outcome: AskOutcome;
+
+    try {
+      const answered: unknown = await keySet?.ask(entry.issuer, ask.controller.signal);
+
+      outcome = { keys: heldOf(answered, entry.issuer) };
+    } catch (reason) {
+      outcome = { failure: reason ?? new Error('the key set failed') };
+    }
+
+    // ! an answer at its deadline or past it is dropped: its ask failed there, its keys never held
+    reach(entry);
+
+    if (!ask.isSettled) {
+      settle(entry, { ask, outcome });
+    }
+  };
+
+  // one ask of the key set for the issuer, at once, for the calls that waited for its deadline and
+  // `joining`, each come before it went; its deadline a minute past `now`
+  const askNow = (
+    entry: IIssuerKeys,
+    { joining, now }: { joining?: IWaiter; now: number }
+  ): IKeySetAsk => {
+    const { next: waiters } = entry;
+    const ask: IKeySetAsk = { controller: new AbortController(), isSettled: false, waiters };
+
+    if (joining !== undefined) {
+      waiters.add(joining);
+    }
+
+    for (const waiter of waiters) {
+      waiter.among = waiters;
+      waiter.isAfter = true;
+    }
+
+    entry.next = new Set();
     disarm(entry);
     entry.asking = ask;
-    entry.deadline = clock.performance.now() + KEY_SET_INTERVAL;
-    entry.waiting = undefined;
+    entry.deadline = now + KEY_SET_INTERVAL;
     arm(entry);
-    waiting?.next.resolve(ask);
-
-    // ! a key set that throws as it is asked fails as one that rejects: this function is async
-    void (async () => {
-      try {
-        const answered: unknown = await keySet?.ask(entry.issuer, ask.controller.signal);
-
-        // ! what it settles to once it failed at its deadline is dropped: its keys are never held
-        if (ask.isSettled) {
-          return;
-        }
-
-        entry.held = heldOf(answered, entry.issuer);
-        entry.answered = clock.performance.now();
-        ask.settle();
-      } catch (reason) {
-        ask.settle(reason ?? new Error('the key set failed'));
-      }
-    })();
+    void answer(entry, ask);
 
     return ask;
   };
 
-  // the issuer's deadline: an ask unsettled then has failed, its signal aborted; the calls that
-  // wait for it have the next ask go, and none goes for none
-  const reachDeadline = (entry: IIssuerKeys): void => {
-    const { asking, waiting } = entry;
+  // the issuer's deadline, once the reading `now` is at it or past it: an ask unsettled then has
+  // failed, its signal aborted, and the calls that waited for it have the next ask go, which it
+  // gives; for none, none goes
+  const reach = (
+    entry: IIssuerKeys,
+    now: number = clock.performance.now()
+  ): IKeySetAsk | undefined => {
+    if (now < entry.deadline) {
+      return undefined;
+    }
 
-    entry.timer = undefined;
+    const { asking } = entry;
 
     if (asking !== undefined) {
       const failure = new TimeoutError(KEY_SET_INTERVAL);
 
-      asking.settle(failure);
+      settle(entry, { ask: asking, outcome: { failure } });
       asking.controller.abort(failure);
     }
 
-    if (waiting !== undefined) {
-      askNow(entry);
-    }
+    return entry.next.size === 0 ? undefined : askNow(entry, { now });
   };
 
-  // the deadline's timer, armed once, its delay rounded up so that it never fires before, a
-  // millisecond at least, as every timer Bead arms
+  // * the deadline's timer only makes sure the deadline is reached when nothing else reads it: armed
+  // once, its delay rounded up, a millisecond at least, as every timer Bead arms; one that fires
+  // before the reading reaches the deadline arms again for the rest
   const arm = (entry: IIssuerKeys): void => {
     if (entry.timer !== undefined) {
       return;
@@ -354,85 +454,56 @@ export const createCredentialResolver = (
     const delay = Math.max(1, Math.ceil(entry.deadline - clock.performance.now()));
 
     entry.timer = clock.setTimeout(() => {
-      reachDeadline(entry);
+      entry.timer = undefined;
+      reach(entry);
+
+      if (entry.asking !== undefined || entry.next.size > 0) {
+        arm(entry);
+      }
     }, delay);
     // a browser's timer has no `unref`
     (entry.timer as { unref?: () => unknown }).unref?.();
   };
 
-  // waits on `ask` until it settles, or `signal` aborts: a call's cancel ends its own wait, never the
-  // ask the others wait on. Rejects once the ask failed
-  const waitOn = async (ask: IKeySetAsk, signal: AbortSignal): Promise<void> => {
-    await createPromise(
-      (resolve) => {
-        void ask.done.then(resolve);
-      },
-      { signal }
-    );
+  // a call that leaves its wait by its own signal reaches nothing: it frees its place, and the last
+  // that waited for the deadline leaves no timer behind
+  const leave = (entry: IIssuerKeys, waiter: IWaiter): void => {
+    const { among } = waiter;
 
-    if (ask.failure !== undefined) {
-      throw new Error(`the key set's ask for ${JSON.stringify(ask.issuer)} failed`, {
-        cause: ask.failure,
-      });
+    among?.delete(waiter);
+    waiter.among = undefined;
+
+    if (among === entry.next && among.size === 0 && entry.asking === undefined) {
+      disarm(entry);
     }
   };
 
-  // waits for the issuer's deadline, and the ask that goes then, shared by every call that waits;
-  // the last call that leaves before it leaves no deadline to keep
-  const waitForDeadline = async (entry: IIssuerKeys, signal: AbortSignal): Promise<IKeySetAsk> => {
-    const waiting = (entry.waiting ??= { next: Promise.withResolvers(), waiters: 0 });
+  // a call's wait, until it is to be judged again: its own signal ends it, its alone
+  const waitAs = async (
+    entry: IIssuerKeys,
+    { signal, waiter }: { signal: AbortSignal; waiter: IWaiter }
+  ): Promise<void> => {
+    const onAbort = (): void => {
+      leave(entry, waiter);
+      waiter.released.reject(toCancelError(signal));
+    };
 
-    waiting.waiters += 1;
-    arm(entry);
+    signal.addEventListener('abort', onAbort, { once: true });
 
     try {
-      return await createPromise<IKeySetAsk>(
-        (resolve) => {
-          void waiting.next.promise.then(resolve);
-        },
-        { signal }
-      );
-    } catch (reason) {
-      waiting.waiters -= 1;
-
-      if (waiting.waiters === 0 && entry.waiting === waiting) {
-        entry.waiting = undefined;
-
-        if (entry.asking === undefined) {
-          disarm(entry);
-        }
-      }
-
-      throw reason;
+      await waiter.released.promise;
+    } finally {
+      signal.removeEventListener('abort', onAbort);
     }
   };
 
-  // waits for the issuer's keys: on its ask under way, which went before the call came; else, before
-  // its deadline, for the ask that goes then; else on one that goes at once. Whether the ask it
-  // waited on went after the call came; rejects once that ask failed
-  const awaitKeys = async (entry: IIssuerKeys, signal: AbortSignal): Promise<boolean> => {
-    const { asking } = entry;
-
-    if (asking !== undefined) {
-      await waitOn(asking, signal);
-
-      return false;
-    }
-
-    const ask =
-      clock.performance.now() < entry.deadline
-        ? await waitForDeadline(entry, signal)
-        : askNow(entry);
-
-    await waitOn(ask, signal);
-
-    return true;
-  };
-
-  // the issuer whose keys a token waits for: one its key set names, while the token's kid names none
-  // of that issuer's keys that serve, whatever another's names — or, without a kid, while those held
-  // are past their ten minutes
-  const awaitedOf = (token: string): IIssuerKeys | undefined => {
+  // the wait of a token of an issuer the key set names, in the order 13.8 takes: a deadline the
+  // reading reached, then whether its key serves, then the bound. None for a token of another issuer,
+  // or whose key served when judged; a call that left already reads nothing
+  const waitOf = (
+    token: string,
+    { judged, signal }: { judged: readonly IJwtKey[]; signal: AbortSignal }
+  ): Promise<void> | undefined => {
     const read = readJwt(token);
     const issuer = read === undefined ? undefined : jwtStringOf(read.claims, 'iss');
     const entry = issuer === undefined ? undefined : issuers.get(issuer);
@@ -441,44 +512,80 @@ export const createCredentialResolver = (
       return undefined;
     }
 
-    if (!Object.hasOwn(read.header, 'kid')) {
-      return entry.held.length > 0 && !isServing(entry) ? entry : undefined;
+    if (signal.aborted) {
+      return Promise.reject(toCancelError(signal));
     }
 
-    // a kid that is no string names no key, whatever a key set answers
-    const kid = jwtStringOf(read.header, 'kid');
-    const isNamed = keysServing().some((key) => {
-      return key.issuer === entry.issuer && key.jwk.kid === kid;
-    });
+    const now = clock.performance.now();
+    const letGo = reach(entry, now);
+    const waiter: IWaiter = {
+      among: undefined,
+      hasKid: Object.hasOwn(read.header, 'kid'),
+      isAfter: false,
+      kid: jwtStringOf(read.header, 'kid'),
+      released: Promise.withResolvers(),
+    };
 
-    return kid === undefined || isNamed ? undefined : entry;
+    // ! a key that came to serve as it was judged, an answer settling meanwhile: it is judged again
+    // by the keys that serve, never answered with the refusal it had
+    if (!needs(issuerKeysOf(entry), waiter)) {
+      // its issuer's keys that served as it was judged
+      const served = judged.filter((key) => {
+        return key.issuer === entry.issuer;
+      });
+
+      return needs(served, waiter) ? Promise.resolve() : undefined;
+    }
+
+    if (waitingOf(entry) >= maximumWaitingCalls) {
+      throw new CapacityError(
+        `as many calls as its key set lets wait for the keys of ${entry.issuer} wait already`
+      );
+    }
+
+    const { asking } = entry;
+
+    // on the ask under way, which went before it came unless its own reach let it go; before the
+    // deadline, for it and the ask then; otherwise on an ask that goes at once
+    if (asking !== undefined) {
+      waiter.among = asking.waiters;
+      waiter.isAfter = asking === letGo;
+      asking.waiters.add(waiter);
+    } else if (now < entry.deadline) {
+      waiter.among = entry.next;
+      entry.next.add(waiter);
+      arm(entry);
+    } else {
+      askNow(entry, { joining: waiter, now });
+    }
+
+    return waitAs(entry, { signal, waiter });
   };
 
-  // a token's verdict against the keys that serve; while it waits for its issuer's keys, it is
-  // judged again as each ask it waited on answers, until its key serves or an ask that went after it
-  // came answered, the wall clock read as each signature verified
+  // a token's verdict against the keys that serve, the wall clock read as its signature verified;
+  // one refused at its key or past it waits for its issuer's keys while its key does not serve, and
+  // is judged again, its last word
   const verdictOf = async (
     token: string,
     { audiences, signal }: { audiences: string | readonly string[]; signal: AbortSignal }
   ): Promise<JwtVerdict> => {
-    const judge = (): Promise<JwtVerdict> => {
-      return verifyJwt(token, { audience: audiences, keys: keysServing(), now: wallNow });
+    const judge = (keys: readonly IJwtKey[]): Promise<JwtVerdict> => {
+      return verifyJwt(token, { audience: audiences, keys, now: wallNow });
     };
-    let verdict = await judge();
-    // whether an ask that went after the token came answered: the token's last word
-    let isLast = false;
+    const judged = keysServing();
+    const verdict = await judge(judged);
+    const waiting =
+      verdict.holds || BEFORE_KEY.has(verdict.reason)
+        ? undefined
+        : waitOf(token, { judged, signal });
 
-    for (;;) {
-      const entry =
-        isLast || verdict.holds || BEFORE_KEY.has(verdict.reason) ? undefined : awaitedOf(token);
-
-      if (entry === undefined) {
-        return verdict;
-      }
-
-      isLast = await awaitKeys(entry, signal);
-      verdict = await judge();
+    if (waiting === undefined) {
+      return verdict;
     }
+
+    await waiting;
+
+    return judge(keysServing());
   };
 
   const resolveJwt = async (

@@ -93,18 +93,20 @@ public static class InteropService
 
     /// <summary>
     /// The interop service's credentials, <c>credentials.jwt</c> and <c>credentials.elsewhere</c>,
-    /// on <paramref name="clock"/>, the clock its server is given (decision 0011): the two issuers'
-    /// published test keys and their audience; the key set, given with the issuers it answers for,
-    /// which answers each as its words say, on that clock whatever its signal, and fails at once for
-    /// any other, its rotated issuer's asks counted for this key set alone; and the ELSEWHERE
-    /// verifier, by its grammar, which settles on that clock whatever its signal.
+    /// on <paramref name="clock"/>, the clock its server is given (decision 0011): the two
+    /// issuers' published test keys and their audience; the key set, given with the issuers it
+    /// answers for and the most calls that wait for one issuer's keys at once, which answers each
+    /// as its words say, on that clock whatever its signal, and fails at once for any other, its
+    /// rotated issuer's asks counted for this key set alone; and the ELSEWHERE verifier, by its
+    /// grammar, which settles on that clock whatever its signal.
     /// </summary>
     public static Credentials CredentialsOf(TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
 
         var jwt = Manifest.GetProperty("credentials").GetProperty("jwt");
-        var answered = jwt.GetProperty("keySet").GetProperty("issuers").EnumerateArray().ToDictionary(
+        var keySet = jwt.GetProperty("keySet");
+        var answered = keySet.GetProperty("issuers").EnumerateArray().ToDictionary(
             (named) =>
             {
                 return named.GetProperty("issuer").GetString()!;
@@ -147,6 +149,7 @@ public static class InteropService
 
                     return Answer((isWithdrawn ? [] : keys, clock));
                 },
+                MaximumWaitingCalls = keySet.GetProperty("maximumWaitingCalls").GetInt32(),
             },
             Verify = (carried, _) =>
             {
@@ -263,6 +266,20 @@ public static class InteropService
         };
     }
 
+    // the issuer endSessionsOf takes: an object of this member alone, a string — {"issuer"}
+    internal static string IssuerOf(JsonElement request)
+    {
+        if (request.ValueKind != JsonValueKind.Object
+            || request.EnumerateObject().Count() != 1
+            || !request.TryGetProperty("issuer", out var issuer)
+            || issuer.ValueKind != JsonValueKind.String)
+        {
+            throw new ArgumentException("endSessionsOf names an issuer by {issuer}, a string, alone", nameof(request));
+        }
+
+        return issuer.GetString()!;
+    }
+
     /// <summary>The procedure of the interop service named <paramref name="procedureName"/>.</summary>
     public static Procedure ProcedureOf(string procedureName)
     {
@@ -295,7 +312,7 @@ public static class InteropService
     /// it verifies; the destination
     /// it registered last is kept by its handle, once it closed too, for <c>unregister</c> to take
     /// out. <c>endSession</c> ends a credential's session on every connection that keeps it, and
-    /// nothing else.
+    /// nothing else; <c>endSessionsOf</c>, every credential's session of an issuer alike.
     /// </summary>
     public static void Offer(Server<string> server)
     {
@@ -468,6 +485,14 @@ public static class InteropService
         services.GetRequestResolver(ProcedureOf("endSession"), dependencies)(async (request, response) =>
         {
             await router.EndSession(IdentifierOf(request.Payload));
+            await response.Answer(Null);
+        });
+
+        // every credential's session of an issuer ended by that issuer, on every connection that
+        // keeps one, and nothing else: a credential that still holds opens its session anew
+        services.GetRequestResolver(ProcedureOf("endSessionsOf"), dependencies)(async (request, response) =>
+        {
+            await router.EndSessionsOf(IssuerOf(request.Payload));
             await response.Answer(Null);
         });
 

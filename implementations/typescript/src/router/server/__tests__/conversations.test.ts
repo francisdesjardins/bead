@@ -14,6 +14,7 @@ import {
   interopCredentialsOf,
   interopVerifierOf,
   type InteropServer,
+  issuerOf,
   JSON_SERIALIZER,
   offerInterop,
   offerInteropClient,
@@ -487,6 +488,7 @@ test("the interop service's key set answers each issuer it names as its words sa
   const keysIssuer = 'https://keys.interop.bead.example';
   const rotatedIssuer = 'https://rotated.interop.bead.example';
   const stalledIssuer = 'https://stalled.interop.bead.example';
+  const kidlessIssuer = 'https://kidless.interop.bead.example';
   const kid = '018c0ae5-4d9b-471b-bfd6-eef314bc7037';
   const second = 1_000;
   const clock = createTestClock();
@@ -505,18 +507,29 @@ test("the interop service's key set answers each issuer it names as its words sa
     });
   };
 
-  expect(keySet.issuers).toEqual([keysIssuer, rotatedIssuer, stalledIssuer]);
+  expect(keySet.issuers).toEqual([keysIssuer, rotatedIssuer, stalledIssuer, kidlessIssuer]);
+  expect(keySet.maximumWaitingCalls).toBe(
+    INTEROP_SERVICE.credentials.jwt.keySet.maximumWaitingCalls
+  );
+  expect(keySet.maximumWaitingCalls).toBe(2);
 
-  // the rotated issuer's keys at its first ask alone; the stalled one's never, no timer armed
-  const asked = [ask(keysIssuer), ask(rotatedIssuer), ask(rotatedIssuer)];
+  // the rotated issuer's keys at its first ask alone; the stalled one's never, no timer armed; the
+  // kid-less one's at every ask, its one key naming no kid
+  const asked = [
+    ask(keysIssuer),
+    ask(rotatedIssuer),
+    ask(rotatedIssuer),
+    ask(kidlessIssuer),
+    ask(kidlessIssuer),
+  ];
 
   void ask(stalledIssuer);
 
-  expect(duesOn(clock)).toEqual([second, second, second]);
+  expect(duesOn(clock)).toEqual([second, second, second, second, second]);
 
   await clock.tickAsync(second - 1);
 
-  expect(answers).toEqual(['pending', 'pending', 'pending', 'pending']);
+  expect(answers).toEqual(['pending', 'pending', 'pending', 'pending', 'pending', 'pending']);
 
   await clock.tickAsync(1);
 
@@ -526,10 +539,14 @@ test("the interop service's key set answers each issuer it names as its words sa
     answered.map((keys) => {
       return keys.length;
     })
-  ).toEqual([1, 1, 0]);
+  ).toEqual([1, 1, 0, 1, 1]);
   expect([answered[0]?.[0]?.jwk.kid, answered[1]?.[0]?.jwk.kid]).toEqual([kid, kid]);
   expect(answered[0]?.[0]?.jwk.k).not.toBe(answered[1]?.[0]?.jwk.k);
-  expect(answers[3]).toBe('pending');
+  expect([answered[3]?.[0]?.jwk.kid, answered[3]?.[0]?.jwk.k]).toEqual([
+    undefined,
+    answered[0]?.[0]?.jwk.k,
+  ]);
+  expect(answers[5]).toBe('pending');
   expect(duesOn(clock)).toEqual([]);
 
   // its asks counted per key set built: another server's answers its first anew
@@ -553,6 +570,32 @@ test("the interop service's key set answers each issuer it names as its words sa
   expect(failure).toBe(
     'the interop key set answers for no issuer https://unnamed.interop.bead.example'
   );
+});
+
+test('the interop service’s endSessionsOf takes an issuer alone, a string, and throws for anything else', () => {
+  expect(issuerOf({ issuer: 'https://hs256.interop.bead.example' })).toBe(
+    'https://hs256.interop.bead.example'
+  );
+  expect(issuerOf({ issuer: '' })).toBe('');
+
+  for (const request of [
+    null,
+    undefined,
+    7,
+    'https://hs256.interop.bead.example',
+    ['https://hs256.interop.bead.example'],
+    {},
+    { issuer: 7 },
+    { issuer: null },
+    { issuer: 'https://hs256.interop.bead.example', sub: 'grace' },
+    { iss: 'https://hs256.interop.bead.example' },
+  ]) {
+    expect(() => {
+      return issuerOf(request);
+    }, JSON.stringify(request)).toThrow(
+      'endSessionsOf names an issuer by {"issuer"} alone, a string'
+    );
+  }
 });
 
 test.describe('the conversations', () => {

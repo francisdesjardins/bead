@@ -377,8 +377,10 @@ credential the call presented, and its end, in milliseconds since the epoch; it 
 `credentials` holds a `JWT`'s `keys`, each a JWK with its issuer and its one algorithm, `ES256` or
 `HS256`, and its `audience`; `keySet`, `{ issuers, ask(issuer, signal) }`, asked for the issuers it
 names alone, when no key of a token's issuer names its `kid`, once a minute at most for that issuer,
-with a signal its deadline aborts, its answer held ten minutes, and a `kid` that comes while the
-minute runs waiting for the ask its deadline lets go; and an `ELSEWHERE`'s
+with a signal its deadline aborts, its answer held ten minutes, a `kid` that comes while the minute
+runs waiting for the ask its deadline lets go, a token without a `kid` waiting on its issuer's keys
+while none serve, and `maximumWaitingCalls`, 64 by default, the calls that may wait for an issuer's
+keys at once, one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s
 `verify(carried, signal)`, given what the transport carried, which settles with `{ id, data, end }`,
 or with none when the credential does not hold. The server verifies a `JWT` one way, as an access
 token of RFC 9068's profile (spec 13.8), on its own clock, and takes the schemes it is given
@@ -386,7 +388,8 @@ something for: a request presenting another is refused `CREDENTIAL_UNSUPPORTED`,
 those it takes. A credential's session has no inactivity timeout: no message, listen or silence
 moves its end, and it ends at its end, with its connection, or by
 `server.router.endSession(identifier)`, which ends it and the subscriptions it bounds on every
-connection that keeps it; a credential that still holds opens it anew. The server keeps one, and
+connection that keeps it, or by `server.router.endSessionsOf(issuer)`, every session of an issuer,
+as when a key of its leaks; a credential that still holds opens it anew. The server keeps one, and
 times its end, only while it bounds a subscription, and a call whose credential resolves to the same
 identifier moves that end to the later of the two: a credential renewed keeps its subscriptions.
 

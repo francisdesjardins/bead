@@ -2065,9 +2065,12 @@ public sealed partial class RouterServerTests : IDisposable
             }
         }
 
+        // what its admission refuses every request with; none admits each
+        public Failure? Refusal { get; init; }
+
         public Failure? Admit(AdmissionRequest request)
         {
-            return null;
+            return Refusal;
         }
 
         public Task Handle(RequestResolverProps props)

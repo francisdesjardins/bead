@@ -227,6 +227,33 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task A_credential_whose_resolution_rejects_with_a_RefusalException_is_answered_CAPACITY_EXCEEDED_its_message_for_detail_and_reported_nowhere_a_FailureException_of_that_code_stays_PROCEDURE_FAILED_reported()
+    {
+        var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
+        var resolver = server.Resolve();
+        var thrown = FailureException.OfProtocol(ProtocolCode.CapacityExceeded, RouterSide.Server, "too many");
+
+        // the side's own bound refuses; anything else that fails, a failure of that code among them,
+        // has failed
+        server.Resolution = (request, _) =>
+        {
+            return request.Header.CallId == 1
+                ? ValueTask.FromException<CallSession?>(new RefusalException(Failure.OfProtocol(ProtocolCode.CapacityExceeded, "too many")))
+                : ValueTask.FromException<CallSession?>(thrown);
+        };
+
+        await server.Deliver(PresentingOf(1, Credential.Jwt("a.b.c")));
+        await server.Deliver(PresentingOf(3, Credential.Jwt("a.b.c")));
+        await server.Settle();
+
+        Assert.Equal(
+            [(1u, ProtocolCode.CapacityExceeded, "too many"), (3u, ProtocolCode.ProcedureFailed, "")],
+            RefusalsOf(server.Sent));
+        Assert.Equal([thrown], server.Reports);
+        Assert.Equal(0, resolver.Admitted);
+    }
+
+    [Fact]
     public async Task A_credential_of_a_JWT_or_an_ELSEWHERE_resolves_in_a_later_turn_whether_its_resolution_waits_or_not_its_call_id_held_meanwhile()
     {
         var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere] };
@@ -396,5 +423,69 @@ public sealed partial class RouterCoreTests
         Assert.Null(Assert.IsType<RequestHeader>(tooLarge.Header).Credential);
         Assert.Equal(5, client.Sent.Count);
         Assert.Equal(long40, ((RequestHeader)client.Sent[4].Header).Credential);
+    }
+
+    [Fact]
+    public async Task Answers_an_admission_s_SESSION_REQUIRED_to_a_request_that_presented_a_credential_ACCESS_DENIED_its_detail_kept_and_to_one_that_presented_none_SESSION_REQUIRED_whatever_its_handler()
+    {
+        var token = SessionToken.FromBytes(PatternOf(16));
+
+        foreach (var side in new[] { RouterSide.Server, RouterSide.Client })
+        {
+            var peer = new Peer(side) { Session = token, Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere] };
+            var resolver = peer.Resolve();
+
+            // the peer's call ids: odd to a server, even to a client
+            var first = side == RouterSide.Server ? 1u : 2u;
+
+            // ! no service manager between: a handler's own admission, which refuses every call
+            Failure refusal = Failure.OfProtocol(ProtocolCode.SessionRequired, "short of its scope");
+
+            resolver.Admission = (_) =>
+            {
+                return refusal;
+            };
+
+            // each credential holds, and its call runs in a session
+            peer.Resolution = (request, _) =>
+            {
+                return ValueTask.FromResult<CallSession?>(new CallSession { Data = request.Header.Credential?.Scheme.ToString() ?? "none" });
+            };
+
+            await peer.Deliver(PresentingOf(first, null));
+            await peer.Deliver(PresentingOf(first + 2, token));
+            await peer.Deliver(PresentingOf(first + 4, Credential.Jwt("a.b.c")));
+            peer.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(first + 6, Credential.Elsewhere())), false) { Credential = "Interop sub=ada" }, Handle);
+            await peer.Settle();
+
+            // one with no detail goes out with none
+            refusal = Failure.OfProtocol(ProtocolCode.SessionRequired);
+            await peer.Deliver(PresentingOf(first + 8, null));
+            await peer.Deliver(PresentingOf(first + 10, Credential.Jwt("a.b.c")));
+            await peer.Settle();
+
+            // the application's failure of that code is its own, and goes out as it is
+            refusal = Failure.OfApplication(32);
+            await peer.Deliver(PresentingOf(first + 12, Credential.Jwt("a.b.c")));
+            await peer.Settle();
+            Assert.Equal(Failure.OfApplication(32), peer.Sent[^1].Failure);
+            peer.Sent.RemoveAt(peer.Sent.Count - 1);
+
+            Assert.Equal(
+                [
+                    (first, ProtocolCode.SessionRequired, "short of its scope"),
+                    (first + 2, ProtocolCode.AccessDenied, "short of its scope"),
+                    (first + 4, ProtocolCode.AccessDenied, "short of its scope"),
+                    (first + 6, ProtocolCode.AccessDenied, "short of its scope"),
+                    (first + 8, ProtocolCode.SessionRequired, ""),
+                    (first + 10, ProtocolCode.AccessDenied, ""),
+                ],
+                RefusalsOf(peer.Sent).OrderBy((refused) =>
+                {
+                    return refused.CallId;
+                }));
+            Assert.Equal(7, resolver.Admitted);
+            Assert.Empty(peer.Reports);
+        }
     }
 }

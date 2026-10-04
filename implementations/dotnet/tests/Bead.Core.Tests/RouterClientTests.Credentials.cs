@@ -407,4 +407,38 @@ public sealed partial class RouterClientTests
         Assert.Equal(["Interop sub=server"], verified);
         Assert.Equal([new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "server" }], sessions);
     }
+
+    [Fact]
+    public async Task Answers_a_command_that_presented_a_credential_whose_admission_refuses_SESSION_REQUIRED_ACCESS_DENIED_as_a_server_does()
+    {
+        using var scripted = new ScriptedRouter(new RouterClientOptions
+        {
+            Credentials = new Credentials
+            {
+                Verify = (_, _) =>
+                {
+                    return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Id = "server" });
+                },
+            },
+        });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        // ! no service manager between: the router asks the resolver's admission itself
+        router.RegisterResolver(
+            new ScriptedResolver(Service, (_) =>
+            {
+                return Task.CompletedTask;
+            })
+            {
+                Refusal = Failure.OfProtocol(ProtocolCode.SessionRequired, "short of its scope"),
+            });
+        transport.Carrying(new Envelope { Header = RequestHeaderOf(2) with { Credential = Credential.Elsewhere() }, Payload = new byte[] { 1 } }, "Interop sub=server");
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(4), Payload = new byte[] { 1 } });
+        await scripted.Settle();
+
+        // the command in none first: it resolves in the turn it came
+        Assert.Equal([(4u, ProtocolCode.SessionRequired), (2u, ProtocolCode.AccessDenied)], transport.Failures);
+        Assert.Equal("short of its scope", transport.Envelopes[1].Failure!.Detail);
+        Assert.Empty(scripted.Errors);
+    }
 }

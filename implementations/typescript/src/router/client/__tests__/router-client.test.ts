@@ -23,6 +23,7 @@ import {
 import { envelopeOf } from '../../shared/__tests__/fixtures';
 import {
   CancelError,
+  CLIENT_FAILURES,
   createRouterClient,
   CredentialScheme,
   DisconnectError,
@@ -2084,6 +2085,67 @@ test.describe('createRouterClient', () => {
             : [];
         })
       ).toEqual([[2, ProtocolCode.SESSION_REQUIRED, 'no credential came']]);
+    });
+
+    test('answers a command that presented a credential, whose admission refuses SESSION_REQUIRED, ACCESS_DENIED, as a server does', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, {
+        credentials: {
+          verify: (carried) => {
+            return Promise.resolve({ data: { sub: carried }, id: carried });
+          },
+        },
+      });
+      const errors = recordErrors(router);
+
+      // registered raw, its admission refusing every command, the credential held or none
+      router.registerResolver(
+        Object.assign(
+          () => {
+            return Promise.resolve();
+          },
+          service,
+          {
+            admit: () => {
+              return { ...CLIENT_FAILURES.sessionRequired, detail: 'sign in first' };
+            },
+          }
+        )
+      );
+      deliver(
+        {
+          header: { ...requestHeaderOf(2), credential: { scheme: CredentialScheme.ELSEWHERE } },
+          kind: EnvelopeKind.REQUEST,
+          payload: new Uint8Array(0),
+        },
+        'ada'
+      );
+      deliver({
+        header: requestHeaderOf(4),
+        kind: EnvelopeKind.REQUEST,
+        payload: new Uint8Array(0),
+      });
+      await expect
+        .poll(() => {
+          return sent.length;
+        })
+        .toBe(2);
+
+      expect(
+        sent
+          .flatMap((envelope) => {
+            return envelope?.kind === EnvelopeKind.FAILURE
+              ? [[envelope.header.callId, envelope.failure.code, envelope.failure.detail]]
+              : [];
+          })
+          .toSorted(([a], [b]) => {
+            return Number(a) - Number(b);
+          })
+      ).toEqual([
+        [2, ProtocolCode.ACCESS_DENIED, 'sign in first'],
+        [4, ProtocolCode.SESSION_REQUIRED, 'sign in first'],
+      ]);
+      expect(errors).toEqual([]);
     });
 
     test('reports a resolver that rejects, and an answer the transport cannot send', async () => {

@@ -771,7 +771,7 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public void Answers_its_SESSION_REQUIRED_to_a_call_that_presented_a_credential_ACCESS_DENIED_its_detail_kept_and_to_a_call_that_presented_none_SESSION_REQUIRED()
+    public void Keeps_its_refusal_SESSION_REQUIRED_whatever_the_call_presented_for_its_router_to_answer()
     {
         BeforeRequest Refusing(Failure? refusal)
         {
@@ -787,19 +787,19 @@ public sealed class ServiceManagerTests
         var detailed = Refusing(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"));
         var request = new AdmissionRequest(Handle, Header);
 
-        foreach (var credential in new[] { (Credential)SessionToken.FromBytes([.. Enumerable.Repeat((byte)1, SessionToken.Bytes)]), Credential.Jwt("a.b.c"), Credential.Elsewhere() })
+        // the router answers a call that presented a credential ACCESS_DENIED, whatever the
+        // admission
+        foreach (var presenting in new Credential?[] { null, (Credential)SessionToken.FromBytes([.. Enumerable.Repeat((byte)1, SessionToken.Bytes)]), Credential.Jwt("a.b.c"), Credential.Elsewhere() }.Select((credential) =>
         {
-            var presenting = request with { Header = Header with { Credential = credential } };
+            return request with { Header = Header with { Credential = credential } };
+        }))
+        {
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), plain.RefusalOf(presenting));
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"), detailed.RefusalOf(presenting));
 
-            Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), plain.RefusalOf(presenting));
-            Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied, "sign in first"), detailed.RefusalOf(presenting));
-
-            // ACCESS_DENIED goes out as it is
+            // ACCESS_DENIED when it gives none
             Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), Refusing(null).RefusalOf(presenting));
         }
-
-        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), plain.RefusalOf(request));
-        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"), detailed.RefusalOf(request));
     }
 
     // a failure carries no side here — the router writes it as its own — so what is left to show is

@@ -1,18 +1,30 @@
 import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
+import type { IClock } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError } from '../../../transport/shared/errors';
-import { createTestClock, duesOn } from '../../../transport/shared/__tests__/fixtures';
+import {
+  createTestClock,
+  duesOn,
+  type TestClock,
+} from '../../../transport/shared/__tests__/fixtures';
 import { CredentialScheme } from '../constants';
-import { assertLimitsHoldJwt, createCredentialResolver, JWT_LIMIT_BYTES } from '../credentials';
+import {
+  assertLimitsHoldJwt,
+  createCredentialResolver,
+  type ICredentialResolver,
+  JWT_LIMIT_BYTES,
+} from '../credentials';
+import { CapacityError } from '../errors';
 import type { IJwtKey } from '../jwt-verifier';
-import type { IJwtKeySet, IJwtSetKey } from '../types';
+import type { ICallSession, IJwtKeySet, IJwtSetKey } from '../types';
 
 // constants
 
 const NOW = Date.parse('2026-01-01T00:00:00Z');
 const ISSUER = 'https://issuer.example';
 const SET_ISSUER = 'https://keys.example';
+const OTHER_SET_ISSUER = 'https://other-keys.example';
 const AUDIENCE = 'https://bead.example';
 
 // keys of these tests' own, 32 bytes each, in base64url
@@ -27,6 +39,11 @@ const KEY: IJwtKey = Object.freeze({
 const SET_KEY: IJwtSetKey = Object.freeze({
   algorithm: 'HS256',
   jwk: { k: SET_KEY_BYTES.toString('base64url'), kid: 'set-1', kty: 'oct' },
+});
+// the same key under the kid the key set's first answer does not name
+const SET_KEY_2: IJwtSetKey = Object.freeze({
+  algorithm: 'HS256',
+  jwk: { k: SET_KEY_BYTES.toString('base64url'), kid: 'set-2', kty: 'oct' },
 });
 
 // helpers
@@ -72,6 +89,57 @@ const createKeySet = () => {
   };
 
   return { asks, keySet };
+};
+
+/**
+ * `clock`, its monotonic reading `lag` milliseconds past the test clock's, which fires its timers by
+ * its own: a test moves the reading past a due without the timer firing, as a late timer does.
+ */
+const createLateClock = (clock: TestClock): { clock: IClock; lag: number } => {
+  const base: IClock = clock;
+  const late: { clock: IClock; lag: number } = {
+    clock: {
+      Date: base.Date,
+      performance: {
+        now: () => {
+          return base.performance.now() + late.lag;
+        },
+      },
+      clearInterval: (timer) => {
+        base.clearInterval(timer);
+      },
+      clearTimeout: (timer) => {
+        base.clearTimeout(timer);
+      },
+      setInterval: (callback, delay) => {
+        return base.setInterval(callback, delay);
+      },
+      setTimeout: (callback, delay) => {
+        return base.setTimeout(callback, delay);
+      },
+    },
+    lag: 0,
+  };
+
+  return late;
+};
+
+/** Has `resolver` hold {@link SET_KEY} for {@link SET_ISSUER}: a call naming set-1, and its ask's answer. */
+const heldOn = async (
+  resolver: ICredentialResolver,
+  asks: ReturnType<typeof createKeySet>['asks']
+): Promise<void> => {
+  const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+  const first = resolver.resolve(named, new AbortController().signal);
+
+  await expect
+    .poll(() => {
+      return asks.length;
+    })
+    .toBe(1);
+  asks[0]?.settle.resolve([SET_KEY]);
+
+  expect(await first).toMatchObject({ identifier: { sub: 'grace' } });
 };
 
 /** What `resolution` settled to, once it did: its session, none, or its reason; `'waiting'` before. */
@@ -465,27 +533,609 @@ test.describe('createCredentialResolver', () => {
     expect(asks).toHaveLength(1);
   });
 
-  test('counts the keys held toward an issuer’s one key, for a token without a kid', async () => {
+  test('judges a token again when its key comes to serve during its first judgment, never answering the refusal it had before', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    // the wall clock runs what the test gives it as it is next read, once: as a token's signature
+    // has verified, its first judgment under way
+    const onRead: { current: (() => void) | undefined } = { current: undefined };
+    const reading: IClock = {
+      ...clock,
+      Date: {
+        now: () => {
+          const read = onRead.current;
+
+          onRead.current = undefined;
+          read?.();
+
+          return clock.Date.now();
+        },
+      },
+    };
+    // set-1 names the application's key of another issuer too: a token of the key set's issuer
+    // naming it verifies by that key, and is refused at its iss while its own does not serve
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet, keys: [{ ...SET_KEY, issuer: ISSUER }] },
+      { clock: reading }
+    );
+    const signal = new AbortController().signal;
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    const first = resolver.resolve(named, signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+
+    // the answer naming set-1 settles as the next is judged: its key serves once it is refused,
+    // and it is judged again by the keys that serve
+    onRead.current = () => {
+      asks[0]?.settle.resolve([SET_KEY]);
+    };
+
+    expect(await resolver.resolve(named, signal)).toMatchObject({
+      identifier: { issuer: SET_ISSUER, sub: 'grace' },
+    });
+    expect(await first).toMatchObject({ identifier: { issuer: SET_ISSUER, sub: 'grace' } });
+    expect([onRead.current, asks.length]).toEqual([undefined, 1]);
+  });
+
+  test('has a token without a kid wait on its issuer’s keys at a cold start, and counts the keys held toward its issuer’s one key', async () => {
     const clock = createTestClock(NOW);
     const { asks, keySet } = createKeySet();
     const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
     const signal = new AbortController().signal;
     const kidless = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES }));
 
-    // none held: refused, and no ask goes for a token that names no kid
-    expect(await resolver.resolve(kidless, signal)).toBeUndefined();
+    // none of its issuer's keys serve: it waits on an ask that goes at once
+    const first = resolver.resolve(kidless, signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    expect(await first).toMatchObject({ identifier: { sub: 'grace' } });
+    expect(await resolver.resolve(kidless, signal)).toMatchObject({ identifier: { sub: 'grace' } });
+    expect(asks).toHaveLength(1);
+  });
+
+  test('has a token without a kid wait for nothing when its issuer has a key of the application’s, and for the deadline and the ask then after an answer that gave its issuer none', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet: { ...keySet, issuers: [SET_ISSUER, ISSUER] }, keys: [KEY] },
+      { clock }
+    );
+    const signal = new AbortController().signal;
+    const kidless = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES }));
+
+    // the application's key of its issuer serves: refused at its signature, asking nothing
+    expect(
+      await resolver.resolve(jwtOf(tokenOf(claimsOf(ISSUER), { key: SET_KEY_BYTES })), signal)
+    ).toBeUndefined();
     expect(asks).toHaveLength(0);
 
-    const named = resolver.resolve(
-      jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' })),
-      signal
+    // an answer that gives its issuer no key refuses the token that set it off
+    const cold = resolver.resolve(kidless, signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    asks[0]?.settle.resolve([]);
+
+    expect(await cold).toBeUndefined();
+
+    // the next, within the minute, waits for the deadline and the ask then, never refused at once
+    const next = outcomeOf(resolver.resolve(kidless, signal));
+
+    await expect
+      .poll(() => {
+        return duesOn(clock);
+      })
+      .toEqual([60_000]);
+    await clock.tickAsync(59_999);
+
+    expect([next.current, asks.length]).toEqual(['waiting', 1]);
+
+    await clock.tickAsync(1);
+
+    expect(asks).toHaveLength(2);
+
+    asks[1]?.settle.resolve([SET_KEY]);
+
+    await expect
+      .poll(() => {
+        return next.current;
+      })
+      .toMatchObject({ identifier: { sub: 'grace' } });
+  });
+
+  test('refuses as it is built a key set whose maximumWaitingCalls is not a whole number from 1 to 2147483647, and takes either bound', () => {
+    const clock = createTestClock(NOW);
+    const { keySet } = createKeySet();
+    const resolverOf = (maximumWaitingCalls: unknown) => {
+      return createCredentialResolver(
+        {
+          audience: AUDIENCE,
+          keySet: { ...keySet, maximumWaitingCalls } as unknown as IJwtKeySet,
+        },
+        { clock }
+      );
+    };
+
+    for (const maximumWaitingCalls of [0, -1, 1.5, 2 ** 31, Number.NaN, Infinity, '2', null]) {
+      expect(() => {
+        return resolverOf(maximumWaitingCalls);
+      }, String(maximumWaitingCalls)).toThrow(ProgrammerError);
+    }
+
+    for (const maximumWaitingCalls of [1, 2 ** 31 - 1, undefined]) {
+      expect(resolverOf(maximumWaitingCalls).takesJwt, String(maximumWaitingCalls)).toBe(true);
+    }
+  });
+
+  test('lets as many calls wait for an issuer’s keys as maximumWaitingCalls says, 64 when not given, and refuses one more CAPACITY_EXCEEDED at once, asking nothing more', async () => {
+    const clock = createTestClock(NOW);
+    const signal = new AbortController().signal;
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+
+    for (const [maximumWaitingCalls, most] of [
+      [undefined, 64],
+      [3, 3],
+    ] as const) {
+      const { asks, keySet } = createKeySet();
+      const resolver = createCredentialResolver(
+        {
+          audience: AUDIENCE,
+          keySet: {
+            ...keySet,
+            ...(maximumWaitingCalls === undefined ? {} : { maximumWaitingCalls }),
+          },
+        },
+        { clock }
+      );
+      const outcomes = Array.from({ length: most + 1 }, () => {
+        return outcomeOf(resolver.resolve(named, signal));
+      });
+      const refused = () => {
+        return outcomes.filter(({ current }) => {
+          return current instanceof CapacityError;
+        });
+      };
+
+      // whichever came last to wait, as the others wait on the one ask
+      await expect.poll(refused).toHaveLength(1);
+
+      expect(refused()[0]?.current).toMatchObject({
+        message: `as many calls as its key set lets wait for the keys of ${SET_ISSUER} wait already`,
+      });
+      expect(
+        outcomes.filter(({ current }) => {
+          return current === 'waiting';
+        })
+      ).toHaveLength(most);
+      expect(asks).toHaveLength(1);
+
+      asks[0]?.settle.resolve([SET_KEY]);
+
+      await expect
+        .poll(() => {
+          return outcomes.filter(({ current }) => {
+            return (current as ICallSession | undefined)?.identifier !== undefined;
+          }).length;
+        })
+        .toBe(most);
+    }
+  });
+
+  test('keeps a call’s place as an answer moves it from its issuer’s ask to the deadline, refusing a call past the bound meanwhile, and frees it as the call leaves', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: 1 } },
+      { clock }
+    );
+    const signal = new AbortController().signal;
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
+    // the ask goes for a call that leaves: the ask goes on, its place freed
+    const leaving = new AbortController();
+    const left = outcomeOf(resolver.resolve(named, leaving.signal));
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    leaving.abort();
+    await expect
+      .poll(() => {
+        return left.current;
+      })
+      .toBeInstanceOf(CancelError);
+
+    // two kids none names find the ask under way, which went before they came: one waits on it
+    const controllers = [new AbortController(), new AbortController()];
+    const outcomes = controllers.map((controller) => {
+      return outcomeOf(resolver.resolve(unnamed, controller.signal));
+    });
+
+    await expect
+      .poll(() => {
+        return outcomes.some(({ current }) => {
+          return current instanceof CapacityError;
+        });
+      })
+      .toBe(true);
+
+    const index = outcomes.findIndex(({ current }) => {
+      return current === 'waiting';
+    });
+
+    // its answer names no set-2: the call waits on for the deadline, refused nothing for the move
+    asks[0]?.settle.resolve([SET_KEY]);
+    await expect
+      .poll(() => {
+        return duesOn(clock);
+      })
+      .toEqual([60_000]);
+
+    expect(outcomes[index]?.current).toBe('waiting');
+    await expect(resolver.resolve(unnamed, signal)).rejects.toBeInstanceOf(CapacityError);
+
+    // gone, it frees its place: the next waits in it
+    controllers[index]?.abort();
+    await expect
+      .poll(() => {
+        return outcomes[index]?.current;
+      })
+      .toBeInstanceOf(CancelError);
+
+    const next = outcomeOf(resolver.resolve(unnamed, signal));
+
+    await clock.tickAsync(60_000);
+
+    expect(asks).toHaveLength(2);
+
+    asks[1]?.settle.resolve([SET_KEY, SET_KEY_2]);
+
+    await expect
+      .poll(() => {
+        return next.current;
+      })
+      .toMatchObject({ identifier: { sub: 'grace' } });
+  });
+
+  test('counts the calls that wait for each issuer’s keys apart', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      {
+        audience: AUDIENCE,
+        keySet: { ...keySet, issuers: [SET_ISSUER, OTHER_SET_ISSUER], maximumWaitingCalls: 1 },
+      },
+      { clock }
+    );
+    const signal = new AbortController().signal;
+    const tokenFor = (issuer: string) => {
+      return jwtOf(tokenOf(claimsOf(issuer), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    };
+    const waiting = [SET_ISSUER, OTHER_SET_ISSUER].map((issuer) => {
+      return resolver.resolve(tokenFor(issuer), signal);
+    });
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    await expect(resolver.resolve(tokenFor(SET_ISSUER), signal)).rejects.toBeInstanceOf(
+      CapacityError
+    );
+    await expect(resolver.resolve(tokenFor(OTHER_SET_ISSUER), signal)).rejects.toBeInstanceOf(
+      CapacityError
     );
 
-    await sleep(0);
-    asks[0]?.settle.resolve([SET_KEY]);
-    await named;
+    for (const ask of asks) {
+      ask.settle.resolve([SET_KEY]);
+    }
 
-    expect(await resolver.resolve(kidless, signal)).toMatchObject({ identifier: { sub: 'grace' } });
+    expect(await Promise.all(waiting)).toMatchObject([
+      { identifier: { issuer: SET_ISSUER } },
+      { identifier: { issuer: OTHER_SET_ISSUER } },
+    ]);
+  });
+
+  test('refuses CAPACITY_EXCEEDED a call that comes past a deadline its timer has yet to reach, for which as many calls wait as the key set lets, and lets the ask go for them', async () => {
+    const clock = createTestClock(NOW);
+    const late = createLateClock(clock);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: 2 } },
+      { clock: late.clock }
+    );
+    const signal = new AbortController().signal;
+    const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
+
+    await heldOn(resolver, asks);
+
+    // two wait for the deadline, the third refused
+    const outcomes = Array.from({ length: 3 }, () => {
+      return outcomeOf(resolver.resolve(unnamed, signal));
+    });
+
+    await expect
+      .poll(() => {
+        return outcomes.some(({ current }) => {
+          return current instanceof CapacityError;
+        });
+      })
+      .toBe(true);
+
+    // the reading reaches the deadline, its timer yet to fire: the call that comes lets the ask go for
+    // the two, and is the third
+    await clock.tickAsync(59_999);
+    late.lag = 1;
+
+    await expect(resolver.resolve(unnamed, signal)).rejects.toBeInstanceOf(CapacityError);
+    expect(asks).toHaveLength(2);
+
+    asks[1]?.settle.resolve([SET_KEY, SET_KEY_2]);
+
+    await expect
+      .poll(() => {
+        return outcomes.filter(({ current }) => {
+          return (current as ICallSession | undefined)?.identifier !== undefined;
+        }).length;
+      })
+      .toBe(2);
+  });
+
+  test('drops an answer that comes as the reading reaches its ask’s deadline, its timer yet to fire: the calls that wait on it fail, nothing is held, and the late timer does nothing more', async () => {
+    const clock = createTestClock(NOW);
+    const late = createLateClock(clock);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet },
+      { clock: late.clock }
+    );
+    const signal = new AbortController().signal;
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    const waiting = outcomeOf(resolver.resolve(named, signal));
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    await clock.tickAsync(59_999);
+    late.lag = 1;
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    await expect
+      .poll(() => {
+        return (waiting.current as Error | undefined)?.message;
+      })
+      .toMatch(/key set/);
+
+    expect([asks[0]?.signal.aborted, duesOn(clock)]).toEqual([true, []]);
+
+    await clock.tickAsync(1);
+
+    // nothing held: the next asks anew, and holds once that ask names its kid
+    const next = resolver.resolve(named, signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    asks[1]?.settle.resolve([]);
+
+    expect(await next).toBeUndefined();
+  });
+
+  test('fails an ask still unsettled as a call comes past its deadline, its timer yet to fire, aborting its signal, and judges that call by a new ask with a live signal; the late timer does nothing more', async () => {
+    const clock = createTestClock(NOW);
+    const late = createLateClock(clock);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet },
+      { clock: late.clock }
+    );
+    const signal = new AbortController().signal;
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    const doomed = outcomeOf(resolver.resolve(named, signal));
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    await clock.tickAsync(59_999);
+    late.lag = 1;
+
+    const coming = resolver.resolve(named, signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+
+    expect([asks[0]?.signal.aborted, asks[1]?.signal.aborted]).toEqual([true, false]);
+    await expect
+      .poll(() => {
+        return (doomed.current as Error | undefined)?.message;
+      })
+      .toMatch(/key set/);
+    // the new ask's deadline, a minute past the reading at which it went, alone
+    expect(duesOn(clock)).toEqual([60_000]);
+
+    asks[1]?.settle.resolve([SET_KEY]);
+
+    expect(await coming).toMatchObject({ identifier: { sub: 'grace' } });
+
+    await clock.tickAsync(1);
+    asks[0]?.settle.resolve([]);
+    await sleep(0);
+
+    expect(asks).toHaveLength(2);
+    expect(await resolver.resolve(named, signal)).toMatchObject({ identifier: { sub: 'grace' } });
+  });
+
+  test('lets the deadline’s ask go as a call comes past it, its timer yet to fire, and refuses that call at once once that ask’s answer does not name its kid; the late timer does nothing more', async () => {
+    const clock = createTestClock(NOW);
+    const late = createLateClock(clock);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet },
+      { clock: late.clock }
+    );
+    const signal = new AbortController().signal;
+    const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
+
+    await heldOn(resolver, asks);
+
+    const waiting = outcomeOf(resolver.resolve(unnamed, signal));
+
+    await expect
+      .poll(() => {
+        return duesOn(clock);
+      })
+      .toEqual([60_000]);
+    await clock.tickAsync(59_999);
+    late.lag = 1;
+
+    // its coming lets the ask go, after it came: that answer is its last word
+    const coming = outcomeOf(resolver.resolve(unnamed, signal));
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    asks[1]?.settle.resolve([SET_KEY]);
+
+    await expect
+      .poll(() => {
+        return [waiting.current, coming.current];
+      })
+      .toEqual([undefined, undefined]);
+
+    expect(duesOn(clock)).toEqual([]);
+
+    await clock.tickAsync(1);
+
+    expect(asks).toHaveLength(2);
+  });
+
+  test('lets no ask go as the last call that waits for a deadline leaves past it, its timer yet to fire, then or as the timer fires', async () => {
+    const clock = createTestClock(NOW);
+    const late = createLateClock(clock);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet },
+      { clock: late.clock }
+    );
+    const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
+    const leaving = new AbortController();
+
+    await heldOn(resolver, asks);
+
+    const left = outcomeOf(resolver.resolve(unnamed, leaving.signal));
+
+    await expect
+      .poll(() => {
+        return duesOn(clock);
+      })
+      .toEqual([60_000]);
+
+    // a timer that fires a millisecond before the reading reaches the deadline does nothing, and
+    // waits on for the rest
+    late.lag = -1;
+    await clock.tickAsync(60_000);
+
+    expect([left.current, asks.length, duesOn(clock)]).toEqual(['waiting', 1, [1]]);
+
+    // the reading at the deadline, that timer yet to fire, the last call leaves
+    late.lag = 0;
+    leaving.abort();
+
+    await expect
+      .poll(() => {
+        return left.current;
+      })
+      .toBeInstanceOf(CancelError);
+
+    expect([asks.length, duesOn(clock)]).toEqual([1, []]);
+
+    await clock.tickAsync(60_000);
+
+    expect(asks).toHaveLength(1);
+  });
+
+  test('frees the place of each call that leaves its wait: 10,000 that leave as their connection closes wait again, none refused, and no ask goes at a deadline none waits for', async () => {
+    test.setTimeout(60_000);
+
+    const most = 10_000;
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: most } },
+      { clock }
+    );
+    const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
+
+    await heldOn(resolver, asks);
+
+    // twice: as many wait for the deadline as the bound lets, the one more refused, and all leave
+    for (const round of ['first', 'second']) {
+      const connection = new AbortController();
+      const outcomes = Array.from({ length: most + 1 }, () => {
+        return outcomeOf(resolver.resolve(unnamed, connection.signal));
+      });
+
+      await expect
+        .poll(
+          () => {
+            return outcomes.filter(({ current }) => {
+              return current instanceof CapacityError;
+            }).length;
+          },
+          { message: round, timeout: 30_000 }
+        )
+        .toBe(1);
+
+      expect(
+        outcomes.filter(({ current }) => {
+          return current === 'waiting';
+        }),
+        round
+      ).toHaveLength(most);
+
+      connection.abort();
+
+      await expect
+        .poll(() => {
+          return outcomes.filter(({ current }) => {
+            return current instanceof CancelError;
+          }).length;
+        })
+        .toBe(most);
+    }
+
+    expect(duesOn(clock)).toEqual([]);
+
+    await clock.tickAsync(60_000);
+
+    expect(asks).toHaveLength(1);
   });
 
   test('asks the ELSEWHERE verifier once with exactly what its transport carried and the call’s signal, and never for one that carried nothing', async () => {

@@ -427,8 +427,10 @@ export interface IRequestHandler<Handle extends string = ConnectionHandle> {
   /**
    * Whether a request may reach the handler, asked on its header before its payload is read — or
    * comes, for one that opens a transfer: `undefined` admits it; a failure refuses it, and the router
-   * answers with that failure; one that throws refuses it as failed, `PROCEDURE_FAILED`, and is
-   * reported. A router that asks says so with `isAdmitted`, so it is asked once.
+   * answers with that failure, but for `SESSION_REQUIRED` to a request that presented a credential,
+   * which it answers `ACCESS_DENIED`, its detail kept, since the credential may hold and its requester
+   * would withdraw it (spec 9.2, step 5); one that throws refuses it as failed, `PROCEDURE_FAILED`,
+   * and is reported. A router that asks says so with `isAdmitted`, so it is asked once.
    */
   admit?(request: IAdmissionRequest<Handle>): IFailure | undefined;
   /**
@@ -735,8 +737,10 @@ export interface IRouterCorePort<Handle extends string> {
   /**
    * The call's session a request's credential resolves to, asked once per request, its call id
    * held, as {@link SessionOf} says — never for an `ELSEWHERE` its transport carried nothing beside,
-   * which no credential came for. None when not given: a request presenting none runs in none, and
-   * one presenting a credential is refused with `SESSION_REQUIRED`.
+   * which no credential came for — but for a rejection with a {@link CapacityError}, a bound of the
+   * side's own, which the router answers `CAPACITY_EXCEEDED` and reports nowhere. None when not
+   * given: a request presenting none runs in none, and one presenting a credential is refused with
+   * `SESSION_REQUIRED`.
    */
   sessionOf?(request: ISessionRequest<Handle>, signal: AbortSignal): ReturnType<SessionOf<Handle>>;
   /**
@@ -921,17 +925,25 @@ export interface ICredentials {
  * A key set (RFC 7517 §5), the application's to fetch, given with the issuers it answers for, one at
  * least: the side asks it for no other, compared octet for octet, so a token whose `iss` it does not
  * name is judged at once by the keys there are. Asked once a minute at most for an issuer, when a
- * token's `kid` names none of its issuer's keys that serve — or, without a `kid`, when the keys held
- * for its issuer are past their ten minutes — its answer is held for that issuer ten minutes, in
- * place of the last. An ask's signal aborts at its deadline, a minute after it went. One that throws
- * or rejects, answers what is not keys shaped for their algorithms, or comes to its deadline
- * unsettled fails the calls that wait on it, and replaces no key held.
+ * token's `kid` names none of its issuer's keys that serve — or, without a `kid`, when none of its
+ * issuer's keys serve — its answer is held for that issuer ten minutes, in place of the last. An
+ * ask's signal aborts at its deadline, a minute after it went, on the monotonic reading. One that
+ * throws or rejects, answers what is not keys shaped for their algorithms, or is unsettled as its
+ * deadline is reached fails the calls that wait on it, and replaces no key held. A call past the
+ * `maximumWaitingCalls` that wait for one issuer's keys is refused `CAPACITY_EXCEEDED`, and nothing
+ * is reported (spec 13.8).
  */
 export interface IJwtKeySet {
   /** Asked for one of its issuers, with a signal, that issuer's keys, which it may wait for. */
   readonly ask: (issuer: string, signal: AbortSignal) => PromiseLike<readonly IJwtSetKey[]>;
   /** The issuers it answers for, one at least, each a string. */
   readonly issuers: readonly string[];
+  /**
+   * The most calls that wait for one issuer's keys at once, on its ask under way and for its
+   * deadline counted together, each issuer's apart: a whole number from 1 to 2³¹ − 1, 64 when not
+   * given. Any other is a {@link ProgrammerError}, as the side is built.
+   */
+  readonly maximumWaitingCalls?: number | undefined;
 }
 
 /** A key a key set answers for the issuer it was asked for: a JWK, and its one algorithm. */

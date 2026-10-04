@@ -1731,6 +1731,9 @@ public sealed partial class RouterClientTests
             }
         }
 
+        // what its admission refuses every request with; none admits each
+        public Failure? Refusal { get; init; }
+
         public Task Handle(RequestResolverProps props)
         {
             return handle(props);
@@ -1738,7 +1741,7 @@ public sealed partial class RouterClientTests
 
         public Failure? Admit(AdmissionRequest request)
         {
-            return null;
+            return Refusal;
         }
     }
 

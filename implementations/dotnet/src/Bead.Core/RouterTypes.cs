@@ -115,8 +115,9 @@ public interface IRequestHandler
 
     /// <summary>
     /// Whether a request may reach the handler, asked on its header before its payload is read:
-    /// none admits it; a failure refuses it, and the router answers with it; one that throws
-    /// refuses it as failed, and is reported.
+    /// none admits it; a failure refuses it, and the router answers with it — but SESSION_REQUIRED
+    /// to a call whose header presents a credential, which it answers ACCESS_DENIED, its detail
+    /// kept (spec 9.2, step 5); one that throws refuses it as failed, and is reported.
     /// </summary>
     Failure? Admit(AdmissionRequest request);
 

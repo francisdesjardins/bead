@@ -20,7 +20,7 @@ import {
   SERVER_FAILURES,
 } from '../constants';
 import { readEnvelope } from '../envelope';
-import { DisconnectError, FailureError } from '../errors';
+import { CapacityError, DisconnectError, FailureError } from '../errors';
 import { toSessionToken } from '../identifiers';
 import { createRouterCore } from '../router-core';
 import type {
@@ -29,6 +29,7 @@ import type {
   IAdmissionRequest,
   ICallSession,
   ICreditHeader,
+  IFailure,
   INotificationHeader,
   IProcedure,
   IRequestHandler,
@@ -1282,6 +1283,122 @@ test.describe('createRouterCore', () => {
         ['broken', 'a'],
       ]);
       expect(admitted).toEqual([]);
+    });
+
+    test('whose resolution rejects with a CapacityError is answered CAPACITY_EXCEEDED, its message for detail, and reported nowhere; a FailureError of that code stays PROCEDURE_FAILED, reported', async () => {
+      const bounded = new CapacityError('as many calls wait already');
+      const thrown = new FailureError(SERVER_FAILURES.capacityExceeded);
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }) => {
+          return Promise.reject(header.callId === 1 ? bounded : thrown);
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(resolverOf(echo));
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(requestOf(3, { credential: JWT }), 'a');
+      await sleep(0);
+
+      expect(
+        sent.map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.FAILURE
+            ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
+            : envelope;
+        })
+      ).toEqual([
+        [1, ProtocolCode.CAPACITY_EXCEEDED, 'as many calls wait already'],
+        [3, ProtocolCode.PROCEDURE_FAILED, ''],
+      ]);
+      expect(reported).toEqual([[thrown, 'a']]);
+    });
+
+    test('answers an admission’s SESSION_REQUIRED to a request that presented a credential ACCESS_DENIED, its detail kept, and to one that presented none SESSION_REQUIRED, whatever its handler', async () => {
+      const detailed: IProcedure = { ...echo, procedureId: 4, procedureName: 'detailed' };
+      const own: IProcedure = { ...echo, procedureId: 5, procedureName: 'own' };
+      const credentials = [undefined, OPAQUE, JWT, ELSEWHERE] as const;
+
+      // a core on each side, its own table, its peer's call ids
+      for (const [failures, firstCallId] of [
+        [SERVER_FAILURES, 1],
+        [CLIENT_FAILURES, 2],
+      ] as const) {
+        const { port, reported, sent } = createPort({
+          credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+          failures,
+          sessionOf: ({ header }) => {
+            return header.credential === undefined ? undefined : SESSION;
+          },
+        });
+        const refusing = (procedure: IProcedure, refusal: IFailure) => {
+          return Object.assign(resolverOf(procedure), {
+            admit: () => {
+              return refusal;
+            },
+          });
+        };
+        using core = createRouterCore(port);
+        const expected: unknown[] = [];
+        let callId = firstCallId;
+
+        // handlers registered raw, refusing every call: the table's SESSION_REQUIRED, one with a
+        // detail of its own, and an application's failure whose code is 32, which is left alone
+        core.registerResolver(refusing(echo, failures.sessionRequired));
+        core.registerResolver(
+          refusing(detailed, { ...failures.sessionRequired, detail: 'sign in first' })
+        );
+        core.registerResolver(
+          refusing(own, { code: 32, detail: 'its own', scope: FailureScope.APPLICATION })
+        );
+
+        for (const [procedure, detail] of [
+          [echo, ''],
+          [detailed, 'sign in first'],
+        ] as const) {
+          for (const credential of credentials) {
+            core.receive(
+              {
+                data: requestOf(callId, {
+                  ...(credential === undefined ? {} : { credential }),
+                  procedure,
+                }),
+                ...(credential === ELSEWHERE ? { credential: 'carried' } : {}),
+              },
+              'a'
+            );
+            expected.push([
+              callId,
+              credential === undefined ? ProtocolCode.SESSION_REQUIRED : ProtocolCode.ACCESS_DENIED,
+              FailureScope.PROTOCOL,
+              detail,
+            ]);
+            callId += 2;
+          }
+        }
+
+        core.receive(requestOf(callId, { credential: JWT, procedure: own }), 'a');
+        expected.push([callId, 32, FailureScope.APPLICATION, 'its own']);
+        await sleep(0);
+
+        expect(
+          sent
+            .map(({ envelope }) => {
+              return envelope?.kind === EnvelopeKind.FAILURE
+                ? [
+                    envelope.header.callId,
+                    envelope.failure.code,
+                    envelope.failure.scope,
+                    envelope.failure.detail,
+                  ]
+                : envelope;
+            })
+            .toSorted((a, b) => {
+              return Number((a as number[])[0]) - Number((b as number[])[0]);
+            })
+        ).toEqual(expected);
+        expect(reported).toEqual([]);
+      }
     });
 
     test('of a JWT or an ELSEWHERE resolves in a later turn, whether its resolution waits or not, its call id held meanwhile', async () => {

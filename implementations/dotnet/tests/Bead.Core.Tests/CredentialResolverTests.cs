@@ -112,6 +112,39 @@ public sealed class CredentialResolverTests
         return new JwtKeySet { Issuers = [Issuer], Ask = ask };
     }
 
+    // a resolver of a recording key set for the issuer and the set's issuer, letting `maximum`
+    // calls wait for one issuer's keys, on a clock
+    private static CredentialResolver BoundedOf((RecordingKeySet KeySet, int Maximum) bounded, TimeProvider clock)
+    {
+        return ResolverOf(
+            new Credentials { Audience = Audience, KeySet = bounded.KeySet.KeySet with { MaximumWaitingCalls = bounded.Maximum } },
+            clock);
+    }
+
+    // what a request presenting a credential resolves to, on a signal of the test's
+    private static Task<CallSession?> ResolvedOn((CredentialResolver Resolver, Credential Credential) asked, CancellationToken signal)
+    {
+        return asked.Resolver.Resolve(RequestOf(asked.Credential), signal).AsTask();
+    }
+
+    // the failure a call refused as it would wait past its bound is answered with
+    private static async Task<Failure> RefusalOf(Task<CallSession?> resolving)
+    {
+        return (await Assert.ThrowsAsync<RefusalException>(() =>
+        {
+            return resolving.WaitAsync(Patience, Cancelled);
+        })).Failure;
+    }
+
+    // whether each of `calls` still waits
+    private static void AssertWaiting(IEnumerable<Task<CallSession?>> calls)
+    {
+        Assert.All(calls, (call) =>
+        {
+            Assert.False(call.IsCompleted);
+        });
+    }
+
     // a key set for the issuer answering keys at once
     private static JwtKeySet AnsweringOf(params JwtSetKey[] keys)
     {
@@ -252,17 +285,16 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
-    public async Task Counts_the_keys_held_toward_an_issuer_s_one_key_for_a_token_without_a_kid()
+    public async Task Has_a_token_without_a_kid_wait_on_its_issuer_s_keys_at_a_cold_start_and_counts_the_keys_held_toward_its_issuer_s_one_key()
     {
         var clock = new FakeTimeProvider(Start);
         var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = AnsweringOf(SetKeyOf((First, "first"))) }, clock);
         var key = new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((Second, "second")) };
         var twoKeyed = ResolverOf(new Credentials { Audience = Audience, Keys = [key], KeySet = AnsweringOf(SetKeyOf((First, "first"))) }, clock);
 
-        // none held yet: a kid-less token asks nothing, and finds no key
-        Assert.Null(await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null))))));
-
-        // the one key its issuer holds, once the set answered it, serves a token without a kid
+        // none of its issuer's keys serving yet, a kid-less token asks, and finds the one key the
+        // set answered, which then serves a token without a kid, or with its kid, asking nothing
+        Assert.NotNull(await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null))))));
         Assert.NotNull(await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, "first"))))));
         Assert.NotNull(await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null))))));
 
@@ -510,6 +542,402 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
+    public async Task Judges_a_token_again_when_its_key_comes_to_serve_during_its_first_judgment_never_answering_the_refusal_it_had_before()
+    {
+        var clock = new ReadingClock();
+        var keySet = new RecordingKeySet(SetIssuer);
+
+        // set-1 names the application's key of another issuer too: a token of the key set's issuer
+        // naming it verifies by that key, and is refused at its iss while its own does not serve
+        var resolver = ResolverOf(
+            new Credentials
+            {
+                Audience = Audience,
+                Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((Second, "set-1")) }],
+                KeySet = keySet.KeySet,
+            },
+            clock);
+        var named = Credential.Jwt(TokenOf((Second, "set-1"), SetIssuer));
+        var first = ResolvedOf((resolver, named));
+
+        Assert.Single(keySet.Asks);
+
+        // the answer naming set-1 settles as the next is judged: its key serves once it is refused,
+        // and it is judged again by the keys that serve
+        clock.OnRead = () =>
+        {
+            keySet.Asks[0].Settle.SetResult([SetKeyOf((Second, "set-1"))]);
+        };
+
+        var again = await ResolvedOf((resolver, named));
+
+        Assert.Equal((SetIssuer, "grace"), (again!.Identifier!.Issuer, again.Identifier.Sub));
+        Assert.Equal(SetIssuer, (await first)!.Identifier!.Issuer);
+        Assert.Null(clock.OnRead);
+        Assert.Single(keySet.Asks);
+    }
+
+    [Fact]
+    public void Refuses_as_it_is_built_a_key_set_whose_maximumWaitingCalls_is_not_a_whole_number_from_1_to_2147483647_and_takes_either_bound()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = AnsweringOf();
+
+        // ! an int holds no fraction, nothing past 2³¹ − 1, and no NaN: what is left is under 1
+        foreach (var maximum in new[] { 0, -1, int.MinValue })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return ResolverOf(new Credentials { Audience = Audience, KeySet = keySet with { MaximumWaitingCalls = maximum } }, clock);
+            });
+        }
+
+        // from one to 2³¹ − 1, and 64 when not given
+        foreach (var maximum in new[] { 1, int.MaxValue })
+        {
+            ResolverOf(new Credentials { Audience = Audience, KeySet = keySet with { MaximumWaitingCalls = maximum } }, clock);
+        }
+
+        Assert.Equal(64, keySet.MaximumWaitingCalls);
+    }
+
+    [Fact]
+    public async Task Lets_as_many_calls_wait_for_an_issuer_s_keys_as_maximumWaitingCalls_says_64_when_not_given_and_refuses_one_more_CAPACITY_EXCEEDED_at_once_asking_nothing_more()
+    {
+        var named = Credential.Jwt(TokenOf((First, "first")));
+
+        foreach (var (maximum, given) in new (int, int?)[] { (64, null), (3, 3) })
+        {
+            var clock = new FakeTimeProvider(Start);
+            var keySet = new RecordingKeySet();
+            var resolver = given is { } bound ? BoundedOf((keySet, bound), clock) : ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+            var waiting = Enumerable.Range(0, maximum).Select((_) =>
+            {
+                return ResolvedOn((resolver, named), Cancelled);
+            }).ToList();
+
+            AssertWaiting(waiting);
+
+            var refused = await RefusalOf(ResolvedOn((resolver, named), Cancelled));
+
+            Assert.Equal((FailureScope.Protocol, (ushort)ProtocolCode.CapacityExceeded), (refused.Scope, refused.Code));
+            Assert.Single(keySet.Asks);
+
+            // the ask goes on for those that wait
+            keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+            Assert.All(await Task.WhenAll(waiting).WaitAsync(Patience, Cancelled), Assert.NotNull);
+        }
+    }
+
+    [Fact]
+    public async Task Keeps_a_call_s_place_as_an_answer_moves_it_from_its_issuer_s_ask_to_the_deadline_refusing_a_call_past_the_bound_meanwhile_and_frees_it_as_the_call_leaves()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet();
+        var resolver = BoundedOf((keySet, 1), clock);
+        var named = Credential.Jwt(TokenOf((First, "first")));
+        var unnamed = Credential.Jwt(TokenOf((Second, "second")));
+
+        using var leaving = new CancellationTokenSource();
+        using var moving = new CancellationTokenSource();
+
+        // an ask under way that its one call left, which a token comes to find: it went before
+        var left = ResolvedOn((resolver, named), leaving.Token);
+
+        await leaving.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return left.WaitAsync(Patience, Cancelled);
+        });
+
+        var moved = ResolvedOn((resolver, unnamed), moving.Token);
+
+        await RefusalOf(ResolvedOn((resolver, unnamed), Cancelled));
+
+        // its answer names no "second": it waits on for the deadline, its place kept, the bound
+        // still counting it
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.False(moved.IsCompleted);
+        await RefusalOf(ResolvedOn((resolver, unnamed), Cancelled));
+
+        // it leaves, and frees its place for the next, which the ask at the deadline judges
+        await moving.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return moved.WaitAsync(Patience, Cancelled);
+        });
+
+        var next = ResolvedOn((resolver, unnamed), Cancelled);
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(2, keySet.Asks.Count);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first")), SetKeyOf((Second, "second"))]);
+        Assert.Equal("grace", (await next.WaitAsync(Patience, Cancelled))!.Identifier!.Sub);
+    }
+
+    [Fact]
+    public async Task Counts_the_calls_that_wait_for_each_issuer_s_keys_apart()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet(Issuer, SetIssuer);
+        var resolver = BoundedOf((keySet, 1), clock);
+        var waiting = new[]
+        {
+            ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled),
+            ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first"), SetIssuer))), Cancelled),
+        };
+
+        AssertWaiting(waiting);
+        await RefusalOf(ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled));
+        await RefusalOf(ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first"), SetIssuer))), Cancelled));
+
+        Assert.Equal([Issuer, SetIssuer], keySet.Issuers());
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.All(await Task.WhenAll(waiting).WaitAsync(Patience, Cancelled), Assert.NotNull);
+    }
+
+    [Fact]
+    public async Task Refuses_CAPACITY_EXCEEDED_a_call_that_comes_past_a_deadline_its_timer_has_yet_to_reach_for_which_as_many_calls_wait_as_the_key_set_lets_and_lets_the_ask_go_for_them()
+    {
+        var clock = new LateClock();
+        var keySet = new RecordingKeySet();
+        var resolver = BoundedOf((keySet, 2), clock);
+        var named = Credential.Jwt(TokenOf((First, "first")));
+        var unnamed = Credential.Jwt(TokenOf((Second, "second")));
+        var first = ResolvedOn((resolver, named), Cancelled);
+
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.NotNull(await first.WaitAsync(Patience, Cancelled));
+
+        var waiting = new[] { ResolvedOn((resolver, unnamed), Cancelled), ResolvedOn((resolver, unnamed), Cancelled) };
+
+        // past the deadline, its timer yet to fire: the call that comes reaches it, and the ask
+        // goes for the two, which the third would go past
+        clock.Reading = 60_000;
+        await RefusalOf(ResolvedOn((resolver, unnamed), Cancelled));
+        Assert.Equal(2, keySet.Asks.Count);
+        AssertWaiting(waiting);
+
+        // the late timer does nothing more
+        clock.Timers[0].Fire();
+        Assert.Equal(2, keySet.Asks.Count);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.All(await Task.WhenAll(waiting).WaitAsync(Patience, Cancelled), Assert.Null);
+    }
+
+    [Fact]
+    public async Task Drops_an_answer_that_comes_as_the_reading_reaches_its_ask_s_deadline_its_timer_yet_to_fire_the_calls_that_wait_on_it_fail_nothing_is_held_and_the_late_timer_does_nothing_more()
+    {
+        var clock = new LateClock();
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var token = Credential.Jwt(TokenOf((First, "first")));
+        var late = ResolvedOn((resolver, token), Cancelled);
+
+        clock.Reading = 60_000;
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Contains("key set", (await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return late.WaitAsync(Patience, Cancelled);
+        })).Message, StringComparison.Ordinal);
+        Assert.True(keySet.Asks[0].Signal.IsCancellationRequested);
+
+        // nothing held: a token of that kid asks anew; the late timer does nothing more
+        var again = ResolvedOn((resolver, token), Cancelled);
+
+        Assert.Equal(2, keySet.Asks.Count);
+        clock.Timers[0].Fire();
+        Assert.Equal(2, keySet.Asks.Count);
+        Assert.False(again.IsCompleted);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Equal("grace", (await again.WaitAsync(Patience, Cancelled))!.Identifier!.Sub);
+    }
+
+    [Fact]
+    public async Task Fails_an_ask_still_unsettled_as_a_call_comes_past_its_deadline_its_timer_yet_to_fire_aborting_its_signal_and_judges_that_call_by_a_new_ask_with_a_live_signal_the_late_timer_does_nothing_more()
+    {
+        var clock = new LateClock();
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var token = Credential.Jwt(TokenOf((First, "first")));
+        var stalled = ResolvedOn((resolver, token), Cancelled);
+
+        clock.Reading = 60_000;
+
+        var coming = ResolvedOn((resolver, token), Cancelled);
+
+        // the first ask failed as the call came, its signal aborted; the next went, its own live
+        Assert.Contains("key set", (await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return stalled.WaitAsync(Patience, Cancelled);
+        })).Message, StringComparison.Ordinal);
+        Assert.True(keySet.Asks[0].Signal.IsCancellationRequested);
+        Assert.Equal(2, keySet.Asks.Count);
+        Assert.False(keySet.Asks[1].Signal.IsCancellationRequested);
+
+        // the late timer, and what the first ask settles to now, do nothing more
+        clock.Timers[0].Fire();
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((Second, "first"))]);
+        Assert.Equal(2, keySet.Asks.Count);
+        Assert.False(keySet.Asks[1].Signal.IsCancellationRequested);
+        Assert.False(coming.IsCompleted);
+
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Equal("grace", (await coming.WaitAsync(Patience, Cancelled))!.Identifier!.Sub);
+    }
+
+    [Fact]
+    public async Task Lets_the_deadline_s_ask_go_as_a_call_comes_past_it_its_timer_yet_to_fire_and_refuses_that_call_at_once_once_that_ask_s_answer_does_not_name_its_kid_the_late_timer_does_nothing_more()
+    {
+        var clock = new LateClock();
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var named = Credential.Jwt(TokenOf((First, "first")));
+        var unnamed = Credential.Jwt(TokenOf((Second, "second")));
+        var first = ResolvedOn((resolver, named), Cancelled);
+
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.NotNull(await first.WaitAsync(Patience, Cancelled));
+        clock.Reading = 1_000;
+
+        var waiting = ResolvedOn((resolver, unnamed), Cancelled);
+
+        // its coming reaches the deadline: the ask goes then, after it came, for it as for the call
+        // that waited
+        clock.Reading = 60_000;
+
+        var coming = ResolvedOn((resolver, unnamed), Cancelled);
+
+        Assert.Equal(2, keySet.Asks.Count);
+        AssertWaiting([waiting, coming]);
+
+        // a kid its answer does not name is refused then, never held another minute
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Null(await coming.WaitAsync(Patience, Cancelled));
+        Assert.Null(await waiting.WaitAsync(Patience, Cancelled));
+
+        // the late timer does nothing more
+        clock.Timers[0].Fire();
+        Assert.Equal(2, keySet.Asks.Count);
+    }
+
+    [Fact]
+    public async Task Lets_no_ask_go_as_the_last_call_that_waits_for_a_deadline_leaves_past_it_its_timer_yet_to_fire_then_or_as_the_timer_fires()
+    {
+        var clock = new LateClock();
+        var keySet = new RecordingKeySet();
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var first = ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled);
+
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.NotNull(await first.WaitAsync(Patience, Cancelled));
+
+        using var leaving = new CancellationTokenSource();
+
+        var left = ResolvedOn((resolver, Credential.Jwt(TokenOf((Second, "second")))), leaving.Token);
+
+        // a timer that fires before the reading reaches its deadline is armed again for the rest
+        clock.Reading = 59_999;
+        clock.Timers[0].Fire();
+        Assert.Equal(TimeSpan.FromMilliseconds(1), clock.Timers[0].Due);
+        Assert.False(left.IsCompleted);
+        Assert.Single(keySet.Asks);
+
+        // a leave reads nothing of its issuer's state, and reaches no deadline
+        clock.Reading = 60_000;
+        await leaving.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return left.WaitAsync(Patience, Cancelled);
+        });
+        Assert.Single(keySet.Asks);
+
+        clock.Timers[0].Fire();
+        Assert.Single(keySet.Asks);
+    }
+
+    [Fact]
+    public async Task Has_a_token_without_a_kid_wait_for_nothing_when_its_issuer_has_a_key_of_the_application_s_and_for_the_deadline_and_the_ask_then_after_an_answer_that_gave_its_issuer_none()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet(Issuer, SetIssuer);
+        var resolver = ResolverOf(
+            new Credentials
+            {
+                Audience = Audience,
+                Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = JwkOf((First, null)) }],
+                KeySet = keySet.KeySet,
+            },
+            clock);
+
+        // a key of its issuer's serves: verified, or refused, at once, asking nothing
+        Assert.Equal("grace", (await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null))))))!.Identifier!.Sub);
+        Assert.Null(await ResolvedOf((resolver, Credential.Jwt(TokenOf((Second, null))))));
+        Assert.Empty(keySet.Asks);
+
+        // of the other issuer, at a cold start it asks, and is judged by that answer, which gives
+        // no key
+        var kidless = Credential.Jwt(TokenOf((First, null), SetIssuer));
+        var cold = ResolvedOn((resolver, kidless), Cancelled);
+
+        Assert.Single(keySet.Asks);
+        keySet.Asks[0].Settle.SetResult([]);
+        Assert.Null(await cold.WaitAsync(Patience, Cancelled));
+
+        // none of its issuer's keys serving, the next waits for the deadline, never refused at once
+        var next = ResolvedOn((resolver, kidless), Cancelled);
+
+        clock.Advance(TimeSpan.FromMilliseconds(59_999));
+        Assert.False(next.IsCompleted);
+        Assert.Single(keySet.Asks);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal([SetIssuer, SetIssuer], keySet.Issuers());
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Equal("grace", (await next.WaitAsync(Patience, Cancelled))!.Identifier!.Sub);
+    }
+
+    [Fact]
+    public async Task Frees_the_place_of_each_call_that_leaves_its_wait_10000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for()
+    {
+        const int Many = 10_000;
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet();
+        var resolver = BoundedOf((keySet, Many), clock);
+        var unnamed = Credential.Jwt(TokenOf((Second, "second")));
+        var first = ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled);
+
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.NotNull(await first.WaitAsync(Patience, Cancelled));
+
+        // the bound's worth twice, a round at a time, their connection closing on them: the second
+        // round finds every place free
+        for (var round = 0; round < 2; round += 1)
+        {
+            using var connection = new CancellationTokenSource();
+
+            var waiting = Enumerable.Range(0, Many).Select((_) =>
+            {
+                return ResolvedOn((resolver, unnamed), connection.Token);
+            }).ToList();
+
+            AssertWaiting(waiting);
+            await connection.CancelAsync();
+
+            foreach (var left in waiting)
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                {
+                    return left.WaitAsync(Patience, Cancelled);
+                });
+            }
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Single(keySet.Asks);
+    }
+
+    [Fact]
     public async Task Asks_the_ELSEWHERE_verifier_once_with_exactly_what_its_transport_carried_and_the_call_s_signal_and_never_for_one_that_carried_nothing()
     {
         var asked = new List<(string Carried, CancellationToken Signal)>();
@@ -595,15 +1023,15 @@ public sealed class CredentialResolverTests
         Assert.Equal(wall + 1, (await resolver.Resolve(RequestOf(Credential.Elsewhere(), "Interop sub=ada"), Cancelled))!.End);
     }
 
-    // a key set for an issuer that records each ask, its issuer and its signal, and answers as each
-    // is settled
+    // a key set for its issuers, the issuer when none is given, that records each ask, its issuer
+    // and its signal, and answers as each is settled
     private sealed class RecordingKeySet
     {
-        public RecordingKeySet(string issuer = Issuer)
+        public RecordingKeySet(params string[] issuers)
         {
             KeySet = new JwtKeySet
             {
-                Issuers = [issuer],
+                Issuers = issuers.Length > 0 ? issuers : [Issuer],
                 Ask = (asked, signal) =>
                 {
                     var settle = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
@@ -625,6 +1053,113 @@ public sealed class CredentialResolverTests
             {
                 return ask.Issuer;
             })];
+        }
+    }
+
+    // a clock whose monotonic reading, in milliseconds, the test moves as it likes, past a due
+    // without its timer firing, and whose timers fire as the test fires them, late, or once
+    // disposed, as a timer's callback already on its way does; its wall reading stays at the start
+    private sealed class LateClock : TimeProvider
+    {
+        public long Reading { get; set; }
+
+        public List<LateTimer> Timers { get; } = [];
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return 1_000;
+            }
+        }
+
+        public override long GetTimestamp()
+        {
+            return Reading;
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return Start;
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new LateTimer(callback, state);
+
+            Timers.Add(timer);
+
+            return timer;
+        }
+    }
+
+    // a clock at the start whose wall clock runs what the test gives it as it is next read, once: as
+    // a token's signature has verified, its first judgment under way
+    private sealed class ReadingClock : TimeProvider
+    {
+        private readonly FakeTimeProvider _clock = new(Start);
+
+        public Action? OnRead { get; set; }
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return _clock.TimestampFrequency;
+            }
+        }
+
+        public override long GetTimestamp()
+        {
+            return _clock.GetTimestamp();
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            var read = OnRead;
+
+            OnRead = null;
+            read?.Invoke();
+
+            return _clock.GetUtcNow();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return _clock.CreateTimer(callback, state, dueTime, period);
+        }
+    }
+
+    // a timer of the late clock, which fires as the test fires it, whatever it was told: the due it
+    // was last armed again for, when it was
+    private sealed class LateTimer(TimerCallback callback, object? state) : ITimer
+    {
+        public bool IsDisposed { get; private set; }
+
+        public TimeSpan? Due { get; private set; }
+
+        public void Fire()
+        {
+            callback(state);
+        }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            Due = dueTime;
+
+            return !IsDisposed;
+        }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+
+            return ValueTask.CompletedTask;
         }
     }
 }

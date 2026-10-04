@@ -228,11 +228,19 @@ ISSUERS = {key['algorithm']: key['issuer'] for key in CREDENTIALS['keys']}
 HS_KEY = next(key['jwk'] for key in CREDENTIALS['keys'] if key['algorithm'] == 'HS256')
 KEY_SET = CREDENTIALS['keySet']
 # the issuers the key set answers for: one that answers its key at every ask, one that answers it at
-# the first ask alone, under the first one's kid, and one whose ask never settles
-SET, ROTATED, STALLED = KEY_SET['issuers']
+# the first ask alone, under the first one's kid, one whose ask never settles, and one whose one key
+# carries no kid
+SET, ROTATED, STALLED, KIDLESS = KEY_SET['issuers']
 SET_KEY = SET['keys'][0]['jwk']
 ROTATED_KEY = ROTATED['keys'][0]['jwk']
+KIDLESS_KEY = KIDLESS['keys'][0]['jwk']
 assert ROTATED_KEY['kid'] == SET_KEY['kid'] and ROTATED_KEY['k'] != SET_KEY['k'] and STALLED['keys'] == []
+assert len(KIDLESS['keys']) == 1 and 'kid' not in KIDLESS_KEY
+
+# the most calls that wait for one issuer's keys at once (13.8): the conversation that passes them
+# plays two waiting, on two connections, and a third on a third
+WAITING_CALLS = KEY_SET['maximumWaitingCalls']
+assert WAITING_CALLS == 2
 
 # how long the key set takes to answer, on the server's clock, as its words say; an ask's deadline,
 # a minute after it went; and how long the keys an answer gave are held, ten minutes from it (13.8)
@@ -307,13 +315,22 @@ HS_AT_START = hs256(access(exp=START, iat=START - HOUR, jti='at-hs256-0003'))
 HS_30_DAYS = hs256(access(exp=START + 30 * DAY, jti='at-hs256-0004'))
 HS_OTHER_AUDIENCE = hs256(access(aud='bead-other', jti='at-hs256-0005'))
 
+# the HS256 issuer's token for carol, another session of that issuer than grace's
+HS_CAROL = hs256(access(sub='carol', jti='at-hs256-0007'))
+
 # the key set's first issuer's tokens, under its one key: one its kid names, and one whose kid no key
 # names, which that key would verify
 SET_GRACE = hs256(access(SET['issuer'], jti='at-keys-0001'), SET_KEY)
 SET_UNNAMED = hs256(access(SET['issuer'], jti='at-keys-0002'), {**SET_KEY, 'kid': '2026-01'})
 
-# the rotated issuer's token, under its key, whose kid the first issuer's key names too
+# the rotated issuer's tokens, under its key: one whose kid the first issuer's key names too, and one
+# whose kid no key names
 ROTATED_GRACE = hs256(access(ROTATED['issuer'], jti='at-rotated-0001'), ROTATED_KEY)
+ROTATED_UNNAMED = hs256(access(ROTATED['issuer'], jti='at-rotated-0002'), {**ROTATED_KEY, 'kid': '2026-01'})
+
+# the kid-less issuer's token, under its one key, which carries no kid
+KIDLESS_GRACE = hs256(access(KIDLESS['issuer'], jti='at-kidless-0001'), KIDLESS_KEY)
+assert 'kid' not in json.loads(unbase64url(KIDLESS_GRACE.split('.')[0]))
 
 # the stalled issuer's token, whose kid no key names: its signature is never reached
 STALLED_GRACE = hs256(access(STALLED['issuer'], jti='at-stalled-0001'), {**SET_KEY, 'kid': '2026-01'})
@@ -330,8 +347,10 @@ HOUR_END = HOUR * 1000 + LEEWAY
 assert HOUR_END == 3_660_000
 assert 30 * DAY * 1000 + LEEWAY - (2 ** 31 - 1) == 444_576_353
 
-# the identifier HS_GRACE resolves to, which endSession ends
+# the identifier HS_GRACE resolves to, which endSession ends, and its issuer, which endSessionsOf
+# ends every session of
 GRACE = '{"issuer":"%s","sub":"grace"}' % ISSUERS['HS256']
+HS_ISSUER = '{"issuer":"%s"}' % ISSUERS['HS256']
 
 
 def slow(call_id, milliseconds):
@@ -343,7 +362,8 @@ def slow(call_id, milliseconds):
 
 def jwt_conversations():
     """A JWT taken and refused, its session kept while it bounds a subscription, timed to its end,
-    renewed, ended by its identifier, and its key found through the key set."""
+    renewed, ended by its identifier or its issuer, and its key found through the key set, for as
+    many calls at once as it lets wait."""
     return [
         ('a request presenting a JWT that verifies runs in its credential\'s session, never its connection\'s',
          ['9.2.5', '13.1', '13.5', '13.8'], None, [
@@ -426,32 +446,61 @@ def jwt_conversations():
              on(subscribing(7, jwt(HS_GRACE)), 'client'), on(result(7, 'null'), 'client'),
              on(ticked(9, 2, jwt(HS_GRACE)), 'client'), on(notification(7, '2'), 'client'), on(result(9, 'null'), 'client'),
              on(ticked(11, 3, jwt(ES_GRACE)), 'client'), on(notification(3, '3'), 'client'), on(result(11, 'null'), 'client')]),
+        # endSessionsOf, on a connection of its own, ends every session of the HS256 issuer on every
+        # connection that keeps one, grace's and carol's, and nothing of the ES256 issuer's under the
+        # same sub; grace's token still holds, and its tick runs in a session no longer kept
+        ('every credential\'s session of an issuer, ended by that issuer, ends on every connection that keeps one, and nothing of another issuer\'s, whatever its sub',
+         ['13.6', '13.9'], None, [
+             opened('client'), opened('other'), opened('admin'),
+             on(subscribing(1, jwt(HS_GRACE)), 'client'), on(result(1, 'null'), 'client'),
+             on(subscribing(3, jwt(ES_GRACE)), 'client'), on(result(3, 'null'), 'client'),
+             on(subscribing(1, jwt(HS_CAROL)), 'other'), on(result(1, 'null'), 'other'),
+             on(json_request(1, 'endSessionsOf', HS_ISSUER), 'admin'), on(result(1, 'null'), 'admin'),
+             on(failure(1, SESSION_REQUIRED), 'client'), on(failure(1, SESSION_REQUIRED), 'other'),
+             on(ticked(5, 1, jwt(ES_GRACE)), 'client'), on(notification(3, '1'), 'client'), on(result(5, 'null'), 'client'),
+             on(ticked(7, 2, jwt(HS_GRACE)), 'client'), on(result(7, 'null'), 'client'),
+             on(ticked(3, 3, jwt(HS_CAROL)), 'other'), on(result(3, 'null'), 'other')]),
         # the key set answers on the server's clock: a call presenting none, sent meanwhile, is answered first
         ('a call presenting none, sent while a JWT call resolves, is answered first', ['9.2'], None, [
             presenting(1, 'whoami', 'null', jwt(SET_GRACE)),
             json_request(3, 'echo', '"x"'), result(3, '"x"'),
             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"')]),
-        # each ask waits on the server's clock: a call that finds the kid among the keys held asks
-        # nothing, and is answered at once; a kid none names, a second after the first ask answered,
-        # waits for that ask's deadline, 59 s on, then for the ask that goes then, its own
-        ('a key set is asked once a minute at most for an issuer: a kid only it names is taken from its answer, then from the keys held; a kid none names within the minute waits for its end and the ask then, and is refused once that ask\'s answer does not name it',
+        # each ask waits on the server's clock, and the rotated issuer answers its key at its first ask
+        # alone, so a second ask would leave its token no key: a call whose kid the keys held name is
+        # answered at once, inside each wait, which shows that no ask went before the minute's end. A
+        # kid none names, a second after the first ask answered, waits for that ask's deadline, 59 s
+        # on, then for the ask that goes then, its own
+        ('a key set is asked once a minute at most for an issuer: a kid only it names is taken from its answer, then from the keys held; a kid none names within the minute waits for its end and the ask then, no ask going before, and is refused once that ask\'s answer does not name it',
          ['13.8', '13.8.4'], None, [
-             presenting(1, 'whoami', 'null', jwt(SET_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
-             presenting(3, 'whoami', 'null', jwt(SET_GRACE)), result(3, '"grace"'),
-             presenting(5, 'echo', '"x"', jwt(SET_UNNAMED)), armed(KEY_SET_DEADLINE - KEY_SET_WAIT),
-             advance(KEY_SET_DEADLINE - KEY_SET_WAIT), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
-             failure(5, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
-             presenting(7, 'whoami', 'null', jwt(SET_GRACE)), result(7, '"grace"')]),
-        # the call cancelled waited for the deadline; at that deadline no call waits, so no ask goes,
-        # and the next kid none names, past it, asks at once: refused on that ask's answer
+             presenting(1, 'whoami', 'null', jwt(ROTATED_GRACE)),
+             json_request(3, 'echo', '"x"'), result(3, '"x"'),
+             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
+             presenting(5, 'whoami', 'null', jwt(ROTATED_GRACE)), result(5, '"grace"'),
+             presenting(7, 'echo', '"y"', jwt(ROTATED_UNNAMED)), armed(KEY_SET_DEADLINE - KEY_SET_WAIT),
+             advance(KEY_SET_DEADLINE // 2 - KEY_SET_WAIT),
+             presenting(9, 'whoami', 'null', jwt(ROTATED_GRACE)), result(9, '"grace"'),
+             armed(KEY_SET_DEADLINE // 2), advance(KEY_SET_DEADLINE // 2),
+             presenting(11, 'whoami', 'null', jwt(ROTATED_GRACE)), result(11, '"grace"'),
+             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             failure(7, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
+        # the call cancelled waited for the deadline, which no call waits for once it left: no ask goes
+        # then, so the next kid none names, past it, asks at once, and is refused on that ask's answer.
+        # A side that asked at that deadline would find call 11 waiting on an ask that went before it
+        # came, and hold it for the next deadline; one that asked within the minute would leave call 7
+        # no key
         ('a call waiting for its issuer\'s minute to end leaves on its cancel, answered nothing, and no ask goes at a deadline no call waits for',
          ['10.2', '13.8'], None, [
-             presenting(1, 'whoami', 'null', jwt(SET_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
-             presenting(3, 'echo', '"x"', jwt(SET_UNNAMED)), armed(KEY_SET_DEADLINE - KEY_SET_WAIT), cancel(3),
-             presenting(3, 'whoami', 'null', jwt(SET_GRACE)), result(3, '"grace"'),
-             *slow(5, KEY_SET_DEADLINE - KEY_SET_WAIT),
-             presenting(7, 'echo', '"y"', jwt(SET_UNNAMED)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
-             failure(7, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
+             presenting(1, 'whoami', 'null', jwt(ROTATED_GRACE)),
+             json_request(3, 'echo', '"x"'), result(3, '"x"'),
+             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
+             presenting(5, 'echo', '"y"', jwt(ROTATED_UNNAMED)), armed(KEY_SET_DEADLINE - KEY_SET_WAIT),
+             advance(KEY_SET_DEADLINE // 2 - KEY_SET_WAIT),
+             presenting(7, 'whoami', 'null', jwt(ROTATED_GRACE)), result(7, '"grace"'),
+             cancel(5),
+             presenting(5, 'whoami', 'null', jwt(ROTATED_GRACE)), result(5, '"grace"'),
+             *slow(9, KEY_SET_DEADLINE // 2),
+             presenting(11, 'echo', '"z"', jwt(ROTATED_UNNAMED)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             failure(11, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
         # the key set fails at once when asked for an issuer it does not name, so an ask would show as
         # PROCEDURE_FAILED; none goes, and nothing waits on the server's clock
         ('a key set is asked for the issuers it names alone: a token of another, whose kid no key names, is refused at once, asking nothing, the application\'s own issuers among them',
@@ -488,6 +537,42 @@ def jwt_conversations():
              *slow(7, 1),
              presenting(9, 'echo', '"x"', jwt(ROTATED_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
              failure(9, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
+        # the kid-less issuer's key and tokens carry no kid: at a cold start no key of its issuer serves,
+        # so its token asks, and is verified by the answer; held ten minutes from it, a second in, they
+        # serve until then, and past them the token asks again
+        ('a token without a kid, of an issuer the key set names, waits on that issuer\'s keys while none of them serve: at a cold start it asks, and once the keys answered are past their ten minutes it asks again',
+         ['13.8', '13.8.4'], None, [
+             presenting(1, 'whoami', 'null', jwt(KIDLESS_GRACE)),
+             json_request(3, 'echo', '"x"'), result(3, '"x"'),
+             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
+             presenting(5, 'whoami', 'null', jwt(KIDLESS_GRACE)), result(5, '"grace"'),
+             *slow(7, KEYS_HELD),
+             presenting(9, 'whoami', 'null', jwt(KIDLESS_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             result(9, '"grace"')]),
+        # the interop key set lets two calls wait for one issuer's keys at once, on its ask under way and
+        # for its deadline counted together: a third is refused at once, unreported. A call whose key
+        # serves waits for nothing, another issuer's calls are counted apart, and a call that leaves
+        # frees its place. Each call that waits does so on a connection of its own, so that the two one
+        # answer judges are each expected on theirs
+        ('a key set lets maximumWaitingCalls calls wait for an issuer\'s keys at once, on its ask under way and for its deadline alike: one more is refused CAPACITY_EXCEEDED at once, and not reported, while a call whose key serves, a call of another issuer, and a call that comes once one left are not',
+         ['8.2', '9.2.5', '13.8'], None, [
+             opened('a'), opened('b'), opened('c'),
+             on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'a'), armed(KEY_SET_WAIT),
+             on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'b'),
+             on(presenting(1, 'echo', '"x"', jwt(SET_GRACE)), 'c'), on(failure(1, CAPACITY_EXCEEDED), 'c'),
+             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             on(result(1, '"grace"'), 'a'), on(result(1, '"grace"'), 'b'),
+             on(presenting(3, 'echo', '"x"', jwt(SET_UNNAMED)), 'a'), armed(KEY_SET_DEADLINE - KEY_SET_WAIT),
+             on(presenting(3, 'echo', '"y"', jwt(SET_UNNAMED)), 'b'),
+             on(presenting(3, 'echo', '"z"', jwt(SET_UNNAMED)), 'c'), on(failure(3, CAPACITY_EXCEEDED), 'c'),
+             on(presenting(5, 'whoami', 'null', jwt(SET_GRACE)), 'c'), on(result(5, '"grace"'), 'c'),
+             on(presenting(7, 'whoami', 'null', jwt(ROTATED_GRACE)), 'c'), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             on(result(7, '"grace"'), 'c'),
+             on(cancel(3), 'a'),
+             on(presenting(9, 'echo', '"z"', jwt(SET_UNNAMED)), 'c'), armed(KEY_SET_DEADLINE - 2 * KEY_SET_WAIT),
+             advance(KEY_SET_DEADLINE - 2 * KEY_SET_WAIT), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             on(failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD), 'b'),
+             on(failure(9, SESSION_REQUIRED, detail=DOES_NOT_HOLD), 'c')]),
     ]
 
 
@@ -1169,7 +1254,7 @@ document = {
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket\'s or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireSessionOrCredential by default, or requireSession.',
-        'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server\'s clock as its words say; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
+        'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server\'s clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer\'s keys at once; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),

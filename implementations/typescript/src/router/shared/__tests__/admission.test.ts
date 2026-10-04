@@ -76,39 +76,33 @@ test.describe('admissionOf', () => {
     );
   });
 
-  test('answers its SESSION_REQUIRED to a call that presented a credential ACCESS_DENIED, its detail kept, and to a call that presented none SESSION_REQUIRED', () => {
-    const refusing = (refusal: IBeforeRequest<Handle>['refusal']): IBeforeRequest<Handle> => {
-      return Object.assign(
-        () => {
-          return false;
-        },
-        { refusal }
-      );
-    };
+  test('keeps its refusal SESSION_REQUIRED whatever the call presented, for its router to answer', () => {
     const credentials = [
+      undefined,
       { scheme: CredentialScheme.OPAQUE, token: toSessionToken(new Uint8Array(16).fill(1)) },
       { scheme: CredentialScheme.JWT, token: 'a.b.c' },
       { scheme: CredentialScheme.ELSEWHERE },
     ] as const;
 
     for (const failures of [SERVER_FAILURES, CLIENT_FAILURES]) {
-      const plain = admissionOf(refusing(failures.sessionRequired), failures);
-      const detailed = admissionOf(
-        refusing({ ...failures.sessionRequired, detail: 'sign in first' }),
-        failures
+      const refusal = { ...failures.sessionRequired, detail: 'sign in first' };
+      const refusing = Object.assign(
+        () => {
+          return false;
+        },
+        { refusal }
       );
 
+      // the router answers it ACCESS_DENIED to a call that presented a credential, whatever handler
+      // refused it
       for (const credential of credentials) {
-        const presenting = { ...request, header: { ...request.header, credential } };
+        const presenting = {
+          ...request,
+          header: { ...request.header, ...(credential === undefined ? {} : { credential }) },
+        };
 
-        expect(plain(presenting)).toBe(failures.accessDenied);
-        expect(detailed(presenting)).toEqual({ ...failures.accessDenied, detail: 'sign in first' });
-        // ACCESS_DENIED goes out as it is
-        expect(admissionOf(refusing(undefined), failures)(presenting)).toBe(failures.accessDenied);
+        expect(admissionOf(refusing, failures)(presenting)).toBe(refusal);
       }
-
-      expect(plain(request)).toBe(failures.sessionRequired);
-      expect(detailed(request)).toEqual({ ...failures.sessionRequired, detail: 'sign in first' });
     }
   });
 

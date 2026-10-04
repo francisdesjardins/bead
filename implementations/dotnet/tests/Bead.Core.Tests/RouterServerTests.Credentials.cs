@@ -34,21 +34,35 @@ public sealed partial class RouterServerTests
     // the epoch
     private static string JwtOf(long exp)
     {
+        return SignedOf(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = exp, ["iss"] = Issuer, ["sub"] = "ada" });
+    }
+
+    // an HS256 access token of an issuer, the issuer when none is given, under the key "first",
+    // named by its sid or its sub, its exp the start of 2100
+    private static string JwtOf((string Claim, string Value) identity, string issuer = Issuer)
+    {
+        return SignedOf(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = 4_102_444_800, ["iss"] = issuer, [identity.Claim] = identity.Value });
+    }
+
+    // claims, signed under the key "first"
+    private static string SignedOf(Dictionary<string, object> claimed)
+    {
         var part = (object value) =>
         {
             return Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
         };
         var header = part(new Dictionary<string, string> { ["alg"] = "HS256", ["kid"] = "first", ["typ"] = "at+jwt" });
-        var claims = part(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = exp, ["iss"] = Issuer, ["sub"] = "ada" });
+        var claims = part(claimed);
         var signature = HMACSHA256.HashData(Secret, Encoding.ASCII.GetBytes($"{header}.{claims}"));
 
         return $"{header}.{claims}.{Base64Url.EncodeToString(signature)}";
     }
 
     // a router whose JWTs verify against its key set alone, which answers the key "first" once
-    // `answer` settles, counting its asks in `asks`, on the first connection: echo answers its
-    // session's sub, counting the calls it ran in `ran`
-    private void StartAsking((TaskCompletionSource<IReadOnlyList<JwtSetKey>> Answer, Counts Counts) asking)
+    // `answer` settles, counting its asks in `asks`, and lets `maximum` calls wait for its issuer's
+    // keys, 64 by default, on the first connection: echo answers its session's sub, counting the
+    // calls it ran in `ran`
+    private void StartAsking((TaskCompletionSource<IReadOnlyList<JwtSetKey>> Answer, Counts Counts) asking, int maximum = 64)
     {
         Start(new RouterServerOptions
         {
@@ -64,6 +78,7 @@ public sealed partial class RouterServerTests
 
                         return new ValueTask<IReadOnlyList<JwtSetKey>>(asking.Answer.Task);
                     },
+                    MaximumWaitingCalls = maximum,
                 },
             },
         });
@@ -839,6 +854,174 @@ public sealed partial class RouterServerTests
 
         Assert.Empty(SentSince());
         Assert.Equal((1, 0), (counts.Asks, counts.Ran));
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Answers_a_JWT_call_past_the_calls_its_key_set_lets_wait_for_an_issuer_s_keys_CAPACITY_EXCEEDED_reporting_nothing_and_its_client_keeps_its_default()
+    {
+        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+        var withdrawn = new List<CredentialScheme>();
+        var clientEnd = new ClientEnd(_transport);
+
+        StartAsking((answer, new Counts()), 1);
+        _transport.Peer = clientEnd;
+
+        var credential = Credential.Jwt(Holding());
+        var echo = new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(5) });
+
+        using var client = new RouterClient(clientEnd, new RouterClientOptions { Credential = credential, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+
+        client.CredentialWithdrawn += withdrawn.Add;
+
+        var waiting = client.Request(BytesOf("first"), echo);
+
+        await Settle();
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.Request(BytesOf("second"), echo).WaitAsync(Patience, Cancelled);
+        });
+
+        // nothing failed, and nothing is withdrawn: the call that waits is answered as the ask is
+        Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, FailureScope.Protocol), (refused.Code, refused.Scope));
+        Assert.Empty(withdrawn);
+        Assert.Equal(credential, client.Credential);
+        answer.SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }]);
+        Assert.Equal("ada", TextOf((await waiting.WaitAsync(Patience, Cancelled)).Payload));
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Answers_SESSION_REQUIRED_from_the_admission_of_a_resolver_registered_on_it_ACCESS_DENIED_to_a_call_that_presented_a_JWT_that_holds_whose_client_keeps_its_default_and_SESSION_REQUIRED_to_one_that_presented_none()
+    {
+        var withdrawn = new List<CredentialScheme>();
+        var clientEnd = new ClientEnd(_transport);
+        var credential = Credential.Jwt(Holding());
+
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials { Audience = Audience, Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = Jwk }] },
+        });
+        _transport.Open(First);
+
+        // ! no service manager between: the router asks the resolver's admission itself
+        Router.RegisterResolver(
+            new RawResolver(Echo, (_) =>
+            {
+                return Task.CompletedTask;
+            })
+            {
+                Refusal = Failure.OfProtocol(ProtocolCode.SessionRequired, "short of its scope"),
+            });
+        Deliver(First, RequestOf(1));
+        await Settle();
+        Assert.Equal(["first failure 1 SessionRequired"], SentSince());
+
+        _transport.Peer = clientEnd;
+
+        using var client = new RouterClient(clientEnd, new RouterClientOptions { Credential = credential, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+
+        client.CredentialWithdrawn += withdrawn.Add;
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.Request(BytesOf("hi"), new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(5) }))
+                .WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.AccessDenied, "short of its scope"), (refused.Code, refused.Detail));
+        Assert.Empty(withdrawn);
+        Assert.Equal(credential, client.Credential);
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Ends_every_credential_s_session_of_an_issuer_by_that_issuer_on_every_connection_its_sid_s_and_its_sub_s_alike_and_nothing_of_another_issuer_s_nor_an_ELSEWHERE_s_whose_id_is_that_issuer_an_issuer_none_names_ends_nothing()
+    {
+        const string OtherIssuer = "https://other.example";
+
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Audience = Audience,
+                Keys =
+                [
+                    new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = Jwk },
+                    new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = OtherIssuer, Jwk = Jwk },
+                ],
+                Verify = (carried, _) =>
+                {
+                    return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Id = carried });
+                },
+            },
+        });
+        _transport.Open(First);
+        _transport.Open(Second);
+        NotifierOf(async (_, response) =>
+        {
+            await response.RegisterNotification();
+            await response.Answer("ok");
+        });
+
+        // the issuer's by its sid and by its sub, on two connections; another issuer's; an
+        // ELSEWHERE's whose id is the issuer's very string
+        Deliver(First, Presenting(SubscribingOf(1), Credential.Jwt(JwtOf(("sid", "s-1")))));
+        Deliver(First, Presenting(SubscribingOf(3), Credential.Jwt(JwtOf(("sub", "ada")))));
+        Deliver(First, Presenting(SubscribingOf(5), Credential.Jwt(JwtOf(("sub", "ada"), OtherIssuer))));
+        SubscribeElsewhere(First, (7, Issuer));
+        Deliver(Second, Presenting(SubscribingOf(1), Credential.Jwt(JwtOf(("sub", "bob")))));
+        await Settle();
+        Assert.Equal(5, SentSince().Count);
+
+        await Router.EndSessionsOf(Issuer).WaitAsync(Patience, Cancelled);
+        await Settle();
+        Assert.Equal(
+            ["first failure 1 SessionRequired", "first failure 3 SessionRequired", "second failure 1 SessionRequired"],
+            SentSince().Order(StringComparer.Ordinal));
+        Assert.Equal(["first 5", "first 7"], await SubscribedTo(News));
+
+        // again, and for an issuer none names — another case of its string among them — nothing
+        await Router.EndSessionsOf(Issuer).WaitAsync(Patience, Cancelled);
+        await Router.EndSessionsOf("https://none.example").WaitAsync(Patience, Cancelled);
+        await Router.EndSessionsOf(Issuer.ToUpperInvariant()).WaitAsync(Patience, Cancelled);
+        await Settle();
+        Assert.Empty(SentSince());
+
+        // ending refuses no credential: one that still holds opens its session anew
+        Deliver(First, Presenting(SubscribingOf(9), Credential.Jwt(JwtOf(("sid", "s-1")))));
+        await Settle();
+        Assert.Equal(["first result 9 ok"], SentSince());
+        Assert.Equal(["first 5", "first 7", "first 9"], await SubscribedTo(News));
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Refuses_endSessionsOf_an_issuer_that_is_no_string_ending_nothing()
+    {
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials { Audience = Audience, Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = Issuer, Jwk = Jwk }] },
+        });
+        _transport.Open(First);
+        NotifierOf(async (_, response) =>
+        {
+            await response.RegisterNotification();
+            await response.Answer("ok");
+        });
+        Deliver(First, Presenting(SubscribingOf(1), Credential.Jwt(JwtOf(("sub", "ada")))));
+        await Settle();
+        Assert.Equal(["first result 1 ok"], SentSince());
+
+        // ! thrown as it is called, as EndSession's null is: the type takes no other that is no string
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = Router.EndSessionsOf(null!);
+        });
+        await Settle();
+        Assert.Empty(SentSince());
+        Assert.Equal(["first 1"], await SubscribedTo(News));
         Assert.Empty(Reported());
     }
 

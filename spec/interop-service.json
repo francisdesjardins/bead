@@ -8,7 +8,7 @@
     "notifies: what a notification procedure notifies its subscribers.",
     "relay: what the interop server's relay admits, what it forwards, and whether it verifies what it forwards. Its destinations are its clients' connections, each registered by register, with the audience it verifies or with none, and taken out by unregister.",
     "credentials: what the interop server resolves a request's credential with, by its scheme. elsewhere is its ELSEWHERE verifier: what it reads, the grammar of the values it holds, in ABNF (RFC 5234, where a string is case-insensitive, and RFC 7405, where %s makes one case-sensitive), and what it settles with.",
-    "credentials.jwt: what the interop server verifies a JWT with (section 13.8), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; answers, what it does asked for any other."
+    "credentials.jwt: what the interop server verifies a JWT with (section 13.8), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; maximumWaitingCalls, the most calls that wait for one issuer's keys at once, which the server is given with it, small so that a conversation passes it; answers, what it does asked for any other."
   ],
   "specVersion": "0.1.0",
   "serviceId": 1,
@@ -125,6 +125,12 @@
       "procedureName": "endSession",
       "request": "a credential's session's identifier, an object of these members alone, each a string: a JWT's, {\"issuer\":i,\"sub\":s} or {\"issuer\":i,\"sid\":s}; an ELSEWHERE's, {\"id\":d}",
       "answers": "null, once it ended the credential's session of that identifier on every connection that keeps it, each subscription it bounded failing SESSION_REQUIRED, and nothing else (section 13.9): an identifier no connection keeps ends nothing, and a credential that still holds opens its session anew. A request that names no identifier ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
+    },
+    {
+      "procedureId": 18,
+      "procedureName": "endSessionsOf",
+      "request": "an issuer, an object of this member alone, a string: {\"issuer\":i}",
+      "answers": "null, once it ended every credential's session of that issuer on every connection that keeps one — each JWT's whose identifier's issuer is i, octet for octet, whatever its sid or sub — each subscription they bounded failing SESSION_REQUIRED, and nothing else (section 13.9): an issuer no session kept names ends nothing, an ELSEWHERE's session names no issuer, and a credential that still holds opens its session anew. A request that names no issuer ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
     }
   ],
   "credentials": {
@@ -188,8 +194,24 @@
             "issuer": "https://stalled.interop.bead.example",
             "keys": [],
             "answers": "nothing: its ask never settles, whatever its signal, and arms no timer, so it fails at its deadline (spec 13.8)"
+          },
+          {
+            "issuer": "https://kidless.interop.bead.example",
+            "keys": [
+              {
+                "algorithm": "HS256",
+                "jwk": {
+                  "kty": "oct",
+                  "use": "sig",
+                  "alg": "HS256",
+                  "k": "hJtXIZ2uSN5kbQfbtTNWbpdmhkV8FJG-Onbc6mxCcYg"
+                }
+              }
+            ],
+            "answers": "its keys, at every ask, once 1,000 ms passed on the server's clock since it was asked, whatever its signal. Its one key, RFC 7520's 3.5 HMAC key, carries no kid, nor do its tokens, so that a token without a kid waits on its issuer's keys while none serve, and finds its key by its issuer once they do (spec 13.8)"
           }
         ],
+        "maximumWaitingCalls": 2,
         "answers": "asked for an issuer it does not name, which its server never asks it for, it fails at once"
       }
     },

@@ -327,6 +327,43 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
+    public async Task Answers_a_JWT_past_the_calls_its_key_set_lets_wait_CAPACITY_EXCEEDED_at_its_first_step_reporting_nothing_as_a_relay_that_verifies()
+    {
+        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+
+        using var device = DeviceOf(new Setup());
+
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Audience = Audience,
+                KeySet = new JwtKeySet
+                {
+                    Issuers = [Issuer],
+                    Ask = (_, _) =>
+                    {
+                        return new ValueTask<IReadOnlyList<JwtSetKey>>(answer.Task);
+                    },
+                    MaximumWaitingCalls = 1,
+                },
+            },
+            Relay = Admitting with { Verifies = true },
+        });
+        _transport.Open(First);
+        Router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7, Audience = Audience });
+
+        // the first waits for its issuer's keys; the second would wait past the one the relay lets
+        Deliver(First, To(7, Presenting(RequestOf(1, payload: "hi"), Credential.Jwt(Holding()))));
+        Deliver(First, To(7, Presenting(RequestOf(3, payload: "ho"), Credential.Jwt(Holding()))));
+        await Settle();
+
+        Assert.Equal(["first failure 3 CapacityExceeded"], SentSince());
+        Assert.Empty(device.Pipe.ClientSent);
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
     public async Task Cancels_leg_B_when_leg_A_cancels_its_call_when_its_connection_goes_and_when_the_relay_is_disposed_freeing_the_call_id_each_time()
     {
         using var device = StartRelayed();

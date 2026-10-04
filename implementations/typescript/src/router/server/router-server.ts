@@ -557,6 +557,15 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     endSession: (identifier) => {
       return credentialSessions.end(identifier);
     },
+    endSessionsOf: (issuer) => {
+      if (typeof issuer !== 'string') {
+        return Promise.reject(
+          new ProgrammerError(`endSessionsOf takes an issuer, a string, not ${String(issuer)}`)
+        );
+      }
+
+      return credentialSessions.endSessionsOf(issuer);
+    },
     gauges: () => {
       return mergeGauges([
         gaugesOf({

@@ -77,17 +77,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it bounds a subscription, its end timed on the clock the side is given, the wall clock read again
   at each step and a timer of 2³¹ − 1 ms at most armed toward it. A credential renewed under the
   same identifier moves its end, and `endSession`, `EndSession`, ends it by its identifier on every
-  connection that keeps it, and nothing else: a credential that still holds opens it anew. A
-  connection holds one subscription per procedure and per session.
+  connection that keeps it, and nothing else: a credential that still holds opens it anew;
+  `endSessionsOf`, `EndSessionsOf`, ends every credential's session of an issuer, as when a key of
+  its leaks. A connection holds one subscription per procedure and per session.
 - `credentials`, `Credentials`, among a server's and a client's options: a `JWT`'s keys, each with
   its issuer and its algorithm, its audience, and a key set, given with the issuers it answers for
   and asked for those alone, when no key of a token's issuer names its `kid`, once a minute at most
   for an issuer, with a signal its deadline aborts: its answer is held ten minutes, an ask under way
-  is shared, and a `kid` that comes while its issuer's minute runs waits for the ask its deadline
-  lets go; and an `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the transport carried and
-  the call's signal. A side given a `JWT`'s keys holds its limits to 1,024 bytes at least (section
-  12.2), and keys or a key set given without an audience are refused as the side is built. A
-  `JWT`'s verdict reads the wall clock once its signature has verified.
+  is shared, a `kid` that comes while its issuer's minute runs waits for the ask its deadline lets
+  go, a token without a `kid` waits on its issuer's keys while none serve, and at most
+  `maximumWaitingCalls`, `MaximumWaitingCalls`, 64 by default, wait for an issuer's keys at once,
+  one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s verifier, `verify`, `Verify`,
+  given what the transport carried and the call's signal. A side given a `JWT`'s keys holds its
+  limits to 1,024 bytes at least (section 12.2), and keys or a key set given without an audience are
+  refused as the side is built. A `JWT`'s verdict reads the wall clock once its signature has
+  verified.
 - A client's credential, `credential`, `Credential`, by default and per call: `NONE`, `OPAQUE`, a
   `JWT` or an `ELSEWHERE`. A default withdrawn once a call that presented it is refused
   `SESSION_REQUIRED`, while it is still, by value, the credential that call presented, tells its
@@ -108,9 +112,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   credential, at the sixth.
 - The interop service verifies a `JWT` under two issuers' published test keys and a key set's third,
   and an `ELSEWHERE` of its own auth-scheme, `Interop`; `endSession` ends a credential's session by
-  its identifier, `register` takes the audience its destination verifies, and `ticks` and `tick`
-  hold per session. 221 vectors in 10 groups, where 123 were in 9; 139 conversations, where 89 were;
-  56 transports' cases, where 50 were.
+  its identifier, and `endSessionsOf` an issuer's, `register` takes the audience its destination
+  verifies, and `ticks` and `tick` hold per session. 221 vectors in 10 groups, where 123 were in 9;
+  142 conversations, where 89 were; 56 transports' cases, where 50 were.
 
 ### Changed
 

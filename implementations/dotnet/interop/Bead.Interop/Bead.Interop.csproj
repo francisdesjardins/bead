@@ -10,6 +10,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- what the procedures' parsers take, for the tests to hold -->
+    <InternalsVisibleTo Include="Bead.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- the manifest every implementation's interop server reads -->
     <Content Include="../../../../spec/interop-service.json" Link="interop-service.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -6,9 +6,11 @@ namespace Bead;
 /// the <see cref="Credentials"/> it was given, on the clock it runs on: a JWT verified as section
 /// 13.8 states, its key found among the application's keys and those its key set answered that
 /// serve; an ELSEWHERE by the application's verifier, as section 13.10 states. What does not hold
-/// resolves to none; what fails throws, for its call to fail PROCEDURE_FAILED. Its key set's state
-/// is kept under a lock, so calls of any thread find an ask under way, and what an ask's deadline
-/// does is posted where the side runs.
+/// resolves to none; what fails throws, for its call to fail PROCEDURE_FAILED; a call that would
+/// wait for its issuer's keys past the calls its key set lets wait throws a
+/// <see cref="RefusalException"/>, for its call to be refused CAPACITY_EXCEEDED, unreported. Its
+/// key set's state is kept under a lock, so calls of any thread find an ask under way, and what an
+/// ask's deadline does is posted where the side runs.
 /// </summary>
 internal sealed class CredentialResolver
 {
@@ -33,6 +35,9 @@ internal sealed class CredentialResolver
     private readonly long _minute;
     private readonly long _hold;
 
+    // the most calls that wait for one issuer's keys at once
+    private readonly int _maximumWaitingCalls;
+
     // by issuer the key set names, what it answered for it, and its asks
     private readonly Dictionary<string, IssuerKeys> _issuers = new(StringComparer.Ordinal);
 
@@ -40,8 +45,9 @@ internal sealed class CredentialResolver
     /// A resolver of <paramref name="credentials"/>, on its side's clock, posting what an ask's
     /// deadline does where its side runs. A key not shaped for its algorithm, an audience that is
     /// not a string of well-formed Unicode, keys or a key set given without an audience, whatever
-    /// its side's relay does, and a key set given with no issuer, or one that is no string, are each
-    /// an <see cref="ArgumentException"/>, as it is built.
+    /// its side's relay does, a key set given with no issuer, or one that is no string, and a key
+    /// set that lets fewer than one call wait are each an <see cref="ArgumentException"/>, as it
+    /// is built.
     /// </summary>
     public CredentialResolver(Credentials? credentials, (TimeProvider Clock, Action<Action> Post) side)
     {
@@ -77,6 +83,15 @@ internal sealed class CredentialResolver
                     "a key set is given with the issuers it answers for, one at least, each a string, and how it is asked",
                     nameof(credentials));
             }
+
+            if (keySet.MaximumWaitingCalls < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(credentials),
+                    $"a key set's {nameof(JwtKeySet.MaximumWaitingCalls)} is a whole number from 1 to 2³¹ − 1, not {keySet.MaximumWaitingCalls}");
+            }
+
+            _maximumWaitingCalls = keySet.MaximumWaitingCalls;
 
             foreach (var issuer in issuers)
             {
@@ -169,36 +184,47 @@ internal sealed class CredentialResolver
             })];
     }
 
-    // whether a token's key does not serve, so that it waits for its issuer's keys: its kid names
-    // none of its issuer's keys that serve, whatever another issuer's key names; without a kid, the
-    // keys held for its issuer are past their ten minutes. A kid that is no string names none, ever,
-    // and waits on nothing. Under the lock
-    private bool Needs(IssuerKeys issuer, ((bool HasKid, string? Kid) Key, long Now) token)
+    // an issuer's keys that serve: the application's of that issuer, and those held within their ten
+    // minutes. Under the lock
+    private IEnumerable<JwtKey> ServingOf(IssuerKeys issuer, long now)
     {
-        var ((hasKid, kid), now) = token;
-
-        if (!hasKid)
-        {
-            return issuer.Held.Count > 0 && !Serves(issuer, now);
-        }
-
-        var held = Serves(issuer, now) ? issuer.Held : [];
-
-        return kid is not null && !_credentials.Keys
+        return _credentials.Keys
             .Where((key) =>
             {
                 return string.Equals(key.Issuer, issuer.Name, StringComparison.Ordinal);
             })
-            .Concat(held)
-            .Any((key) =>
-            {
-                return string.Equals(JwtVerifier.StringOf(key.Jwk, "kid"), kid, StringComparison.Ordinal);
-            });
+            .Concat(Serves(issuer, now) ? issuer.Held : []);
+    }
+
+    // whether a token's key does not serve among `serving`, its issuer's keys, so that it waits for
+    // them: its kid names none of them, whatever another issuer's key names; without a kid, there
+    // are none — none given, none answered yet, or all past their ten minutes. A kid that is no
+    // string names none, ever, and waits on nothing
+    private static bool Needs(IEnumerable<JwtKey> serving, (bool HasKid, string? Kid) token)
+    {
+        var (hasKid, kid) = token;
+
+        if (!hasKid)
+        {
+            return !serving.Any();
+        }
+
+        return kid is not null && !serving.Any((key) =>
+        {
+            return string.Equals(JwtVerifier.StringOf(key.Jwk, "kid"), kid, StringComparison.Ordinal);
+        });
+    }
+
+    // the calls that wait for an issuer's keys, on its ask under way and for its deadline together.
+    // Under the lock
+    private static int WaitingOf(IssuerKeys issuer)
+    {
+        return issuer.Minute is { } minute ? (minute.Asked?.Count ?? 0) + minute.Next.Count : 0;
     }
 
     // the verdict on a token, against the keys that serve now and the wall clock read as its
-    // signature has verified
-    private async ValueTask<JwtVerdict> VerdictOf(string token, IReadOnlyCollection<string> audiences)
+    // signature has verified, and the keys it was judged by
+    private async ValueTask<(JwtVerdict Verdict, List<JwtKey> Judged)> VerdictOf(string token, IReadOnlyCollection<string> audiences)
     {
         List<JwtKey> keys;
 
@@ -207,15 +233,19 @@ internal sealed class CredentialResolver
             keys = KeysServing(_clock.GetTimestamp());
         }
 
-        return await JwtVerifier.VerifyJwt(token, new VerifyJwtProps { Audiences = audiences, Keys = keys, Now = Now });
+        return (await JwtVerifier.VerifyJwt(token, new VerifyJwtProps { Audiences = audiences, Keys = keys, Now = Now }), keys);
     }
 
     // the wait of a token of an issuer the key set names, while its key does not serve: on the ask
-    // under way, which went before it came; before the deadline, for it and the ask then, which goes
-    // after it came; otherwise on an ask that goes now. None for a token of any other issuer, which
-    // never has the key set asked, or whose key serves
-    private Task? WaitOf(string token, CancellationToken signal)
+    // under way, which went before it came — unless its coming let it go, at the deadline it
+    // reached; before the deadline, for it and the ask then, which goes after it came; otherwise on
+    // an ask that goes now. None for a token of any other issuer, which never has the key set
+    // asked, or whose key served when judged; refused, a RefusalException, for one that would wait
+    // past the calls the key set lets wait for its issuer's keys
+    private Task? WaitOf(string token, (List<JwtKey> Judged, CancellationToken Signal) against)
     {
+        var (judged, signal) = against;
+
         if (JwtVerifier.ReadUnverified(token) is not { } read
             || JwtVerifier.StringOf(read.Claims, "iss") is not { } name
             || !_issuers.TryGetValue(name, out var issuer))
@@ -223,41 +253,82 @@ internal sealed class CredentialResolver
             return null;
         }
 
+        // a call whose signal ended as it comes reads nothing, and waits for nothing: it sets off
+        // no ask
+        if (signal.IsCancellationRequested)
+        {
+            return Task.FromCanceled(signal);
+        }
+
         var waiter = new Waiter((read.Header.TryGetProperty("kid", out _), JwtVerifier.StringOf(read.Header, "kid")));
         var effects = new Effects(_clock.GetTimestamp());
         var waits = true;
+        var isRefused = false;
 
         lock (_gate)
         {
-            // a deadline reached whose timer has yet to fire is reached all the same
+            Minute? reached = null;
+
+            // a deadline the reading reached, its timer yet to fire, is reached as the call comes
             if (issuer.Minute is { IsOver: false } passed && effects.Now >= passed.Deadline)
             {
                 Expire(issuer, effects);
+                reached = issuer.Minute;
             }
 
-            if (!Needs(issuer, (waiter.Key, effects.Now)))
+            if (!Needs(ServingOf(issuer, effects.Now), waiter.Key))
             {
                 waits = false;
             }
-            else if (issuer.Minute is { IsOver: false, Asked: { } asking })
+            else if (WaitingOf(issuer) >= _maximumWaitingCalls)
             {
-                waiter.In = asking;
-                asking.Add(waiter);
+                // ! counted as it starts to wait, never again: an answer or a deadline that moves
+                // it keeps its place
+                (waits, isRefused) = (false, true);
+            }
+            else if (issuer.Minute is { IsOver: false, Asked: { } asking } current)
+            {
+                // * the ask its coming let go, at the deadline it reached, went after it came
+                waiter.IsAfter = ReferenceEquals(current, reached);
+                asking.AddLast(waiter.Node);
             }
             else if (issuer.Minute is { IsOver: false } minute)
             {
-                waiter.In = minute.Next;
-                minute.Next.Add(waiter);
+                minute.Next.AddLast(waiter.Node);
             }
             else
             {
-                Go(issuer, ([waiter], effects));
+                var waiters = new LinkedList<Waiter>();
+
+                waiters.AddLast(waiter.Node);
+                Go(issuer, (waiters, effects));
             }
         }
 
+        // what the deadline it reached let go goes, whether it waits or is refused
         Apply(effects);
 
-        return waits ? Wait(waiter, signal) : null;
+        if (isRefused)
+        {
+            return Task.FromException(new RefusalException(Failure.OfProtocol(
+                ProtocolCode.CapacityExceeded,
+                $"as many calls as its key set lets wait for the keys of {issuer.Name} wait already")));
+        }
+
+        // ! a key that came to serve as it was judged, an answer settling meanwhile: it is judged
+        // again by the keys that serve, never answered with the refusal it had
+        if (!waits)
+        {
+            // its issuer's keys that served as it was judged
+            var served = judged.Where((key) =>
+            {
+                return string.Equals(key.Issuer, issuer.Name, StringComparison.Ordinal);
+            });
+
+            return Needs(served, waiter.Key) ? Task.CompletedTask : null;
+        }
+
+        return Wait(waiter, signal);
     }
 
     // a call's wait on its issuer's keys, which its own signal ends, its alone
@@ -271,29 +342,29 @@ internal sealed class CredentialResolver
         await waiter.Settled.Task;
     }
 
-    // a call that left its wait by its own signal: the ask goes on for the others, and a deadline
+    // ! a call that leaves its wait by its own signal, freeing its place in constant time, reads
+    // nothing of its issuer's state, so it reaches no deadline: the last call that leaves one past
+    // it, its timer yet to fire, lets no ask go. The ask goes on for the others, and a deadline
     // whose callers all left asks nothing
     private void Leave(Waiter waiter, CancellationToken signal)
     {
         lock (_gate)
         {
-            waiter.In?.Remove(waiter);
-            waiter.In = null;
+            waiter.Node.List?.Remove(waiter.Node);
         }
 
         waiter.Settled.TrySetCanceled(signal);
     }
 
     // an ask that goes now for an issuer, the calls given waiting on it, each come before it went,
-    // its deadline a minute on and its timer armed. Under the lock
-    private void Go(IssuerKeys issuer, (List<Waiter> Waiters, Effects Effects) going)
+    // its deadline a minute past the reading at which it goes and its timer armed. Under the lock
+    private void Go(IssuerKeys issuer, (LinkedList<Waiter> Waiters, Effects Effects) going)
     {
         var minute = new Minute { Deadline = going.Effects.Now + _minute, Asked = going.Waiters };
 
         foreach (var waiter in going.Waiters)
         {
             waiter.IsAfter = true;
-            waiter.In = going.Waiters;
         }
 
         // ! its work posted where the side runs, so the ask it may send goes from there
@@ -313,8 +384,8 @@ internal sealed class CredentialResolver
     }
 
     // an issuer's minute at its deadline: its ask, still under way, fails, its signal aborted; the
-    // calls that wait for the deadline wait on an ask that goes now; for no call, none goes. Under
-    // the lock
+    // calls that wait for the deadline wait on an ask that goes now, each keeping its place; for no
+    // call, none goes. Under the lock
     private void Expire(IssuerKeys issuer, Effects effects)
     {
         var minute = issuer.Minute!;
@@ -326,17 +397,20 @@ internal sealed class CredentialResolver
         {
             minute.Asked = null;
             effects.Aborted.Add(minute);
-            Fail(asking, (new TimeoutException($"the key set's ask for {issuer.Name} was unsettled at its deadline"), effects));
+            Fail(asking, (new TimeoutException($"the key set's ask for {issuer.Name} was unsettled as its deadline was reached"), effects));
         }
 
         if (minute.Next.Count > 0)
         {
-            Go(issuer, ([.. minute.Next], effects));
-            minute.Next.Clear();
+            var next = minute.Next;
+
+            minute.Next = new LinkedList<Waiter>();
+            Go(issuer, (next, effects));
         }
     }
 
-    // an ask's deadline, as its timer fires, unless that minute ended already
+    // an ask's deadline, as its timer fires, unless that minute ended already; a timer that fires
+    // before the reading reaches it is armed again for the rest, a millisecond at least
     private void OnDeadline(IssuerKeys issuer, Minute minute)
     {
         var effects = new Effects(_clock.GetTimestamp());
@@ -345,22 +419,29 @@ internal sealed class CredentialResolver
         {
             if (!minute.IsOver && ReferenceEquals(issuer.Minute, minute))
             {
-                Expire(issuer, effects);
+                if (effects.Now >= minute.Deadline)
+                {
+                    Expire(issuer, effects);
+                }
+                else
+                {
+                    var rest = Math.Ceiling((minute.Deadline - effects.Now) * 1_000.0 / _clock.TimestampFrequency);
+
+                    minute.Timer?.Change(TimeSpan.FromMilliseconds(Math.Max(1, rest)), Timeout.InfiniteTimeSpan);
+                }
             }
         }
 
         Apply(effects);
     }
 
-    // the calls of an ask that failed, failed with it. Under the lock
-    private static void Fail(List<Waiter> waiters, (Exception Reason, Effects Effects) failed)
+    // the calls of an ask that failed, failed with it, each leaving its place. Under the lock
+    private static void Fail(LinkedList<Waiter> waiters, (Exception Reason, Effects Effects) failed)
     {
-        foreach (var waiter in waiters)
-        {
-            waiter.In = null;
-        }
+        List<Waiter> leaving = [.. waiters];
 
-        failed.Effects.Failed.Add((waiters, failed.Reason));
+        waiters.Clear();
+        failed.Effects.Failed.Add((leaving, failed.Reason));
     }
 
     // asks the key set for an issuer's keys, with its minute's signal: what it answers, or why it
@@ -390,10 +471,11 @@ internal sealed class CredentialResolver
         Settle((issuer, minute), (answered, null));
     }
 
-    // an ask settled: dropped once its deadline came, when it failed. Its answer is held for its
-    // issuer in place of the last, as its reading is taken, and each call that waits on it goes on —
-    // but one whose ask went before it came and whose key still does not serve, which waits for the
-    // deadline and the ask then; its failure fails them all, and replaces nothing held
+    // an ask settled: dropped once its deadline was reached, when it failed. Its answer is held for
+    // its issuer in place of the last, as its reading is taken, and each call that waits on it goes
+    // on — but one whose ask went before it came and whose key still does not serve, which waits
+    // for the deadline and the ask then, keeping its place; its failure fails them all, and
+    // replaces nothing held
     private void Settle((IssuerKeys Issuer, Minute Minute) asked, (List<JwtKey>? Keys, Exception? Reason) settled)
     {
         var (issuer, minute) = asked;
@@ -401,7 +483,7 @@ internal sealed class CredentialResolver
 
         lock (_gate)
         {
-            // ! at its deadline it failed, whatever it settles to after
+            // ! at its deadline it failed, whatever it settles to at it or past it
             if (!minute.IsOver && ReferenceEquals(issuer.Minute, minute) && effects.Now >= minute.Deadline)
             {
                 Expire(issuer, effects);
@@ -419,25 +501,37 @@ internal sealed class CredentialResolver
                 {
                     issuer.Held = keys;
                     issuer.AnsweredAt = effects.Now;
-
-                    foreach (var waiter in asking)
-                    {
-                        if (waiter.IsAfter || !Needs(issuer, (waiter.Key, effects.Now)))
-                        {
-                            waiter.In = null;
-                            effects.Released.Add(waiter);
-                        }
-                        else
-                        {
-                            waiter.In = minute.Next;
-                            minute.Next.Add(waiter);
-                        }
-                    }
+                    Judge((issuer, minute), (asking, effects));
                 }
             }
         }
 
         Apply(effects);
+    }
+
+    // the calls of an ask that answered, each judged again: one whose ask went after it came, or
+    // whose key now serves, goes on; any other moves to the deadline's, its place kept. Under the
+    // lock
+    private void Judge((IssuerKeys Issuer, Minute Minute) answered, (LinkedList<Waiter> Waiters, Effects Effects) judged)
+    {
+        var (issuer, minute) = answered;
+        var (waiters, effects) = judged;
+
+        while (waiters.First is { } node)
+        {
+            var waiter = node.Value;
+
+            waiters.Remove(node);
+
+            if (waiter.IsAfter || !Needs(ServingOf(issuer, effects.Now), waiter.Key))
+            {
+                effects.Released.Add(waiter);
+            }
+            else
+            {
+                minute.Next.AddLast(node);
+            }
+        }
     }
 
     // what a change of the key set's state does once the lock is let go: the calls failed or let go
@@ -481,9 +575,12 @@ internal sealed class CredentialResolver
     /// <see cref="CredentialScheme.Elsewhere"/> resolves to, with its identifier, its data and its
     /// end; none for a credential that does not hold. A JWT is held to its request's audiences — a
     /// relay's that verifies — or to the side's own. Throws, for its call to fail PROCEDURE_FAILED,
-    /// for a verifier that fails: its key set's ask failing, unreached or unsettled at its deadline,
-    /// or the application's verifier failing; and an <see cref="OperationCanceledException"/> as
-    /// <paramref name="signal"/> ends a wait on its key set, which goes on for the others.
+    /// for a verifier that fails: its key set's ask failing, unreached or unsettled as its deadline
+    /// is reached, or the application's verifier failing; a <see cref="RefusalException"/> of
+    /// CAPACITY_EXCEEDED for a JWT that would wait for its issuer's keys past the calls its key set
+    /// lets wait, in the turn it would have waited; and an
+    /// <see cref="OperationCanceledException"/> as <paramref name="signal"/> ends a wait on its key
+    /// set, which goes on for the others.
     /// </summary>
     public ValueTask<CallSession?> Resolve(SessionRequest request, CancellationToken signal)
     {
@@ -501,14 +598,14 @@ internal sealed class CredentialResolver
     // not serve waits for that issuer's keys, then is verified again
     private async ValueTask<CallSession?> ResolveJwt(string token, (IReadOnlyCollection<string> Audiences, CancellationToken Signal) against)
     {
-        var verdict = await VerdictOf(token, against.Audiences);
+        var (verdict, judged) = await VerdictOf(token, against.Audiences);
 
         // * a token refused before its key is looked for waits for none
         if (verdict.Reason is not (null or JwtRefusal.Token or JwtRefusal.Crit or JwtRefusal.Typ)
-            && WaitOf(token, against.Signal) is { } waiting)
+            && WaitOf(token, (judged, against.Signal)) is { } waiting)
         {
             await waiting;
-            verdict = await VerdictOf(token, against.Audiences);
+            (verdict, _) = await VerdictOf(token, against.Audiences);
         }
 
         if (!verdict.Holds)
@@ -585,14 +682,15 @@ internal sealed class CredentialResolver
 
     // an ask, and the minute it holds off the next for its issuer: its deadline, the calls that wait
     // on it while it is under way, those that wait for its deadline and the ask then, its signal,
-    // which its deadline cancels while it is under way, its timer, and whether its deadline came
+    // which its deadline cancels while it is under way, its timer, and whether its deadline was
+    // reached
     private sealed class Minute
     {
         public required long Deadline { get; init; }
 
-        public List<Waiter>? Asked { get; set; }
+        public LinkedList<Waiter>? Asked { get; set; }
 
-        public List<Waiter> Next { get; } = [];
+        public LinkedList<Waiter> Next { get; set; } = new();
 
         public CancellationTokenSource Signal { get; } = new();
 
@@ -602,15 +700,21 @@ internal sealed class CredentialResolver
     }
 
     // a call that waits on its issuer's keys: its token's kid — whether it has one, and it when a
-    // string — whether the ask it waits on went after it came, the list it waits in, and what tells
-    // it to go on, or fails it
-    private sealed class Waiter((bool HasKid, string? Kid) key)
+    // string — whether the ask it waits on went after it came, its place in the calls it waits
+    // among, which it leaves in constant time, and what tells it to go on, or fails it
+    private sealed class Waiter
     {
-        public (bool HasKid, string? Kid) Key { get; } = key;
+        public Waiter((bool HasKid, string? Kid) key)
+        {
+            Key = key;
+            Node = new LinkedListNode<Waiter>(this);
+        }
+
+        public (bool HasKid, string? Kid) Key { get; }
 
         public bool IsAfter { get; set; }
 
-        public List<Waiter>? In { get; set; }
+        public LinkedListNode<Waiter> Node { get; }
 
         public TaskCompletionSource Settled { get; } = new();
     }
@@ -631,4 +735,22 @@ internal sealed class CredentialResolver
 
         public List<(IssuerKeys Issuer, Minute Minute)> Asking { get; } = [];
     }
+}
+
+/// <summary>
+/// A call its side refuses with <see cref="Failure"/>, as it would go past a bound of the side's
+/// own: nothing failed, so its router answers it with that failure, and reports nothing (spec 8.2).
+/// </summary>
+internal sealed class RefusalException : Exception
+{
+    /// <summary>A refusal, with the failure that answers it.</summary>
+    public RefusalException(Failure failure)
+        : base(failure?.Detail)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        Failure = failure;
+    }
+
+    /// <summary>The failure that answers the call.</summary>
+    public Failure Failure { get; }
 }

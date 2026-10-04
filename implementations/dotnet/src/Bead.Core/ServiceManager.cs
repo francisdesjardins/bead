@@ -96,10 +96,11 @@ public interface IRequestSerializerServer<TRequest, TResponse>
 }
 
 /// <summary>
-/// Whether a request may reach a resolver, on its header alone: only <c>true</c> admits it; anything
-/// else refuses it, with <see cref="Refusal"/>, or with <see cref="ProtocolCode.AccessDenied"/>. A
-/// refusal SESSION_REQUIRED of a call that presented a credential is answered ACCESS_DENIED, its
-/// detail kept: the credential may hold, and its requester would withdraw it (spec 9.2, step 5).
+/// Whether a request may reach a resolver, on its header alone: only <c>true</c> admits it;
+/// anything else refuses it, with <see cref="Refusal"/>, or with
+/// <see cref="ProtocolCode.AccessDenied"/>. The router answers a refusal SESSION_REQUIRED of a
+/// call that presented a credential ACCESS_DENIED, its detail kept: the credential may hold, and
+/// its requester would withdraw it (spec 9.2, step 5).
 /// </summary>
 public sealed class BeforeRequest
 {
@@ -142,8 +143,9 @@ public sealed class BeforeRequest
 
     /// <summary>
     /// What the admission makes of a request: none admits it; any other its refusal, or
-    /// ACCESS_DENIED. A refusal SESSION_REQUIRED of a call whose header presents a credential goes
-    /// out ACCESS_DENIED, its detail kept (spec 9.2, step 5). An admission that throws throws.
+    /// ACCESS_DENIED. The router answers a refusal SESSION_REQUIRED of a call whose header presents
+    /// a credential ACCESS_DENIED, whatever the admission (spec 9.2, step 5). An admission that
+    /// throws throws.
     /// </summary>
     internal Failure? RefusalOf(AdmissionRequest request)
     {
@@ -152,13 +154,7 @@ public sealed class BeforeRequest
             return null;
         }
 
-        var refusal = Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
-
-        // ! never SESSION_REQUIRED to a call that presented a credential: it may hold, and its
-        // requester would withdraw it (RFC 6750 §3.1, a token short of its scope answered 403)
-        return refusal.Code == (ushort)ProtocolCode.SessionRequired && request.Header.Credential is not null
-            ? refusal with { Code = (ushort)ProtocolCode.AccessDenied }
-            : refusal;
+        return Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
     }
 }
 

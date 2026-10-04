@@ -7,6 +7,7 @@ import { type IClock, LONGEST_TIMER, type TimeoutId } from '../../transport/shar
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { sessionKeyOf } from '../shared/call-session';
+import { CredentialScheme } from '../shared/constants';
 import type { CallId, ICallSession, SessionIdentifier } from '../shared/types';
 import type { INotificationManager, ISubscribingCall, ISubscriber } from './types';
 
@@ -42,6 +43,12 @@ export interface ICredentialSessions {
    * settles once each ended what it bounded; one no connection keeps ends nothing.
    */
   end(identifier: SessionIdentifier): Promise<void>;
+  /**
+   * Ends every `JWT`'s session whose identifier's issuer is `issuer`, octet for octet, its `sid`'s
+   * and its `sub`'s alike, on every connection that keeps one, and settles once each ended what it
+   * bounded; an `ELSEWHERE`'s names no issuer, and one no connection keeps ends nothing.
+   */
+  endSessionsOf(issuer: string): Promise<void>;
   /** The sessions kept and their timers, counted, and their connections. */
   gauges(): IGauges<TransportServerConnectionHandle>;
   /**
@@ -78,7 +85,8 @@ const laterOf = (first: number | undefined, second: number | undefined): number 
  * as it comes to be kept, as a renewal moves it, and at each due — a timer of the time left, at most
  * the longest one holds, in place of the one before — so a wall clock set by hand takes effect at the
  * next due. An end reached as it is read is taken in a turn of its own, past the answer of the call
- * that kept it. At its end, or by its identifier, `onEnd` ends what it bounds on its connection.
+ * that kept it. At its end, by its identifier or its issuer, `onEnd` ends what it bounds on its
+ * connection.
  */
 export const createCredentialSessions = ({
   clock,
@@ -290,6 +298,19 @@ export const createCredentialSessions = ({
         })
         .filter((session) => {
           return session !== undefined;
+        })
+        .toArray();
+
+      await Promise.all(ending.map(end));
+    },
+    endSessionsOf: async (issuer) => {
+      const ending = kept
+        .values()
+        .flatMap((sessions) => {
+          return sessions.values();
+        })
+        .filter(({ identifier }) => {
+          return identifier.scheme === CredentialScheme.JWT && identifier.issuer === issuer;
         })
         .toArray();
 

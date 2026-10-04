@@ -148,9 +148,10 @@ public sealed record RouterServerOptions
 /// <see cref="RouterServerOptions.SessionTokenOf"/> gives it. A connection holds one subscription
 /// per procedure and per session (spec 11.3): its connection's, for calls presenting none or OPAQUE,
 /// and each credential's, kept while it bounds one and ended at its end on a timer of the router's
-/// clock, or by <see cref="EndSession"/>. A request that names a destination
-/// goes on through the relay to the destination registered, as <see cref="RouterServerOptions.Relay"/>
-/// admits it; while none is registered, it is refused: this router relays nothing.
+/// clock, or by <see cref="EndSession"/> or <see cref="EndSessionsOf"/>. A request that names a
+/// destination goes on through the relay to the destination registered, as
+/// <see cref="RouterServerOptions.Relay"/> admits it; while none is registered, it is refused: this
+/// router relays nothing.
 /// </summary>
 public sealed class RouterServer : IRouterLike, IDisposable
 {
@@ -503,6 +504,30 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return Task.WhenAll(_kept.Keys.Where((place) =>
             {
                 return place.Session == identifier;
+            }).ToList().Select(EndKept).ToList());
+        });
+    }
+
+    /// <summary>
+    /// Ends every credential's session of an issuer alike, as when a key of that issuer's leaks:
+    /// each <see cref="CredentialScheme.Jwt"/>'s session whose identifier's issuer it is, compared
+    /// octet for octet, whatever its <c>sid</c> or <c>sub</c>, on every connection that keeps one,
+    /// and nothing else — an <see cref="CredentialScheme.Elsewhere"/>'s identifier names no
+    /// issuer. Each subscription they bound fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// issuer no kept session names ends nothing. Ending a session refuses no credential: one that
+    /// still holds opens its session anew, a token a leaked key signed among them while that key
+    /// serves. Settles once each failure was tried; one that cannot go out is reported. An issuer
+    /// that is null is an <see cref="ArgumentNullException"/>.
+    /// </summary>
+    public Task EndSessionsOf(string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(issuer);
+
+        return _core.Loop.Run(() =>
+        {
+            return Task.WhenAll(_kept.Keys.Where((place) =>
+            {
+                return place.Session is { Scheme: CredentialScheme.Jwt, Issuer: { } named } && string.Equals(named, issuer, StringComparison.Ordinal);
             }).ToList().Select(EndKept).ToList());
         });
     }

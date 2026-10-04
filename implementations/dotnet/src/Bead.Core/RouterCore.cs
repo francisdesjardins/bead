@@ -1102,13 +1102,17 @@ public sealed class RouterCore : IDisposable
                 Loop);
     }
 
-    // what refuses a request before its payload is read: its resolver's admission, on its header; one
-    // that throws refuses it as failed, and is reported
+    // what refuses a request before its payload is read: its resolver's admission, on its header,
+    // whatever the resolver; one that throws refuses it as failed, and is reported. Its
+    // SESSION_REQUIRED to a call whose header presents a credential goes out ACCESS_DENIED, its
+    // detail kept (spec 9.2, step 5)
     private Failure? RefusalOf(IRequestHandler resolver, AdmissionRequest request)
     {
+        Failure? refusal;
+
         try
         {
-            return resolver.Admit(request);
+            refusal = resolver.Admit(request);
         }
         catch (Exception reason)
         {
@@ -1116,6 +1120,12 @@ public sealed class RouterCore : IDisposable
 
             return ProtocolFailureOf(ProtocolCode.ProcedureFailed);
         }
+
+        // ! never SESSION_REQUIRED to a call that presented a credential: it may hold, and its
+        // requester would withdraw it (RFC 6750 §3.1, a token short of its scope answered 403)
+        return refusal is { Scope: FailureScope.Protocol, Code: (ushort)ProtocolCode.SessionRequired } && request.Header.Credential is not null
+            ? refusal with { Code = (ushort)ProtocolCode.AccessDenied }
+            : refusal;
     }
 
     // what did not read: a request of the peer's on a free call id is answered; an answer of this
@@ -1425,8 +1435,9 @@ public sealed class RouterCore : IDisposable
         Settle(resolver, (arrival, resolving.AsTask()));
     }
 
-    // a credential resolved: dropped once its call ended; refused when it does not hold; otherwise
-    // the call runs in the session it resolved to, whatever befell its connection's meanwhile
+    // a credential resolved: dropped once its call ended; refused when it does not hold, or as it
+    // would wait past the calls the side lets wait; otherwise the call runs in the session it
+    // resolved to, whatever befell its connection's meanwhile
     private void Settle(IRequestHandler resolver, (Arrival Arrival, Task<CallSession?> Resolution) resolved)
     {
         var (arrival, resolution) = resolved;
@@ -1434,6 +1445,15 @@ public sealed class RouterCore : IDisposable
         if (!IsResolving(arrival))
         {
             _ = resolution.Exception;
+
+            return;
+        }
+
+        // * a call refused as it would go past a bound of the side's own: nothing failed, and
+        // nothing is reported
+        if (resolution.Exception?.InnerException is RefusalException refused)
+        {
+            Refuse(refused.Failure, (arrival.Target, arrival.Answering));
 
             return;
         }

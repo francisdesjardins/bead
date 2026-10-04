@@ -118,9 +118,9 @@
               "minLength": 1
             },
             "keySet": {
-              "description": "The key set the server is given, with the issuers it answers for (spec 13.8): each issuer, the keys it answers, each a JWK with its one algorithm, and what and when it answers; and what it does asked for any other issuer.",
+              "description": "The key set the server is given, with the issuers it answers for (spec 13.8): each issuer, the keys it answers, each a JWK with its one algorithm, and what and when it answers; the most calls that wait for one issuer's keys at once; and what it does asked for any other issuer.",
               "type": "object",
-              "required": ["issuers", "answers"],
+              "required": ["issuers", "maximumWaitingCalls", "answers"],
               "additionalProperties": false,
               "properties": {
                 "issuers": {
@@ -157,6 +157,12 @@
                       }
                     }
                   }
+                },
+                "maximumWaitingCalls": {
+                  "description": "The most calls that wait for one issuer's keys at once, on its ask under way or for its deadline (spec 13.8).",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
                 },
                 "answers": {
                   "type": "string",

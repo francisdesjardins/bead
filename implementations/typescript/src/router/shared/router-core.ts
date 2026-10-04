@@ -24,7 +24,13 @@ import {
   SESSION_TOKEN_BYTES,
 } from './constants';
 import { bytesOf, readEnvelope, writeEnvelope, writeFailure } from './envelope';
-import { DisconnectError, FailureError, failureErrorOf, redactHeader } from './errors';
+import {
+  CapacityError,
+  DisconnectError,
+  FailureError,
+  failureErrorOf,
+  redactHeader,
+} from './errors';
 import { headerBytesOf, readPrefix } from './header';
 import { sideOfCallId } from './identifiers';
 import {
@@ -990,13 +996,31 @@ export const createRouterCore = <Handle extends string>(
     resolver: IRequestHandler<Handle>,
     request: IAdmissionRequest<Handle>
   ): IFailure | undefined => {
+    let refusal: IFailure | undefined;
+
     try {
-      return resolver.admit?.(request);
+      refusal = resolver.admit?.(request);
     } catch (reason) {
       port.report(toError(reason), request.connectionHandle);
 
       return failures.procedureFailed;
     }
+
+    const { sessionRequired } = failures;
+
+    // ! never SESSION_REQUIRED to a call that presented a credential, whatever its handler: the
+    // credential may hold, and its requester would withdraw it (spec 9.2, step 5)
+    if (
+      refusal?.scope !== sessionRequired.scope ||
+      refusal.code !== sessionRequired.code ||
+      request.header.credential === undefined
+    ) {
+      return refusal;
+    }
+
+    return refusal.detail === undefined
+      ? failures.accessDenied
+      : { ...failures.accessDenied, detail: refusal.detail };
   };
 
   // a chunk that did not read ends the transfer it was for, as invalid — unless its payload came
@@ -1197,7 +1221,14 @@ export const createRouterCore = <Handle extends string>(
 
       admitRouted({ ...routed, dispatched: { ...dispatched, session } });
     };
+    // a bound of the side's own refuses the call: nothing failed, so nothing is reported
     const fail = (reason: unknown): void => {
+      if (reason instanceof CapacityError) {
+        const detail = reason.message;
+
+        return (refuse({ ...failures.capacityExceeded, detail }, dispatched), undefined);
+      }
+
       port.report(toError(reason), connectionHandle);
       refuse(failures.procedureFailed, dispatched);
     };

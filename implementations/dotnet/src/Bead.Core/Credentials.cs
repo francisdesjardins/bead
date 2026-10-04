@@ -22,8 +22,9 @@ public sealed record JwtSetKey
 }
 
 /// <summary>
-/// A key set (RFC 7517 §5), the application's to fetch: the issuers it answers for, and how it is
-/// asked for the keys of one of them. The side asks it for no other issuer.
+/// A key set (RFC 7517 §5), the application's to fetch: the issuers it answers for, how it is asked
+/// for the keys of one of them, and the most calls that wait for one issuer's keys at once. The
+/// side asks it for no other issuer.
 /// </summary>
 public sealed record JwtKeySet
 {
@@ -35,13 +36,22 @@ public sealed record JwtKeySet
     public required IReadOnlyList<string> Issuers { get; init; }
 
     /// <summary>
-    /// Asks it for one of <see cref="Issuers"/>, with a signal cancelled at the ask's deadline, a
-    /// minute after it went on the side's monotonic reading, should it still be unsettled then: it
-    /// answers that issuer's keys, and may wait. One that throws or faults, answers what is not keys
-    /// shaped for their algorithms, or is still unsettled at its deadline fails the calls that wait
-    /// on it, PROCEDURE_FAILED; what it settles to after its deadline is dropped.
+    /// Asks it for one of <see cref="Issuers"/>, with a signal cancelled as the ask's deadline is
+    /// reached, a minute past the reading at which it went on the side's monotonic reading, should
+    /// it still be unsettled then: it answers that issuer's keys, and may wait. One that throws or
+    /// faults, answers what is not keys shaped for their algorithms, or is still unsettled as its
+    /// deadline is reached fails the calls that wait on it, PROCEDURE_FAILED; what it settles to at
+    /// or past its deadline is dropped.
     /// </summary>
     public required Func<string, CancellationToken, ValueTask<IReadOnlyList<JwtSetKey>>> Ask { get; init; }
+
+    /// <summary>
+    /// The most calls that wait for one issuer's keys at once, on its ask under way and for its
+    /// deadline counted together, each issuer's apart: 64 by default, from 1 to 2³¹ − 1, or an
+    /// <see cref="ArgumentOutOfRangeException"/> as the side is built. A call that would wait past
+    /// them is refused CAPACITY_EXCEEDED, and not reported: it withdraws nothing (spec 8.2, 13.8).
+    /// </summary>
+    public int MaximumWaitingCalls { get; init; } = 64;
 }
 
 /// <summary>
@@ -97,10 +107,11 @@ public sealed record Credentials
     /// <summary>
     /// The key set, asked for an issuer it names once a minute at most: for a token of that issuer
     /// whose <c>kid</c> names none of that issuer's keys that serve, or that names no <c>kid</c>
-    /// while the keys held for that issuer are past their ten minutes. What an answer gave is held
-    /// for its issuer, beside <see cref="Keys"/>, in place of what the last gave, and serves ten
-    /// minutes from that answer; an ask that fails replaces nothing, and fails the calls that wait on
-    /// it, PROCEDURE_FAILED (spec 13.8). The application fetches; the side fetches nothing.
+    /// while none of that issuer's keys serve — none given, none answered yet, or all past their
+    /// ten minutes. What an answer gave is held for its issuer, beside <see cref="Keys"/>, in
+    /// place of what the last gave, and serves ten minutes from that answer; an ask that fails
+    /// replaces nothing, and fails the calls that wait on it, PROCEDURE_FAILED (spec 13.8). The
+    /// application fetches; the side fetches nothing.
     /// </summary>
     public JwtKeySet? KeySet { get; init; }
 

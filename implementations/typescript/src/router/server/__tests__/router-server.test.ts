@@ -107,6 +107,70 @@ const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(8));
 // what an answer announces: the session, by its token
 const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 
+// a JWT's clock, keys and tokens, the application's and its key set's
+const NOW = Date.parse('2026-01-01T00:00:00Z');
+const AUDIENCE = 'https://bead.example';
+const ISSUER = 'https://issuer.example';
+const SET_ISSUER = 'https://keys.example';
+const SET_KID = 'set-1';
+// keys of these tests' own, 32 bytes each: one given, one its key set answers
+const SECRET = Buffer.alloc(32, 1);
+const SET_SECRET = Buffer.alloc(32, 2);
+const KEY: IJwtKey = Object.freeze({
+  algorithm: 'HS256',
+  issuer: ISSUER,
+  jwk: { k: SECRET.toString('base64url'), kty: 'oct' },
+});
+const SET_KEY: IJwtSetKey = Object.freeze({
+  algorithm: 'HS256',
+  jwk: { k: SET_SECRET.toString('base64url'), kid: SET_KID, kty: 'oct' },
+});
+
+/**
+ * An access token for grace, ending at `exp`, in seconds, `claims` over its own: under
+ * {@link KEY}'s secret, or, naming `kid`, under the key the key set answers for {@link SET_ISSUER}.
+ */
+const jwtOf = (
+  exp: number,
+  { claims: extra = {}, kid }: { claims?: Record<string, unknown>; kid?: string } = {}
+): string => {
+  const part = (value: object): string => {
+    return Buffer.from(JSON.stringify(value)).toString('base64url');
+  };
+  const header = part({ alg: 'HS256', typ: 'at+jwt', ...(kid === undefined ? {} : { kid }) });
+  const claims = part({
+    aud: AUDIENCE,
+    exp,
+    iss: kid === undefined ? ISSUER : SET_ISSUER,
+    sub: 'grace',
+    ...extra,
+  });
+  const signature = createHmac('sha256', kid === undefined ? SECRET : SET_SECRET)
+    .update(`${header}.${claims}`)
+    .digest('base64url');
+
+  return `${header}.${claims}.${signature}`;
+};
+
+/** A key set for {@link SET_ISSUER} that records each ask, and answers as each is settled. */
+const createKeySet = () => {
+  const asks: { issuer: string; settle: PromiseWithResolvers<readonly IJwtSetKey[]> }[] = [];
+
+  return {
+    asks,
+    keySet: {
+      ask: (issuer: string) => {
+        const settle = Promise.withResolvers<readonly IJwtSetKey[]>();
+
+        asks.push({ issuer, settle });
+
+        return settle.promise;
+      },
+      issuers: [SET_ISSUER],
+    },
+  };
+};
+
 /** A client's request for `procedure`, on `callId`, presenting `credential`, carrying `payload`. */
 const requestOf = (
   callId: number,
@@ -2211,65 +2275,6 @@ test.describe('createRouterServer, credentials', () => {
   const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
   const CARRIED = 'Interop sub=ada';
 
-  const NOW = Date.parse('2026-01-01T00:00:00Z');
-  const AUDIENCE = 'https://bead.example';
-  const ISSUER = 'https://issuer.example';
-  const SET_ISSUER = 'https://keys.example';
-  const SET_KID = 'set-1';
-  // keys of these tests' own, 32 bytes each: one given, one its key set answers
-  const SECRET = Buffer.alloc(32, 1);
-  const SET_SECRET = Buffer.alloc(32, 2);
-  const KEY: IJwtKey = Object.freeze({
-    algorithm: 'HS256',
-    issuer: ISSUER,
-    jwk: { k: SECRET.toString('base64url'), kty: 'oct' },
-  });
-  const SET_KEY: IJwtSetKey = Object.freeze({
-    algorithm: 'HS256',
-    jwk: { k: SET_SECRET.toString('base64url'), kid: SET_KID, kty: 'oct' },
-  });
-
-  /**
-   * An access token for grace, ending at `exp`, in seconds: under {@link KEY}, or, naming `kid`,
-   * under the key the key set answers for {@link SET_ISSUER}.
-   */
-  const jwtOf = (exp: number, kid?: string): string => {
-    const part = (value: object): string => {
-      return Buffer.from(JSON.stringify(value)).toString('base64url');
-    };
-    const header = part({ alg: 'HS256', typ: 'at+jwt', ...(kid === undefined ? {} : { kid }) });
-    const claims = part({
-      aud: AUDIENCE,
-      exp,
-      iss: kid === undefined ? ISSUER : SET_ISSUER,
-      sub: 'grace',
-    });
-    const signature = createHmac('sha256', kid === undefined ? SECRET : SET_SECRET)
-      .update(`${header}.${claims}`)
-      .digest('base64url');
-
-    return `${header}.${claims}.${signature}`;
-  };
-
-  /** A key set for {@link SET_ISSUER} that records each ask, and answers as each is settled. */
-  const createKeySet = () => {
-    const asks: { issuer: string; settle: PromiseWithResolvers<readonly IJwtSetKey[]> }[] = [];
-
-    return {
-      asks,
-      keySet: {
-        ask: (issuer: string) => {
-          const settle = Promise.withResolvers<readonly IJwtSetKey[]>();
-
-          asks.push({ issuer, settle });
-
-          return settle.promise;
-        },
-        issuers: [SET_ISSUER],
-      },
-    };
-  };
-
   /** Each failure sent: its call id, its code, its detail. */
   const failuresOf = (sent: ISentEnvelope[]) => {
     return sent.flatMap(({ envelope }) => {
@@ -2912,7 +2917,10 @@ test.describe('createRouterServer, credentials', () => {
     });
     const errors = recordErrors(router);
     const presenting = {
-      credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600, SET_KID) },
+      credential: {
+        scheme: CredentialScheme.JWT,
+        token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+      },
     } as const;
 
     createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
@@ -2961,7 +2969,10 @@ test.describe('createRouterServer, credentials', () => {
     deliver(
       first,
       requestOf(1, {
-        credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600, SET_KID) },
+        credential: {
+          scheme: CredentialScheme.JWT,
+          token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+        },
       })
     );
     await expect
@@ -2977,6 +2988,235 @@ test.describe('createRouterServer, credentials', () => {
     expect(resolved).toBe(0);
     expect(sent).toEqual([]);
     expect(errors).toEqual([]);
+  });
+
+  test('answers SESSION_REQUIRED from the admission of a resolver registered on it ACCESS_DENIED to a call that presented a JWT that holds, whose client keeps its default, and SESSION_REQUIRED to one that presented none', async () => {
+    const clock = createTestClock(NOW);
+    const pipe = createPipedTransports({ connectionHandle: first });
+    const credential = { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600) } as const;
+    using server = createRouterServer(pipe.server, {
+      clock,
+      credentials: { audience: AUDIENCE, keys: [KEY] },
+    });
+    using client = createRouterClient(pipe.client, { clock, credential });
+    const errors = recordErrors(server);
+    const withdrawn: unknown[] = [];
+    const refusedOf = (requesting: Promise<unknown>) => {
+      return requesting.then(
+        () => {
+          return 'answered';
+        },
+        (reason: unknown) => {
+          return reason instanceof FailureError ? [reason.code, reason.detail] : reason;
+        }
+      );
+    };
+
+    // registered raw, no service manager between: its admission refuses every call
+    server.registerResolver(
+      Object.assign(
+        () => {
+          return Promise.resolve();
+        },
+        echo,
+        {
+          admit: () => {
+            return { ...SERVER_FAILURES.sessionRequired, detail: 'sign in first' };
+          },
+        }
+      )
+    );
+    client.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    pipe.open();
+
+    expect(
+      await refusedOf(client.request(new Uint8Array(0), { options, procedure: echo }))
+    ).toEqual([ProtocolCode.ACCESS_DENIED, 'sign in first']);
+    expect(
+      await refusedOf(
+        client.request(new Uint8Array(0), {
+          options: { ...options, credential: { scheme: CredentialScheme.NONE } },
+          procedure: echo,
+        })
+      )
+    ).toEqual([ProtocolCode.SESSION_REQUIRED, 'sign in first']);
+    expect(withdrawn).toEqual([]);
+    expect(client.credential).toEqual(credential);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers a JWT call past the calls its key set lets wait for an issuer’s keys CAPACITY_EXCEEDED, reporting nothing, and its client keeps its default', async () => {
+    const clock = createTestClock(NOW);
+    const pipe = createPipedTransports({ connectionHandle: first });
+    const { asks, keySet } = createKeySet();
+    const credential = {
+      scheme: CredentialScheme.JWT,
+      token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+    } as const;
+    using server = createRouterServer(pipe.server, {
+      clock,
+      credentials: { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: 1 } },
+    });
+    using client = createRouterClient(pipe.client, { clock, credential });
+    const errors = recordErrors(server);
+    const withdrawn: unknown[] = [];
+
+    createServiceManager(server).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(String((request.session?.data as { sub?: unknown } | undefined)?.sub));
+      }
+    );
+    client.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    pipe.open();
+
+    // one waits on the ask its key set's issuer has under way, the other is past the bound
+    const outcomes = [1, 2].map(() => {
+      return client.request(new Uint8Array(0), { options, procedure: echo }).then(
+        ({ payload }) => {
+          return text.decode(payload);
+        },
+        (reason: unknown) => {
+          return reason instanceof FailureError ? [reason.code, reason.origin] : reason;
+        }
+      );
+    });
+    const refused = await Promise.race(outcomes);
+
+    expect(refused).toEqual([ProtocolCode.CAPACITY_EXCEEDED, 'peer']);
+    expect(asks).toHaveLength(1);
+
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    expect(
+      (await Promise.all(outcomes)).toSorted((a, b) => {
+        return String(a).localeCompare(String(b));
+      })
+    ).toEqual([[ProtocolCode.CAPACITY_EXCEEDED, 'peer'], 'grace']);
+    expect(withdrawn).toEqual([]);
+    expect(client.credential).toEqual(credential);
+    expect(errors).toEqual([]);
+  });
+
+  test('ends every credential’s session of an issuer by that issuer on every connection, its sid’s and its sub’s alike, and nothing of another issuer’s nor an ELSEWHERE’s whose id is that issuer; an issuer none names ends nothing', async () => {
+    const { carry, deliver, sent, transport } = createScriptedTransport();
+    const otherIssuer = 'https://other.example';
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: {
+        audience: AUDIENCE,
+        keys: [KEY, { ...KEY, issuer: otherIssuer }],
+        verify: (carried) => {
+          return Promise.resolve({ data: carried, id: carried });
+        },
+      },
+    });
+    const errors = recordErrors(router);
+    const exp = NOW / 1_000 + 3_600;
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('subscribed');
+      }
+    );
+
+    const presenting = (callId: number, credential: Credential): OutgoingEnvelope => {
+      const envelope = subscribingOf(callId);
+
+      return { ...envelope, header: { ...envelope.header, credential } } as OutgoingEnvelope;
+    };
+    const jwt = (extra: Record<string, unknown>): Credential => {
+      return { scheme: CredentialScheme.JWT, token: jwtOf(exp, { claims: extra }) };
+    };
+
+    deliver(first, presenting(1, jwt({})));
+    deliver(first, presenting(3, jwt({ sid: 'one' })));
+    deliver(first, presenting(5, jwt({ iss: otherIssuer })));
+    carry(first, {
+      credential: ISSUER,
+      envelope: presenting(7, { scheme: CredentialScheme.ELSEWHERE }),
+    });
+    deliver(second, presenting(1, jwt({ sub: 'carol' })));
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(5);
+    sent.length = 0;
+
+    // octet for octet: the issuer in upper case names none
+    await router.endSessionsOf(ISSUER.toUpperCase());
+
+    expect(sent).toEqual([]);
+
+    await router.endSessionsOf(ISSUER);
+    // none keeps one now, and no session names this one: each ends nothing
+    await router.endSessionsOf(ISSUER);
+    await router.endSessionsOf('https://unnamed.example');
+
+    expect(
+      answersOf(sent).toSorted((a, b) => {
+        return String(a).localeCompare(String(b));
+      })
+    ).toEqual([
+      [first, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
+      [second, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(
+      router.notifications
+        .subscriptions()
+        .map(({ callId, connectionHandle, identifier }) => {
+          return [connectionHandle, callId, identifier];
+        })
+        .toSorted(([, a], [, b]) => {
+          return Number(a) - Number(b);
+        })
+    ).toEqual([
+      [first, 5, { issuer: otherIssuer, scheme: CredentialScheme.JWT, sub: 'grace' }],
+      [first, 7, { id: ISSUER, scheme: CredentialScheme.ELSEWHERE }],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  test('refuses endSessionsOf an issuer that is no string, ending nothing', async () => {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: { audience: AUDIENCE, keys: [KEY] },
+    });
+    const subscribing = subscribingOf(1);
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('subscribed');
+      }
+    );
+    deliver(first, {
+      ...subscribing,
+      header: {
+        ...subscribing.header,
+        credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600) },
+      },
+    } as OutgoingEnvelope);
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+
+    for (const [index, issuer] of [undefined, null, 7, { issuer: ISSUER }].entries()) {
+      await expect(
+        router.endSessionsOf(issuer as unknown as string),
+        String(index)
+      ).rejects.toBeInstanceOf(ProgrammerError);
+    }
+
+    expect(sent).toHaveLength(1);
+    expect(router.notifications.subscriptions()).toHaveLength(1);
   });
 });
 
@@ -3262,6 +3502,55 @@ test.describe('createRouterServer, relaying', () => {
     ]);
     // leg B carried the OPAQUE call alone
     expect(pipe.sent.client).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers a JWT past the calls its key set lets wait CAPACITY_EXCEEDED at its first step, reporting nothing, as a relay that verifies', async () => {
+    const clock = createTestClock(NOW);
+    const legA = createScriptedTransport();
+    const { asks, keySet } = createKeySet();
+    using router = createRouterServer(legA.transport, {
+      clock,
+      credentials: { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: 1 } },
+      relay: { ...admitting, verifies: true },
+    });
+    using behind = createDevice({ clock });
+    const errors = recordErrors(router);
+    const presenting = {
+      credential: {
+        scheme: CredentialScheme.JWT,
+        token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+      },
+      destinationId: 7,
+      payload: text.encode('hi'),
+    } as const;
+
+    legA.open(first);
+    router.registerDestination(behind.toDevice, { audience: AUDIENCE, destinationId: 7 });
+    legA.deliver(first, requestOf(1, presenting));
+    legA.deliver(first, requestOf(3, presenting));
+
+    // one waits on the ask its issuer has under way, the other is refused before leg B
+    await expect
+      .poll(() => {
+        return legA.sent.length;
+      })
+      .toBe(1);
+
+    expect(answersOf(legA.sent)).toEqual([
+      [first, 'failure', expect.any(Number), ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect([asks.length, behind.pipe.sent.client]).toEqual([1, []]);
+
+    // verified, the other goes on through leg B, whatever the device answers it
+    asks[0]?.settle.resolve([SET_KEY]);
+    await expect
+      .poll(() => {
+        return legA.sent.length;
+      })
+      .toBe(2);
+
+    expect(behind.pipe.sent.client).toHaveLength(1);
     expect(errors).toEqual([]);
   });
 

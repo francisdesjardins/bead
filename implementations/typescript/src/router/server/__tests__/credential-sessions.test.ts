@@ -221,4 +221,41 @@ test.describe('createCredentialSessions', () => {
     expect(ended).toHaveLength(2);
     expect(sessions.gauges().counts).toEqual({ credentialSessions: 0, timedCredentialSessions: 0 });
   });
+
+  test('ends every session of an issuer by that issuer on every connection, sid and sub alike, and never an ELSEWHERE’s', async () => {
+    const { clock, ended, sessions } = createSessions();
+    const { notifications } = sessions;
+    const end = NOW + 3_660_000;
+    const { issuer } = GRACE as { issuer: string };
+    const one: SessionIdentifier = { issuer, scheme: CredentialScheme.JWT, sid: 'one' };
+    const another: SessionIdentifier = { ...GRACE, issuer: 'https://other.example' };
+    const named: SessionIdentifier = { id: issuer, scheme: CredentialScheme.ELSEWHERE };
+
+    notifications.register(news, { callId: 1, connectionHandle: first, end, identifier: GRACE });
+    notifications.register(other, { callId: 3, connectionHandle: first, end, identifier: one });
+    notifications.register(news, { callId: 1, connectionHandle: second, end, identifier: one });
+    notifications.register(other, {
+      callId: 3,
+      connectionHandle: second,
+      end,
+      identifier: another,
+    });
+    notifications.register(news, { callId: 5, connectionHandle: second, identifier: named });
+
+    await sessions.endSessionsOf(issuer);
+
+    expect(ended).toEqual([
+      { connectionHandle: first, identifier: GRACE },
+      { connectionHandle: first, identifier: one },
+      { connectionHandle: second, identifier: one },
+    ]);
+    expect(delaysOn(clock)).toEqual([end - NOW]);
+
+    // none of it kept now, and no session of an issuer none names: each ends nothing
+    await sessions.endSessionsOf(issuer);
+    await sessions.endSessionsOf('https://unnamed.example');
+
+    expect(ended).toHaveLength(3);
+    expect(sessions.gauges().counts).toEqual({ credentialSessions: 2, timedCredentialSessions: 1 });
+  });
 });

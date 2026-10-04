@@ -34,7 +34,10 @@ interface IInteropService {
   credentials: {
     jwt: {
       audience: string;
-      keySet: { issuers: { issuer: string; keys: IJwtSetKey[] }[] };
+      keySet: {
+        issuers: { issuer: string; keys: IJwtSetKey[] }[];
+        maximumWaitingCalls: number;
+      };
       keys: IJwtKey[];
     };
   };
@@ -145,6 +148,23 @@ const identifierOf = (request: unknown): SessionIdentifier => {
   );
 };
 
+/**
+ * The issuer `endSessionsOf` names: `{"issuer":i}`, of this member alone, a string. Anything else
+ * throws, which its server answers with PROCEDURE_FAILED and reports.
+ */
+export const issuerOf = (request: unknown): string => {
+  const named = (
+    typeof request === 'object' && request !== null && !Array.isArray(request) ? request : {}
+  ) as Record<string, unknown>;
+  const { issuer } = named;
+
+  if (Object.keys(named).join(',') !== 'issuer' || typeof issuer !== 'string') {
+    throw new Error('endSessionsOf names an issuer by {"issuer"} alone, a string');
+  }
+
+  return issuer;
+};
+
 /** Settles with `value` once `milliseconds` passed on `clock`, or at once without them. */
 const afterOn = <Value>(
   clock: IClock,
@@ -231,11 +251,12 @@ export const interopVerifierOf = (
 
 /**
  * What the interop server resolves a request's credential with, on `clock`, as `credentials` in
- * its manifest says: its `JWT` keys, its audience and its key set, but under limits that hold no
- * `JWT` (spec 12.2); and its `ELSEWHERE` verifier. The key set answers for the manifest's issuers,
- * each once a second passed on `clock`, whatever its signal: the keys issuer its keys at every ask;
- * the rotated one its keys at its first ask, counted per key set, so per server, and none after; the
- * stalled one never, arming no timer. Asked for any other, it fails at once.
+ * its manifest says: its `JWT` keys, its audience and its key set, with the most calls that wait
+ * for one issuer's keys, but under limits that hold no `JWT` (spec 12.2); and its `ELSEWHERE`
+ * verifier. The key set answers for the manifest's issuers, each once a second passed on `clock`,
+ * whatever its signal: the rotated one its keys at its first ask, counted per key set, so per
+ * server, and none after; the stalled one never, arming no timer; any other, the kid-less one among
+ * them, its keys at every ask. Asked for an issuer the manifest does not name, it fails at once.
  */
 export const interopCredentialsOf = (clock: IClock, limits?: RouterLimitsOptions): ICredentials => {
   const { audience, keySet, keys } = INTEROP_SERVICE.credentials.jwt;
@@ -279,6 +300,7 @@ export const interopCredentialsOf = (clock: IClock, limits?: RouterLimitsOptions
       issuers: keySet.issuers.map(({ issuer }) => {
         return issuer;
       }),
+      maximumWaitingCalls: keySet.maximumWaitingCalls,
     },
     keys,
     verify,
@@ -595,6 +617,16 @@ export const offerInterop = (server: InteropServer): void => {
   services.getRequestResolver(procedureOf('endSession'), { serializer: JSON_SERIALIZER })(
     async (request, response) => {
       await router.endSession(identifierOf(request.payload));
+
+      return response(null);
+    }
+  );
+
+  // ends every credential's session of an issuer on every connection that keeps one, and nothing
+  // else, and answers once it did
+  services.getRequestResolver(procedureOf('endSessionsOf'), { serializer: JSON_SERIALIZER })(
+    async (request, response) => {
+      await router.endSessionsOf(issuerOf(request.payload));
 
       return response(null);
     }

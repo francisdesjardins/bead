@@ -444,6 +444,17 @@ export interface IRouterServer<
    * one that still holds opens its session anew.
    */
   endSession(identifier: SessionIdentifier): Promise<void>;
+  /**
+   * Ends every credential's session of an issuer by that issuer, as when a key of its leaks, on every
+   * connection that keeps one, and nothing else (spec 13.9): each `JWT`'s session whose identifier's
+   * issuer is `issuer`, octet for octet, whatever its `sid` or `sub`, each subscription it bounds
+   * ending with SESSION_REQUIRED on its call id, a call still in flight left to its own answer; an
+   * `ELSEWHERE`'s identifier names no issuer. Resolves once each failure was tried; one that cannot
+   * go out is reported to `error`. An issuer no connection's session names ends nothing; one that is
+   * no string rejects with a {@link ProgrammerError}. Ending refuses no credential: one that still
+   * holds opens its session anew, a token a leaked key signed among them while that key serves.
+   */
+  endSessionsOf(issuer: string): Promise<void>;
   emit<K extends ROUTER_SERVER_EVENTS>(event: K, ...params: RouterServerEventMap[K]): boolean;
   /**
    * Every `event` from now on, as its arguments, for `for await`; the signal, a `break` or a throw
