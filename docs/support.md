@@ -43,8 +43,8 @@ Each client is played against the other implementation's server of the interop s
 
 | Client     | Server     | Transport  | Cases | Test                                                                                                                                    |
 | ---------- | ---------- | ---------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------- |
-| TypeScript | C#         | WebSocket  |    16 | `implementations/typescript/src/client/__tests__/interop.test.ts` (`the C# server of the interop service`, `over WebSocket`)            |
-| TypeScript | C#         | HTTP/1.1   |    15 | the same file (`over HTTP`)                                                                                                             |
+| TypeScript | C#         | WebSocket  |    18 | `implementations/typescript/src/client/__tests__/interop.test.ts` (`the C# server of the interop service`, `over WebSocket`)            |
+| TypeScript | C#         | HTTP/1.1   |    17 | the same file (`over HTTP`)                                                                                                             |
 | C#         | TypeScript | WebSocket  |    13 | `implementations/dotnet/tests/Bead.Interop.Tests/InteropTests.cs` (`InteropTests`, each theory over `WebSocket`, and the transfer fact) |
 | C#         | TypeScript | HTTP/1.1   |    12 | the same file (each theory over `HTTP`)                                                                                                 |
 | either     | either     | HTTP/2     |     0 | not tested                                                                                                                              |

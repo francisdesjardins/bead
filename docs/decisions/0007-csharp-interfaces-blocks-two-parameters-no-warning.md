@@ -146,8 +146,14 @@ test ran. CI's `dotnet` job runs both, then the interop
   JavaScript `Map` keeps the older one's place.
 - An instant a side reports — a transport server client's and a session's `LastActivity`, a trace's
   `StartedAt` — is a `DateTimeOffset` its clock's wall reading gives, and a trace's `Duration` a
-  `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
+    `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
   for an instant.
+- A credential's session's end is a `long` of milliseconds since the epoch, as on the TypeScript
+  side, never a `DateTimeOffset`: section 13.8 lets an end run to 2⁵³ − 1 ms, past what a
+  `DateTimeOffset` holds.
+- A `Credential` writes its scheme alone as its string, so no credential reaches a log through
+  `ToString`; a TypeScript credential is a plain object with no string of its own, and both sides
+  redact what they trace.
 - A stop over HTTP lets the exchanges under way write their end, and Kestrel put it on the wire, a
   second at most, before it cuts what it holds: Node writes a 404 into its socket as the stop ends
   the exchange, where Kestrel's handler writes it a moment later, and a cut that comes first loses

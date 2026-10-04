@@ -955,6 +955,11 @@ credential's session. What a procedure admits reads that session, never the payl
 session, by `requireSession`; a write needs a token whose `scope` holds `write`, by a
 `beforeRequest` that reads `session.data`. A token that does not hold — its signature no longer
 matching, its time past — is refused `SESSION_REQUIRED`, which withdraws it: `credentialWithdrawn`
-tells the page, which asks to sign in again. No published test key signs a demo's token, and its
-verifier refuses one. A reader's glyph upload, 8 MiB, is refused at its opening over WebSocket — one
-REQUEST, one FAILURE, and no chunk; over HTTP, its body crosses first.
+tells the page, which asks to log in again. Each log-in is a session of its own, its token's `sid`:
+`whoami` answers the call's session, its claims and its end, and `logout` ends that session alone,
+by `endSession`, whoever else logged in under the same name. The key is drawn at each start, or
+given by `DEMO_KEY`, in base64url, 32 bytes at least; a key published with its RFC is refused before
+anything listens. Both servers time a connection's silence themselves, 120 s, since a session of the
+demo's is a credential's and has no timeout of its own. A reader's glyph upload, 8 MiB, is refused
+at its opening over WebSocket — one REQUEST, one FAILURE, and no chunk; over HTTP, its body crosses
+first.
