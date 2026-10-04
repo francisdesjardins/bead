@@ -602,35 +602,111 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
-    public async Task Lets_as_many_calls_wait_for_an_issuer_s_keys_as_maximumWaitingCalls_says_64_when_not_given_and_refuses_one_more_CAPACITY_EXCEEDED_at_once_asking_nothing_more()
+    public async Task Lets_as_many_calls_wait_for_an_issuer_s_deadline_as_maximumWaitingCalls_says_64_when_not_given_and_refuses_one_more_CAPACITY_EXCEEDED_at_once_asking_nothing_more()
     {
-        var named = Credential.Jwt(TokenOf((First, "first")));
+        var unnamed = Credential.Jwt(TokenOf((Second, "second")));
 
         foreach (var (maximum, given) in new (int, int?)[] { (64, null), (3, 3) })
         {
             var clock = new FakeTimeProvider(Start);
             var keySet = new RecordingKeySet();
             var resolver = given is { } bound ? BoundedOf((keySet, bound), clock) : ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+            var first = ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled);
+
+            keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+            Assert.NotNull(await first.WaitAsync(Patience, Cancelled));
+
             var waiting = Enumerable.Range(0, maximum).Select((_) =>
             {
-                return ResolvedOn((resolver, named), Cancelled);
+                return ResolvedOn((resolver, unnamed), Cancelled);
             }).ToList();
 
             AssertWaiting(waiting);
 
-            var refused = await RefusalOf(ResolvedOn((resolver, named), Cancelled));
+            var refused = await RefusalOf(ResolvedOn((resolver, unnamed), Cancelled));
 
-            Assert.Equal((FailureScope.Protocol, (ushort)ProtocolCode.CapacityExceeded), (refused.Scope, refused.Code));
+            Assert.Equal(
+                (FailureScope.Protocol, (ushort)ProtocolCode.CapacityExceeded, $"as many calls as its key set lets wait for the deadline of {Issuer} wait already"),
+                (refused.Scope, refused.Code, refused.Detail));
             Assert.Single(keySet.Asks);
 
-            // the ask goes on for those that wait
-            keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+            // the ask at the deadline names "second": those that waited are verified
+            clock.Advance(TimeSpan.FromMinutes(1));
+            Assert.Equal(2, keySet.Asks.Count);
+            keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first")), SetKeyOf((Second, "second"))]);
             Assert.All(await Task.WhenAll(waiting).WaitAsync(Patience, Cancelled), Assert.NotNull);
         }
     }
 
     [Fact]
-    public async Task Keeps_a_call_s_place_as_an_answer_moves_it_from_its_issuer_s_ask_to_the_deadline_refusing_a_call_past_the_bound_meanwhile_and_frees_it_as_the_call_leaves()
+    public async Task Lets_every_call_that_waits_on_an_ask_under_way_wait_however_many_65_valid_tokens_at_a_cold_start_and_65_at_the_ten_minute_mark_all_verified()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet();
+
+        // 64 wait for a deadline at most, the key set saying nothing
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var named = Credential.Jwt(TokenOf((First, "first")));
+
+        // at a cold start, then once the keys held are past their ten minutes: no key serves, and
+        // every call waits on the one ask the first sets off, none refused
+        foreach (var (asks, held) in new[] { (1, TimeSpan.Zero), (2, TimeSpan.FromMinutes(10)) })
+        {
+            clock.Advance(held);
+
+            var waiting = Enumerable.Range(0, 65).Select((_) =>
+            {
+                return ResolvedOn((resolver, named), Cancelled);
+            }).ToList();
+
+            AssertWaiting(waiting);
+            Assert.Equal(asks, keySet.Asks.Count);
+            keySet.Asks[^1].Settle.SetResult([SetKeyOf((First, "first"))]);
+            Assert.All(await Task.WhenAll(waiting).WaitAsync(Patience, Cancelled), (session) =>
+            {
+                Assert.Equal("grace", session?.Identifier?.Sub);
+            });
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_CAPACITY_EXCEEDED_a_call_an_answer_moves_onto_a_deadline_that_holds_as_many_as_its_key_set_lets_wait()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet();
+        var resolver = BoundedOf((keySet, 2), clock);
+        var unnamed = Credential.Jwt(TokenOf((Second, "second")));
+
+        // the ask goes for a kid it names; three kids none names come while it is under way, which
+        // went before they came, and wait on it, uncounted
+        var first = ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled);
+        var moved = new[] { ResolvedOn((resolver, unnamed), Cancelled), ResolvedOn((resolver, unnamed), Cancelled) };
+        var refusing = ResolvedOn((resolver, unnamed), Cancelled);
+
+        AssertWaiting([.. moved, refusing]);
+
+        // its answer names no "second": the first two it moves onto the deadline take its places, and
+        // the third is refused as it moves
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.Equal("grace", (await first.WaitAsync(Patience, Cancelled))!.Identifier!.Sub);
+
+        var refused = await RefusalOf(refusing);
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.CapacityExceeded, $"as many calls as its key set lets wait for the deadline of {Issuer} wait already"),
+            (refused.Code, refused.Detail));
+        AssertWaiting(moved);
+        Assert.Single(keySet.Asks);
+
+        // at the deadline the two wait on the ask then, whose answer names "second"
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(2, keySet.Asks.Count);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first")), SetKeyOf((Second, "second"))]);
+        Assert.All(await Task.WhenAll(moved).WaitAsync(Patience, Cancelled), Assert.NotNull);
+    }
+
+    [Fact]
+    public async Task Gives_a_call_a_place_as_an_answer_moves_it_from_its_issuer_s_ask_onto_the_deadline_refusing_one_that_comes_past_the_bound_then_and_frees_it_as_the_call_leaves()
     {
         var clock = new FakeTimeProvider(Start);
         var keySet = new RecordingKeySet();
@@ -641,7 +717,8 @@ public sealed class CredentialResolverTests
         using var leaving = new CancellationTokenSource();
         using var moving = new CancellationTokenSource();
 
-        // an ask under way that its one call left, which a token comes to find: it went before
+        // an ask under way that its one call left, which a token comes to find: it went before, and
+        // the token waits on it
         var left = ResolvedOn((resolver, named), leaving.Token);
 
         await leaving.CancelAsync();
@@ -652,10 +729,8 @@ public sealed class CredentialResolverTests
 
         var moved = ResolvedOn((resolver, unnamed), moving.Token);
 
-        await RefusalOf(ResolvedOn((resolver, unnamed), Cancelled));
-
-        // its answer names no "second": it waits on for the deadline, its place kept, the bound
-        // still counting it
+        // its answer names no "second": it moves onto the deadline, taking its one place, and the
+        // next that comes is refused
         keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
         Assert.False(moved.IsCompleted);
         await RefusalOf(ResolvedOn((resolver, unnamed), Cancelled));
@@ -676,29 +751,52 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
-    public async Task Counts_the_calls_that_wait_for_each_issuer_s_keys_apart()
+    public async Task Counts_the_calls_that_wait_for_each_issuer_s_deadline_apart()
     {
         var clock = new FakeTimeProvider(Start);
         var keySet = new RecordingKeySet(Issuer, SetIssuer);
         var resolver = BoundedOf((keySet, 1), clock);
-        var waiting = new[]
-        {
-            ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled),
-            ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first"), SetIssuer))), Cancelled),
-        };
+        string[] issuers = [Issuer, SetIssuer];
 
-        AssertWaiting(waiting);
-        await RefusalOf(ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first")))), Cancelled));
-        await RefusalOf(ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first"), SetIssuer))), Cancelled));
+        // each issuer's keys held, from an ask of its own
+        var held = issuers.Select((issuer) =>
+        {
+            return ResolvedOn((resolver, Credential.Jwt(TokenOf((First, "first"), issuer))), Cancelled);
+        }).ToList();
 
         Assert.Equal([Issuer, SetIssuer], keySet.Issuers());
         keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
         keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
+        Assert.All(await Task.WhenAll(held).WaitAsync(Patience, Cancelled), Assert.NotNull);
+
+        // one of each waits for its issuer's deadline, whatever the other's holds; one more of each
+        // is refused
+        var waiting = issuers.Select((issuer) =>
+        {
+            return ResolvedOn((resolver, Credential.Jwt(TokenOf((Second, "second"), issuer))), Cancelled);
+        }).ToList();
+
+        AssertWaiting(waiting);
+
+        foreach (var issuer in issuers)
+        {
+            await RefusalOf(ResolvedOn((resolver, Credential.Jwt(TokenOf((Second, "second"), issuer))), Cancelled));
+        }
+
+        // at the deadlines, each issuer's ask names "second"
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(4, keySet.Asks.Count);
+
+        foreach (var (_, settle, _) in keySet.Asks.Skip(2))
+        {
+            settle.SetResult([SetKeyOf((First, "first")), SetKeyOf((Second, "second"))]);
+        }
+
         Assert.All(await Task.WhenAll(waiting).WaitAsync(Patience, Cancelled), Assert.NotNull);
     }
 
     [Fact]
-    public async Task Refuses_CAPACITY_EXCEEDED_a_call_that_comes_past_a_deadline_its_timer_has_yet_to_reach_for_which_as_many_calls_wait_as_the_key_set_lets_and_lets_the_ask_go_for_them()
+    public async Task Lets_a_call_that_comes_past_a_deadline_its_timer_has_yet_to_reach_for_which_as_many_calls_wait_as_the_key_set_lets_let_the_ask_go_for_them_and_wait_on_it_with_them_never_refused()
     {
         var clock = new LateClock();
         var keySet = new RecordingKeySet();
@@ -710,20 +808,25 @@ public sealed class CredentialResolverTests
         keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "first"))]);
         Assert.NotNull(await first.WaitAsync(Patience, Cancelled));
 
+        // two wait for the deadline, the third refused
         var waiting = new[] { ResolvedOn((resolver, unnamed), Cancelled), ResolvedOn((resolver, unnamed), Cancelled) };
 
-        // past the deadline, its timer yet to fire: the call that comes reaches it, and the ask
-        // goes for the two, which the third would go past
-        clock.Reading = 60_000;
         await RefusalOf(ResolvedOn((resolver, unnamed), Cancelled));
+
+        // past the deadline, its timer yet to fire: the call that comes reaches it, lets the ask go
+        // for the two, and waits on it with them, uncounted
+        clock.Reading = 60_000;
+
+        var coming = ResolvedOn((resolver, unnamed), Cancelled);
+
         Assert.Equal(2, keySet.Asks.Count);
-        AssertWaiting(waiting);
+        AssertWaiting([.. waiting, coming]);
 
         // the late timer does nothing more
         clock.Timers[0].Fire();
         Assert.Equal(2, keySet.Asks.Count);
-        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first"))]);
-        Assert.All(await Task.WhenAll(waiting).WaitAsync(Patience, Cancelled), Assert.Null);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((First, "first")), SetKeyOf((Second, "second"))]);
+        Assert.All(await Task.WhenAll(waiting.Append(coming)).WaitAsync(Patience, Cancelled), Assert.NotNull);
     }
 
     [Fact]

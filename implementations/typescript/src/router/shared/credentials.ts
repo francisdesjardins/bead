@@ -42,14 +42,18 @@ export interface ICredentialResolver {
    * its identifier, its data, its end — or `undefined` when its credential does not hold. Rejects
    * when its verifier fails: an `ELSEWHERE`'s that throws, rejects or settles with what is no
    * session, or a key set's ask the call waited on that failed; with a {@link CapacityError} when it
-   * would wait for its issuer's keys past the calls its key set lets wait for them; and with a
-   * `CancelError` as `signal` aborts while it waits for a key set, whose ask goes on for the others.
+   * would wait for its issuer's deadline past the calls its key set lets wait for it, as it comes or
+   * as an answer moves it there; and with a `CancelError` as `signal` aborts while it waits for a key
+   * set, whose ask goes on for the others.
    * No rejection carries the credential.
    */
   resolve(request: ICredentialRequest, signal: AbortSignal): Promise<ICallSession | undefined>;
 }
 
-/** A call that waits for its issuer's keys, which holds its place among those its key set lets wait. */
+/**
+ * A call that waits for its issuer's keys: on an ask, uncounted, or for the deadline, where it holds
+ * its place among those its key set lets wait.
+ */
 interface IWaiter {
   /** The calls it waits among, its ask's or its deadline's; none once it left them. */
   among: Set<IWaiter> | undefined;
@@ -104,7 +108,7 @@ const KEY_SET_INTERVAL = 60_000;
 // how long the keys a key set answered serve, from its answer, in milliseconds
 const KEY_SET_HOLD = 600_000;
 
-// the most calls that wait for one issuer's keys at once: when its key set does not say, and ever
+// the most calls that wait for one issuer's deadline at once: when its key set does not say, and ever
 const KEY_SET_WAITING_CALLS = 64;
 const MOST_WAITING_CALLS = 2_147_483_647;
 
@@ -127,7 +131,7 @@ const isAudience = (audience: unknown): audience is string => {
 
 /**
  * The issuers `keySet` answers for, none without one, and the most calls that wait for one issuer's
- * keys at once: given with its ask and one issuer at least, each a string, and that most a whole
+ * deadline at once: given with its ask and one issuer at least, each a string, and that most a whole
  * number from 1 to 2³¹ − 1, 64 when not given; any other is a {@link ProgrammerError}, the
  * application's fault, as the side is built.
  */
@@ -223,12 +227,13 @@ export const assertLimitsHoldJwt = ({
  * serve — or, without a `kid`, while none of them serve — on the ask under way, else for the
  * deadline and the ask then, shared, else on an ask that goes at once; as that ask answers, it is
  * judged again once its key serves or the ask went after it came, and waits on for the deadline
- * otherwise, keeping its place. At most `maximumWaitingCalls` wait for one issuer's keys at once: one
- * more is refused with a {@link CapacityError}, in the turn it would have waited. A call's cancel
- * ends its own wait, never the ask. A key not shaped for its algorithm, an audience that is not a
- * string of well-formed Unicode, a key set given without an issuer or with a `maximumWaitingCalls`
- * out of its bounds, and keys or a key set given without an audience, whatever the side's relay
- * does, are each a {@link ProgrammerError}, as the resolver is built.
+ * otherwise. At most `maximumWaitingCalls` wait for one issuer's deadline at once, a call on an ask
+ * never counted: one more is refused with a {@link CapacityError}, in the turn it would have waited,
+ * as it comes or as an answer moves it there. A call's cancel ends its own wait, never the ask. A
+ * key not shaped for its algorithm, an audience that is not a string of well-formed Unicode, a key
+ * set given without an issuer or with a `maximumWaitingCalls` out of its bounds, and keys or a key
+ * set given without an audience, whatever the side's relay does, are each a
+ * {@link ProgrammerError}, as the resolver is built.
  */
 export const createCredentialResolver = (
   credentials: ICredentials | undefined,
@@ -322,9 +327,15 @@ export const createCredentialResolver = (
     );
   };
 
-  // the calls that wait for an issuer's keys, on its ask under way and for its deadline together
-  const waitingOf = ({ asking, next }: IIssuerKeys): number => {
-    return (asking?.waiters.size ?? 0) + next.size;
+  // ! the refusal of a call past the calls its key set lets wait for the deadline, as it comes or as
+  // an answer moves it there; never of one on an ask, which the key set's latency bounds, and the
+  // ask's deadline
+  const refusalOf = ({ issuer, next }: IIssuerKeys): CapacityError | undefined => {
+    return next.size < maximumWaitingCalls
+      ? undefined
+      : new CapacityError(
+          `as many calls as its key set lets wait for the deadline of ${issuer} wait already`
+        );
   };
 
   const disarm = (entry: IIssuerKeys): void => {
@@ -332,9 +343,9 @@ export const createCredentialResolver = (
     entry.timer = undefined;
   };
 
-  // an ask settled, its answer held in place of the last: each call that waits on it is judged
-  // again once its key serves or the ask went after it came, and waits for the deadline otherwise,
-  // keeping its place; a failure fails them all, and replaces nothing held
+  // an ask settled: its answer replaces the keys held; its failure replaces none, and fails every
+  // call on it. Otherwise each is judged again once its key serves or the ask went after it came,
+  // else moves onto the deadline in the order they came, refused once it is full
   const settle = (
     entry: IIssuerKeys,
     { ask, outcome }: { ask: IKeySetAsk; outcome: AskOutcome }
@@ -359,8 +370,14 @@ export const createCredentialResolver = (
       } else if (waiter.isAfter || !needs(issuerKeysOf(entry), waiter)) {
         waiter.released.resolve();
       } else {
-        waiter.among = entry.next;
-        entry.next.add(waiter);
+        const refused = refusalOf(entry);
+
+        if (refused === undefined) {
+          waiter.among = entry.next;
+          entry.next.add(waiter);
+        } else {
+          waiter.released.reject(refused);
+        }
       }
     }
 
@@ -422,7 +439,7 @@ export const createCredentialResolver = (
 
   // the issuer's deadline, once the reading `now` is at it or past it: an ask unsettled then has
   // failed, its signal aborted, and the calls that waited for it have the next ask go, which it
-  // gives; for none, none goes
+  // gives, and wait on it, holding no place; for none, none goes
   const reach = (
     entry: IIssuerKeys,
     now: number = clock.performance.now()
@@ -537,21 +554,21 @@ export const createCredentialResolver = (
       return needs(served, waiter) ? Promise.resolve() : undefined;
     }
 
-    if (waitingOf(entry) >= maximumWaitingCalls) {
-      throw new CapacityError(
-        `as many calls as its key set lets wait for the keys of ${entry.issuer} wait already`
-      );
-    }
-
     const { asking } = entry;
 
     // on the ask under way, which went before it came unless its own reach let it go; before the
-    // deadline, for it and the ask then; otherwise on an ask that goes at once
+    // deadline, for it and the ask then, past the bound refused; otherwise on an ask that goes at once
     if (asking !== undefined) {
       waiter.among = asking.waiters;
       waiter.isAfter = asking === letGo;
       asking.waiters.add(waiter);
     } else if (now < entry.deadline) {
+      const refused = refusalOf(entry);
+
+      if (refused !== undefined) {
+        throw refused;
+      }
+
       waiter.among = entry.next;
       entry.next.add(waiter);
       arm(entry);

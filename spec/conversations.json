@@ -11,7 +11,7 @@
     "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket's or a listen's batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.",
     "Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
     "limits, where given, are the server's limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server's relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireSessionOrCredential by default, or requireSession.",
-    "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server's clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer's keys at once; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
+    "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server's clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer's deadline at once; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
   "specVersion": "0.1.0",
@@ -2959,7 +2959,7 @@
       ]
     },
     {
-      "name": "a key set lets maximumWaitingCalls calls wait for an issuer's keys at once, on its ask under way and for its deadline alike: one more is refused CAPACITY_EXCEEDED at once, and not reported, while a call whose key serves, a call of another issuer, and a call that comes once one left are not",
+      "name": "a key set lets maximumWaitingCalls calls wait for an issuer's deadline at once, a call that waits on its ask never counted: however many wait on an ask, none is refused; one more for the deadline is refused CAPACITY_EXCEEDED at once, and one an answer moves onto a deadline that holds them as it moves, neither reported, while a call whose key serves and a call that comes once one left are not",
       "clauses": [
         "8.2",
         "9.2.5",
@@ -2976,6 +2976,9 @@
           "open": "c"
         },
         {
+          "open": "d"
+        },
+        {
           "send": "A1 10 08 60  00 00 00 01  00 01 00 0E  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 6E 75 6C 6C",
           "on": "a"
         },
@@ -2989,19 +2992,7 @@
           "on": "b"
         },
         {
-          "send": "A1 10 08 60  00 00 00 01  00 01 00 01  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 22 78 22",
-          "on": "c"
-        },
-        {
-          "expect": {
-            "kind": 18,
-            "callId": 1,
-            "failure": {
-              "code": 35,
-              "scope": 0,
-              "relays": 0
-            }
-          },
+          "send": "A1 10 08 60  00 00 00 01  00 01 00 0E  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 6E 75 6C 6C",
           "on": "c"
         },
         {
@@ -3027,6 +3018,14 @@
             "payload": "22 67 72 61 63 65 22"
           },
           "on": "b"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 67 72 61 63 65 22"
+          },
+          "on": "c"
         },
         {
           "send": "A1 10 08 57  00 00 00 03  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 78 22",
@@ -3070,8 +3069,20 @@
           "on": "c"
         },
         {
-          "send": "A1 10 08 62  00 00 00 07  00 01 00 0E  00 02 01 78  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 33 4A 76 64 47 46 30 5A 57 51 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 79 62 33 52 68 64 47 56 6B 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 77 72 4C 48 68 63 69 52 7A 4E 6E 63 4D 43 34 77 32 75 68 66 58 79 7A 33 65 6A 44 41 6E 71 78 59 4D 32 6B 47 42 64 56 68 47 30 34 | 6E 75 6C 6C",
+          "send": "A1 16 00 02  00 00 00 03",
+          "on": "a"
+        },
+        {
+          "send": "A1 10 08 57  00 00 00 07  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 7A 22",
           "on": "c"
+        },
+        {
+          "until": {
+            "timer": 59000
+          }
+        },
+        {
+          "advance": 59000
         },
         {
           "until": {
@@ -3079,31 +3090,16 @@
           }
         },
         {
-          "advance": 1000
-        },
-        {
-          "expect": {
-            "kind": 17,
-            "callId": 7,
-            "payload": "22 67 72 61 63 65 22"
-          },
-          "on": "c"
-        },
-        {
-          "send": "A1 16 00 02  00 00 00 03",
+          "send": "A1 10 08 57  00 00 00 05  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 78 22",
           "on": "a"
         },
         {
-          "send": "A1 10 08 57  00 00 00 09  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 7A 22",
-          "on": "c"
+          "send": "A1 10 08 57  00 00 00 01  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 77 22",
+          "on": "d"
         },
         {
-          "until": {
-            "timer": 58000
-          }
-        },
-        {
-          "advance": 58000
+          "send": "A1 10 08 57  00 00 00 03  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 77 22",
+          "on": "d"
         },
         {
           "until": {
@@ -3129,7 +3125,7 @@
         {
           "expect": {
             "kind": 18,
-            "callId": 9,
+            "callId": 7,
             "failure": {
               "code": 32,
               "scope": 0,
@@ -3138,6 +3134,76 @@
             }
           },
           "on": "c"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "d"
+        },
+        {
+          "send": "A1 10 08 57  00 00 00 09  00 01 00 01  00 02 01 4A  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 49 77 4D 6A 59 74 4D 44 45 69 66 51 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 49 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 71 49 39 62 73 37 44 69 38 47 43 41 4A 5F 76 46 75 6C 70 65 30 65 35 65 55 50 4D 6E 48 62 31 4F 48 4E 42 58 6C 45 30 78 48 56 45 00 00 | 22 7A 22",
+          "on": "c"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 9,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "c"
+        },
+        {
+          "until": {
+            "timer": 59000
+          }
+        },
+        {
+          "advance": 59000
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "d"
         }
       ]
     },

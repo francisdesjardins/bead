@@ -3047,13 +3047,14 @@ test.describe('createRouterServer, credentials', () => {
     expect(errors).toEqual([]);
   });
 
-  test('answers a JWT call past the calls its key set lets wait for an issuer’s keys CAPACITY_EXCEEDED, reporting nothing, and its client keeps its default', async () => {
+  test('answers a JWT call past the calls its key set lets wait for an issuer’s deadline CAPACITY_EXCEEDED, reporting nothing, and its client keeps its default', async () => {
     const clock = createTestClock(NOW);
     const pipe = createPipedTransports({ connectionHandle: first });
     const { asks, keySet } = createKeySet();
+    // the client's default names a kid the key set's first answer does not
     const credential = {
       scheme: CredentialScheme.JWT,
-      token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+      token: jwtOf(NOW / 1_000 + 3_600, { kid: 'set-2' }),
     } as const;
     using server = createRouterServer(pipe.server, {
       clock,
@@ -3073,23 +3074,53 @@ test.describe('createRouterServer, credentials', () => {
     });
     pipe.open();
 
-    // one waits on the ask its key set's issuer has under way, the other is past the bound
-    const outcomes = [1, 2].map(() => {
-      return client.request(new Uint8Array(0), { options, procedure: echo }).then(
-        ({ payload }) => {
-          return text.decode(payload);
+    // the key set's keys held, by a call presenting a kid its answer names
+    const holding = client.request(new Uint8Array(0), {
+      options: {
+        ...options,
+        credential: {
+          scheme: CredentialScheme.JWT,
+          token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
         },
-        (reason: unknown) => {
-          return reason instanceof FailureError ? [reason.code, reason.origin] : reason;
-        }
-      );
+      },
+      procedure: echo,
+    });
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    expect(text.decode((await holding).payload)).toBe('grace');
+
+    // within the minute, one waits for the deadline, the other is past the bound
+    const outcomes = [1, 2].map(() => {
+      return client
+        .request(new Uint8Array(0), { options: { timeout: 120_000 }, procedure: echo })
+        .then(
+          ({ payload }) => {
+            return text.decode(payload);
+          },
+          (reason: unknown) => {
+            return reason instanceof FailureError ? [reason.code, reason.origin] : reason;
+          }
+        );
     });
     const refused = await Promise.race(outcomes);
 
     expect(refused).toEqual([ProtocolCode.CAPACITY_EXCEEDED, 'peer']);
     expect(asks).toHaveLength(1);
 
-    asks[0]?.settle.resolve([SET_KEY]);
+    // at the deadline, the ask then names its kid
+    await clock.tickAsync(60_000);
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    asks[1]?.settle.resolve([SET_KEY, { ...SET_KEY, jwk: { ...SET_KEY.jwk, kid: 'set-2' } }]);
 
     expect(
       (await Promise.all(outcomes)).toSorted((a, b) => {
@@ -3527,10 +3558,21 @@ test.describe('createRouterServer, relaying', () => {
 
     legA.open(first);
     router.registerDestination(behind.toDevice, { audience: AUDIENCE, destinationId: 7 });
-    legA.deliver(first, requestOf(1, presenting));
-    legA.deliver(first, requestOf(3, presenting));
 
-    // one waits on the ask its issuer has under way, the other is refused before leg B
+    // the ask its one call left answers no key: within the minute, a token waits for the deadline
+    legA.deliver(first, requestOf(1, presenting));
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    legA.deliver(first, cancelOf(1));
+    asks[0]?.settle.resolve([]);
+    await sleep(0);
+
+    // one waits for the deadline, the other is refused before leg B
+    legA.deliver(first, requestOf(3, presenting));
+    legA.deliver(first, requestOf(5, presenting));
     await expect
       .poll(() => {
         return legA.sent.length;
@@ -3542,8 +3584,15 @@ test.describe('createRouterServer, relaying', () => {
     ]);
     expect([asks.length, behind.pipe.sent.client]).toEqual([1, []]);
 
-    // verified, the other goes on through leg B, whatever the device answers it
-    asks[0]?.settle.resolve([SET_KEY]);
+    // at the deadline, the ask then names its kid: verified, the other goes on through leg B,
+    // whatever the device answers it
+    await clock.tickAsync(60_000);
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    asks[1]?.settle.resolve([SET_KEY]);
     await expect
       .poll(() => {
         return legA.sent.length;

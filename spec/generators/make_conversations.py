@@ -237,8 +237,8 @@ KIDLESS_KEY = KIDLESS['keys'][0]['jwk']
 assert ROTATED_KEY['kid'] == SET_KEY['kid'] and ROTATED_KEY['k'] != SET_KEY['k'] and STALLED['keys'] == []
 assert len(KIDLESS['keys']) == 1 and 'kid' not in KIDLESS_KEY
 
-# the most calls that wait for one issuer's keys at once (13.8): the conversation that passes them
-# plays two waiting, on two connections, and a third on a third
+# the most calls that wait for one issuer's deadline at once (13.8): the conversation that passes them
+# plays two waiting, each on a connection of its own, and a third on another
 WAITING_CALLS = KEY_SET['maximumWaitingCalls']
 assert WAITING_CALLS == 2
 
@@ -549,30 +549,42 @@ def jwt_conversations():
              *slow(7, KEYS_HELD),
              presenting(9, 'whoami', 'null', jwt(KIDLESS_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
              result(9, '"grace"')]),
-        # the interop key set lets two calls wait for one issuer's keys at once, on its ask under way and
-        # for its deadline counted together: a third is refused at once, unreported. A call whose key
-        # serves waits for nothing, another issuer's calls are counted apart, and a call that leaves
-        # frees its place. Each call that waits does so on a connection of its own, so that the two one
-        # answer judges are each expected on theirs
-        ('a key set lets maximumWaitingCalls calls wait for an issuer\'s keys at once, on its ask under way and for its deadline alike: one more is refused CAPACITY_EXCEEDED at once, and not reported, while a call whose key serves, a call of another issuer, and a call that comes once one left are not',
+        # the interop key set lets two calls wait for one issuer's deadline at once, and counts no call
+        # that waits on its ask. At a cold start three wait on the one ask, none refused. Within the
+        # minute two wait for the deadline and a third is refused at once, unreported; a call whose key
+        # serves waits for nothing, and a call that leaves frees its place. At the deadline the two wait
+        # on the ask then, holding no place, and three more come while it is under way: its answer
+        # refuses the two, which it judges, and moves the three onto the deadline, the first two taking
+        # the places and the third refused as it moves, as a call that comes after them is. The calls
+        # answered at one instant are each on a connection of their own, so that each is expected on
+        # its own
+        ('a key set lets maximumWaitingCalls calls wait for an issuer\'s deadline at once, a call that waits on its ask never counted: however many wait on an ask, none is refused; one more for the deadline is refused CAPACITY_EXCEEDED at once, and one an answer moves onto a deadline that holds them as it moves, neither reported, while a call whose key serves and a call that comes once one left are not',
          ['8.2', '9.2.5', '13.8'], None, [
-             opened('a'), opened('b'), opened('c'),
+             opened('a'), opened('b'), opened('c'), opened('d'),
              on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'a'), armed(KEY_SET_WAIT),
              on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'b'),
-             on(presenting(1, 'echo', '"x"', jwt(SET_GRACE)), 'c'), on(failure(1, CAPACITY_EXCEEDED), 'c'),
+             on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'c'),
              armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
-             on(result(1, '"grace"'), 'a'), on(result(1, '"grace"'), 'b'),
+             on(result(1, '"grace"'), 'a'), on(result(1, '"grace"'), 'b'), on(result(1, '"grace"'), 'c'),
              on(presenting(3, 'echo', '"x"', jwt(SET_UNNAMED)), 'a'), armed(KEY_SET_DEADLINE - KEY_SET_WAIT),
              on(presenting(3, 'echo', '"y"', jwt(SET_UNNAMED)), 'b'),
              on(presenting(3, 'echo', '"z"', jwt(SET_UNNAMED)), 'c'), on(failure(3, CAPACITY_EXCEEDED), 'c'),
              on(presenting(5, 'whoami', 'null', jwt(SET_GRACE)), 'c'), on(result(5, '"grace"'), 'c'),
-             on(presenting(7, 'whoami', 'null', jwt(ROTATED_GRACE)), 'c'), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
-             on(result(7, '"grace"'), 'c'),
              on(cancel(3), 'a'),
-             on(presenting(9, 'echo', '"z"', jwt(SET_UNNAMED)), 'c'), armed(KEY_SET_DEADLINE - 2 * KEY_SET_WAIT),
-             advance(KEY_SET_DEADLINE - 2 * KEY_SET_WAIT), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             on(presenting(7, 'echo', '"z"', jwt(SET_UNNAMED)), 'c'),
+             armed(KEY_SET_DEADLINE - KEY_SET_WAIT), advance(KEY_SET_DEADLINE - KEY_SET_WAIT), armed(KEY_SET_WAIT),
+             on(presenting(5, 'echo', '"x"', jwt(SET_UNNAMED)), 'a'),
+             on(presenting(1, 'echo', '"w"', jwt(SET_UNNAMED)), 'd'),
+             on(presenting(3, 'echo', '"w"', jwt(SET_UNNAMED)), 'd'),
+             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
              on(failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD), 'b'),
-             on(failure(9, SESSION_REQUIRED, detail=DOES_NOT_HOLD), 'c')]),
+             on(failure(7, SESSION_REQUIRED, detail=DOES_NOT_HOLD), 'c'),
+             on(failure(3, CAPACITY_EXCEEDED), 'd'),
+             on(presenting(9, 'echo', '"z"', jwt(SET_UNNAMED)), 'c'), on(failure(9, CAPACITY_EXCEEDED), 'c'),
+             armed(KEY_SET_DEADLINE - KEY_SET_WAIT), advance(KEY_SET_DEADLINE - KEY_SET_WAIT),
+             armed(KEY_SET_WAIT), advance(KEY_SET_WAIT),
+             on(failure(5, SESSION_REQUIRED, detail=DOES_NOT_HOLD), 'a'),
+             on(failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD), 'd')]),
     ]
 
 
@@ -1254,7 +1266,7 @@ document = {
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket\'s or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireSessionOrCredential by default, or requireSession.',
-        'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server\'s clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer\'s keys at once; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
+        'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server\'s clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer\'s deadline at once; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),

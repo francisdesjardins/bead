@@ -55,7 +55,7 @@ public sealed partial class RouterServerTests
     // cancelled
     private Device DeviceOf(Setup setup)
     {
-        var pipe = new Pipe(DeviceHandle, setup.IsDeferred ? _scheduler : null) { Clock = setup.Clock ?? _time };
+        var pipe = new Pipe(DeviceHandle, setup.IsDeferred ? _scheduler : null) { Clock = setup.Clock ?? _time, IsSecure = setup.IsSecure };
         var device = new Device(
             pipe,
             (new RouterServer(
@@ -329,9 +329,10 @@ public sealed partial class RouterServerTests
     [Fact]
     public async Task Answers_a_JWT_past_the_calls_its_key_set_lets_wait_CAPACITY_EXCEEDED_at_its_first_step_reporting_nothing_as_a_relay_that_verifies()
     {
-        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+        var answers = new List<TaskCompletionSource<IReadOnlyList<JwtSetKey>>>();
 
-        using var device = DeviceOf(new Setup());
+        // leg B secure, so a bearer token crosses it
+        using var device = DeviceOf(new Setup { IsSecure = true });
 
         Start(new RouterServerOptions
         {
@@ -343,6 +344,10 @@ public sealed partial class RouterServerTests
                     Issuers = [Issuer],
                     Ask = (_, _) =>
                     {
+                        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+
+                        answers.Add(answer);
+
                         return new ValueTask<IReadOnlyList<JwtSetKey>>(answer.Task);
                     },
                     MaximumWaitingCalls = 1,
@@ -353,13 +358,35 @@ public sealed partial class RouterServerTests
         _transport.Open(First);
         Router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7, Audience = Audience });
 
-        // the first waits for its issuer's keys; the second would wait past the one the relay lets
-        Deliver(First, To(7, Presenting(RequestOf(1, payload: "hi"), Credential.Jwt(Holding()))));
-        Deliver(First, To(7, Presenting(RequestOf(3, payload: "ho"), Credential.Jwt(Holding()))));
+        var token = Credential.Jwt(JwtOf(_time.GetUtcNow().ToUnixTimeSeconds() + 3_600));
+
+        // the ask its one call left answers no key: within the minute, a token waits for the deadline
+        Deliver(First, To(7, Presenting(RequestOf(1, payload: "hi"), token)));
+        await Settle();
+        Deliver(First, CancelOf(1));
+        await Settle();
+        answers[0].SetResult([]);
         await Settle();
 
-        Assert.Equal(["first failure 3 CapacityExceeded"], SentSince());
+        // one waits for the deadline; the other would wait past the one the relay lets
+        Deliver(First, To(7, Presenting(RequestOf(3, payload: "ho"), token)));
+        Deliver(First, To(7, Presenting(RequestOf(5, payload: "hu"), token)));
+        await Settle();
+
+        Assert.Equal(["first failure 5 CapacityExceeded"], SentSince());
+        Assert.Single(answers);
         Assert.Empty(device.Pipe.ClientSent);
+
+        // at the deadline, the ask then names its kid: verified, the other goes on through leg B,
+        // whatever the device answers it
+        _time.Advance(TimeSpan.FromMinutes(1));
+        await Settle();
+        Assert.Equal(2, answers.Count);
+        answers[1].SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }]);
+        await Settle();
+
+        Assert.Single(device.Pipe.ClientSent);
+        Assert.Single(SentSince());
         Assert.Empty(Reported());
     }
 
@@ -686,6 +713,9 @@ public sealed partial class RouterServerTests
         public RouterLimits? DeviceLimits { get; init; }
 
         public bool IsDeferred { get; init; }
+
+        // whether leg B is secure, which a bearer credential needs to cross it
+        public bool IsSecure { get; init; }
 
         public TimeProvider? Clock { get; init; }
 

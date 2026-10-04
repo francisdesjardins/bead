@@ -230,8 +230,8 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
 takes no more: a notification past its subscription's queue (section 11.10), a transfer past those
 its connection receives at once or past the budget left (section 12.3), a call past those that wait
-for an issuer's keys (section 13.8). It says nothing against the call's credential, and withdraws
-none (section 13.4).
+for an issuer's deadline (section 13.8). It says nothing against the call's credential, and
+withdraws none (section 13.4).
 
 ## 9. Calls and answers
 
@@ -274,10 +274,10 @@ first that applies:
       or rejects, its key set's ask fails, unreached or unsettled as its deadline is reached
       (section 13.8) — is answered with `PROCEDURE_FAILED`, and reported, never with
       `SESSION_REQUIRED`, which would have its requester withdraw a credential that holds
-      (section 13.4). A `JWT` that would wait for its issuer's keys past the calls the receiver
-      lets wait for them (section 13.8) is answered with `CAPACITY_EXCEEDED`, in the turn it would
-      have waited, and not reported: nothing failed, and its requester withdraws nothing
-      (section 8.2);
+      (section 13.4). A `JWT` that would wait for its issuer's deadline past the calls the
+      receiver lets wait for it, as it comes or as an answer moves it there (section 13.8), is
+      answered with `CAPACITY_EXCEEDED`, in the turn it would have waited, and not reported:
+      nothing failed, and its requester withdraws nothing (section 8.2);
    3. its admission, synchronous, on the call's session: answered with the admission's failure —
       `SESSION_REQUIRED`, `ACCESS_DENIED`, or another of the admission's block; `PROCEDURE_FAILED`
       when the admission itself fails. An admission never answers `SESSION_REQUIRED` to a call that
@@ -697,22 +697,22 @@ bytes each, an `HS256` one that is not `oct`, its `k` 32 bytes at least (RFC 751
 application's fault, never the token's: the verifier fails, and refuses nothing.
 
 A side may be given a key set besides its keys, with the issuers it answers for, one at least, and
-the most calls that wait for one issuer's keys at once, `maximumWaitingCalls`, _N_: a whole number
-from 1 to 2³¹ − 1, 64 when not given. A key set given with no issuer, or with an _N_ outside those
-bounds, is the application's fault, refused as the side is built. Asked for one of its issuers, with
-a signal, it answers that issuer's keys (RFC 7517 §5), each a JWK with its one algorithm, and may
-wait. The side asks it for no other issuer, compared octet for octet: a token whose `iss` it does
-not name is judged at once by the keys there are, asking nothing, so no peer has it asked for an
-issuer of the peer's choosing. The side asks it once a minute at most for an issuer: an ask sets
-that issuer's deadline a minute past the reading at which it goes, on the side's monotonic reading
-(decision 0011), and its signal aborts as that deadline is reached. A deadline is reached once that
-reading is at it or past it, wherever the side reads that issuer's state — as a call of that issuer
-comes, as an answer comes, as the deadline's timer fires — whichever is first, and never as a call
-leaves its wait, which reads nothing of it: the timer, which may fire late, only makes sure it is
-reached when nothing else reads it. An ask that fails — the key set throws or rejects, answers what
-is not keys shaped for their algorithms, or is unsettled as its deadline is reached, what it settles
-to at or past that deadline being dropped — fails the verifier of every call that waits on it
-(section 9.2, step 5), as a key set that cannot be reached does.
+the most calls that wait for one issuer's deadline at once, `maximumWaitingCalls`, _N_: a whole
+number from 1 to 2³¹ − 1, 64 when not given. A key set given with no issuer, or with an _N_ outside
+those bounds, is the application's fault, refused as the side is built. Asked for one of its
+issuers, with a signal, it answers that issuer's keys (RFC 7517 §5), each a JWK with its one
+algorithm, and may wait. The side asks it for no other issuer, compared octet for octet: a token
+whose `iss` it does not name is judged at once by the keys there are, asking nothing, so no peer has
+it asked for an issuer of the peer's choosing. The side asks it once a minute at most for an issuer:
+an ask sets that issuer's deadline a minute past the reading at which it goes, on the side's
+monotonic reading (decision 0011), and its signal aborts as that deadline is reached. A deadline is
+reached once that reading is at it or past it, wherever the side reads that issuer's state — as a
+call of that issuer comes, as an answer comes, as the deadline's timer fires — whichever is first,
+and never as a call leaves its wait, which reads nothing of it: the timer, which may fire late, only
+makes sure it is reached when nothing else reads it. An ask that fails — the key set throws or
+rejects, answers what is not keys shaped for their algorithms, or is unsettled as its deadline is
+reached, what it settles to at or past that deadline being dropped — fails the verifier of every
+call that waits on it (section 9.2, step 5), as a key set that cannot be reached does.
 
 The keys an answer gave are held for its issuer, beside the application's, in place of those its
 last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
@@ -739,14 +739,18 @@ the keys that serve, so a `kid` that answer did not name is refused then, at ste
 other waits on, for the deadline and the ask then, since an ask that went before its token came may
 not know its key.
 
-At most _N_ calls wait for one issuer's keys at once, on its ask under way and for its deadline
-counted together, each issuer's apart. A call that would wait past them is refused
-`CAPACITY_EXCEEDED`, in the turn it would have waited, and not reported (section 9.2, step 5): a
-peer that sends tokens whose `kid` no key names holds no more than _N_ calls, and what they carry,
-through an issuer's minute. A call keeps its place while it waits, from an ask to the deadline after
-it and onto the ask then, and one that leaves frees it. A call's own signal — its cancel, which its
-requester's timeout sends as well (section 9.9), or its connection closing (section 9.10) — ends its
-own wait, never the ask. The side fetches nothing itself: the key set is the application's to fetch.
+At most _N_ calls wait for one issuer's deadline at once, each issuer's apart. A call that waits on
+an ask is not counted: the key set's own latency bounds its wait, and the ask's deadline. A call is
+counted as it starts to wait for the deadline, and as an answer moves it there from an ask that went
+before its token came, the calls that answer moves taken in the order they came to that ask: one
+that would wait past _N_ is refused `CAPACITY_EXCEEDED` then, in the turn it would have waited, and
+not reported (section 9.2, step 5). A call holds its place while it waits for the deadline: at the
+deadline, the calls that waited for it wait on the ask that goes then, and hold none there, and a
+call that leaves frees its own. A peer that sends tokens whose `kid` no key names holds no more than
+_N_ calls, and what they carry, for an issuer's deadline, and any more no longer than an ask takes
+to settle, a minute at most. A call's own signal — its cancel, which its requester's timeout sends
+as well (section 9.9), or its connection closing (section 9.10) — ends its own wait, never the ask.
+The side fetches nothing itself: the key set is the application's to fetch.
 
 _Vectors: `jwtVerdicts`._
 
@@ -853,7 +857,7 @@ opening, before any of its payload crosses — as section 9.2's credential, admi
       its destinations were registered with. One that does not hold — a `JWT` that names none of
       those audiences, say — is answered with `SESSION_REQUIRED`, with the detail section 9.2 gives
       it; a verifier that fails, with `PROCEDURE_FAILED`, and reported; a `JWT` that would wait for
-      its issuer's keys past the calls the relay lets wait for them, with `CAPACITY_EXCEEDED`, not
+      its issuer's deadline past the calls the relay lets wait for it, with `CAPACITY_EXCEEDED`, not
       reported; one that holds resolves to its credential's session;
    3. `beforeRoute`, synchronous, on the call's session. A relay with no `beforeRoute` admits
       nobody: `ACCESS_DENIED`. A server's relay admits by default with `requireSessionOrCredential`:

@@ -187,19 +187,19 @@ as RFC 8725 recommends:
   that finds an ask under way waits on it, and its own signal leaves that ask to the others; a call
   whose `kid` comes while its issuer's minute runs waits for the deadline and the ask that goes
   then, and one without a `kid` waits on its issuer's keys while none of them serve, a cold start
-  included. So many calls at most wait for an issuer's keys at once, `maximumWaitingCalls`, 64 by
-  default: one past them is refused `CAPACITY_EXCEEDED`, which withdraws nothing and is not
-  reported, since a `kid` is looked up before any signature is checked. A deadline is reached on the
-  monotonic reading wherever a side reads it, whenever its timer fires. The keys an answer gave are
-  held ten minutes, beside the application's, held for good: past them, a token whose `kid` they
-  name waits on a new ask before they serve, so a key its issuer withdrew stops verifying. A `kid`
-  still unnamed by an answer to an ask that went after its token came is refused `SESSION_REQUIRED`,
-  never tried against the others; a call that waited on an ask that failed is refused
-  `PROCEDURE_FAILED`, as a key set that cannot be reached is. The runtime fetches nothing itself: a
-  token's `jwk`, `jku`, `x5u` and `x5c` are never read (RFC 8725 §3.10), and a token that carries
-  `crit` is refused. A JWK serves only when its `alg` is its key's algorithm, or is absent and the
-  application names it, its `use` is `sig` or absent, and its `key_ops`, when present, include
-  `verify` (RFC 7517 §4.2 to §4.4);
+  included. So many calls at most wait for an issuer's deadline at once, `maximumWaitingCalls`, 64
+  by default, a call on an ask under way never counted: one past them is refused
+  `CAPACITY_EXCEEDED`, which withdraws nothing and is not reported, since a `kid` is looked up
+  before any signature is checked. A deadline is reached on the monotonic reading wherever a side
+  reads it, whenever its timer fires. The keys an answer gave are held ten minutes, beside the
+  application's, held for good: past them, a token whose `kid` they name waits on a new ask before
+  they serve, so a key its issuer withdrew stops verifying. A `kid` still unnamed by an answer to an
+  ask that went after its token came is refused `SESSION_REQUIRED`, never tried against the others;
+  a call that waited on an ask that failed is refused `PROCEDURE_FAILED`, as a key set that cannot
+  be reached is. The runtime fetches nothing itself: a token's `jwk`, `jku`, `x5u` and `x5c` are
+  never read (RFC 8725 §3.10), and a token that carries `crit` is refused. A JWK serves only when
+  its `alg` is its key's algorithm, or is absent and the application names it, its `use` is `sig` or
+  absent, and its `key_ops`, when present, include `verify` (RFC 7517 §4.2 to §4.4);
 - **its claims**: `iss` required and equal, octet for octet, to its key's issuer (RFC 8725 §3.8);
   `exp` required, the token holding while the wall clock is before `exp` plus 60 s, and `nbf` read
   when present, the token holding from `nbf` less 60 s (RFC 7519 §4.1.4, §4.1.5); `aud` required,
@@ -323,7 +323,7 @@ bytes, nor the transport's field; only its scheme, `credentialScheme`, `Credenti
   receives: a `JWT`'s keys, each with its issuer and its algorithm, and its audience; the key set,
   `keySet`, `KeySet`, given with the issuers it answers for, which the runtime asks for a `kid` no
   key of the token's issuer names, with a signal its deadline aborts, which may wait, and whose
-  answer it holds ten minutes, and the calls that may wait for an issuer's keys at once,
+  answer it holds ten minutes, and the calls that may wait for an issuer's deadline at once,
   `maximumWaitingCalls`, `MaximumWaitingCalls`; and an `ELSEWHERE`'s verifier, `verify`, `Verify`,
   given what the transport carried and its call's signal, which settles with a credential's session
   — its identifier, its data, and its end, none for a session without one — or with none, when the
@@ -576,12 +576,18 @@ each with its answer:
 
 The answers to that fourth round met the Tenth Man in their turn. Its objections, each with its answer:
 
-| Objection                                                                                                                                                                             | Answer                                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A `kid` that waits for its issuer's deadline holds its call and its payload a minute at any peer's will, since step 4 comes before the signature, and nothing bounds how many         | Accepted, the user's choice: at most so many calls wait for an issuer's keys at once, given with the key set, 64 by default; one past them is refused `CAPACITY_EXCEEDED`, which withdraws nothing and is not reported. |
-| The rule that an admission never answers `SESSION_REQUIRED` to a call that presented a credential lives in two wrappers, not in the router, so a resolver registered on it escapes it | Accepted: each router applies it where it answers an admission, whatever the handler.                                                                                                                                   |
-| One side reaches a key set's deadline when its timer fires, the other when the monotonic reading passes it, so a late timer gives two answers                                         | Accepted: a deadline is reached on the reading wherever a side reads the state, and section 13.8 says which ask a call that comes past it is judged by.                                                                 |
-| A token without a `kid` never has the key set asked while nothing is held for its issuer, so at a cold start it is refused and its credential withdrawn                               | Accepted: it waits on its issuer's keys while none of them serve, as an unnamed `kid` does.                                                                                                                             |
-| A call that leaves a key set's wait is removed from a list under one lock, so many leaves stall every verification                                                                    | Accepted: the waiters leave in constant time, on both sides.                                                                                                                                                            |
-| The conversations that pin the minute pass a side that asks at once for every `kid` it does not know                                                                                  | Accepted: a call answered at once inside each wait, and the minute pinned by an issuer whose second ask answers no key.                                                                                                 |
-| A session verified under a key its issuer withdrew lasts until the `exp` whoever holds the key chose                                                                                  | Accepted, the user's choice: the application ends every credential's session of an issuer, on every connection that keeps one, as when a key of its leaks.                                                              |
+| Objection                                                                                                                                                                             | Answer                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A `kid` that waits for its issuer's deadline holds its call and its payload a minute at any peer's will, since step 4 comes before the signature, and nothing bounds how many         | Accepted, the user's choice: at most so many calls wait for an issuer's deadline at once, given with the key set, 64 by default; one past them is refused `CAPACITY_EXCEEDED`, which withdraws nothing and is not reported. |
+| The rule that an admission never answers `SESSION_REQUIRED` to a call that presented a credential lives in two wrappers, not in the router, so a resolver registered on it escapes it | Accepted: each router applies it where it answers an admission, whatever the handler.                                                                                                                                       |
+| One side reaches a key set's deadline when its timer fires, the other when the monotonic reading passes it, so a late timer gives two answers                                         | Accepted: a deadline is reached on the reading wherever a side reads the state, and section 13.8 says which ask a call that comes past it is judged by.                                                                     |
+| A token without a `kid` never has the key set asked while nothing is held for its issuer, so at a cold start it is refused and its credential withdrawn                               | Accepted: it waits on its issuer's keys while none of them serve, as an unnamed `kid` does.                                                                                                                                 |
+| A call that leaves a key set's wait is removed from a list under one lock, so many leaves stall every verification                                                                    | Accepted: the waiters leave in constant time, on both sides.                                                                                                                                                                |
+| The conversations that pin the minute pass a side that asks at once for every `kid` it does not know                                                                                  | Accepted: a call answered at once inside each wait, and the minute pinned by an issuer whose second ask answers no key.                                                                                                     |
+| A session verified under a key its issuer withdrew lasts until the `exp` whoever holds the key chose                                                                                  | Accepted, the user's choice: the application ends every credential's session of an issuer, on every connection that keeps one, as when a key of its leaks.                                                                  |
+
+The answers met the Tenth Man a last time. Its one objection, with its answer:
+
+| Objection                                                                                                                            | Answer                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The bound counts the calls on an ask under way as well, so valid tokens are refused at every start, and every ten minutes under load | Accepted, as the user's choice had it: only the calls that wait for a deadline count, checked as a call starts to wait for it or an answer moves it there; a call on an ask under way waits as long as the key set takes, its deadline bounding it. |

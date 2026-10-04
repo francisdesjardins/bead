@@ -25,16 +25,22 @@ public sealed partial class RouterServerTests
     // an HS256 key of 32 bytes, and its JWK, which names it by the kid "first"
     private static readonly byte[] Secret = [.. Enumerable.Repeat((byte)1, 32)];
 
-    private static readonly JsonElement Jwk = JsonSerializer.SerializeToElement(
-        new Dictionary<string, string> { ["k"] = Base64Url.EncodeToString(Secret), ["kid"] = "first", ["kty"] = "oct" });
+    private static readonly JsonElement Jwk = JwkOf("first");
 
     // helpers
 
-    // an HS256 access token of the issuer for ada, under the key "first", its exp `exp` seconds since
-    // the epoch
-    private static string JwtOf(long exp)
+    // the JWK of the key, named by `kid`
+    private static JsonElement JwkOf(string kid)
     {
-        return SignedOf(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = exp, ["iss"] = Issuer, ["sub"] = "ada" });
+        return JsonSerializer.SerializeToElement(
+            new Dictionary<string, string> { ["k"] = Base64Url.EncodeToString(Secret), ["kid"] = kid, ["kty"] = "oct" });
+    }
+
+    // an HS256 access token of the issuer for ada, under the key "first" or another kid of it, its
+    // exp `exp` seconds since the epoch
+    private static string JwtOf(long exp, string kid = "first")
+    {
+        return SignedOf(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = exp, ["iss"] = Issuer, ["sub"] = "ada" }, kid);
     }
 
     // an HS256 access token of an issuer, the issuer when none is given, under the key "first",
@@ -44,14 +50,14 @@ public sealed partial class RouterServerTests
         return SignedOf(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = 4_102_444_800, ["iss"] = issuer, [identity.Claim] = identity.Value });
     }
 
-    // claims, signed under the key "first"
-    private static string SignedOf(Dictionary<string, object> claimed)
+    // claims, signed under the key, its kid "first" or the one given
+    private static string SignedOf(Dictionary<string, object> claimed, string kid = "first")
     {
         var part = (object value) =>
         {
             return Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
         };
-        var header = part(new Dictionary<string, string> { ["alg"] = "HS256", ["kid"] = "first", ["typ"] = "at+jwt" });
+        var header = part(new Dictionary<string, string> { ["alg"] = "HS256", ["kid"] = kid, ["typ"] = "at+jwt" });
         var claims = part(claimed);
         var signature = HMACSHA256.HashData(Secret, Encoding.ASCII.GetBytes($"{header}.{claims}"));
 
@@ -59,10 +65,9 @@ public sealed partial class RouterServerTests
     }
 
     // a router whose JWTs verify against its key set alone, which answers the key "first" once
-    // `answer` settles, counting its asks in `asks`, and lets `maximum` calls wait for its issuer's
-    // keys, 64 by default, on the first connection: echo answers its session's sub, counting the
-    // calls it ran in `ran`
-    private void StartAsking((TaskCompletionSource<IReadOnlyList<JwtSetKey>> Answer, Counts Counts) asking, int maximum = 64)
+    // `answer` settles, counting its asks in `asks`, on the first connection: echo answers its
+    // session's sub, counting the calls it ran in `ran`
+    private void StartAsking((TaskCompletionSource<IReadOnlyList<JwtSetKey>> Answer, Counts Counts) asking)
     {
         Start(new RouterServerOptions
         {
@@ -78,7 +83,6 @@ public sealed partial class RouterServerTests
 
                         return new ValueTask<IReadOnlyList<JwtSetKey>>(asking.Answer.Task);
                     },
-                    MaximumWaitingCalls = maximum,
                 },
             },
         });
@@ -858,22 +862,60 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
-    public async Task Answers_a_JWT_call_past_the_calls_its_key_set_lets_wait_for_an_issuer_s_keys_CAPACITY_EXCEEDED_reporting_nothing_and_its_client_keeps_its_default()
+    public async Task Answers_a_JWT_call_past_the_calls_its_key_set_lets_wait_for_an_issuer_s_deadline_CAPACITY_EXCEEDED_reporting_nothing_and_its_client_keeps_its_default()
     {
-        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+        var answers = new List<TaskCompletionSource<IReadOnlyList<JwtSetKey>>>();
         var withdrawn = new List<CredentialScheme>();
         var clientEnd = new ClientEnd(_transport);
+        var exp = _time.GetUtcNow().ToUnixTimeSeconds() + 3_600;
 
-        StartAsking((answer, new Counts()), 1);
+        // a key set that answers each ask as the test settles it, and lets one call wait for its
+        // issuer's deadline
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Audience = Audience,
+                KeySet = new JwtKeySet
+                {
+                    Issuers = [Issuer],
+                    Ask = (_, _) =>
+                    {
+                        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+
+                        answers.Add(answer);
+
+                        return new ValueTask<IReadOnlyList<JwtSetKey>>(answer.Task);
+                    },
+                    MaximumWaitingCalls = 1,
+                },
+            },
+        });
+        _transport.Open(First);
+        EchoOf((request, response) =>
+        {
+            return response.Answer(request.Session?.Identifier?.Sub ?? "none");
+        });
         _transport.Peer = clientEnd;
 
-        var credential = Credential.Jwt(Holding());
-        var echo = new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(5) });
+        // the client's default names a kid the key set's first answer does not
+        var credential = Credential.Jwt(JwtOf(exp, "second"));
+        var echo = new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromMinutes(2) });
 
         using var client = new RouterClient(clientEnd, new RouterClientOptions { Credential = credential, ResolverScheduler = _scheduler, Scheduler = _scheduler });
 
         client.CredentialWithdrawn += withdrawn.Add;
 
+        // the key set's keys held, by a call presenting a kid its answer names
+        var holding = client.Request(
+            BytesOf("held"),
+            new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(5), Credential = Credential.Jwt(JwtOf(exp)) }));
+
+        await Settle();
+        answers[0].SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }]);
+        Assert.Equal("ada", TextOf((await holding.WaitAsync(Patience, Cancelled)).Payload));
+
+        // within the minute, one waits for the deadline, the other is past the bound
         var waiting = client.Request(BytesOf("first"), echo);
 
         await Settle();
@@ -883,12 +925,19 @@ public sealed partial class RouterServerTests
             return client.Request(BytesOf("second"), echo).WaitAsync(Patience, Cancelled);
         });
 
-        // nothing failed, and nothing is withdrawn: the call that waits is answered as the ask is
+        // nothing failed, and nothing is withdrawn
         Assert.Equal(((ushort)ProtocolCode.CapacityExceeded, FailureScope.Protocol), (refused.Code, refused.Scope));
         Assert.Empty(withdrawn);
         Assert.Equal(credential, client.Credential);
-        answer.SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }]);
+        Assert.Single(answers);
+
+        // at the deadline, the ask then names its kid
+        _time.Advance(TimeSpan.FromMinutes(1));
+        await Settle();
+        Assert.Equal(2, answers.Count);
+        answers[1].SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }, new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = JwkOf("second") }]);
         Assert.Equal("ada", TextOf((await waiting.WaitAsync(Patience, Cancelled)).Payload));
+        Assert.Empty(withdrawn);
         Assert.Empty(Reported());
     }
 

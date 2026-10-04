@@ -89,7 +89,7 @@ export const redactHeader = (header: EnvelopeHeader): RedactedHeader => {
  * A call a bound of the side's own refuses as its credential resolves (spec 8.2): its router answers
  * it `CAPACITY_EXCEEDED`, its message for detail, and reports nothing, since nothing failed and its
  * requester withdraws nothing. Only the side's own resolver raises it: a key set's bound on the calls
- * that wait for an issuer's keys (spec 13.8).
+ * that wait for an issuer's deadline (spec 13.8).
  */
 export class CapacityError extends GenericError {
   public override readonly name: string = 'CapacityError';

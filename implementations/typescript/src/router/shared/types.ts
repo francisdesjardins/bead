@@ -930,8 +930,8 @@ export interface ICredentials {
  * ask's signal aborts at its deadline, a minute after it went, on the monotonic reading. One that
  * throws or rejects, answers what is not keys shaped for their algorithms, or is unsettled as its
  * deadline is reached fails the calls that wait on it, and replaces no key held. A call past the
- * `maximumWaitingCalls` that wait for one issuer's keys is refused `CAPACITY_EXCEEDED`, and nothing
- * is reported (spec 13.8).
+ * `maximumWaitingCalls` that wait for one issuer's deadline is refused `CAPACITY_EXCEEDED`, and
+ * nothing is reported (spec 13.8).
  */
 export interface IJwtKeySet {
   /** Asked for one of its issuers, with a signal, that issuer's keys, which it may wait for. */
@@ -939,9 +939,9 @@ export interface IJwtKeySet {
   /** The issuers it answers for, one at least, each a string. */
   readonly issuers: readonly string[];
   /**
-   * The most calls that wait for one issuer's keys at once, on its ask under way and for its
-   * deadline counted together, each issuer's apart: a whole number from 1 to 2³¹ − 1, 64 when not
-   * given. Any other is a {@link ProgrammerError}, as the side is built.
+   * The most calls that wait for one issuer's deadline at once, each issuer's apart, a call on its
+   * ask under way never counted: a whole number from 1 to 2³¹ − 1, 64 when not given. Any other is a
+   * {@link ProgrammerError}, as the side is built.
    */
   readonly maximumWaitingCalls?: number | undefined;
 }

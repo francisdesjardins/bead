@@ -23,8 +23,8 @@ public sealed record JwtSetKey
 
 /// <summary>
 /// A key set (RFC 7517 §5), the application's to fetch: the issuers it answers for, how it is asked
-/// for the keys of one of them, and the most calls that wait for one issuer's keys at once. The
-/// side asks it for no other issuer.
+/// for the keys of one of them, and the most calls that wait for one issuer's deadline at once.
+/// The side asks it for no other issuer.
 /// </summary>
 public sealed record JwtKeySet
 {
@@ -46,10 +46,11 @@ public sealed record JwtKeySet
     public required Func<string, CancellationToken, ValueTask<IReadOnlyList<JwtSetKey>>> Ask { get; init; }
 
     /// <summary>
-    /// The most calls that wait for one issuer's keys at once, on its ask under way and for its
-    /// deadline counted together, each issuer's apart: 64 by default, from 1 to 2³¹ − 1, or an
+    /// The most calls that wait for one issuer's deadline at once, each issuer's apart, a call on
+    /// its ask under way never counted: 64 by default, from 1 to 2³¹ − 1, or an
     /// <see cref="ArgumentOutOfRangeException"/> as the side is built. A call that would wait past
-    /// them is refused CAPACITY_EXCEEDED, and not reported: it withdraws nothing (spec 8.2, 13.8).
+    /// them, as it comes or as an answer moves it there, is refused CAPACITY_EXCEEDED, and not
+    /// reported: it withdraws nothing (spec 8.2, 13.8).
     /// </summary>
     public int MaximumWaitingCalls { get; init; } = 64;
 }

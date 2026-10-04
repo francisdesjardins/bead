@@ -86,12 +86,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for an issuer, with a signal its deadline aborts: its answer is held ten minutes, an ask under way
   is shared, a `kid` that comes while its issuer's minute runs waits for the ask its deadline lets
   go, a token without a `kid` waits on its issuer's keys while none serve, and at most
-  `maximumWaitingCalls`, `MaximumWaitingCalls`, 64 by default, wait for an issuer's keys at once,
-  one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s verifier, `verify`, `Verify`,
-  given what the transport carried and the call's signal. A side given a `JWT`'s keys holds its
-  limits to 1,024 bytes at least (section 12.2), and keys or a key set given without an audience are
-  refused as the side is built. A `JWT`'s verdict reads the wall clock once its signature has
-  verified.
+  `maximumWaitingCalls`, `MaximumWaitingCalls`, 64 by default, wait for an issuer's deadline at
+  once, one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s verifier, `verify`,
+  `Verify`, given what the transport carried and the call's signal. A side given a `JWT`'s keys
+  holds its limits to 1,024 bytes at least (section 12.2), and keys or a key set given without an
+  audience are refused as the side is built. A `JWT`'s verdict reads the wall clock once its
+  signature has verified.
 - A client's credential, `credential`, `Credential`, by default and per call: `NONE`, `OPAQUE`, a
   `JWT` or an `ELSEWHERE`. A default withdrawn once a call that presented it is refused
   `SESSION_REQUIRED`, while it is still, by value, the credential that call presented, tells its

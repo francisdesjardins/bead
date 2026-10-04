@@ -380,7 +380,7 @@ names alone, when no key of a token's issuer names its `kid`, once a minute at m
 with a signal its deadline aborts, its answer held ten minutes, a `kid` that comes while the minute
 runs waiting for the ask its deadline lets go, a token without a `kid` waiting on its issuer's keys
 while none serve, and `maximumWaitingCalls`, 64 by default, the calls that may wait for an issuer's
-keys at once, one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s
+deadline at once, one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s
 `verify(carried, signal)`, given what the transport carried, which settles with `{ id, data, end }`,
 or with none when the credential does not hold. The server verifies a `JWT` one way, as an access
 token of RFC 9068's profile (spec 13.8), on its own clock, and takes the schemes it is given

@@ -680,15 +680,15 @@ test.describe('createCredentialResolver', () => {
     }
   });
 
-  test('lets as many calls wait for an issuer’s keys as maximumWaitingCalls says, 64 when not given, and refuses one more CAPACITY_EXCEEDED at once, asking nothing more', async () => {
-    const clock = createTestClock(NOW);
+  test('lets as many calls wait for an issuer’s deadline as maximumWaitingCalls says, 64 when not given, and refuses one more CAPACITY_EXCEEDED at once, asking nothing more', async () => {
     const signal = new AbortController().signal;
-    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
 
     for (const [maximumWaitingCalls, most] of [
       [undefined, 64],
       [3, 3],
     ] as const) {
+      const clock = createTestClock(NOW);
       const { asks, keySet } = createKeySet();
       const resolver = createCredentialResolver(
         {
@@ -700,8 +700,11 @@ test.describe('createCredentialResolver', () => {
         },
         { clock }
       );
+
+      await heldOn(resolver, asks);
+
       const outcomes = Array.from({ length: most + 1 }, () => {
-        return outcomeOf(resolver.resolve(named, signal));
+        return outcomeOf(resolver.resolve(unnamed, signal));
       });
       const refused = () => {
         return outcomes.filter(({ current }) => {
@@ -709,11 +712,11 @@ test.describe('createCredentialResolver', () => {
         });
       };
 
-      // whichever came last to wait, as the others wait on the one ask
+      // whichever came last to wait for the deadline, as the others wait for it
       await expect.poll(refused).toHaveLength(1);
 
       expect(refused()[0]?.current).toMatchObject({
-        message: `as many calls as its key set lets wait for the keys of ${SET_ISSUER} wait already`,
+        message: `as many calls as its key set lets wait for the deadline of ${SET_ISSUER} wait already`,
       });
       expect(
         outcomes.filter(({ current }) => {
@@ -722,7 +725,12 @@ test.describe('createCredentialResolver', () => {
       ).toHaveLength(most);
       expect(asks).toHaveLength(1);
 
-      asks[0]?.settle.resolve([SET_KEY]);
+      // the ask at the deadline names set-2: those that waited are verified
+      await clock.tickAsync(60_000);
+
+      expect(asks).toHaveLength(2);
+
+      asks[1]?.settle.resolve([SET_KEY, SET_KEY_2]);
 
       await expect
         .poll(() => {
@@ -734,7 +742,132 @@ test.describe('createCredentialResolver', () => {
     }
   });
 
-  test('keeps a call’s place as an answer moves it from its issuer’s ask to the deadline, refusing a call past the bound meanwhile, and frees it as the call leaves', async () => {
+  test('lets every call that waits on an ask under way wait, however many: 65 valid tokens at a cold start, and 65 at the ten-minute mark, all verified', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    // 64 wait for a deadline at most, the key set saying nothing
+    const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+    const signal = new AbortController().signal;
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+
+    // at a cold start, then once the keys held are past their ten minutes: no key serves, and every
+    // call waits on the one ask the first sets off, none refused
+    for (const [round, held] of [
+      ['cold start', 0],
+      ['ten-minute mark', 600_000],
+    ] as const) {
+      await clock.tickAsync(held);
+
+      const outcomes = Array.from({ length: 65 }, () => {
+        return outcomeOf(resolver.resolve(named, signal));
+      });
+
+      await expect
+        .poll(
+          () => {
+            return asks.length;
+          },
+          { message: round }
+        )
+        .toBe(held === 0 ? 1 : 2);
+      // ! refused at its key as it is first judged, which no await comes before: one turn lets every
+      // call reach its wait
+      await sleep(0);
+
+      expect(
+        outcomes.filter(({ current }) => {
+          return current === 'waiting';
+        }),
+        round
+      ).toHaveLength(65);
+
+      asks.at(-1)?.settle.resolve([SET_KEY]);
+
+      await expect
+        .poll(
+          () => {
+            return outcomes.filter(({ current }) => {
+              return current === 'waiting';
+            }).length;
+          },
+          { message: round }
+        )
+        .toBe(0);
+
+      for (const { current } of outcomes) {
+        expect(current, round).toMatchObject({ identifier: { sub: 'grace' } });
+      }
+    }
+  });
+
+  test('refuses CAPACITY_EXCEEDED a call an answer moves onto a deadline that holds as many as its key set lets wait', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: 2 } },
+      { clock }
+    );
+    const signal = new AbortController().signal;
+    const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
+
+    // the ask goes for a kid it names; three kids none names come while it is under way, which went
+    // before they came, and wait on it, uncounted
+    const first = resolver.resolve(named, signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+
+    const outcomes = Array.from({ length: 3 }, () => {
+      return outcomeOf(resolver.resolve(unnamed, signal));
+    });
+
+    await sleep(0);
+
+    expect(
+      outcomes.map(({ current }) => {
+        return current;
+      })
+    ).toEqual(['waiting', 'waiting', 'waiting']);
+
+    // its answer names no set-2: the first two it moves onto the deadline take its places, and the
+    // third is refused as it moves
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    expect(await first).toMatchObject({ identifier: { sub: 'grace' } });
+    await expect
+      .poll(() => {
+        return outcomes.map(({ current }) => {
+          return current instanceof CapacityError ? current.message : current;
+        });
+      })
+      .toEqual([
+        'waiting',
+        'waiting',
+        `as many calls as its key set lets wait for the deadline of ${SET_ISSUER} wait already`,
+      ]);
+    expect([asks.length, duesOn(clock)]).toEqual([1, [60_000]]);
+
+    // at the deadline the two wait on the ask then, whose answer names set-2
+    await clock.tickAsync(60_000);
+
+    expect(asks).toHaveLength(2);
+
+    asks[1]?.settle.resolve([SET_KEY, SET_KEY_2]);
+
+    await expect
+      .poll(() => {
+        return outcomes.filter(({ current }) => {
+          return (current as ICallSession | undefined)?.identifier !== undefined;
+        }).length;
+      })
+      .toBe(2);
+  });
+
+  test('gives a call a place as an answer moves it from its issuer’s ask onto the deadline, refusing one that comes past the bound then, and frees it as the call leaves', async () => {
     const clock = createTestClock(NOW);
     const { asks, keySet } = createKeySet();
     const resolver = createCredentialResolver(
@@ -744,7 +877,7 @@ test.describe('createCredentialResolver', () => {
     const signal = new AbortController().signal;
     const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
     const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-2' }));
-    // the ask goes for a call that leaves: the ask goes on, its place freed
+    // the ask goes for a call that leaves: the ask goes on, for a token that comes to find it
     const leaving = new AbortController();
     const left = outcomeOf(resolver.resolve(named, leaving.signal));
 
@@ -760,25 +893,12 @@ test.describe('createCredentialResolver', () => {
       })
       .toBeInstanceOf(CancelError);
 
-    // two kids none names find the ask under way, which went before they came: one waits on it
-    const controllers = [new AbortController(), new AbortController()];
-    const outcomes = controllers.map((controller) => {
-      return outcomeOf(resolver.resolve(unnamed, controller.signal));
-    });
+    // a kid none names finds the ask under way, which went before it came, and waits on it
+    const moving = new AbortController();
+    const moved = outcomeOf(resolver.resolve(unnamed, moving.signal));
 
-    await expect
-      .poll(() => {
-        return outcomes.some(({ current }) => {
-          return current instanceof CapacityError;
-        });
-      })
-      .toBe(true);
-
-    const index = outcomes.findIndex(({ current }) => {
-      return current === 'waiting';
-    });
-
-    // its answer names no set-2: the call waits on for the deadline, refused nothing for the move
+    // its answer names no set-2: it moves onto the deadline, taking its one place, and the next that
+    // comes is refused
     asks[0]?.settle.resolve([SET_KEY]);
     await expect
       .poll(() => {
@@ -786,14 +906,14 @@ test.describe('createCredentialResolver', () => {
       })
       .toEqual([60_000]);
 
-    expect(outcomes[index]?.current).toBe('waiting');
+    expect(moved.current).toBe('waiting');
     await expect(resolver.resolve(unnamed, signal)).rejects.toBeInstanceOf(CapacityError);
 
     // gone, it frees its place: the next waits in it
-    controllers[index]?.abort();
+    moving.abort();
     await expect
       .poll(() => {
-        return outcomes[index]?.current;
+        return moved.current;
       })
       .toBeInstanceOf(CancelError);
 
@@ -812,7 +932,7 @@ test.describe('createCredentialResolver', () => {
       .toMatchObject({ identifier: { sub: 'grace' } });
   });
 
-  test('counts the calls that wait for each issuer’s keys apart', async () => {
+  test('counts the calls that wait for each issuer’s deadline apart', async () => {
     const clock = createTestClock(NOW);
     const { asks, keySet } = createKeySet();
     const resolver = createCredentialResolver(
@@ -823,11 +943,13 @@ test.describe('createCredentialResolver', () => {
       { clock }
     );
     const signal = new AbortController().signal;
-    const tokenFor = (issuer: string) => {
-      return jwtOf(tokenOf(claimsOf(issuer), { key: SET_KEY_BYTES, kid: 'set-1' }));
+    const issuers = [SET_ISSUER, OTHER_SET_ISSUER];
+    const tokenFor = (issuer: string, kid: string) => {
+      return jwtOf(tokenOf(claimsOf(issuer), { key: SET_KEY_BYTES, kid }));
     };
-    const waiting = [SET_ISSUER, OTHER_SET_ISSUER].map((issuer) => {
-      return resolver.resolve(tokenFor(issuer), signal);
+    // each issuer's keys held, from an ask of its own
+    const held = issuers.map((issuer) => {
+      return resolver.resolve(tokenFor(issuer, 'set-1'), signal);
     });
 
     await expect
@@ -835,15 +957,41 @@ test.describe('createCredentialResolver', () => {
         return asks.length;
       })
       .toBe(2);
-    await expect(resolver.resolve(tokenFor(SET_ISSUER), signal)).rejects.toBeInstanceOf(
-      CapacityError
-    );
-    await expect(resolver.resolve(tokenFor(OTHER_SET_ISSUER), signal)).rejects.toBeInstanceOf(
-      CapacityError
-    );
 
     for (const ask of asks) {
       ask.settle.resolve([SET_KEY]);
+    }
+
+    expect(await Promise.all(held)).toMatchObject([
+      { identifier: { issuer: SET_ISSUER } },
+      { identifier: { issuer: OTHER_SET_ISSUER } },
+    ]);
+
+    // one of each waits for its issuer's deadline, whatever the other's holds; one more of each is
+    // refused
+    const waiting = issuers.map((issuer) => {
+      return resolver.resolve(tokenFor(issuer, 'set-2'), signal);
+    });
+
+    await expect
+      .poll(() => {
+        return duesOn(clock);
+      })
+      .toEqual([60_000, 60_000]);
+
+    for (const issuer of issuers) {
+      await expect(resolver.resolve(tokenFor(issuer, 'set-2'), signal)).rejects.toBeInstanceOf(
+        CapacityError
+      );
+    }
+
+    // at the deadlines, each issuer's ask names set-2
+    await clock.tickAsync(60_000);
+
+    expect(asks).toHaveLength(4);
+
+    for (const ask of asks.slice(2)) {
+      ask.settle.resolve([SET_KEY, SET_KEY_2]);
     }
 
     expect(await Promise.all(waiting)).toMatchObject([
@@ -852,7 +1000,7 @@ test.describe('createCredentialResolver', () => {
     ]);
   });
 
-  test('refuses CAPACITY_EXCEEDED a call that comes past a deadline its timer has yet to reach, for which as many calls wait as the key set lets, and lets the ask go for them', async () => {
+  test('lets a call that comes past a deadline its timer has yet to reach, for which as many calls wait as the key set lets, let the ask go for them and wait on it with them, never refused', async () => {
     const clock = createTestClock(NOW);
     const late = createLateClock(clock);
     const { asks, keySet } = createKeySet();
@@ -879,22 +1027,35 @@ test.describe('createCredentialResolver', () => {
       .toBe(true);
 
     // the reading reaches the deadline, its timer yet to fire: the call that comes lets the ask go for
-    // the two, and is the third
+    // the two, and waits on it with them, uncounted
     await clock.tickAsync(59_999);
     late.lag = 1;
 
-    await expect(resolver.resolve(unnamed, signal)).rejects.toBeInstanceOf(CapacityError);
+    const coming = outcomeOf(resolver.resolve(unnamed, signal));
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    await sleep(0);
+
+    expect(coming.current).toBe('waiting');
+
+    // the late timer does nothing more
+    await clock.tickAsync(1);
+
     expect(asks).toHaveLength(2);
 
     asks[1]?.settle.resolve([SET_KEY, SET_KEY_2]);
 
     await expect
       .poll(() => {
-        return outcomes.filter(({ current }) => {
+        return [...outcomes, coming].filter(({ current }) => {
           return (current as ICallSession | undefined)?.identifier !== undefined;
         }).length;
       })
-      .toBe(2);
+      .toBe(3);
   });
 
   test('drops an answer that comes as the reading reaches its ask’s deadline, its timer yet to fire: the calls that wait on it fail, nothing is held, and the late timer does nothing more', async () => {
