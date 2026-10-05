@@ -1031,15 +1031,20 @@ server and the identity provider run in a Web Worker of the page — `demo/worke
 `dist/worker.js` beside `dist/page.js` — and no backend answers anything but the files: that pair is
 what a playground takes. `yarn playground:build:file` builds it, with the page, into
 `demo/dist/playground/`, every path relative and nothing started — the site publishes it at
-`/playground/calls/`, where the page, served as files alone, is its worker's and hides what needs a
+`/playground/bead/`, where the page, served as files alone, is its worker's and hides what needs a
 server. In the console, `localStorage.setItem('bead:debug', 'd(rx), read')` sends the calls that filter
 keeps to the console — and the envelopes, when it asks for them by `e(…)` — with no reload, and
 `removeItem` stops it (`demo/debug.ts`). A listener only queues: the console is written when the
 page is idle, in one collapsed group, since an open console rendering an object per event is what
-slows a page through a burst. A Server panel reads, every second, what the server the page is connected to
-says of itself — its health, the calls answered as the registry its servers count into counts them,
-how many, their mean and a median estimated within its bucket, and what each layer holds — by a
-`stats` call like any other, over whichever transport, which the logs and those counts leave out. The procedures, in `demo/offer.ts`, and the tokens, in `demo/token.ts`,
+slows a page through a burst. Every second, over whichever transport, the page reads the server it
+is connected to by two calls like any other, which the logs and the counts it shows leave out:
+`stats`, its health and what each layer holds, and `metrics`, its registry's exposition, the text
+`/metrics` serves — so a server in a Web Worker, which no scraper reaches, shows what it counts
+too. A Server panel shows the first, and the calls answered, how many, their mean and a median
+estimated within its bucket; a Metrics panel shows, beside the server's registry, the one the page's
+client counts into, a line a procedure — the calls made or answered, those in flight, their median
+and p95, and what did not end in a result — and each exposition as a scrape reads it, which
+`demo/metrics.ts` reads. The procedures, in `demo/offer.ts`, and the tokens, in `demo/token.ts`,
 stand on Web Crypto alone, so the worker offers what Node's servers do. There is a button per kind of call — a read, a write, a subscription and its notifications, a
 glyph drawn at random that crosses as a transfer either way and is shown, a slow call cancelled or timed out, a procedure's own failure, a command the
 server sends back — and two logs, the calls and their envelopes, as the client sees them. A burst of

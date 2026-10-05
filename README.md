@@ -177,8 +177,8 @@ cd implementations/dotnet && BEAD_INTEROP_REQUIRED=1 dotnet test --project tests
 ## The demo
 
 A page with a button per kind of call — a read, a write, a subscription, a transfer either way, a
-cancel, a failure, a command — and the calls and envelopes logged as the client sees them, over
-WebSocket, HTTP or a Web Worker.
+cancel, a failure, a command — the calls and envelopes logged as the client sees them, and what the
+client's and the server's metrics registries count, over WebSocket, HTTP or a Web Worker.
 
 ```sh
 cd implementations/typescript

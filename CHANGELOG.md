@@ -161,8 +161,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{ contentType, text }` and `MetricsExposition(ContentType, Text)`, for an application to serve at
   `/metrics` or append to its own 0.0.4 scrape: Bead opens no port.
 - The demo's servers count into one registry, which `/metrics` serves beside `/health`, on this
-  machine alone, and which the `stats` procedure reads: the Server panel shows the calls answered,
-  their mean and a median estimated within its bucket, `stats`' own left out.
+  machine alone, and the `metrics` procedure over Bead, on every transport, the worker's server's
+  own included; the page's client counts into one of its own. A Metrics panel shows both, a line a
+  procedure — the calls made or answered, those in flight, their median and p95, and what did not
+  end in a result — and each exposition as a scrape reads it; the Server panel, the calls answered,
+  their mean and a median estimated within its bucket. The reads, `stats` and `metrics`, are left
+  out of the logs and of those counts.
 
 ### Changed
 

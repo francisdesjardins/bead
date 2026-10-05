@@ -17,6 +17,7 @@ import type { IClient } from '../src/client/types';
 import type { IWorkerLike } from '../src/transport/client/worker-transport-client';
 import type { IRouterDebugInfo } from '../src/router/client/types';
 import { EnvelopeKind } from '../src/router/shared/constants';
+import { createMetricsRegistry } from '../src/router/shared/metrics-registry';
 import type { INotificationRegistration, IReceivedFailure } from '../src/router/shared/types';
 import type { IHealth, ServerGauges } from '../src/server/health';
 import {
@@ -30,8 +31,14 @@ import {
   type Role,
 } from './procedures';
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
-import type { IAnswered } from './offer';
 import { createQuietCalls, watchDebug } from './debug';
+import {
+  answeredOf,
+  type IAnswered,
+  type IProcedureMetrics,
+  metricsOf,
+  quantileOf,
+} from './metrics';
 
 // interfaces
 
@@ -44,7 +51,6 @@ interface IIdentity {
 
 /** What the `stats` procedure answers, read. */
 interface IServerStats {
-  answered: IAnswered;
   gauges: ServerGauges;
   health: IHealth;
 }
@@ -80,6 +86,13 @@ const SCHEME_NAMES: Readonly<Record<number, string>> = Object.fromEntries(
     return [scheme, name];
   })
 );
+
+/** The calls that read the server each second, which the logs and the metrics shown leave out. */
+const READS = [CALLS.stats.procedure, CALLS.metrics.procedure];
+
+const READ_NAMES = READS.map(({ procedureName }) => {
+  return procedureName;
+});
 
 /** The demo's procedures by id, so an envelope, which carries none of their names, shows one. */
 const PROCEDURE_NAMES: Readonly<Record<number, string>> = Object.fromEntries(
@@ -357,10 +370,17 @@ const workerOf = (): IWorkerLike => {
   };
 };
 
+// what the page's client counts: the calls it made, and the commands it answered
+const metricsRegistry = createMetricsRegistry();
 const workerClient =
-  transport === 'worker' ? createWorkerClient({ transport: { worker: workerOf() } }) : undefined;
+  transport === 'worker'
+    ? createWorkerClient({ metricsRegistry, transport: { worker: workerOf() } })
+    : undefined;
 const client: IClient =
-  workerClient ?? (transport === 'http' ? createHTTPClient() : createWSClient());
+  workerClient ??
+  (transport === 'http'
+    ? createHTTPClient({ metricsRegistry })
+    : createWSClient({ metricsRegistry }));
 const { services } = client;
 // the page's own port: the server relays the upgrade to the Bead server behind it
 const port = Number(
@@ -370,6 +390,9 @@ const pathname = document.body.dataset['beadPathname'] ?? '/';
 const shown = {
   burst: elementOf('burst'),
   calls: elementOf('calls'),
+  // each a <details>, as the page declares it
+  clientExposition: elementOf('client-exposition') as HTMLDetailsElement,
+  clientMetrics: elementOf('client-metrics'),
   connection: elementOf('connection'),
   counter: elementOf('counter'),
   durations: elementOf('durations'),
@@ -381,6 +404,8 @@ const shown = {
   health: elementOf('health'),
   identity: elementOf('identity'),
   result: elementOf('result'),
+  serverExposition: elementOf('server-exposition') as HTMLDetailsElement,
+  serverMetrics: elementOf('server-metrics'),
   subscribe: elementOf('subscribe'),
   tabs: elementOf('tabs'),
 };
@@ -396,6 +421,7 @@ const calls = {
   fail: requestOf(CALLS.fail),
   increment: requestOf(CALLS.increment),
   logout: requestOf(CALLS.logout),
+  metrics: requestOf(CALLS.metrics),
   read: requestOf(CALLS.read),
   slow: requestOf(CALLS.slow),
   stats: requestOf(CALLS.stats),
@@ -433,12 +459,44 @@ const readChanged = mergedOf(async () => {
   }
 });
 
-// the calls that read the server's statistics, which the logs leave out
-const isQuiet = createQuietCalls([CALLS.stats.procedure]);
+// the calls that read the server, which the logs leave out
+const isQuiet = createQuietCalls(READS);
 
-/** What the server's statistics say, shown: its verdict, the calls it answered, what each layer holds. */
+// each exposition's last text, written in its <details> while it is open
+const expositions = new Map<HTMLDetailsElement, string>();
+
+/** A chip, as the gauges and the metrics show one: plain, quiet, or a failure. */
+const chipOf = (text: string, kind?: 'failure' | 'quiet'): HTMLElement => {
+  const chip = document.createElement('span');
+
+  chip.className = kind === undefined ? 'chip' : `chip ${kind}`;
+  chip.textContent = text;
+
+  return chip;
+};
+
+/** A line of a list of chips: its name, and its chips. */
+const lineOf = (named: string, chips: readonly HTMLElement[]): HTMLElement => {
+  const line = document.createElement('li');
+  const name = document.createElement('span');
+  const held = document.createElement('span');
+
+  name.className = 'layer';
+  name.textContent = named;
+  held.className = 'chips';
+  held.append(...chips);
+  line.append(name, held);
+
+  return line;
+};
+
+/** A duration in seconds, as the page shows one, in milliseconds. */
+const millisecondsOf = (seconds: number | undefined): string => {
+  return `${numbers.format((seconds ?? 0) * 1_000)} ms`;
+};
+
+/** What the server's statistics say, shown: its verdict, and what each layer holds. */
 const showStats = (stats: IServerStats): void => {
-  const { count, mean, median } = stats.answered;
   const failing = Object.entries(stats.health.checks)
     .filter(([, [check]]) => {
       return check !== undefined && check.status !== 'pass';
@@ -449,15 +507,8 @@ const showStats = (stats: IServerStats): void => {
 
   shown.health.dataset['status'] = stats.health.status;
   shown.health.textContent = [stats.health.status, ...failing].join(' — ');
-  shown.durations.textContent =
-    count === 0
-      ? 'none yet'
-      : `${numbers.format(count)} calls, mean ${numbers.format(mean ?? 0)} ms, median about ${numbers.format(median ?? 0)} ms`;
   shown.gauges.replaceChildren(
     ...Object.entries(stats.gauges).map(([layer, { anomalies, ceilings, counts, orphans }]) => {
-      const line = document.createElement('li');
-      const name = document.createElement('span');
-      const chips = document.createElement('span');
       const held = Object.entries(counts)
         .filter(([, value]) => {
           return value !== 0;
@@ -475,24 +526,83 @@ const showStats = (stats: IServerStats): void => {
         ...anomalies,
       ];
 
-      name.className = 'layer';
-      name.textContent = layer;
-      chips.className = 'chips';
-      chips.append(
-        ...(said.length === 0 ? ['nothing'] : said).map((text) => {
-          const chip = document.createElement('span');
-
-          chip.className = said.length === 0 ? 'chip quiet' : 'chip';
-          chip.textContent = text;
-
-          return chip;
-        })
+      return lineOf(
+        layer,
+        said.length === 0
+          ? [chipOf('nothing', 'quiet')]
+          : said.map((text) => {
+              return chipOf(text);
+            })
       );
-      line.append(name, chips);
-
-      return line;
     })
   );
+};
+
+/** The calls the server answered, every procedure's together: how many, their mean, their median. */
+const showAnswered = ({ count, mean, median }: IAnswered): void => {
+  shown.durations.textContent =
+    count === 0
+      ? 'none yet'
+      : `${numbers.format(count)} calls, mean ${numbers.format(mean ?? 0)} ms, median about ${numbers.format(median ?? 0)} ms`;
+};
+
+/**
+ * What a registry counted, a line a procedure that saw a call or a notification: its calls, made or
+ * answered, those in flight, how long they took, and what did not end in a result.
+ */
+const showMetrics = (list: HTMLElement, rows: readonly IProcedureMetrics[]): void => {
+  const lines = rows
+    .map(({ buckets, count, notifications, outcomes, procedure, role, started, type }) => {
+      const chips = [
+        ...(started === 0 ? [] : [chipOf(`${numbers.format(count)} ${role}`)]),
+        ...(type === 'request' || started === 0 ? [] : [chipOf(type, 'quiet')]),
+        ...(started > count ? [chipOf(`${numbers.format(started - count)} in flight`)] : []),
+        ...(count === 0
+          ? []
+          : [
+              chipOf(`median ≈ ${millisecondsOf(quantileOf(buckets, 0.5))}`),
+              chipOf(`p95 ≈ ${millisecondsOf(quantileOf(buckets, 0.95))}`),
+            ]),
+        ...[...outcomes, ...notifications]
+          .filter(([outcome, value]) => {
+            return outcome !== 'result' && value > 0;
+          })
+          .map(([outcome, value]) => {
+            const isFailure =
+              outcomes.has(outcome) || outcome === 'not sent' || outcome.startsWith('dropped');
+
+            return chipOf(`${numbers.format(value)} ${outcome}`, isFailure ? 'failure' : undefined);
+          }),
+      ];
+
+      return chips.length === 0 ? undefined : lineOf(procedure, chips);
+    })
+    .filter((line) => {
+      return line !== undefined;
+    });
+
+  list.replaceChildren(
+    ...(lines.length === 0 ? [lineOf('—', [chipOf('none yet', 'quiet')])] : lines)
+  );
+};
+
+/** An exposition's text, kept, and written in its <details> while it is open and holds no selection. */
+const showExposition = (details: HTMLDetailsElement, text: string): void => {
+  const written = details.querySelector('pre');
+  const selection = getSelection();
+
+  expositions.set(details, text);
+
+  // a selection in it holds it still, for a copy
+  if (
+    written === null ||
+    !details.open ||
+    (selection !== null && !selection.isCollapsed && selection.containsNode(written, true))
+  ) {
+    return;
+  }
+
+  written.textContent = text;
 };
 
 // read once at a time, however often the timer asks
@@ -502,6 +612,28 @@ const refreshStats = mergedOf(async () => {
   } catch (reason) {
     shown.health.dataset['status'] = 'unread';
     shown.health.textContent = `unread: ${reasonOf(reason)}`;
+  }
+});
+
+// the client's registry, in the page, and the server's, by a `metrics` call, once at a time too
+const refreshMetrics = mergedOf(async () => {
+  const mine = metricsRegistry.exposition().text;
+
+  showMetrics(shown.clientMetrics, metricsOf(mine, READ_NAMES));
+  showExposition(shown.clientExposition, mine);
+
+  try {
+    const theirs = await calls.metrics('')({ timeout: 5_000 });
+    const rows = metricsOf(theirs, READ_NAMES);
+
+    showAnswered(answeredOf(rows));
+    showMetrics(shown.serverMetrics, rows);
+    showExposition(shown.serverExposition, theirs);
+  } catch (reason) {
+    shown.durations.textContent = `unread: ${reasonOf(reason)}`;
+    shown.serverMetrics.replaceChildren(
+      lineOf('—', [chipOf(`unread: ${reasonOf(reason)}`, 'failure')])
+    );
   }
 });
 
@@ -678,7 +810,7 @@ services.getCommandResolver(CALLS.clock.procedure, { serializer: answererOf(CALL
 services.on('debug', (error, info) => {
   const { duration } = info;
 
-  if (info.procedureName === CALLS.stats.procedure.procedureName) {
+  if (READ_NAMES.includes(info.procedureName)) {
     return;
   }
 
@@ -717,8 +849,15 @@ services.on('dropped', (procedure, failure) => {
   }
 });
 
-// a developer's own, to the console, as the `localStorage` of the page says, the statistics aside
-watchDebug(client, { quiet: [CALLS.stats.procedure] });
+// a developer's own, to the console, as the `localStorage` of the page says, the reads aside
+watchDebug(client, { quiet: READS });
+
+// an exposition opened is written at once, from its last text
+for (const details of [shown.clientExposition, shown.serverExposition]) {
+  details.addEventListener('toggle', () => {
+    showExposition(details, expositions.get(details) ?? '');
+  });
+}
 
 // the transport in use, marked among the others
 document
@@ -766,8 +905,9 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-a
   : workerClient.connect({})
 ).then(
   () => {
-    // the server's statistics, each second the page is seen
+    // the server's statistics and both registries, each second the page is seen
     refreshStats();
+    refreshMetrics();
     let ticks = 0;
 
     setInterval(() => {
@@ -775,6 +915,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-a
 
       if (document.visibilityState === 'visible' || ticks % HIDDEN_READ_EVERY === 0) {
         refreshStats();
+        refreshMetrics();
       }
     }, STATS_MILLISECONDS);
     shown.connection.dataset['state'] = 'open';

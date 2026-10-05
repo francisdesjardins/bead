@@ -137,13 +137,19 @@ export const CALLS = Object.freeze({
    * holds, so its client forgets it.
    */
   logout: callOf(procedureOf(2, 'logout'), { request: TEXT, result: TEXT }),
+  /**
+   * What the server's metrics registry holds, as a scrape reads it: the Prometheus text format
+   * 0.0.4, what `/metrics` serves beside a Node server, over Bead itself. No session needed: nothing
+   * in it names a connection.
+   */
+  metrics: callOf(procedureOf(16, 'metrics'), { request: TEXT, result: TEXT }),
   /** The counter's value; a session is enough. */
   read: callOf(procedureOf(3, 'read'), { request: TEXT, result: TEXT }),
   /** An answer that takes its time, unless its call is cancelled first. */
   slow: callOf(procedureOf(8, 'slow'), { request: TEXT, result: TEXT }),
   /**
-   * What the server holds and how its calls go, as JSON: its health, its gauges, and the durations
-   * of the calls it answered. No session needed: nothing in it names a connection.
+   * What the server holds, as JSON: its health, and its gauges. No session needed: nothing in it
+   * names a connection.
    */
   stats: callOf(procedureOf(15, 'stats'), { request: TEXT, result: TEXT }),
   /**
