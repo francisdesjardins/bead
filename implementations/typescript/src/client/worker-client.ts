@@ -48,6 +48,7 @@ export const createWorkerClient = (options: IWorkerClientOptions): WorkerClient 
     {
       credential: options.credential,
       credentials: options.credentials,
+      devtools: options.devtools,
       limits: options.limits,
       metricsRegistry: options.metricsRegistry,
     }

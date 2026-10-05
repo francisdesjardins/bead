@@ -5,6 +5,7 @@
 import { createRouterClient, DisconnectError } from '../router/client/router-client';
 import { createServiceManager } from '../router/shared/service-manager';
 import { clockOf } from '../transport/shared/clock';
+import { announceToDevtools } from './devtools-hook';
 import type { IClient, IClientLayers, IClientOptions, IClientTransportLike } from './types';
 
 export {
@@ -29,6 +30,8 @@ export {
   TimeoutError,
 } from '../transport/shared/errors';
 export type { IClient, IClientLayers, IClientOptions, IClientTransportLike } from './types';
+export { DEVTOOLS_HOOK_KEY } from './devtools-hook';
+export type { IDevtoolsHook, IDevtoolsListeners, IDevtoolsSource } from './devtools-hook';
 export {
   createMetricsRegistry,
   METRICS_CONTENT_TYPE,
@@ -99,6 +102,11 @@ export const createClient = <Transport extends IClientTransportLike>(
   const services = createServices(router);
   // ends with the client: a reconnection it started must not outlive it
   const lifetime = new AbortController();
+  // what the page's DevTools hook was handed, withdrawn with the client
+  const withdraw =
+    options?.devtools === false
+      ? undefined
+      : announceToDevtools({ metricsRegistry: options?.metricsRegistry, router, services });
 
   return {
     router,
@@ -121,6 +129,7 @@ export const createClient = <Transport extends IClientTransportLike>(
     },
     [Symbol.asyncDispose]: async () => {
       lifetime.abort(new DisconnectError('the client was disposed'));
+      withdraw?.();
 
       // the reverse of the order they were built in; the services hold nothing of their own
       router[Symbol.dispose]();

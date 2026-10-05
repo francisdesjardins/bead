@@ -834,6 +834,15 @@ createServer((request, reply) => {
 await server.transport.start({ port });
 ```
 
+A client built in a page announces itself to the page's DevTools hook, when it has one
+([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
+Bead's extension, in [`devtools/`](devtools/), defines it before the page's scripts run, under
+`DEVTOOLS_HOOK_KEY`, `Symbol.for('@francisdesjardins/bead/devtools-hook')`, and `createClient`,
+which every client of a transport goes through, hands it a source of protocol 1: its `debug` events
+while the extension watches, and its registry's exposition — never the client, its router or its
+credential. Announced, a client builds no `debug` event until a panel opens; `devtools: false` among
+its options refuses, and a router built alone announces nothing.
+
 ### Following a call
 
 Three paths cross the stack. Each step names its file under `src/` and the function that takes the
