@@ -160,6 +160,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   writes its nine families in the Prometheus text format 0.0.4 and gives its media type with it,
   `{ contentType, text }` and `MetricsExposition(ContentType, Text)`, for an application to serve at
   `/metrics` or append to its own 0.0.4 scrape: Bead opens no port.
+- A page's DevTools hook (decision 0015): a client built in a page announces itself to the hook a
+  DevTools extension defines under `Symbol.for('@francisdesjardins/bead/devtools-hook')`,
+  `DEVTOOLS_HOOK_KEY`, handing it a source of protocol 1 — its `debug` events while the extension
+  watches, and its registry's exposition, never the client or its credential — and attaches nothing
+  until it is watched; `devtools: false` among a client's options refuses.
+- The DevTools extension, Chrome's first, in `implementations/typescript/devtools/` (decision
+  0015): `yarn devtools:build` builds it unpacked, and a Bead panel shows the calls and envelopes of
+  each client the page announced, filtered by client and by the package's own filter, what their
+  registries count, and, for a page with no hook, the HTTP transport's exchanges the Network panel
+  saw, read with the package's codec. `yarn test:devtools` tests it in Chromium, and CI runs it.
 - The demo's servers count into one registry, which `/metrics` serves beside `/health`, on this
   machine alone, and the `metrics` procedure over Bead, on every transport, the worker's server's
   own included; the page's client counts into one of its own. A Metrics panel shows both, a line a

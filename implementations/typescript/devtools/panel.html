@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bead</title>
+    <style>
+      :root {
+        --paper: #ffffff;
+        --raised: #f3f5f4;
+        --ink: #1f2623;
+        --muted: #5f6b66;
+        --line: #dfe4e2;
+        --accent: #0b6e5a;
+        --accent-soft: rgb(11 110 90 / 0.1);
+        --bad: #b91c1c;
+        --bad-soft: rgb(185 28 28 / 0.1);
+        --mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+        color-scheme: light;
+        font:
+          12px/1.45 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+
+      :root[data-theme='dark'] {
+        --paper: #202124;
+        --raised: #292a2d;
+        --ink: #e3e6e4;
+        --muted: #9aa5a0;
+        --line: #3c4043;
+        --accent: #3cc7a6;
+        --accent-soft: rgb(60 199 166 / 0.14);
+        --bad: #f28b82;
+        --bad-soft: rgb(242 139 130 / 0.14);
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        height: 100vh;
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 10px;
+        padding: 5px 8px;
+        border-bottom: 1px solid var(--line);
+        background: var(--raised);
+      }
+
+      select,
+      input,
+      button {
+        min-height: 22px;
+        padding: 1px 6px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--paper);
+        color: var(--ink);
+        font: inherit;
+      }
+
+      input {
+        flex: 1 1 260px;
+        font-family: var(--mono);
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      #filter-state {
+        color: var(--bad);
+      }
+
+      #status {
+        margin-left: auto;
+        color: var(--muted);
+      }
+
+      #status[data-state='open'] {
+        color: var(--accent);
+      }
+
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 0 8px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tabs button {
+        min-height: 26px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: none;
+        color: var(--muted);
+      }
+
+      .tabs button[aria-selected='true'] {
+        border-bottom-color: var(--accent);
+        color: var(--ink);
+      }
+
+      main {
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      [data-view] {
+        height: 100%;
+        overflow: auto;
+      }
+
+      [data-view][hidden] {
+        display: none;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(220px, 2fr);
+        overflow: hidden;
+      }
+
+      .split > div {
+        min-height: 0;
+        overflow: auto;
+      }
+
+      #detail {
+        padding: 8px 10px;
+        border-left: 1px solid var(--line);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font: 11.5px/1.5 var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      td {
+        padding: 1px 6px;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+
+      td:last-child {
+        width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      tr[data-direction='tx'] {
+        color: var(--muted);
+      }
+
+      tr.failed td {
+        color: var(--bad);
+      }
+
+      #calls tr {
+        cursor: pointer;
+      }
+
+      tr.selected td {
+        background: var(--accent-soft);
+      }
+
+      .facts {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 3px 10px;
+        margin: 0;
+      }
+
+      .facts dt {
+        color: var(--muted);
+      }
+
+      .facts dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      h3 {
+        margin: 10px 0 4px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      pre {
+        margin: 0;
+        padding: 6px 8px;
+        overflow: auto;
+        border-radius: 4px;
+        background: var(--raised);
+        font: 11px/1.5 var(--mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .note {
+        margin: 8px 10px;
+        color: var(--muted);
+      }
+
+      .registry,
+      .exchange {
+        padding: 2px 10px 8px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .lines {
+        display: grid;
+        gap: 4px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .lines li {
+        display: grid;
+        grid-template-columns: 110px minmax(0, 1fr);
+        gap: 8px;
+        align-items: baseline;
+      }
+
+      .name {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .chip {
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--raised);
+        box-shadow: 0 0 0 1px var(--line);
+        font: 11px var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .chip.quiet {
+        color: var(--muted);
+        background: none;
+        box-shadow: none;
+      }
+
+      .chip.failure {
+        color: var(--bad);
+        background: var(--bad-soft);
+        box-shadow: none;
+      }
+
+      details {
+        margin-top: 6px;
+      }
+
+      summary {
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      details pre {
+        max-height: 50vh;
+        margin-top: 4px;
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <select id="source" aria-label="Client">
+        <option value="all">All clients</option>
+      </select>
+      <input
+        id="filter"
+        type="search"
+        spellcheck="false"
+        aria-label="Filter"
+        placeholder="Filter, as bead:debug reads one: d(rx), t(request), -token, e(request)"
+      />
+      <span id="filter-state" role="status"></span>
+      <button type="button" id="clear">Clear</button>
+      <span id="status" role="status">waiting for the page…</span>
+    </header>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button type="button" role="tab" data-tab="calls" aria-selected="true">Calls</button>
+      <button type="button" role="tab" data-tab="envelopes" aria-selected="false">Envelopes</button>
+      <button type="button" role="tab" data-tab="metrics" aria-selected="false">Metrics</button>
+      <button type="button" role="tab" data-tab="wire" aria-selected="false">Wire</button>
+    </nav>
+    <main>
+      <section data-view="calls" class="split" aria-label="Calls">
+        <div>
+          <table>
+            <tbody id="calls"></tbody>
+          </table>
+        </div>
+        <div id="detail"></div>
+      </section>
+      <section data-view="envelopes" aria-label="Envelopes" hidden>
+        <table>
+          <tbody id="envelopes"></tbody>
+        </table>
+      </section>
+      <section data-view="metrics" id="metrics" aria-label="Metrics" hidden></section>
+      <section data-view="wire" id="wire" aria-label="Wire" hidden></section>
+    </main>
+    <script src="panel.js"></script>
+  </body>
+</html>

@@ -62,6 +62,7 @@ export const createHTTPClient = (options?: IHTTPClientOptions): HTTPClient => {
     {
       credential: options?.credential,
       credentials: options?.credentials,
+      devtools: options?.devtools,
       limits,
       metricsRegistry: options?.metricsRegistry,
     }

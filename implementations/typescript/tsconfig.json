@@ -8,6 +8,13 @@
     "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
     "types": ["node"]
   },
-  "include": ["src/**/*", "demo/**/*", "interop/**/*", "playwright.config.ts"],
+  "include": [
+    "src/**/*",
+    "demo/**/*",
+    "devtools/**/*",
+    "interop/**/*",
+    "playwright.config.ts",
+    "playwright.devtools.config.ts"
+  ],
   "exclude": ["node_modules"]
 }

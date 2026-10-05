@@ -57,6 +57,7 @@ export const createWSClient = (options?: IWSClientOptions): WSClient => {
     {
       credential: options?.credential,
       credentials: options?.credentials,
+      devtools: options?.devtools,
       limits: options?.limits,
       metricsRegistry: options?.metricsRegistry,
     }

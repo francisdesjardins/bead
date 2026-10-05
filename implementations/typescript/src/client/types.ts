@@ -70,6 +70,11 @@ export interface IClientOptions {
    */
   credentials?: ICredentials | undefined;
   /**
+   * Whether it announces itself to a DevTools hook the page defines (decision 0015): it does unless
+   * this is `false`. Announced, it builds nothing for a `debug` event until the hook watches.
+   */
+  devtools?: boolean | undefined;
+  /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the client is a {@link ProgrammerError}.
    */

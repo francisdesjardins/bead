@@ -64,7 +64,7 @@ spec/                         spec.md, debugging.md, the conformance files both 
   generators/                 the Python scripts that write them
   schemas/                    their JSON Schemas
 implementations/
-  typescript/                 a Yarn project of its own: src/, interop/, demo/, tools/
+  typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/
 docs/
   decisions/                  the decision records, and their index
@@ -188,6 +188,18 @@ yarn playground:build:file   # the static build, into demo/dist/playground/
 
 The static build runs its server in a Web Worker of the page, every path relative, so any static
 host serves it as files.
+
+## The DevTools extension
+
+A Bead panel in Chrome's DevTools: the calls, envelopes and metrics of each client a page builds,
+which announces itself to the extension unless its options say `devtools: false`, a server in a Web
+Worker of the page included, whose messages the Network panel does not show.
+
+```sh
+cd implementations/typescript
+yarn devtools:build   # unpacked, into devtools/dist/: chrome://extensions, then Load unpacked
+yarn test:devtools    # its tests, once it and the demo's static build are built
+```
 
 ## Coverage
 

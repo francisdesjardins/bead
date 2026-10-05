@@ -834,6 +834,15 @@ createServer((request, reply) => {
 await server.transport.start({ port });
 ```
 
+A client built in a page announces itself to the page's DevTools hook, when it has one
+([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
+Bead's extension, in [`devtools/`](devtools/), defines it before the page's scripts run, under
+`DEVTOOLS_HOOK_KEY`, `Symbol.for('@francisdesjardins/bead/devtools-hook')`, and `createClient`,
+which every client of a transport goes through, hands it a source of protocol 1: its `debug` events
+while the extension watches, and its registry's exposition — never the client, its router or its
+credential. Announced, a client builds no `debug` event until a panel opens; `devtools: false` among
+its options refuses, and a router built alone announces nothing.
+
 ### Following a call
 
 Three paths cross the stack. Each step names its file under `src/` and the function that takes the
@@ -1044,7 +1053,7 @@ too. A Server panel shows the first, and the calls answered, how many, their mea
 estimated within its bucket; a Metrics panel shows, beside the server's registry, the one the page's
 client counts into, a line a procedure — the calls made or answered, those in flight, their median
 and p95, and what did not end in a result — and each exposition as a scrape reads it, which
-`demo/metrics.ts` reads. The procedures, in `demo/offer.ts`, and the tokens, in `demo/token.ts`,
+`devtools/exposition.ts`, the DevTools panel's reader too, reads. The procedures, in `demo/offer.ts`, and the tokens, in `demo/token.ts`,
 stand on Web Crypto alone, so the worker offers what Node's servers do. There is a button per kind of call — a read, a write, a subscription and its notifications, a
 glyph drawn at random that crosses as a transfer either way and is shown, a slow call cancelled or timed out, a procedure's own failure, a command the
 server sends back — and two logs, the calls and their envelopes, as the client sees them. A burst of
@@ -1067,3 +1076,37 @@ anything listens. Both servers time a connection's silence themselves, 120 s, si
 demo's is a credential's and has no timeout of its own. A reader's glyph upload, 8 MiB, is refused
 at its opening over WebSocket — one REQUEST, one FAILURE, and no chunk; over HTTP, its body crosses
 first.
+
+## The DevTools extension
+
+`devtools/` is Bead's DevTools extension, Chrome's first
+([decision 0015](../../docs/decisions/0015-a-pages-client-announces-itself-to-a-devtools-hook.md)).
+`yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
+`chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools:
+
+- **Calls** and **Envelopes**: each step of each call the page's clients make or answer, and each
+  envelope, newest first, as their `debug` events tell them — a credential by its scheme alone, a
+  payload by a preview of 2,000 characters at most — filtered by client and by the package's own
+  filter, as `bead:debug` reads one (`d(rx), -token, e(request)`); a call selected shows what went
+  across.
+- **Metrics**: what each client's registry counts, a line a procedure, read by
+  `devtools/exposition.ts`, the demo's reader too, and its exposition as a scrape reads it; a client
+  given no registry says so.
+- **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
+  panel saw, read with the package's codec: each `POST`'s envelope, and the batch its answer or a
+  listen brings back.
+
+A client announces itself as it is built, so a page opened before the extension was installed shows
+nothing until it reloads; and the hook watches only while a panel is open, so the panel shows what
+came after it opened. A server in a Web Worker of the page shows through its client, whose messages
+the Network panel does not show. The parts: `hook.ts`, in the page's world at `document_start`;
+`bridge.ts`, beside it in the extension's world, which alone may open a runtime port;
+`background.ts`, which pairs each tab's page with the panel open on it; `devtools.ts` and
+`panel.ts`; and what they say to each other, in `messages.ts`, JSON alone.
+
+`yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
+unit project: its pure modules in Node; the extension loaded in Chromium against the demo's static
+build, the page's calls followed to the panel and the watch stopped as the panel closes —
+`hook.test.ts`, which holds the hook, the bridge and the background, since they run only together; and the
+panel as a page on a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
+`yarn playground:build:file` make what they load.

@@ -94,6 +94,13 @@ jobs:
       - run: $YARN test --grep-invert "the C# server of the interop service"
       # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
       - run: $YARN playground:build:file
+      # The DevTools extension, built, then tested on the current line: its pure modules, and itself
+      # loaded in Chromium against the static build above, which needs the browser installed.
+      - run: $YARN devtools:build
+      - if: matrix.node == '26'
+        run: $YARN playwright install --with-deps chromium
+      - if: matrix.node == '26'
+        run: $YARN test:devtools
       # The root's own files, from the README to this CI, under the TypeScript side's formatter. The
       # conformance files are left to their generators.
       - name: Format of the root's files
