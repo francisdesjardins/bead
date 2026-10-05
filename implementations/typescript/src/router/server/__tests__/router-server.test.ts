@@ -4394,6 +4394,41 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
+  test('counts a notification whose value does not write as failed for each subscription it was for, sends it to none, and reports why once', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const errors = recordErrors(router);
+    const refusal = new TypeError('this value does not write');
+    const notifying = createServiceManager(router).getNotificationResolver(news, {
+      serializer: {
+        ...answering,
+        encodeNotification: () => {
+          throw refusal;
+        },
+      },
+    })((_request, response) => {
+      return response('ok');
+    });
+
+    open(first);
+    open(second);
+    deliver(first, subscribingOf(1));
+    deliver(second, subscribingOf(1));
+    await sleep(0);
+
+    const answered = sent.length;
+
+    await expect(notifying.notify('x')).resolves.toBeUndefined();
+    expect(sent).toHaveLength(answered);
+    expect(errors).toEqual([[refusal, undefined]]);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_notifications');
+      })
+    ).toEqual(['bead_notifications_sent_total{service="2",procedure="news",outcome="failed"} 2']);
+  });
+
   test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, transport } = createScriptedTransport();
@@ -4544,7 +4579,7 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
-  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made', () => {
+  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded and its service at one revision', () => {
     const { transport } = createScriptedTransport();
     using router = createRouterServer(transport, {
       clock: createTestClock(),
@@ -4559,12 +4594,21 @@ test.describe('createRouterServer, its metrics', () => {
 
     resolve(echo);
 
-    // the same procedure under its name, at another address
+    // the same procedure under its name, at another address, its case another: one name (spec 16.6)
     expect(() => {
-      resolve({ ...echo, procedureId: 2 });
+      resolve({ ...echo, procedureId: 2, procedureName: 'eCHO' });
     }).toThrow(
       new ProgrammerError(
-        'the metrics registry holds "echo" at 2/1, and is given it at 2/2: its name at another address'
+        'the metrics registry holds "echo" at 2/1, and is given "eCHO" at 2/2: its name at another address'
+      )
+    );
+
+    // its service at another revision
+    expect(() => {
+      resolve({ ...echo, procedureId: 3, procedureName: 'slow', serviceRevision: 4 });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds service 2 at revision 3, and is given 2/3 at revision 4: another revision of its service'
       )
     );
 

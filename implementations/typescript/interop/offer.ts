@@ -11,6 +11,7 @@ import { sessionKeyOf } from '../src/router/shared/call-session';
 import { CredentialScheme, LIMIT_DEFAULTS } from '../src/router/shared/constants';
 import { JWT_LIMIT_BYTES } from '../src/router/shared/credentials';
 import type { IJwtKey } from '../src/router/shared/jwt-verifier';
+import { PAYLOAD_CODECS } from '../src/router/shared/payloads';
 import type {
   IBeforeRequest,
   ICallSession,
@@ -66,18 +67,11 @@ const MANIFEST = ((): URL => {
 /** The manifest the interop servers of every implementation read. */
 export const INTEROP_SERVICE = JSON.parse(readFileSync(MANIFEST, 'utf8')) as IInteropService;
 
-const decoder = new TextDecoder();
-const encoder = new TextEncoder();
-
-/** What the interop service's payloads are: JSON, in UTF-8. What is not JSON throws. */
-export const JSON_SERIALIZER = Object.freeze({
-  decode: (bytes: Uint8Array): unknown => {
-    return JSON.parse(decoder.decode(bytes));
-  },
-  encode: (value: unknown): Uint8Array => {
-    return encoder.encode(JSON.stringify(value));
-  },
-});
+/**
+ * What the interop service's payloads are: JSON, read and written as spec section 17 states, in
+ * UTF-8 and in canonical form, through the runtime's `json` codec. What does not read throws.
+ */
+export const JSON_SERIALIZER = PAYLOAD_CODECS.json;
 
 // how long the key set takes to answer, on the server's clock, so a conversation sees each ask
 const KEY_SET_MILLISECONDS = 1_000;
@@ -103,8 +97,7 @@ const LATEST_END = Number.MAX_SAFE_INTEGER;
 /**
  * A duration a payload gives, in milliseconds, held as spec 1.4 holds one given: rounded, and
  * refused under a millisecond or past 2³¹ − 1, as given, by a throw its server answers with
- * PROCEDURE_FAILED. `undefined` when not given; JSON writes no never, so a number past the ceiling,
- * `Infinity` once parsed, is refused too.
+ * PROCEDURE_FAILED. `undefined` when not given; JSON writes no never.
  */
 const durationOf = (name: string, given: unknown): number | undefined => {
   return given === undefined ? undefined : assertHeldFinite(name, given);
