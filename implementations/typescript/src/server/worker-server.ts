@@ -55,6 +55,7 @@ export const createWorkerServer = <Data = unknown>(
       connectionInactivityTimeout: options.connectionInactivityTimeout,
       credentials: options.credentials,
       limits: options.limits,
+      metricsRegistry: options.metricsRegistry,
       pacing: options.pacing,
       relay: options.relay,
     }

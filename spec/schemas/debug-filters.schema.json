@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's debug filters, spec/debug-filters.json",
+  "type": "object",
+  "required": ["$comment", "debuggingVersion", "calls", "envelopes", "filters", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/debug-filters.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "debuggingVersion": { "$ref": "common.schema.json#/$defs/debuggingVersion" },
+    "calls": {
+      "description": "The calls a call's filter is asked of, each a trace's event, by what a filter reads of it.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["direction", "type", "procedureName"],
+        "additionalProperties": false,
+        "properties": {
+          "direction": { "$ref": "#/$defs/direction" },
+          "type": { "$ref": "#/$defs/type" },
+          "procedureName": { "type": "string" }
+        }
+      }
+    },
+    "envelopes": {
+      "description": "The envelopes an envelope's filter is asked of, each a router's event, by what a filter reads of it.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["direction", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "direction": { "$ref": "#/$defs/direction" },
+          "kind": { "$ref": "#/$defs/kind" }
+        }
+      }
+    },
+    "filters": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/filter" }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/source" }
+    }
+  },
+  "$defs": {
+    "direction": {
+      "description": "tx for a step or an envelope out, rx for one in.",
+      "enum": ["rx", "tx"]
+    },
+    "type": {
+      "description": "A type of call, by the trace's words.",
+      "enum": ["request", "command", "notification"]
+    },
+    "kind": {
+      "description": "A kind of envelope, named as section 3.1 of spec/spec.md names it, in lower case.",
+      "enum": ["request", "result", "failure", "notification", "chunk", "credit", "cancel"]
+    },
+    "indices": {
+      "description": "Fixtures, by their index, in their order.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "filter": {
+      "description": "A filter as written, and what it reads as and keeps, or why a side refuses it.",
+      "type": "object",
+      "required": ["name", "clauses", "filter"],
+      "oneOf": [{ "required": ["parsed", "keeps"] }, { "required": ["refused"] }],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "filter": { "type": "string" },
+        "parsed": {
+          "description": "The five lists the filter reads as (spec/debugging.md 6.6), each in the order of its words.",
+          "type": "object",
+          "required": ["directions", "types", "kinds", "include", "exclude"],
+          "additionalProperties": false,
+          "properties": {
+            "directions": { "type": "array", "items": { "$ref": "#/$defs/direction" } },
+            "types": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "kinds": { "type": "array", "items": { "$ref": "#/$defs/kind" } },
+            "include": { "type": "array", "items": { "type": "string" } },
+            "exclude": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "keeps": {
+          "description": "The calls a call's listener given the filter hears, and the envelopes an envelope's listener hears.",
+          "type": "object",
+          "required": ["calls", "envelopes"],
+          "additionalProperties": false,
+          "properties": {
+            "calls": { "$ref": "#/$defs/indices" },
+            "envelopes": { "$ref": "#/$defs/indices" }
+          }
+        },
+        "refused": {
+          "description": "Why a side refuses the filter: the reason of the first word that does not hold (spec/debugging.md 6.7), and the word or the value it names, as written.",
+          "type": "object",
+          "required": ["reason", "written"],
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": ["selector empty", "value empty", "names nothing", "holds a parenthesis"]
+            },
+            "written": { "type": "string" }
+          }
+        }
+      }
+    },
+    "source": {
+      "description": "A filter given as a function, step by step (spec/debugging.md 6.9).",
+      "type": "object",
+      "required": ["name", "clauses", "listener", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "listener": {
+          "description": "Whose listener the function filters: a call's, of the calls, or an envelope's, of the envelopes.",
+          "enum": ["call", "envelope"]
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+    "step": {
+      "description": "What the function gives from now on — gives, throws — or what its listener does — made, event: one of them.",
+      "type": "object",
+      "oneOf": [
+        { "required": ["gives"] },
+        { "required": ["throws"] },
+        { "required": ["made"] },
+        { "required": ["event", "heard"] }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "gives": {
+          "description": "A filter, as written, which the function gives from now on.",
+          "type": "string"
+        },
+        "throws": { "description": "From now on the function throws.", "const": true },
+        "made": {
+          "description": "The listener is made with the function, which is asked then: whether it is made.",
+          "type": "boolean"
+        },
+        "event": {
+          "description": "A fixture, by its index, whose event goes through the listener, which asks the function again.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "heard": { "description": "Whether the listener heard the event.", "type": "boolean" }
+      }
+    }
+  }
+}

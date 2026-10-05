@@ -33,6 +33,7 @@ import {
 } from './errors';
 import { headerBytesOf, readPrefix } from './header';
 import { sideOfCallId } from './identifiers';
+import { CallEnding, endingOf, type IResolverSeries, microsecondsOf } from './metrics-registry';
 import {
   assertReservation,
   createPendingCalls,
@@ -112,6 +113,12 @@ interface IRequestReceiving<Handle extends string> {
 interface IWaitingCall<Handle extends string> {
   call: ICallAddress<Handle>;
   pendingRequest: IPendingRequest<Handle>;
+}
+
+/** A resolver registered, and the series its calls count into when the router counts. */
+interface IRegistered<Handle extends string> {
+  readonly resolver: IRequestResolver<Handle>;
+  readonly series: IResolverSeries | undefined;
 }
 
 // types
@@ -250,6 +257,23 @@ const isPayloadLimit = (value: unknown): boolean => {
   return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 1);
 };
 
+/** How a call this side made ended, by what its router settled it with (spec/debugging.md 9.6). */
+const madeEndingOf = (reason: unknown): CallEnding => {
+  if (reason instanceof FailureError) {
+    return endingOf(reason);
+  }
+
+  if (reason instanceof TimeoutError) {
+    return CallEnding.TIMEOUT;
+  }
+
+  if (reason instanceof CancelError) {
+    return CallEnding.CANCELLED;
+  }
+
+  return reason instanceof DisconnectError ? CallEnding.CLOSED : CallEnding.ERROR;
+};
+
 /** Whether a call waits `timeout` at most: a duration held; none and `Infinity` wait on. */
 const isTimeout = (timeout: number | undefined): timeout is number => {
   return timeout !== undefined && Number.isFinite(timeout) && timeout > 0;
@@ -303,6 +327,7 @@ export const createRouterCore = <Handle extends string>(
 ): IRouterCore<Handle> => {
   const { failures } = port;
   const clock = options?.clock ?? PLATFORM_CLOCK;
+  const metrics = options?.metrics;
   const limits = limitsOf(options?.limits);
   // a failure's detail fits in an envelope, whatever the limit of a detail says
   const detailBytes = Math.min(
@@ -363,7 +388,7 @@ export const createRouterCore = <Handle extends string>(
     ...failures.credentialUnsupported,
     detail: credentialSchemesDetailOf(FORWARDED_SCHEMES),
   };
-  const resolvers = createProcedureMap<IRequestResolver<Handle>>();
+  const resolvers = createProcedureMap<IRegistered<Handle>>();
   // the handler each request was routed to, by the very header dispatched: its answer is written by
   // that one's limit, whatever else holds the same address
   const handlers = new WeakMap<IRequestHeader, IRequestHandler<Handle>>();
@@ -469,7 +494,11 @@ export const createRouterCore = <Handle extends string>(
         );
       }
 
-      port.trace('tx', { connectionHandle, header: redactHeader(envelope.header) });
+      // * one check an envelope while nobody listens: no redacted header is built
+      if (port.isTracing()) {
+        port.trace('tx', { connectionHandle, header: redactHeader(envelope.header) });
+      }
+
       sending = port.send(
         credential === undefined ? { data: bytes } : { credential, data: bytes },
         connectionHandle
@@ -494,6 +523,40 @@ export const createRouterCore = <Handle extends string>(
   // sends an envelope no call waits on: what keeps it from going out is reported
   const sendReporting = (envelope: OutgoingEnvelope, connectionHandle: Handle): void => {
     deliver(envelope, { connectionHandle }).catch((reason: unknown) => {
+      port.report(toError(reason), connectionHandle);
+    });
+  };
+
+  // answers a request whose header does not read, at the gate: a call of _OTHER's, counted, that
+  // starts and ends in one turn, as its answer is handed off — or, should it not be, as an error
+  const refuseUnread = (
+    refusal: Extract<OutgoingEnvelope, { kind: typeof EnvelopeKind.FAILURE }>,
+    connectionHandle: Handle
+  ): void => {
+    const series = metrics?.otherServer;
+
+    if (series === undefined) {
+      return (sendReporting(refusal, connectionHandle), undefined);
+    }
+
+    series.start();
+
+    const startedAt = clock.performance.now();
+    let isEnded = false;
+    const end = (ending: CallEnding): void => {
+      if (!isEnded) {
+        isEnded = true;
+        series.end(ending, microsecondsOf(clock.performance.now() - startedAt));
+      }
+    };
+
+    deliver(refusal, {
+      connectionHandle,
+      onHandOff: () => {
+        end(endingOf(refusal.failure));
+      },
+    }).catch((reason: unknown) => {
+      end(CallEnding.ERROR);
       port.report(toError(reason), connectionHandle);
     });
   };
@@ -683,14 +746,20 @@ export const createRouterCore = <Handle extends string>(
   };
 
   // a result as a transfer: its opening, then each chunk credited; its call stays open until the
-  // last chunk is handed off, and the answer goes out once that one did
+  // last chunk is handed off, and the answer goes out once that one did, which ends the call
   const sendResult = (
     outgoing: IOutgoingTransfer,
     {
       connectionHandle,
       controller,
       header,
-    }: { connectionHandle: Handle; controller: AbortController; header: IResultHeader }
+      request,
+    }: {
+      connectionHandle: Handle;
+      controller: AbortController;
+      header: IResultHeader;
+      request: IRequestHeader;
+    }
   ): Promise<void> => {
     const { callId } = header;
     const call = { callId, connectionHandle };
@@ -731,6 +800,10 @@ export const createRouterCore = <Handle extends string>(
           detail: `no credit came for ${String(limits.transferInactivityTimeout)} milliseconds`,
         };
 
+        if (metrics !== undefined) {
+          answeringCalls.end({ connectionHandle, header: request }, stalled.code);
+        }
+
         fail(new FailureError(stalled, { header }));
         sendReporting(
           {
@@ -755,6 +828,11 @@ export const createRouterCore = <Handle extends string>(
           onHandOff: chunk.isLast
             ? () => {
                 stop();
+
+                if (metrics !== undefined) {
+                  answeringCalls.end({ connectionHandle, header: request }, CallEnding.RESULT);
+                }
+
                 answeringCalls.close(call, controller);
               }
             : progress,
@@ -879,7 +957,9 @@ export const createRouterCore = <Handle extends string>(
     // to a destination never a resolver of this side's
     const resolver =
       handlers.get(header) ??
-      (header.destinationId === undefined ? resolvers.get({ procedureId, serviceId }) : undefined);
+      (header.destinationId === undefined
+        ? resolvers.get({ procedureId, serviceId })?.resolver
+        : undefined);
     const transfer =
       response.failure === undefined
         ? resultTransferOf(response.payload, {
@@ -900,6 +980,12 @@ export const createRouterCore = <Handle extends string>(
     // its answer going out: a second goes nowhere, and this one closes the call once done
     answeringCalls.answer({ connectionHandle, header });
 
+    // a whole answer ends its call as its transport has it
+    const ending =
+      metrics === undefined || response.failure === undefined
+        ? CallEnding.RESULT
+        : endingOf(response.failure);
+
     try {
       await (transfer === undefined
         ? deliver(
@@ -915,6 +1001,11 @@ export const createRouterCore = <Handle extends string>(
               // answered: the call id is the peer's to open again
               onHandOff: () => {
                 if (controller !== undefined) {
+                  // * counted, it ends as its transport has it; uncounted, nothing is built for it
+                  if (metrics !== undefined) {
+                    answeringCalls.end({ connectionHandle, header }, ending);
+                  }
+
                   answeringCalls.close({ callId, connectionHandle }, controller);
                 }
               },
@@ -924,6 +1015,7 @@ export const createRouterCore = <Handle extends string>(
             connectionHandle,
             controller: transfer.controller,
             header: result,
+            request: header,
           }));
     } catch (reason) {
       // an answer that did not go out leaves nothing done for it behind, and its call closed
@@ -1074,7 +1166,7 @@ export const createRouterCore = <Handle extends string>(
         kind: EnvelopeKind.FAILURE,
       };
 
-      return (sendReporting(refusal, connectionHandle), undefined);
+      return (refuseUnread(refusal, connectionHandle), undefined);
     }
 
     // a chunk of this layout, of a transfer this side receives?
@@ -1349,7 +1441,13 @@ export const createRouterCore = <Handle extends string>(
       );
     }
 
-    const controller = answeringCalls.open(request);
+    // the resolver it is routed to, whose series it counts into: _OTHER's for any other
+    const registered = destinationId === undefined ? resolvers.get(header) : undefined;
+    // * its call starts as its request opens it, timed from its arrival
+    const controller = answeringCalls.open(
+      request,
+      metrics === undefined ? undefined : (registered?.series?.calls ?? metrics.otherServer)
+    );
     const dispatched: IDispatched<Handle> = {
       ...request,
       controller,
@@ -1358,7 +1456,7 @@ export const createRouterCore = <Handle extends string>(
     // one that names a destination goes to the handler this side has for it — a relay's
     const resolver =
       destinationId === undefined
-        ? resolvers.get(header)
+        ? registered?.resolver
         : port.handlerOfDestination?.(destinationId);
 
     // one this side has no handler for: this peer relays nothing, to that destination or elsewhere
@@ -1704,7 +1802,9 @@ export const createRouterCore = <Handle extends string>(
       return;
     }
 
-    port.trace('rx', { connectionHandle, header: redactHeader(envelope.header) });
+    if (port.isTracing()) {
+      port.trace('rx', { connectionHandle, header: redactHeader(envelope.header) });
+    }
 
     switch (envelope.kind) {
       case EnvelopeKind.REQUEST:
@@ -1795,7 +1895,14 @@ export const createRouterCore = <Handle extends string>(
         throw new ProgrammerError(`${procedureName} is already a registered resolver`);
       }
 
-      resolvers.set(resolver, resolver);
+      // declared as it is registered: one the registry refuses is not registered either
+      const series = metrics?.declareResolver(resolver, {
+        notifies: typeof (resolver as { notify?: unknown }).notify === 'function',
+      });
+
+      resolvers.set(resolver, { resolver, series });
+
+      return series;
     },
     rejectPending,
     request: (
@@ -1809,6 +1916,8 @@ export const createRouterCore = <Handle extends string>(
         options: requestOptions,
         paced,
         procedure,
+        refusal,
+        series: given,
         transportCredential,
       }
     ) => {
@@ -1817,23 +1926,64 @@ export const createRouterCore = <Handle extends string>(
         procedureId: procedure.procedureId,
         serviceId: procedure.serviceId,
       };
+      // the series it counts into, a requester's or _OTHER's; none while the router counts nothing
+      const series = metrics === undefined ? undefined : (given ?? metrics.otherClient);
       // the call once drawn: where it waits, and its entry there
       let waiting: IWaitingCall<Handle> | undefined;
+      // counted, the monotonic reading it started at, and whether it ended
+      let startedAt: number | undefined;
+      let isEnded = false;
+      // ! made only for a call counted: one counted nothing allocates nothing for it
+      const end =
+        series === undefined
+          ? undefined
+          : (ending: CallEnding): void => {
+              if (startedAt !== undefined && !isEnded) {
+                isEnded = true;
+                series.end(ending, microsecondsOf(clock.performance.now() - startedAt));
+              }
+            };
 
       // the call's timer is the core's, which the signal alone is not
       return createPromise<IRouterResult>(
-        (resolve, reject) => {
-          // what no call can take draws nothing
+        (resolved, rejected) => {
+          // what no call can take draws nothing, and is no call: it is not counted
           if (!isPayloadLimit(procedure.maximumPayloadBytes)) {
             const refused = new ProgrammerError(
               `a payload's limit is a whole number above 0, not ${String(procedure.maximumPayloadBytes)}`
             );
 
-            return (reject(refused), undefined);
+            return (rejected(refused), undefined);
           }
 
           // held, which its timer, its reservation and its TimeoutError all take
           const timeout = assertHeld("a call's timeout", givenTimeout);
+
+          // * the call starts once nothing makes it a programmer's error and its signal is not
+          // aborted, and ends wherever its router settles it, each refusal after in this turn
+          if (series !== undefined) {
+            series.start();
+            startedAt = clock.performance.now();
+          }
+
+          const resolve =
+            end === undefined
+              ? resolved
+              : (result: IRouterResult): void => {
+                  end(CallEnding.RESULT);
+                  resolved(result);
+                };
+          const reject =
+            end === undefined
+              ? rejected
+              : (reason: Error): void => {
+                  end(madeEndingOf(reason));
+                  rejected(reason);
+                };
+
+          if (refusal !== undefined) {
+            return (reject(refusal), undefined);
+          }
 
           // drawn once the call starts: an aborted signal draws nothing
           const callId = pendingCalls.draw(connectionHandle);
@@ -1918,6 +2068,9 @@ export const createRouterCore = <Handle extends string>(
         { signal }
       )
         .catch((reason: unknown) => {
+          // ended by its signal, which settles it beside the executor
+          end?.(madeEndingOf(reason));
+
           // gone out and unanswered, ended by its signal: the peer is told before the caller hears
           // of it, so a call made again in its place goes out behind the cancel
           if (
@@ -1944,6 +2097,37 @@ export const createRouterCore = <Handle extends string>(
     respond,
     send: (envelope, connectionHandle) => {
       return deliver(envelope, { connectionHandle });
+    },
+    sendNotification: async (payload, { callId, connectionHandle, series }) => {
+      // set as its transport has it, out of the flow a type follows here
+      let isHanded = false as boolean;
+
+      try {
+        await deliver(
+          {
+            header: { callId, kind: EnvelopeKind.NOTIFICATION },
+            kind: EnvelopeKind.NOTIFICATION,
+            payload,
+          },
+          {
+            connectionHandle,
+            onHandOff:
+              series === undefined
+                ? undefined
+                : () => {
+                    isHanded = true;
+                    series.sent();
+                  },
+          }
+        );
+      } catch (reason) {
+        // ! handed to its transport, and refused by it after, it keeps its count as sent
+        if (!isHanded) {
+          series?.failed();
+        }
+
+        throw reason;
+      }
     },
     [Symbol.dispose]: () => {
       isDisposed = true;

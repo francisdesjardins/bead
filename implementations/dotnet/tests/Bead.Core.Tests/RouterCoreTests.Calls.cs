@@ -39,7 +39,7 @@ public sealed partial class RouterCoreTests
             }
         }
 
-        public void Report(Exception reason, string connectionHandle)
+        public void Report(Exception reason, string? connectionHandle)
         {
             Reports.Add(reason);
         }
@@ -733,13 +733,14 @@ public sealed partial class RouterCoreTests
         Assert.Empty(resolver.Requests);
         Assert.Equal(
             [
-                (DebugDirection.Rx, (IEnvelopeHeader)RequestOf(1), (CredentialScheme?)CredentialScheme.Jwt),
-                (DebugDirection.Tx, new FailureHeader { CallId = 1 }, CredentialScheme.Opaque),
+                (DebugDirection.Rx, (IEnvelopeHeader)(RequestOf(1) with { Credential = Credential.SchemeOf(CredentialScheme.Jwt) })),
+                (DebugDirection.Tx, new FailureHeader { CallId = 1, Credential = Credential.Opaque() }),
             ],
             server.Traces.Select((trace) =>
             {
-                return (trace.Direction, trace.Envelope.Header, trace.Envelope.CredentialScheme);
+                return (trace.Direction, trace.Envelope.Header);
             }));
+        Assert.Null(((RequestHeader)server.Traces[0].Envelope.Header).Credential!.Value.Token);
         Assert.Equal(token, ((FailureHeader)server.Sent[0].Header).Credential!.Value.SessionToken);
     }
 

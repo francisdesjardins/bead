@@ -81,6 +81,12 @@ public sealed record ServerOptions
     public bool? CloseOnCommandTimeout { get; init; }
 
     /// <summary>
+    /// What it counts its calls and its notifications into, given to its router (spec/debugging.md
+    /// 7.1); none counts nothing.
+    /// </summary>
+    public MetricsRegistry? MetricsRegistry { get; init; }
+
+    /// <summary>
     /// What its timers run on: its transport's clock when none; another is an
     /// <see cref="ArgumentException"/>.
     /// </summary>
@@ -182,6 +188,7 @@ public sealed class Server<TData> : IAsyncDisposable
                 {
                     Credentials = options?.Credentials,
                     Limits = options?.Limits,
+                    MetricsRegistry = options?.MetricsRegistry,
                     Pacing = options?.Pacing,
                     Relay = (options?.Relay ?? new RelayOptions()) with { BeforeRoute = options?.Relay?.BeforeRoute ?? RequireSessionOrCredential },
                     ResolverScheduler = options?.ResolverScheduler,

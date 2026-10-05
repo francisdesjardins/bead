@@ -1279,8 +1279,10 @@ document = {
     ],
 }
 
-with open(ROOT + 'conversations.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+# written when run, and not when make_metrics.py takes its steps from here
+if __name__ == '__main__':
+    with open(ROOT + 'conversations.json', 'w', encoding='utf-8', newline='\n') as file:
+        json.dump(document, file, ensure_ascii=False, indent=2)
+        file.write('\n')
 
-print(len(conversations), 'conversations')
+    print(len(conversations), 'conversations')

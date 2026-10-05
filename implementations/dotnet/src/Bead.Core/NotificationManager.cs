@@ -60,6 +60,13 @@ internal sealed class NotificationManager(PacingLimits limits)
     /// <summary>What hears each call as it subscribes, however it came to.</summary>
     public Action<SubscribingCall>? OnRegister { get; set; }
 
+    /// <summary>
+    /// The series a procedure's notifications count into, asked once as a subscription to it is
+    /// made, so each notification reaches them through the subscription it goes under; none counts
+    /// nothing.
+    /// </summary>
+    public Func<ProcedureAddress, NotifyingSeries?>? SeriesOf { get; set; }
+
     /// <summary>The connections subscribed to <paramref name="procedure"/>, each with its call id; a copy.</summary>
     public List<(string ConnectionHandle, uint CallId)> Candidates(ProcedureAddress procedure)
     {
@@ -150,6 +157,17 @@ internal sealed class NotificationManager(PacingLimits limits)
         return _targets.TryGetValue(connectionHandle, out var targets) && targets.ContainsKey(callId);
     }
 
+    /// <summary>
+    /// The subscription under <paramref name="callId"/>, as a notification goes under it: its pacing,
+    /// when it is paced, and the series it counts into; none of either for none.
+    /// </summary>
+    public (NotificationPacing? Pacing, NotifyingSeries? Series) TargetOf(uint callId, string connectionHandle)
+    {
+        return _targets.TryGetValue(connectionHandle, out var targets) && targets.TryGetValue(callId, out var target)
+            ? (target.Pacing, target.Series)
+            : (null, null);
+    }
+
     /// <summary>The pacing of the subscription under <paramref name="callId"/>, when it is paced.</summary>
     public NotificationPacing? PacingOf(uint callId, string connectionHandle)
     {
@@ -191,7 +209,10 @@ internal sealed class NotificationManager(PacingLimits limits)
         candidates[call.Place] = call.CallId;
         targets[call.CallId] = new Target(
             new Subscription(call.CallId, call.ConnectionHandle, procedure) { Session = call.Session?.Identifier },
-            call.Paced ? new NotificationPacing(limits) : null);
+            call.Paced ? new NotificationPacing(limits) : null)
+        {
+            Series = SeriesOf?.Invoke(procedure),
+        };
         OnRegister?.Invoke(call);
 
         return call.CallId;
@@ -212,6 +233,18 @@ internal sealed class NotificationManager(PacingLimits limits)
         return _candidates.TryGetValue(procedure, out var candidates) && candidates.TryGetValue(place, out var callId)
             ? callId
             : null;
+    }
+
+    /// <summary>Every subscription, of every connection.</summary>
+    public List<Subscription> Subscriptions()
+    {
+        return [.. _targets.Values.SelectMany((targets) =>
+        {
+            return targets.Values.Select((target) =>
+            {
+                return target.Subscription;
+            });
+        })];
     }
 
     /// <summary>The subscriptions a connection holds.</summary>
@@ -266,6 +299,10 @@ internal sealed class NotificationManager(PacingLimits limits)
         OnRemove?.Invoke(target.Subscription);
     }
 
-    // one subscription, and its pacing when its request asked for one
-    private sealed record Target(Subscription Subscription, NotificationPacing? Pacing);
+    // one subscription, its pacing when its request asked for one, and the series its
+    // notifications count into
+    private sealed record Target(Subscription Subscription, NotificationPacing? Pacing)
+    {
+        public NotifyingSeries? Series { get; init; }
+    }
 }

@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
 import type { AddressInfo } from 'node:net';
 import { WebSocket as WsWebSocket, WebSocketServer, type ServerOptions } from 'ws';
-import { LONGEST_TIMER, type TimeoutId } from '../clock';
+import { type IClock, LONGEST_TIMER, type TimeoutId } from '../clock';
 
 /**
  * What the client and server suites share: a loopback host, raw `ws` servers with a clean stop, and
@@ -109,13 +109,29 @@ const armedDelayOf = (delay: number | undefined): number => {
  *
  * It refuses what Bead never arms, with an `Error` that names it: a timer or a period that is not a
  * finite number of milliseconds from 1 to {@link LONGEST_TIMER}, and a `tickAsync` while another is
- * under way, which would move the clock back as the first ends. Each timer armed on it is kept in
- * `armed`, and each handle cleared in `cleared`, for the test to read what Bead means to fire.
+ * under way, which would move the clock back. It keeps each timer armed in `armed`, each handle
+ * cleared in `cleared`, and counts each reading Bead takes, wall and monotonic, in `readings`.
  */
 export const createTestClock = (now?: number) => {
   const clock = createClock(now);
   const armed: IArmedTimer[] = [];
   const cleared: unknown[] = [];
+  const readings = { monotonic: 0, wall: 0 };
+  // the clock as Bead reads it, its two readings counted
+  const read: Pick<IClock, 'Date' | 'performance'> = clock;
+  const wallNow = read.Date.now.bind(read.Date);
+  const monotonicNow = read.performance.now.bind(read.performance);
+
+  read.Date.now = () => {
+    readings.wall += 1;
+
+    return wallNow();
+  };
+  read.performance.now = () => {
+    readings.monotonic += 1;
+
+    return monotonicNow();
+  };
   const {
     clearInterval: clearEvery,
     clearTimeout: clear,
@@ -172,7 +188,7 @@ export const createTestClock = (now?: number) => {
     clearEvery(handle);
   };
 
-  return Object.assign(clock, { armed, cleared });
+  return Object.assign(clock, { armed, cleared, readings });
 };
 
 export type TestClock = ReturnType<typeof createTestClock>;

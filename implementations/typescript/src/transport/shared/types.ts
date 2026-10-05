@@ -27,6 +27,14 @@ export interface ICreatePromiseOptions {
 
 export interface IEmitter<E extends EmitterEventMap<E>> {
   emit<K extends keyof E>(event: K, ...params: E[K]): boolean;
+  /**
+   * As `emit`, each listener called within a guard: what one throws goes to `onError`, and the
+   * listeners after it are called all the same.
+   */
+  emitEach<K extends keyof E>(
+    event: K,
+    guarded: { onError: (error: unknown) => void; params: E[K] }
+  ): boolean;
   /** How many registrations `event` has: a `once` counts until it fires. */
   listenerCount(event: keyof E): number;
   off<K extends keyof E>(event: K, listener: EmitterListener<E[K]>): void;

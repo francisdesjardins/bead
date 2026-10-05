@@ -46,6 +46,9 @@ internal sealed class SteppingClock : TimeProvider
     // an advance under way, which a second one would move back
     private bool _isAdvancing;
 
+    // the readings taken of it, wall and monotonic, since it was made
+    private int _readingCount;
+
     /// <summary>A clock whose wall reading starts at <paramref name="wallClock"/>.</summary>
     public SteppingClock(DateTimeOffset wallClock)
     {
@@ -67,9 +70,23 @@ internal sealed class SteppingClock : TimeProvider
         }
     }
 
+    /// <summary>
+    /// How many readings the side under test took of it, wall and monotonic together, since it was
+    /// made: what a reading of debugging's costs is counted by (spec/debugging.md 3.4).
+    /// </summary>
+    public int Readings
+    {
+        get
+        {
+            return Volatile.Read(ref _readingCount);
+        }
+    }
+
     /// <inheritdoc/>
     public override DateTimeOffset GetUtcNow()
     {
+        Interlocked.Increment(ref _readingCount);
+
         lock (_gate)
         {
             return _readings.GetUtcNow() + _wall;
@@ -79,6 +96,8 @@ internal sealed class SteppingClock : TimeProvider
     /// <inheritdoc/>
     public override long GetTimestamp()
     {
+        Interlocked.Increment(ref _readingCount);
+
         lock (_gate)
         {
             return _readings.GetTimestamp();

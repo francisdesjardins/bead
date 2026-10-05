@@ -6,6 +6,7 @@ import type { TransportServerConnectionHandle } from '../../transport/server/typ
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { sessionKeyOf } from '../shared/call-session';
+import type { INotifyingSeries } from '../shared/metrics-registry';
 import type { CallId, ICallAddress, IProcedureAddress, SessionIdentifier } from '../shared/types';
 import type { INotificationManager, ISubscriber, ISubscribingCall } from './types';
 
@@ -18,13 +19,20 @@ type ServerCall = ICallAddress<TransportServerConnectionHandle>;
 
 /**
  * A call answered while another holds its place, the procedure it would take the place for, the
- * session it holds it in, and whether it asked to be paced there.
+ * session it holds it in, whether it asked to be paced there, and the series it counts into.
  */
 interface IWaiting extends IProcedureAddress {
   callId: CallId;
   end: number | undefined;
   identifier: SessionIdentifier | undefined;
   paced: boolean | undefined;
+  series: INotifyingSeries | undefined;
+}
+
+/** A subscription a connection holds, answered: its call id, and the series it counts into. */
+export interface ISubscribed {
+  callId: CallId;
+  series: INotifyingSeries | undefined;
 }
 
 /** A connection's subscription places: who holds each, who is still in flight, who waits. */
@@ -42,7 +50,7 @@ export interface ISubscriptionPlaces {
    * longer waits. A call in flight, registered from the moment it subscribes and still owed its
    * answer, is left to that answer.
    */
-  drop(subscriber: ISubscriber): CallId[];
+  drop(subscriber: ISubscriber): ISubscribed[];
   /** The subscribing calls in flight and those waiting for a place, counted, and their connections. */
   gauges(): IGauges<TransportServerConnectionHandle>;
   /**
@@ -61,6 +69,12 @@ export interface ISubscriptionPlaces {
    * already gives the holder's, and nothing changes.
    */
   subscribe(call: ISubscribingCall, procedure: IProcedureAddress): CallId;
+  /**
+   * Every subscription a connection holds that was answered — established, or waiting on a holder
+   * in flight — each as it would end with its connection: none in flight, which its call's answer
+   * settles.
+   */
+  subscribedOf(connectionHandle: TransportServerConnectionHandle): ISubscribed[];
   /** Takes a subscription away, as its requester asks; whether the connection held it. */
   unsubscribe(call: ServerCall): boolean;
 }
@@ -152,11 +166,11 @@ export const createSubscriptionPlaces = ({
         identifier: successor.identifier,
       }) === undefined
     ) {
-      const { callId, end, identifier, paced, procedureId, serviceId } = successor;
+      const { callId, end, identifier, paced, procedureId, series, serviceId } = successor;
 
       notifications.register(
         { procedureId, serviceId },
-        { callId, connectionHandle, end, identifier, paced }
+        { callId, connectionHandle, end, identifier, paced, series }
       );
     }
   };
@@ -197,15 +211,18 @@ export const createSubscriptionPlaces = ({
       }
 
       return [
-        ...notifications.subscriptions(connectionHandle).filter((held) => {
-          return isOfSession(held) && !isInFlight({ callId: held.callId, connectionHandle });
+        ...notifications
+          .subscriptions(connectionHandle)
+          .filter((held) => {
+            return isOfSession(held) && !isInFlight({ callId: held.callId, connectionHandle });
+          })
+          .map(({ callId }) => {
+            return { callId, series: notifications.seriesOf(callId, connectionHandle) };
+          }),
+        ...successors.map(([, { callId, series }]) => {
+          return { callId, series };
         }),
-        ...successors.map(([, successor]) => {
-          return successor;
-        }),
-      ].map(({ callId }) => {
-        return callId;
-      });
+      ];
     },
     gauges: () => {
       return gaugesOf({
@@ -256,6 +273,7 @@ export const createSubscriptionPlaces = ({
           end: call.end,
           identifier: call.identifier,
           paced: call.paced,
+          series: call.series,
           ...procedure,
         });
         waiting.set(connectionHandle, calls);
@@ -291,6 +309,21 @@ export const createSubscriptionPlaces = ({
       notifications.register(procedure, call);
 
       return call.callId;
+    },
+    subscribedOf: (connectionHandle) => {
+      return [
+        ...notifications
+          .subscriptions(connectionHandle)
+          .filter(({ callId }) => {
+            return !isInFlight({ callId, connectionHandle });
+          })
+          .map(({ callId }) => {
+            return { callId, series: notifications.seriesOf(callId, connectionHandle) };
+          }),
+        ...[...(waiting.get(connectionHandle)?.values() ?? [])].map(({ callId, series }) => {
+          return { callId, series };
+        }),
+      ];
     },
     unsubscribe: (call) => {
       leaveWaiting(call);

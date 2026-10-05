@@ -126,6 +126,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a `differs` names a row that names its entry between backticks, and moves to
   `common.schema.json`; the `spec` job regenerates the file, and the bounds' defaults it shares with
   the transports' file come from one module of the generators.
+- `spec/debugging.md`, the spec's companion (decision 0013), at version 0.1.0 of its own: what a
+  side traces, filters and counts beside the wire, which a constrained profile may leave out and
+  still conform to the wire. It states the trace of calls and of envelopes; a listener's error,
+  which never changes a call; the cost while nobody listens, and two build switches; the debug
+  filter's grammar in ABNF, in ASCII alone, and its refusals by reason; and a registry of metrics,
+  its declarations, its ceiling, nine families under OpenTelemetry's RPC names, `bead` for `rpc`,
+  every series made at 0, the router's gates and every exit of a call, A66's buckets in whole
+  microseconds with each `le` OpenMetrics' canonical number, and its exposition's bytes in the
+  Prometheus text format 0.0.4. `spec/spec.md` says where it stands beside it, and decision 0008's
+  spec axis carries its version, which moves as the spec's does, a release whose companion moved
+  tagging `debugging-v` and that version.
+- `spec/debug-filters.json` and `spec/metrics.json`, their schemas and their generators, each
+  repeating the companion's version as its `debuggingVersion`: 52 filters, what each reads as and
+  keeps of fixed calls and envelopes, or its refusal's reason and what it names, and 5 filters given
+  as functions, event by event; 18 expositions, a registry's text byte for byte, and 49 exits, the
+  interop service's conversations played by a server given a registry, a `counted` step listing the
+  series each step moved. `spec/check.py` holds the companion's version, its units, which
+  `spec/debugging-uncited.txt` lists where none cites them, and the lines naming its files; reads
+  each exposition as 0.0.4, its families, its help and its buckets the companion's, each `_count` the
+  sum of its handled counts, none started below handled; and requires each side's tests to read
+  both files. The `spec` job regenerates them.
+- A metrics registry on each side (decision 0013), `createMetricsRegistry` and `MetricsRegistry`,
+  which a router given it as its `metricsRegistry`, `MetricsRegistry`, counts into at its gates, and
+  which every client and server passes on to the router it builds; one given to two routers sums
+  them. It counts what its side declares, each series made at 0 as its procedure is declared: a
+  resolver as it is registered, a notification as it is registered, and a requester as it is made,
+  through its router's `declareRequester`, `DeclareRequester`, whose series each of its calls
+  carries to its router's request as `series`, `Series`. A declaration of an address the registry
+  holds under another name, of a name its service holds at another address, or past
+  `maximumProcedures`, `MaximumProcedures`, 1,000 by default, is refused as it is made, a
+  `ProgrammerError` and an `ArgumentException`. Its exposition, `exposition()` and `Exposition()`,
+  writes its nine families in the Prometheus text format 0.0.4 and gives its media type with it,
+  `{ contentType, text }` and `MetricsExposition(ContentType, Text)`, for an application to serve at
+  `/metrics` or append to its own 0.0.4 scrape: Bead opens no port.
+- The demo's servers count into one registry, which `/metrics` serves beside `/health`, on this
+  machine alone, and which the `stats` procedure reads: the Server panel shows the calls answered,
+  their mean and a median estimated within its bucket, `stats`' own left out.
 
 ### Changed
 
@@ -202,9 +239,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
 - A trace tells `startedAt` and `duration`, flat on its event, where it told `timestamp: { event,
 duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
-  whole milliseconds, its statistics' `DurationSummary` in `TimeSpan`, and `DebugTimestamp` goes. A
-  notification's one step starts as it is sent or heard, and a failed notify tells its failure at
-  that same start.
+  whole milliseconds, and `DebugTimestamp` goes. A notification's one step starts as it is sent or
+  heard, and a failed notify tells its failure at that same start.
 - The banned-API analyzer (RS0030) on the C# side, and oxlint's `no-restricted-globals` and
   `no-restricted-properties` on the TypeScript side, refuse the platform's clocks and timers; an
   exception is suppressed where it stands, with its reason.
@@ -233,6 +269,41 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   gains three rows — a duration finer than a tick and a duration that is not a number, platform, and
   a reconnection's delay given as a number, open — and the rows of -1 ms and of the Web Worker name
   what of the file crosses them.
+- The traces are `spec/debugging.md`'s, sections 4 and 5, and built only for a listener (decision
+  0013): while nobody listens, a call reads no clock and builds no step, no copy of its options or
+  its payloads, and an envelope no redacted header, one check each. The TypeScript client's router
+  tells each envelope with its connection, `server`, as the C# one does; the C# side's traced header
+  carries its credential's scheme in place of its credential, as the TypeScript side's does, and
+  `TracedEnvelope` is its connection and its header alone; a failed call's `rx` is its failure's
+  code, scope and detail on both sides, where the C# side traced the whole failure.
+- `isDebugging`, on the TypeScript service manager, where it said `debug`, beside the C# side's
+  `IsDebugging`: `debug` is the event's name (decision 0003).
+- The debug filter reads `spec/debugging.md`'s grammar, in ASCII alone, on both sides: a comma or
+  ASCII white space parts two words, and U+0085, U+FEFF, U+00A0 or U+2028 no longer does; `*` runs
+  across every line terminator; an ASCII letter matches itself in either case, and a name outside
+  ASCII is compared as it is, where each platform folded its own case; `t(request)`,
+  `t(command)` and `t(notification)` are taken, `r`, `c` and `n` their short forms; a word holding a
+  parenthesis that is no selector is refused, `d(rx,tx)` among them, where it was kept in silence
+  as two patterns that match nothing; a refusal names the word or the value as it was written,
+  quoted as JSON writes a string; and a filter given whole is refused in the grammar's names.
+- A listener's error goes to its router's error event, through a member both sides' routers gain,
+  `report` and `Report`, through which a service manager reports what its trace's listener threw,
+  with the call's connection on a server; the C# core's port reports with no connection what
+  belongs to none.
+- A router takes a call it makes in one order, on both sides (`spec/debugging.md` 9.3): a
+  programmer's error and a signal aborted already first, each refused and never counted, where the
+  TypeScript client checked a notification bound to the call after its credential, and both sides
+  checked a command's after its connection; then the call starts; then every refusal with a code,
+  `SESSION_REQUIRED` and `DESTINATION_UNREACHABLE` before it goes among them, and a command to a
+  connection not open, which fails `DisconnectError`, `DisconnectException`, as one whose
+  connection closes does.
+
+### Removed
+
+- The debug statistics, for the metrics registry: `createDebugStatistics`, `IDebugStatistics`,
+  `IDebugStatisticsOptions`, `IDurationSummary`, `DEBUG_STATISTICS_DEFAULTS` and
+  `debug-statistics.ts` on the TypeScript side; `DebugStatistics`, `DebugStatisticsOptions` and
+  `DurationSummary` on the C# side; and their seven twin tests a side.
 
 ### Fixed
 
@@ -245,6 +316,11 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 - The C# side's trace of a received call starts as its resolver takes it, before its admission and
   its decoding, as the TypeScript side's does, where it started once the payload decoded; through a
   router, which asks the admission itself, both start once it admitted the call.
+- A debug listener that throws, or a filter around it, no longer fails a call that got its result,
+  nor leaves a request unanswered, its requester waiting out its timeout, against spec 9.5, on both
+  sides: each listener is called within a guard, what it throws is reported, and the call keeps its
+  outcome, its answer and what goes on the wire. The twin tests that pinned the opposite are
+  reversed, and one more answers a request as a listener throws on its `rx` step.
 
 ## [0.1.0] - 2026-10-02
 

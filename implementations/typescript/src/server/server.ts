@@ -34,11 +34,14 @@ import type { IServer, IServerLayers, IServerOptions, IServerTransportLike } fro
 
 export {
   CLIENT_FAILURES,
+  createMetricsRegistry,
   CredentialScheme,
   DisconnectError,
   FailureError,
   FailureScope,
   LIMIT_DEFAULTS,
+  METRICS_CONTENT_TYPE,
+  METRICS_REGISTRY_DEFAULTS,
   PACING_DEFAULTS,
   ProtocolCode,
   requireSession,
@@ -63,6 +66,9 @@ export type {
   IDestination,
   IDestinationOptions,
   IDestinationRegistration,
+  IMetricsExposition,
+  IMetricsRegistry,
+  IMetricsRegistryOptions,
   IPacingLimits,
   IRelayOptions,
   IRouterLimits,
@@ -315,6 +321,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     router = createRouter(transport, {
       clock,
       limits: options?.limits,
+      metricsRegistry: options?.metricsRegistry,
       pacing: options?.pacing,
       credentials: options?.credentials,
       // a server's relay admits a call in leg A's connection's session, or one presenting a

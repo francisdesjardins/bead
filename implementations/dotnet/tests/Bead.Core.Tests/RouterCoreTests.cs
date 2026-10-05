@@ -379,7 +379,7 @@ public sealed partial class RouterCoreTests
             }
         }
 
-        public void Report(Exception reason, string connectionHandle)
+        public void Report(Exception reason, string? connectionHandle)
         {
             link.Reports.Add(reason);
         }

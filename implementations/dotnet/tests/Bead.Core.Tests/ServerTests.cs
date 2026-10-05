@@ -749,7 +749,7 @@ public sealed class ServerTests : IAsyncLifetime
     [Fact]
     public async Task A_connection_that_closes_takes_its_session_and_a_close_that_fails_is_reported()
     {
-        var errors = new List<(Exception Reason, string ConnectionHandle)>();
+        var errors = new List<(Exception Reason, string? ConnectionHandle)>();
         var refused = new IOException("refused");
 
         Start(Timeout.InfiniteTimeSpan);

@@ -1,0 +1,1735 @@
+{
+  "$schema": "schemas/debug-filters.schema.json",
+  "$comment": [
+    "Bead's debug filters: what a filter reads as, which calls and envelopes it keeps, or why a side refuses it, and what a filter given as a function does from event to event (spec/debugging.md, section 6; decision 0013).",
+    "calls are the fixtures a call's filter is asked of: a trace's event, by its direction, its type and its procedure's name. envelopes are those an envelope's filter is asked of: a router's event, by its direction and its kind, named as section 3.1 of spec.md names it, in lower case. An entry names a fixture by its index.",
+    "filter is a filter as written. parsed is what it reads as (6.6): its directions, its types and its kinds, by the grammar's names, and include, its patterns, and exclude, its exclusions without their -, as written, each in the order of its words. keeps lists the calls a call's listener given the filter hears, and the envelopes an envelope's listener hears, in their order.",
+    "refused, in place of parsed and keeps, is why a side refuses the filter (6.7): reason, the first word that does not hold, and written, the word or the value it names, as it was written. The words of a refusal are each side's own, and stay with its tests.",
+    "sources are filters given as functions (6.9). listener says whose listener the function filters, a call's or an envelope's. A step gives a filter, which the function gives from then on; throws, from then on the function throws; made, the listener is made with the function, which is asked then, and true or false says whether it is made; event, an event of that fixture goes through the listener, which asks the function again, and heard says whether the listener heard it.",
+    "clauses are the units of spec/debugging.md an entry checks: a clause, 6.7; a row of its table, counted from 1, 6.7.3.",
+    "Every character outside printable ASCII is written as its JSON escape."
+  ],
+  "debuggingVersion": "0.1.0",
+  "calls": [
+    {
+      "direction": "tx",
+      "type": "request",
+      "procedureName": "getStatus"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "getStatus"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "GetTime"
+    },
+    {
+      "direction": "tx",
+      "type": "command",
+      "procedureName": "ping"
+    },
+    {
+      "direction": "rx",
+      "type": "notification",
+      "procedureName": "news"
+    },
+    {
+      "direction": "tx",
+      "type": "request",
+      "procedureName": "a\rb"
+    },
+    {
+      "direction": "tx",
+      "type": "request",
+      "procedureName": "ab"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "key"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "\u212aey"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "\u0130d"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "a\u0085b"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": ""
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "a.b"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "axb"
+    },
+    {
+      "direction": "rx",
+      "type": "request",
+      "procedureName": "caf\u00e9"
+    }
+  ],
+  "envelopes": [
+    {
+      "direction": "tx",
+      "kind": "request"
+    },
+    {
+      "direction": "rx",
+      "kind": "result"
+    },
+    {
+      "direction": "rx",
+      "kind": "failure"
+    },
+    {
+      "direction": "tx",
+      "kind": "cancel"
+    },
+    {
+      "direction": "rx",
+      "kind": "notification"
+    },
+    {
+      "direction": "tx",
+      "kind": "chunk"
+    },
+    {
+      "direction": "rx",
+      "kind": "credit"
+    }
+  ],
+  "filters": [
+    {
+      "name": "an empty filter keeps every call and every envelope",
+      "clauses": [
+        "6.5"
+      ],
+      "filter": "",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "separators alone are an empty filter",
+      "clauses": [
+        "6.1",
+        "6.2",
+        "6.5"
+      ],
+      "filter": " ,\t\n\u000b\f\r",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a comma and each of the six ASCII white spaces part two words",
+      "clauses": [
+        "6.1",
+        "6.2",
+        "6.6"
+      ],
+      "filter": "getStatus,ping news\tkey\nGetTime\u000baxb\fa.b\rcaf\u00e9",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "getStatus",
+          "ping",
+          "news",
+          "key",
+          "GetTime",
+          "axb",
+          "a.b",
+          "caf\u00e9"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          7,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a run of separators parts two words once",
+      "clauses": [
+        "6.1",
+        "6.2"
+      ],
+      "filter": ", ping ,\t, news ,",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "ping",
+          "news"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          3,
+          4
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a next line, U+0085, parts no two words",
+      "clauses": [
+        "6.2",
+        "6.6"
+      ],
+      "filter": "a\u0085b",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "a\u0085b"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          10
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a byte order mark, U+FEFF, parts no two words",
+      "clauses": [
+        "6.2",
+        "6.6"
+      ],
+      "filter": "getStatus\ufeffping",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "getStatus\ufeffping"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a no-break space, U+00A0, parts no two words",
+      "clauses": [
+        "6.2",
+        "6.6"
+      ],
+      "filter": "getStatus\u00a0ping",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "getStatus\u00a0ping"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a line separator, U+2028, parts no two words",
+      "clauses": [
+        "6.2",
+        "6.6"
+      ],
+      "filter": "getStatusping",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "getStatusping"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "d(rx) keeps the calls and the envelopes that come in",
+      "clauses": [
+        "6.3",
+        "6.5"
+      ],
+      "filter": "d(rx)",
+      "parsed": {
+        "directions": [
+          "rx"
+        ],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          1,
+          2,
+          4,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          1,
+          2,
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a selector's letter and its values are read in either case",
+      "clauses": [
+        "6.1",
+        "6.3"
+      ],
+      "filter": "D(TX)",
+      "parsed": {
+        "directions": [
+          "tx"
+        ],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          3,
+          5,
+          6
+        ],
+        "envelopes": [
+          0,
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "name": "d(rx|tx) keeps both directions",
+      "clauses": [
+        "6.1",
+        "6.3"
+      ],
+      "filter": "d(rx|tx)",
+      "parsed": {
+        "directions": [
+          "rx",
+          "tx"
+        ],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "selectors of one letter add up",
+      "clauses": [
+        "6.3",
+        "6.6"
+      ],
+      "filter": "d(rx), D(tx)",
+      "parsed": {
+        "directions": [
+          "rx",
+          "tx"
+        ],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a value given twice is kept twice",
+      "clauses": [
+        "6.6"
+      ],
+      "filter": "t(r|request)",
+      "parsed": {
+        "directions": [],
+        "types": [
+          "request",
+          "request"
+        ],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "t() takes the trace's words",
+      "clauses": [
+        "6.1",
+        "6.3"
+      ],
+      "filter": "t(request|command)",
+      "parsed": {
+        "directions": [],
+        "types": [
+          "request",
+          "command"
+        ],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "t() takes r, c and n as the short forms of the trace's words",
+      "clauses": [
+        "6.1",
+        "6.3"
+      ],
+      "filter": "t(n|C)",
+      "parsed": {
+        "directions": [],
+        "types": [
+          "notification",
+          "command"
+        ],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          3,
+          4
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "t() keeps types of call, and an envelope passes it whatever its kind",
+      "clauses": [
+        "6.3",
+        "6.5"
+      ],
+      "filter": "T(Notification)",
+      "parsed": {
+        "directions": [],
+        "types": [
+          "notification"
+        ],
+        "kinds": [],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          4
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "e() keeps kinds of envelope by their names, and a call passes it whatever its type",
+      "clauses": [
+        "6.3",
+        "6.5"
+      ],
+      "filter": "e(failure|RESULT)",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [
+          "failure",
+          "result"
+        ],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "e() takes every kind of section 3.1",
+      "clauses": [
+        "6.1",
+        "6.3"
+      ],
+      "filter": "e(request|result|failure|notification|chunk|credit|cancel)",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [
+          "request",
+          "result",
+          "failure",
+          "notification",
+          "chunk",
+          "credit",
+          "cancel"
+        ],
+        "include": [],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a pattern keeps the calls whose name it matches, and an envelope passes it whatever its kind",
+      "clauses": [
+        "6.4",
+        "6.5"
+      ],
+      "filter": "ping",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "ping"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          3
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a pattern matches a whole name, an ASCII letter in either case",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "GETTIME, KEY",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "GETTIME",
+          "KEY"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          2,
+          7
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "* stands for any run of characters, none included",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "get*",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "get*"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "* alone keeps every name, the empty one among them",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "*",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "*"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "* crosses a carriage return and a line separator",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "a*",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "a*"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          5,
+          6,
+          10,
+          12,
+          13
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a point stands for itself",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "a.b",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "a.b"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          12
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "an exclusion leaves out what it matches, and wins over a pattern",
+      "clauses": [
+        "6.4",
+        "6.6"
+      ],
+      "filter": "get* -getStatus",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "get*"
+        ],
+        "exclude": [
+          "getStatus"
+        ]
+      },
+      "keeps": {
+        "calls": [
+          2
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "an exclusion alone keeps every name but those it matches",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "-g*",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": [
+          "g*"
+        ]
+      },
+      "keeps": {
+        "calls": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "- alone leaves out the empty name",
+      "clauses": [
+        "6.1",
+        "6.4",
+        "6.6"
+      ],
+      "filter": "-",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [],
+        "exclude": [
+          ""
+        ]
+      },
+      "keeps": {
+        "calls": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          12,
+          13,
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a selector, a pattern and an exclusion together",
+      "clauses": [
+        "6.1",
+        "6.5",
+        "6.6"
+      ],
+      "filter": " d(rx),t(r|C)  get*, -getStatus\tping ",
+      "parsed": {
+        "directions": [
+          "rx"
+        ],
+        "types": [
+          "request",
+          "command"
+        ],
+        "kinds": [],
+        "include": [
+          "get*",
+          "ping"
+        ],
+        "exclude": [
+          "getStatus"
+        ]
+      },
+      "keeps": {
+        "calls": [
+          2
+        ],
+        "envelopes": [
+          1,
+          2,
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "name": "the Kelvin sign in a pattern matches itself alone",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "\u212aEY",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "\u212aEY"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          8
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "k in a pattern matches no Kelvin sign",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "Key",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "Key"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          7
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a capital I with a dot in a pattern matches itself alone",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "\u0130D",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "\u0130D"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          9
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "i in a pattern matches no capital I with a dot",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "Id",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "Id"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a letter outside ASCII matches itself in its own case alone",
+      "clauses": [
+        "6.4"
+      ],
+      "filter": "CAF\u00c9, CAF\u00e9",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "CAF\u00c9",
+          "CAF\u00e9"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          14
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "a pattern within a word of separators outside ASCII matches that whole word",
+      "clauses": [
+        "6.2",
+        "6.4"
+      ],
+      "filter": "A\u0085B",
+      "parsed": {
+        "directions": [],
+        "types": [],
+        "kinds": [],
+        "include": [
+          "A\u0085B"
+        ],
+        "exclude": []
+      },
+      "keeps": {
+        "calls": [
+          10
+        ],
+        "envelopes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "d() is refused, an empty selector",
+      "clauses": [
+        "6.7",
+        "6.7.1"
+      ],
+      "filter": "d()",
+      "refused": {
+        "reason": "selector empty",
+        "written": "d()"
+      }
+    },
+    {
+      "name": "e() is refused, an empty selector, in either case",
+      "clauses": [
+        "6.7",
+        "6.7.1"
+      ],
+      "filter": "ping E()",
+      "refused": {
+        "reason": "selector empty",
+        "written": "E()"
+      }
+    },
+    {
+      "name": "a value left empty is refused",
+      "clauses": [
+        "6.7",
+        "6.7.2"
+      ],
+      "filter": "d(rx|)",
+      "refused": {
+        "reason": "value empty",
+        "written": "d(rx|)"
+      }
+    },
+    {
+      "name": "a value left empty first is refused",
+      "clauses": [
+        "6.7",
+        "6.7.2"
+      ],
+      "filter": "t(|r)",
+      "refused": {
+        "reason": "value empty",
+        "written": "t(|r)"
+      }
+    },
+    {
+      "name": "a direction that is none is refused, named as it was written",
+      "clauses": [
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "d(UP)",
+      "refused": {
+        "reason": "names nothing",
+        "written": "UP"
+      }
+    },
+    {
+      "name": "d(rx)(tx) is one selector, whose one value names nothing",
+      "clauses": [
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "d(rx)(tx)",
+      "refused": {
+        "reason": "names nothing",
+        "written": "rx)(tx"
+      }
+    },
+    {
+      "name": "a kind spelled with the Kelvin sign names nothing",
+      "clauses": [
+        "6.1",
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "e(chun\u212a)",
+      "refused": {
+        "reason": "names nothing",
+        "written": "chun\u212a"
+      }
+    },
+    {
+      "name": "a kind spelled with a capital I with a dot names nothing",
+      "clauses": [
+        "6.1",
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "e(not\u0130fication)",
+      "refused": {
+        "reason": "names nothing",
+        "written": "not\u0130fication"
+      }
+    },
+    {
+      "name": "a type the trace does not name is refused",
+      "clauses": [
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "t(constructor)",
+      "refused": {
+        "reason": "names nothing",
+        "written": "constructor"
+      }
+    },
+    {
+      "name": "a value holding a quote is refused, named as it was written",
+      "clauses": [
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "d(\"rx\")",
+      "refused": {
+        "reason": "names nothing",
+        "written": "\"rx\""
+      }
+    },
+    {
+      "name": "a value holding a backslash is refused, named as it was written",
+      "clauses": [
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "t(r\\n)",
+      "refused": {
+        "reason": "names nothing",
+        "written": "r\\n"
+      }
+    },
+    {
+      "name": "a value that names nothing is refused before an empty one after it",
+      "clauses": [
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "d(up|)",
+      "refused": {
+        "reason": "names nothing",
+        "written": "up"
+      }
+    },
+    {
+      "name": "d(rx,tx) is two words, each holding a parenthesis",
+      "clauses": [
+        "6.1",
+        "6.7",
+        "6.7.4"
+      ],
+      "filter": "d(rx,tx)",
+      "refused": {
+        "reason": "holds a parenthesis",
+        "written": "d(rx"
+      }
+    },
+    {
+      "name": "a parenthesis alone is refused",
+      "clauses": [
+        "6.7",
+        "6.7.4"
+      ],
+      "filter": "ping (",
+      "refused": {
+        "reason": "holds a parenthesis",
+        "written": "("
+      }
+    },
+    {
+      "name": "a word holding a parenthesis that is no selector is refused",
+      "clauses": [
+        "6.7",
+        "6.7.4"
+      ],
+      "filter": "x(y)",
+      "refused": {
+        "reason": "holds a parenthesis",
+        "written": "x(y)"
+      }
+    },
+    {
+      "name": "an exclusion holding a selector is refused",
+      "clauses": [
+        "6.7",
+        "6.7.4"
+      ],
+      "filter": "-d(rx)",
+      "refused": {
+        "reason": "holds a parenthesis",
+        "written": "-d(rx)"
+      }
+    },
+    {
+      "name": "a selector of another letter is refused, a word holding a parenthesis",
+      "clauses": [
+        "6.7",
+        "6.7.4"
+      ],
+      "filter": "p(rx)",
+      "refused": {
+        "reason": "holds a parenthesis",
+        "written": "p(rx)"
+      }
+    },
+    {
+      "name": "the first word that does not hold is the one refused",
+      "clauses": [
+        "6.7",
+        "6.7.3"
+      ],
+      "filter": "d(up) t() x(",
+      "refused": {
+        "reason": "names nothing",
+        "written": "up"
+      }
+    }
+  ],
+  "sources": [
+    {
+      "name": "a function's first filter that does not hold makes no listener",
+      "clauses": [
+        "6.9"
+      ],
+      "listener": "call",
+      "steps": [
+        {
+          "gives": "d(up)"
+        },
+        {
+          "made": false
+        }
+      ]
+    },
+    {
+      "name": "a function that throws as its listener is made makes none",
+      "clauses": [
+        "6.9"
+      ],
+      "listener": "call",
+      "steps": [
+        {
+          "throws": true
+        },
+        {
+          "made": false
+        }
+      ]
+    },
+    {
+      "name": "a function is asked at each event, and a filter that stops holding leaves the last that held",
+      "clauses": [
+        "6.9"
+      ],
+      "listener": "call",
+      "steps": [
+        {
+          "gives": "d(rx)"
+        },
+        {
+          "made": true
+        },
+        {
+          "event": 1,
+          "heard": true
+        },
+        {
+          "event": 0,
+          "heard": false
+        },
+        {
+          "gives": "d(up)"
+        },
+        {
+          "event": 1,
+          "heard": true
+        },
+        {
+          "event": 0,
+          "heard": false
+        },
+        {
+          "gives": "d(tx)"
+        },
+        {
+          "event": 0,
+          "heard": true
+        },
+        {
+          "event": 1,
+          "heard": false
+        }
+      ]
+    },
+    {
+      "name": "a function that throws leaves the last filter that held, until it gives one again",
+      "clauses": [
+        "6.9"
+      ],
+      "listener": "call",
+      "steps": [
+        {
+          "gives": "t(c)"
+        },
+        {
+          "made": true
+        },
+        {
+          "event": 3,
+          "heard": true
+        },
+        {
+          "event": 1,
+          "heard": false
+        },
+        {
+          "throws": true
+        },
+        {
+          "event": 3,
+          "heard": true
+        },
+        {
+          "event": 1,
+          "heard": false
+        },
+        {
+          "gives": ""
+        },
+        {
+          "event": 1,
+          "heard": true
+        },
+        {
+          "event": 3,
+          "heard": true
+        }
+      ]
+    },
+    {
+      "name": "a function's filter of envelopes is asked at each event alike",
+      "clauses": [
+        "6.9"
+      ],
+      "listener": "envelope",
+      "steps": [
+        {
+          "gives": "e(failure)"
+        },
+        {
+          "made": true
+        },
+        {
+          "event": 2,
+          "heard": true
+        },
+        {
+          "event": 1,
+          "heard": false
+        },
+        {
+          "gives": "e(fail)"
+        },
+        {
+          "event": 2,
+          "heard": true
+        },
+        {
+          "event": 1,
+          "heard": false
+        },
+        {
+          "gives": "d(tx)"
+        },
+        {
+          "event": 0,
+          "heard": true
+        },
+        {
+          "event": 2,
+          "heard": false
+        }
+      ]
+    }
+  ]
+}

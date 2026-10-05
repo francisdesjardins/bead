@@ -43,7 +43,7 @@ public sealed partial class RouterServerTests : IDisposable
     private readonly FakeTimeProvider _time = new();
     private readonly ScriptedTransport _transport = new();
     private readonly TaskCompletionSource _released = new();
-    private readonly List<(Exception Reason, string ConnectionHandle)> _errors = [];
+    private readonly List<(Exception Reason, string? ConnectionHandle)> _errors = [];
     private readonly List<string> _activity = [];
     private RouterServer? _router;
     private ServiceManager? _services;
@@ -101,13 +101,14 @@ public sealed partial class RouterServerTests : IDisposable
         }
     }
 
-    private static string NameOf(string connectionHandle)
+    private static string NameOf(string? connectionHandle)
     {
         return connectionHandle switch
         {
             First => "first",
             Second => "second",
             Third => "third",
+            null => "no connection",
             _ => connectionHandle,
         };
     }
@@ -1649,8 +1650,8 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal(
             [
-                (DebugDirection.Rx, new TracedEnvelope(First, new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 }, null)),
-                (DebugDirection.Tx, new TracedEnvelope(First, new ResultHeader { CallId = 9 }, CredentialScheme.Opaque)),
+                (DebugDirection.Rx, new TracedEnvelope(First, new RequestHeader { CallId = 9, ServiceId = 2, ProcedureId = 1 })),
+                (DebugDirection.Tx, new TracedEnvelope(First, new ResultHeader { CallId = 9, Credential = Credential.Opaque() })),
             ],
             seen);
         Assert.Equal(new ResultHeader { CallId = 9, Credential = Token }, _transport.Sent[0].Envelope.Header);

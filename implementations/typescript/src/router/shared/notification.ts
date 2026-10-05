@@ -42,8 +42,11 @@ export interface INotificationContext<RequestPayload, ResponsePayload, Notificat
     IRouterLike,
     'failures' | 'hasNotification' | 'registerNotification' | 'unregisterNotification'
   >;
-  /** Tells `debug` of a notification that came in: its payload, or the failure it met. */
-  trace: (step: { direction: 'rx'; error?: unknown; rx?: unknown }) => void;
+  /**
+   * Tells `debug` of a notification that came in: the failure it met, or none, and its payload, or
+   * none; nothing is built while nobody listens.
+   */
+  trace: (error: unknown, rx: unknown) => void;
 }
 
 // definition
@@ -235,12 +238,12 @@ export const createNotification = <RequestPayload, ResponsePayload, Notification
             { cause: reason, procedureAddress: procedure }
           );
 
-          trace({ direction: 'rx', error });
+          trace(error, undefined);
 
           throw error;
         }
 
-        trace({ direction: 'rx', rx: notificationPayload });
+        trace(undefined, notificationPayload);
 
         const returned: unknown[] = [];
 

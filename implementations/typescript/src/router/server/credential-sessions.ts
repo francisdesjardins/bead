@@ -252,6 +252,9 @@ export const createCredentialSessions = ({
     pacingOf: (callId, connectionHandle) => {
       return notifications.pacingOf(callId, connectionHandle);
     },
+    seriesOf: (callId, connectionHandle) => {
+      return notifications.seriesOf(callId, connectionHandle);
+    },
     register: (procedureAddress, subscription) => {
       const callId = notifications.register(procedureAddress, subscription);
       const { connectionHandle, end: callEnd, identifier } = subscription;

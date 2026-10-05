@@ -1,5 +1,6 @@
 // dependencies
 
+import type { IMetricsRegistry } from '../router/shared/metrics-registry';
 import type {
   IRouterClient,
   IRouterClientOptions,
@@ -73,6 +74,11 @@ export interface IClientOptions {
    * where these say nothing. They must hold together, or the client is a {@link ProgrammerError}.
    */
   limits?: RouterLimitsOptions | undefined;
+  /**
+   * The registry its router counts its calls and its notifications into, which it is built with;
+   * none counts nothing.
+   */
+  metricsRegistry?: IMetricsRegistry | undefined;
 }
 
 /**

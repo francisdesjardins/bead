@@ -270,6 +270,9 @@ const createFakeRouter = () => {
     clock: createTestClock(),
     failures: SERVER_FAILURES,
 
+    declareRequester: () => {
+      return undefined;
+    },
     hasNotification: () => {
       return false;
     },
@@ -280,6 +283,9 @@ const createFakeRouter = () => {
       return Promise.resolve();
     },
     registerResolver: () => {
+      return undefined;
+    },
+    report: () => {
       return undefined;
     },
     request: (payload, { options }): Promise<IRouterResult> => {
@@ -360,6 +366,9 @@ const createPort = () => {
     failures: SERVER_FAILURES,
 
     activity: () => {},
+    isTracing: () => {
+      return false;
+    },
     report: () => {},
     send: ({ data }) => {
       sent.push(data);

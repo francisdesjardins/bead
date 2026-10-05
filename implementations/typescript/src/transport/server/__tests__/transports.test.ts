@@ -141,7 +141,7 @@ interface IResponseCase {
 /** What the server reported to its application, and the connection it came with. */
 interface IReport {
   code: number | 'exception';
-  connectionHandle: TransportServerConnectionHandle;
+  connectionHandle: TransportServerConnectionHandle | undefined;
 }
 
 // types

@@ -30,11 +30,17 @@ import {
   type TestClock,
   timersUntil,
 } from '../../../transport/shared/__tests__/fixtures';
-import { callIdsOf, createPipedTransports, envelopeOf } from '../../shared/__tests__/fixtures';
+import {
+  callIdsOf,
+  countedOf,
+  createPipedTransports,
+  envelopeOf,
+} from '../../shared/__tests__/fixtures';
 import { createRouterClient } from '../../client/router-client';
 import {
   CancelError,
   CLIENT_FAILURES,
+  createMetricsRegistry,
   createRouterServer,
   CredentialScheme,
   DisconnectError,
@@ -327,7 +333,7 @@ const createScriptedTransport = ({
 };
 
 const recordErrors = (router: ReturnType<typeof createRouterServer>) => {
-  const errors: [Error, string][] = [];
+  const errors: [Error, string | undefined][] = [];
 
   router.on('error', (error, connectionHandle) => {
     errors.push([error, connectionHandle]);
@@ -337,7 +343,7 @@ const recordErrors = (router: ReturnType<typeof createRouterServer>) => {
 };
 
 /** Each error reported, as its failure's code or its message, and the connection named. */
-const reportedOf = (errors: [Error, string][]) => {
+const reportedOf = (errors: [Error, string | undefined][]) => {
   return errors.map(([error, connectionHandle]) => {
     return [error instanceof FailureError ? error.code : error.message, connectionHandle];
   });
@@ -4289,5 +4295,288 @@ test.describe('createRouterServer, its paced subscriptions', () => {
       largestQueuedNotificationBytes: 1_048_576,
       largestQueuedNotifications: 64,
     });
+  });
+});
+
+test.describe('createRouterServer, its metrics', () => {
+  // a line of a series of `procedure`'s, as the exposition writes it: by the rest of its name, its
+  // labels and its value
+  const lineOf = (family: string, labels: string) => {
+    return (rest: string): string => {
+      return `${family}${rest.replace('{}', `{${labels}}`).replace('{outcome', `{${labels},outcome`)}`;
+    };
+  };
+
+  test('a debug listener that throws on an envelope is reported with its connection, and the envelope and its call go on, every listener told', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport);
+    const errors = recordErrors(router);
+    const failure = new Error('listener bug');
+    const heard: string[] = [];
+
+    router.on('debug', () => {
+      throw failure;
+    });
+    router.on('debug', ({ direction }) => {
+      heard.push(direction);
+    });
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.payload);
+      }
+    );
+    open(first);
+    deliver(first, requestOf(1, { payload: text.encode('hi') }));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([[first, 'result', 1, 'hi']]);
+    expect(heard).toEqual(['rx', 'tx']);
+    expect(errors).toEqual([
+      [failure, first],
+      [failure, first],
+    ]);
+  });
+
+  test('counts a command to a connection not open as started and closed in the turn it started', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const series = router.declareRequester(echo);
+    const asking = router.request(new Uint8Array(0), {
+      options: { ...options, connectionHandle: first },
+      procedure: echo,
+      series,
+    });
+    const made = lineOf('bead_client_call_', 'service="2",procedure="echo",type="command"');
+
+    expect(countedOf(metricsRegistry)).toEqual([
+      made('duration_seconds_count{} 1'),
+      made('handled_total{outcome="closed"} 1'),
+      made('started_total{} 1'),
+    ]);
+    await expect(asking).rejects.toBeInstanceOf(DisconnectError);
+  });
+
+  test('counts a notification it cannot hand to its transport as failed, and one its transport refuses once it has it as sent', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { control, deliver, open, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(),
+      // a notification of 100 bytes goes in no envelope of 64
+      limits: { chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 },
+      metricsRegistry,
+    });
+    const errors = recordErrors(router);
+    const notifying = createServiceManager(router).getNotificationResolver(news, {
+      serializer: answering,
+    })((_request, response) => {
+      return response('ok');
+    });
+
+    open(first);
+    deliver(first, subscribingOf(1));
+    await sleep(0);
+    await notifying.notify('x'.repeat(100));
+    control.sendErrors.set(first, new Error('this transport refuses, once it has it'));
+    await notifying.notify('x');
+
+    expect(reportedOf(errors)).toEqual([
+      [ProtocolCode.PAYLOAD_TOO_LARGE, first],
+      ['this transport refuses, once it has it', first],
+    ]);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_notifications');
+      })
+    ).toEqual([
+      'bead_notifications_sent_total{service="2",procedure="news",outcome="sent"} 1',
+      'bead_notifications_sent_total{service="2",procedure="news",outcome="failed"} 1',
+    ]);
+  });
+
+  test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, transport } = createScriptedTransport();
+    using router = createRouterServer(
+      {
+        ...transport,
+        isTwoWay: () => {
+          return false;
+        },
+      },
+      { clock: createTestClock(), metricsRegistry }
+    );
+    const errors = recordErrors(router);
+    const services = createServiceManager(router);
+
+    services.getRequestResolver(echo, {
+      beforeRequest: () => {
+        throw new Error('this admission fails');
+      },
+      serializer: answering,
+    })((request, response) => {
+      return response(request.payload);
+    });
+    services.getNotificationResolver(news, { serializer: answering })((_request, response) => {
+      return response('ok');
+    });
+    open(first);
+    deliver(first, requestOf(1));
+    deliver(first, subscribingOf(3));
+    await sleep(0);
+
+    expect(errors).toHaveLength(1);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_server_call_handled_total');
+      })
+    ).toEqual([
+      'bead_server_call_handled_total{service="2",procedure="echo",type="request",outcome="failure",code="PROCEDURE_FAILED"} 1',
+      'bead_server_call_handled_total{service="2",procedure="news",type="request",outcome="failure",code="SUBSCRIPTION_UNSUPPORTED"} 1',
+    ]);
+  });
+
+  test('one registry given to a client’s router and a server’s counts a call at each of its ends', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const clock = createTestClock();
+    const pipe = createPipedTransports({ connectionHandle: first });
+    using server = createRouterServer(pipe.server, { clock, metricsRegistry });
+    using client = createRouterClient(pipe.client, { clock, metricsRegistry });
+    const labels = 'service="2",procedure="echo",type="request"';
+    const made = lineOf('bead_client_call_', labels);
+    const answered = lineOf('bead_server_call_', labels);
+
+    createServiceManager(server).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.payload);
+      }
+    );
+    pipe.open();
+
+    await expect(
+      createServiceManager(client).getRequest(echo, { serializer: asking })('hi')()
+    ).resolves.toBe('hi');
+    expect(countedOf(metricsRegistry)).toEqual([
+      made('duration_seconds_count{} 1'),
+      made('handled_total{outcome="result"} 1'),
+      made('started_total{} 1'),
+      answered('duration_seconds_count{} 1'),
+      answered('handled_total{outcome="result"} 1'),
+      answered('started_total{} 1'),
+    ]);
+  });
+
+  test('counts a call whose handler fails with no answer handed to its transport as an error', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const errors = recordErrors(router);
+    const other: IProcedure = { ...echo, procedureId: 7, procedureName: 'other' };
+    const answered = lineOf('bead_server_call_', 'service="2",procedure="other",type="request"');
+
+    // a resolver of its own whose handler fails before it answers, and answers nothing
+    router.registerResolver(
+      Object.assign(() => {
+        return Promise.reject(new Error('this handler breaks, on purpose'));
+      }, other)
+    );
+    open(first);
+    deliver(first, requestOf(1, { procedure: other }));
+    await sleep(0);
+
+    expect(sent).toEqual([]);
+    expect(reportedOf(errors)).toEqual([['this handler breaks, on purpose', first]]);
+    expect(metricsRegistry.exposition().text).toContain(
+      'bead_server_call_duration_seconds_bucket{service="2",procedure="other",type="request",le="0.0"} 1\n'
+    );
+    expect(countedOf(metricsRegistry)).toEqual([
+      answered('duration_seconds_count{} 1'),
+      answered('handled_total{outcome="error"} 1'),
+      answered('started_total{} 1'),
+    ]);
+  });
+
+  test('drops each subscription a close or its disposal ends with no code, and none its client cancels', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { close, deliver, open, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    const droppedOf = () => {
+      return countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_subscriptions_dropped_total');
+      });
+    };
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('ok');
+      }
+    );
+
+    for (const connectionHandle of [first, second, third]) {
+      open(connectionHandle);
+    }
+
+    for (const connectionHandle of [first, second, third]) {
+      deliver(connectionHandle, subscribingOf(1));
+    }
+
+    await sleep(0);
+
+    // a cancel ends a subscription its client asked to end: no drop
+    deliver(third, cancelOf(1));
+    await sleep(0);
+
+    expect(droppedOf()).toEqual([]);
+
+    close(first);
+    await sleep(0);
+
+    expect(droppedOf()).toEqual([
+      'bead_subscriptions_dropped_total{service="2",procedure="news"} 1',
+    ]);
+
+    router[Symbol.dispose]();
+    await sleep(0);
+
+    expect(droppedOf()).toEqual([
+      'bead_subscriptions_dropped_total{service="2",procedure="news"} 2',
+    ]);
+  });
+
+  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made', () => {
+    const { transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(),
+      metricsRegistry: createMetricsRegistry(),
+    });
+    const services = createServiceManager(router);
+    const resolve = (procedure: IProcedure) => {
+      services.getRequestResolver(procedure, { serializer: answering })((_request, response) => {
+        return response(procedure.procedureName);
+      });
+    };
+
+    resolve(echo);
+
+    // the same procedure under its name, at another address
+    expect(() => {
+      resolve({ ...echo, procedureId: 2 });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds "echo" at 2/1, and is given it at 2/2: its name at another address'
+      )
+    );
+
+    // it registered nothing: its address is free, for its own name
+    resolve({ ...echo, procedureId: 2, procedureName: 'twice' });
+
+    expect(() => {
+      return services.getCommand({ ...echo, procedureName: 'clock' }, { serializer: asking });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds 2/1 as "echo", and is given "clock": another name at its address'
+      )
+    );
   });
 });

@@ -54,6 +54,11 @@ export const createWSClient = (options?: IWSClientOptions): WSClient => {
       services: options?.services,
       transport: createWSTransportClient(options?.transport),
     },
-    { credential: options?.credential, credentials: options?.credentials, limits: options?.limits }
+    {
+      credential: options?.credential,
+      credentials: options?.credentials,
+      limits: options?.limits,
+      metricsRegistry: options?.metricsRegistry,
+    }
   );
 };

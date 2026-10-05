@@ -28,12 +28,13 @@ never given to another decision.
 | [0010](0010-a-request-presents-a-credential-of-a-scheme.md)            | A request presents a credential of a scheme, in the header's last block, and runs in the session it resolves to              | accepted |
 | [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)     | Every side takes its time from a clock it is given                                                                           | accepted |
 | [0012](0012-a-listen-held-is-not-silence.md)                           | A listen held is not silence, and a connection without a session is its server's                                             | accepted |
+| [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)        | Every language traces, filters and counts its calls alike, beside the wire, at no cost when off                              | accepted |
 | [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md) | Every place that takes a duration is a row of one file, which pins each outcome and its reason                               | accepted |
 
 ## Writing one
 
-The next decision is 0013, which debugging and metrics hold, and 0015 the one after it. Its file is
-`NNNN-the-decision-in-a-few-words.md`, and its title states the decision, not its subject.
+The next decision is 0015. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+the decision, not its subject.
 
 Nygard's shape, trimmed to what gets read, under a `Status` (accepted, or what replaced it) and a
 `Scope`:

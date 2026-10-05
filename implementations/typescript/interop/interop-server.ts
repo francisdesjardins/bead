@@ -33,7 +33,7 @@ const httpServer = createHTTPServer<string>({
 
 for (const each of [server, httpServer]) {
   each.router.on('error', (error, connectionHandle) => {
-    process.stderr.write(`${connectionHandle}: ${error.message}
+    process.stderr.write(`${connectionHandle ?? 'no connection'}: ${error.message}
 `);
   });
   offerInterop(each);

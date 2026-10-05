@@ -22,6 +22,21 @@ public interface IRouterLike
     Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request);
 
     /// <summary>
+    /// Declares a requester of <paramref name="procedure"/> to the router's registry, as the
+    /// requester is made (spec/debugging.md 7.2), and gives the series each of its calls carries as
+    /// <see cref="RouterRequest.Series"/>; one the registry refuses is an
+    /// <see cref="ArgumentException"/>. A router given no registry gives none.
+    /// </summary>
+    ProcedureSeries? DeclareRequester(Procedure procedure);
+
+    /// <summary>
+    /// What went wrong around the router that no call waits on — a debug listener's error among it —
+    /// told through its error event, in its turn, with <paramref name="connectionHandle"/> on a
+    /// server's: none for what belongs to no connection's step, a notification sent or heard.
+    /// </summary>
+    void Report(Exception reason, string? connectionHandle);
+
+    /// <summary>
     /// Notifies the connections subscribed to a procedure: a server's router does; a client's, which
     /// notifies nobody, throws an <see cref="InvalidOperationException"/>.
     /// </summary>
@@ -439,14 +454,16 @@ public sealed class ServiceManager
 
     /// <summary>
     /// One step of a call — a request made or answered, a command, a notification sent or heard —
-    /// and the exception it failed with, or none. Nothing is built when nobody hears it.
+    /// and the exception it failed with, or none. Nothing is built, and no clock read, while nobody
+    /// hears it. A listener that throws is reported through the router, with the call's connection
+    /// on a server's, and changes nothing of the call.
     /// </summary>
     public event Action<Exception?, DebugEvent>? Debug;
 
     /// <summary>A deprecated procedure was called; its deprecation says what to use instead, when it says.</summary>
     public event Action<Procedure>? Deprecated;
 
-    /// <summary>Whether anyone hears <see cref="Debug"/>: nothing is traced while nobody does.</summary>
+    /// <summary>Whether anyone hears <see cref="Debug"/>: nothing is traced, and nothing built for it, while nobody does.</summary>
     public bool IsDebugging
     {
         get
@@ -482,12 +499,14 @@ public sealed class ServiceManager
                 return same;
             }
 
+            // its subscribing request is a requester of the procedure, declared as it is made
+            var series = _router.DeclareRequester(procedure);
             var notification = new Notification<TRequest, TResponse, TNotification>(
                 procedure,
                 (_router, dependencies),
                 ((payload, call) =>
                 {
-                    return CallOf(payload, (procedure, dependencies.Serializer, call.Options, (DebugType.Request, call.Subscribes)));
+                    return CallOf(payload, (procedure, dependencies.Serializer, call.Options, (DebugType.Request, call.Subscribes, series)));
                 },
                 (failure) =>
                 {
@@ -495,7 +514,11 @@ public sealed class ServiceManager
                 },
                 (error, notification) =>
                 {
-                    Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification, Started = StartedNow() });
+                    // * one check a notification heard while nobody listens
+                    if (IsDebugging)
+                    {
+                        Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification, Started = NotifiedNow() });
+                    }
                 }
             ));
 
@@ -592,10 +615,13 @@ public sealed class ServiceManager
         };
     }
 
-    // the failure a failed call carries, for a trace; none when it carries none
+    // the failure a failed call carries, for a trace: its code, its scope and its detail; none when
+    // it carries none
     private static Failure? TracedFailureOf(Exception reason)
     {
-        return reason is FailureException failure ? failure.Failure : null;
+        return reason is FailureException { Failure: var failure }
+            ? new Failure { Code = failure.Code, Detail = failure.Detail, Scope = failure.Scope }
+            : null;
     }
 
     // now, for a call starting: the instant it is told at, on the wall clock, and the reading its
@@ -605,7 +631,15 @@ public sealed class ServiceManager
         return new Started(_clock.GetUtcNow(), _clock.GetTimestamp());
     }
 
-    // tells Debug of one step of a call; nothing is built when nobody hears it
+    // now, for a notification sent or heard: one step, which takes no duration, read on the wall
+    // clock alone
+    private Started NotifiedNow()
+    {
+        return new Started(_clock.GetUtcNow(), 0);
+    }
+
+    // tells Debug of one step of a call, each listener within a guard: what one throws is reported
+    // through the router, and changes nothing of the call; nothing is built when nobody hears it
     private void Trace(Procedure procedure, DebugStep step)
     {
         if (Debug is not { } debug)
@@ -613,7 +647,7 @@ public sealed class ServiceManager
             return;
         }
 
-        debug(step.Error, new DebugEvent
+        var debugEvent = new DebugEvent
         {
             Direction = step.Direction,
             Duration = step.IsAnswered ? WholeMillisecondsOf(_clock.GetElapsedTime(step.Started.Timestamp)) : null,
@@ -626,7 +660,19 @@ public sealed class ServiceManager
             StartedAt = step.Started.Instant,
             Tx = step.Tx,
             Type = step.Type,
-        });
+        };
+
+        foreach (var listener in debug.GetInvocationList())
+        {
+            try
+            {
+                ((Action<Exception?, DebugEvent>)listener)(step.Error, debugEvent);
+            }
+            catch (Exception reason)
+            {
+                _router.Report(reason, step.ConnectionHandle);
+            }
+        }
     }
 
     // a time in whole milliseconds, a fraction dropped
@@ -643,9 +689,12 @@ public sealed class ServiceManager
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(made.Dependencies);
 
+        // declared as it is made (spec/debugging.md 7.2): each of its calls carries its series
+        var series = _router.DeclareRequester(procedure);
+
         async Task<TResponse> Called(TRequest payload, RequestOptions? options)
         {
-            return (await CallOf(payload, (procedure, made.Dependencies.Serializer, options, (made.Type, null)))).Response;
+            return (await CallOf(payload, (procedure, made.Dependencies.Serializer, options, (made.Type, null, series)))).Response;
         }
 
         return (payload) =>
@@ -731,21 +780,36 @@ public sealed class ServiceManager
     // deprecation
     private async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
         TRequest payload,
-        (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes) Made) call)
+        (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes, ProcedureSeries? Series) Made) call)
     {
-        var (procedure, serializer, given, (type, subscribes)) = call;
+        var (procedure, serializer, given, (type, subscribes, series)) = call;
         var options = OptionsOf(given);
 
-        // a credential stays out of what a side tells: the trace carries none
-        var step = new DebugStep(DebugDirection.Tx, type) { Options = options with { Credential = null }, Started = StartedNow(), Tx = payload };
+        // * one check a call while nobody listens: no clock read, no step, no copy of its options;
+        // a credential stays out of what a side tells, and the trace carries none
+        var step = IsDebugging
+            ? new DebugStep(DebugDirection.Tx, type)
+            {
+                ConnectionHandle = options.ConnectionHandle,
+                Options = options with { Credential = null },
+                Started = StartedNow(),
+                Tx = payload,
+            }
+            : null;
 
-        // what the call fails with once it went out is told as its answer
+        // what the call fails with once it went out is told as its answer, when its start was
         void Failed(Exception reason)
         {
-            Trace(procedure, step with { Direction = DebugDirection.Rx, Error = reason, IsAnswered = true, Rx = TracedFailureOf(reason) });
+            if (step is not null)
+            {
+                Trace(procedure, step with { Direction = DebugDirection.Rx, Error = reason, IsAnswered = true, Rx = TracedFailureOf(reason) });
+            }
         }
 
-        Trace(procedure, step);
+        if (step is not null)
+        {
+            Trace(procedure, step);
+        }
 
         if (procedure.Deprecation is not null)
         {
@@ -757,7 +821,7 @@ public sealed class ServiceManager
 
         try
         {
-            result = await _router.Request(encoded, new RouterRequest(procedure, options) { Subscribes = subscribes });
+            result = await _router.Request(encoded, new RouterRequest(procedure, options) { Series = series, Subscribes = subscribes });
         }
         catch (Exception reason)
         {
@@ -785,14 +849,19 @@ public sealed class ServiceManager
             throw;
         }
 
-        Trace(procedure, step with { Direction = DebugDirection.Rx, IsAnswered = true, Rx = response });
+        if (step is not null)
+        {
+            Trace(procedure, step with { Direction = DebugDirection.Rx, IsAnswered = true, Rx = response });
+        }
 
         return (result.Header.CallId, response);
     }
 
-    // one step of a call, as Trace tells it
+    // one step of a call, as Trace tells it, and the connection a listener's error is reported with
     private sealed record DebugStep(DebugDirection Direction, DebugType Type)
     {
+        public string? ConnectionHandle { get; init; }
+
         public Exception? Error { get; init; }
 
         public bool IsAnswered { get; init; }
@@ -862,9 +931,15 @@ public sealed class ServiceManager
                     return connectionHandle != exclude && (filter is null || filter(connectionHandle, identifier));
                 };
 
-            var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.StartedNow(), Tx = notification };
+            // * one check a notification sent while nobody listens: no clock read, no step
+            var step = manager.IsDebugging
+                ? new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.NotifiedNow(), Tx = notification }
+                : null;
 
-            manager.Trace(Procedure, step);
+            if (step is not null)
+            {
+                manager.Trace(Procedure, step);
+            }
 
             // what keeps it from going out is the router's to report, and the trace's to tell, at the
             // start it was sent with: notifying never fails its caller
@@ -874,7 +949,10 @@ public sealed class ServiceManager
             }
             catch (Exception reason)
             {
-                manager.Trace(Procedure, step with { Error = reason });
+                if (step is not null)
+                {
+                    manager.Trace(Procedure, step with { Error = reason });
+                }
             }
         }
     }
@@ -909,8 +987,9 @@ public sealed class ServiceManager
         {
             ArgumentNullException.ThrowIfNull(props);
 
-            // the call starts as it arrives: its admission and its decoding count in its duration
-            var started = manager.StartedNow();
+            // * the call starts as it arrives, its admission and its decoding counted in its duration,
+            // for a listener: one check while nobody listens, and no clock read
+            Started? started = manager.IsDebugging ? manager.StartedNow() : null;
             var target = new AnswerTarget(props.ConnectionHandle, props.Header);
             TRequest payload;
 
@@ -950,7 +1029,10 @@ public sealed class ServiceManager
                 return;
             }
 
-            manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { Rx = payload, Started = started });
+            if (started is { } at)
+            {
+                manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { ConnectionHandle = props.ConnectionHandle, Rx = payload, Started = at });
+            }
 
             var response = new Response(this, (target, payload, started));
             var request = new RequestProps<TRequest>
@@ -1029,7 +1111,7 @@ public sealed class ServiceManager
                 nameof(failure));
         }
 
-        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started Started) answering) : INotificationResponse<TResponse>
+        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started? Started) answering) : INotificationResponse<TResponse>
         {
             public bool IsAnswered { get; set; }
 
@@ -1084,7 +1166,19 @@ public sealed class ServiceManager
                 var answer = answerOf();
 
                 IsAnswered = true;
-                resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type) { IsAnswered = true, Rx = answering.Request, Started = answering.Started, Tx = answered });
+
+                // traced once its request was, to whoever listens
+                if (answering.Started is { } started)
+                {
+                    resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type)
+                    {
+                        ConnectionHandle = Target.ConnectionHandle,
+                        IsAnswered = true,
+                        Rx = answering.Request,
+                        Started = started,
+                        Tx = answered,
+                    });
+                }
 
                 try
                 {

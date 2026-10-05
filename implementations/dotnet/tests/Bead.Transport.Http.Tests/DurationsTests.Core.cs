@@ -592,6 +592,15 @@ public sealed partial class DurationsTests
             return Task.FromResult(new RouterResult(new ResultHeader { CallId = 1 }, payload));
         }
 
+        public ProcedureSeries? DeclareRequester(Procedure procedure)
+        {
+            return null;
+        }
+
+        public void Report(Exception reason, string? connectionHandle)
+        {
+        }
+
         public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
         {
             return Task.CompletedTask;
@@ -647,7 +656,7 @@ public sealed partial class DurationsTests
 
         public List<Exception> Reports { get; } = [];
 
-        public void Report(Exception reason, string connectionHandle)
+        public void Report(Exception reason, string? connectionHandle)
         {
             Reports.Add(reason);
         }

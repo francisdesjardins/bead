@@ -925,7 +925,7 @@ test.describe('createServer', () => {
       connectionInactivityTimeout: 30,
       sessionInactivityTimeout: Infinity,
     });
-    const errors: [Error, string][] = [];
+    const errors: [Error, string | undefined][] = [];
 
     await using server = sessionServer;
 

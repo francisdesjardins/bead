@@ -17,7 +17,6 @@ import type { IClient } from '../src/client/types';
 import type { IWorkerLike } from '../src/transport/client/worker-transport-client';
 import type { IRouterDebugInfo } from '../src/router/client/types';
 import { EnvelopeKind } from '../src/router/shared/constants';
-import type { IDurationSummary } from '../src/router/shared/debug-statistics';
 import type { INotificationRegistration, IReceivedFailure } from '../src/router/shared/types';
 import type { IHealth, ServerGauges } from '../src/server/health';
 import {
@@ -31,6 +30,7 @@ import {
   type Role,
 } from './procedures';
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
+import type { IAnswered } from './offer';
 import { createQuietCalls, watchDebug } from './debug';
 
 // interfaces
@@ -44,7 +44,7 @@ interface IIdentity {
 
 /** What the `stats` procedure answers, read. */
 interface IServerStats {
-  durations: IDurationSummary;
+  answered: IAnswered;
   gauges: ServerGauges;
   health: IHealth;
 }
@@ -436,9 +436,9 @@ const readChanged = mergedOf(async () => {
 // the calls that read the server's statistics, which the logs leave out
 const isQuiet = createQuietCalls([CALLS.stats.procedure]);
 
-/** What the server's statistics say, shown: its verdict, its answers' durations, what each layer holds. */
+/** What the server's statistics say, shown: its verdict, the calls it answered, what each layer holds. */
 const showStats = (stats: IServerStats): void => {
-  const { count, maximum, median } = stats.durations;
+  const { count, mean, median } = stats.answered;
   const failing = Object.entries(stats.health.checks)
     .filter(([, [check]]) => {
       return check !== undefined && check.status !== 'pass';
@@ -452,7 +452,7 @@ const showStats = (stats: IServerStats): void => {
   shown.durations.textContent =
     count === 0
       ? 'none yet'
-      : `${numbers.format(count)} calls, median ${numbers.format(median ?? 0)} ms, slowest ${numbers.format(maximum ?? 0)} ms`;
+      : `${numbers.format(count)} calls, mean ${numbers.format(mean ?? 0)} ms, median about ${numbers.format(median ?? 0)} ms`;
   shown.gauges.replaceChildren(
     ...Object.entries(stats.gauges).map(([layer, { anomalies, ceilings, counts, orphans }]) => {
       const line = document.createElement('li');

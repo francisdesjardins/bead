@@ -24,6 +24,9 @@ internal sealed class PendingRequest
 
     public Action<bool>? OnSent { get; init; }
 
+    /// <summary>How it was counted as it started; none for a router given no registry.</summary>
+    public StartedCall? Counted { get; init; }
+
     /// <summary>What its transport carries beside its request, a call's presenting ELSEWHERE; none for any other.</summary>
     public string? Carried { get; init; }
 
@@ -48,14 +51,22 @@ internal sealed class PendingRequest
         }
     }
 
+    // * the call ends as its router settles it (spec/debugging.md 9.1), counted once, whichever
+    // way settles it first
     public void Resolve(RouterResult result)
     {
-        _completion.TrySetResult(result);
+        if (_completion.TrySetResult(result))
+        {
+            Counted?.End((CallOutcome.Result, null));
+        }
     }
 
     public void Reject(Exception reason)
     {
-        _completion.TrySetException(reason);
+        if (_completion.TrySetException(reason))
+        {
+            Counted?.End(StartedCall.EndingOf(reason));
+        }
     }
 }
 
