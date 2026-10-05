@@ -113,20 +113,7 @@
           "const": true
         },
         "options": { "$ref": "#/$defs/options" },
-        "differs": {
-          "description": "The rows of docs/support.md a case crosses, each naming the case, and the language each excuses from it.",
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["row", "language"],
-            "additionalProperties": false,
-            "properties": {
-              "row": { "type": "string", "minLength": 1 },
-              "language": { "enum": ["TypeScript", "C#"] }
-            }
-          }
-        },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" },
         "steps": {
           "type": "array",
           "minItems": 1,

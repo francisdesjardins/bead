@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
 import type { AddressInfo } from 'node:net';
 import { WebSocket as WsWebSocket, WebSocketServer, type ServerOptions } from 'ws';
-import { LONGEST_TIMER, type TimeoutId } from '../clock';
+import { type IClock, LONGEST_TIMER, type TimeoutId } from '../clock';
 
 /**
  * What the client and server suites share: a loopback host, raw `ws` servers with a clean stop, and
@@ -109,13 +109,29 @@ const armedDelayOf = (delay: number | undefined): number => {
  *
  * It refuses what Bead never arms, with an `Error` that names it: a timer or a period that is not a
  * finite number of milliseconds from 1 to {@link LONGEST_TIMER}, and a `tickAsync` while another is
- * under way, which would move the clock back as the first ends. Each timer armed on it is kept in
- * `armed`, and each handle cleared in `cleared`, for the test to read what Bead means to fire.
+ * under way, which would move the clock back. It keeps each timer armed in `armed`, each handle
+ * cleared in `cleared`, and counts each reading Bead takes, wall and monotonic, in `readings`.
  */
 export const createTestClock = (now?: number) => {
   const clock = createClock(now);
   const armed: IArmedTimer[] = [];
   const cleared: unknown[] = [];
+  const readings = { monotonic: 0, wall: 0 };
+  // the clock as Bead reads it, its two readings counted
+  const read: Pick<IClock, 'Date' | 'performance'> = clock;
+  const wallNow = read.Date.now.bind(read.Date);
+  const monotonicNow = read.performance.now.bind(read.performance);
+
+  read.Date.now = () => {
+    readings.wall += 1;
+
+    return wallNow();
+  };
+  read.performance.now = () => {
+    readings.monotonic += 1;
+
+    return monotonicNow();
+  };
   const {
     clearInterval: clearEvery,
     clearTimeout: clear,
@@ -172,7 +188,7 @@ export const createTestClock = (now?: number) => {
     clearEvery(handle);
   };
 
-  return Object.assign(clock, { armed, cleared });
+  return Object.assign(clock, { armed, cleared, readings });
 };
 
 export type TestClock = ReturnType<typeof createTestClock>;
@@ -280,72 +296,4 @@ export const tcpSocketsClosed = async () => {
       }).length;
     })
     .toBe(0);
-};
-
-/**
- * What a place makes of a duration it is given: holds it as a number of milliseconds, takes it as at
- * once — a delay's 0 — or as never, or refuses it.
- */
-export type DurationOutcome = 'at once' | 'never' | 'refused' | 'taken';
-
-/**
- * A duration a place is given, what the place makes of it, and what it holds — the milliseconds its
- * timer is armed for, 0 at once, `Infinity` never — or, refused, the exact refusal.
- */
-export interface IDurationRow {
-  given: number;
-  held: number | undefined;
-  outcome: DurationOutcome;
-  refusal: string | undefined;
-}
-
-// the durations every place is held to (spec 1.4), the C# side's `Durations` as numbers: NaN
-// besides, which a TimeSpan cannot hold, and -1 aside, which the C# side reads as never; 0.41 s and
-// 2.01 s as a user writes them in milliseconds, the C# side's `TimeSpan.FromSeconds` twins
-const DURATIONS = Object.freeze([
-  { given: 0, held: 0, outcome: 'zero' },
-  { given: 0.5, held: undefined, outcome: 'refused' },
-  { given: 1, held: 1, outcome: 'taken' },
-  { given: 1.4, held: 1, outcome: 'taken' },
-  { given: 1.5, held: 2, outcome: 'taken' },
-  { given: 0.41 * 1000, held: 410, outcome: 'taken' },
-  { given: 2.01 * 1000, held: 2010, outcome: 'taken' },
-  { given: 2_147_483_647, held: 2_147_483_647, outcome: 'taken' },
-  { given: 2_147_483_647.5, held: undefined, outcome: 'refused' },
-  { given: Infinity, held: Infinity, outcome: 'never' },
-  { given: -2, held: undefined, outcome: 'refused' },
-  { given: Number.NaN, held: undefined, outcome: 'refused' },
-] as const);
-
-/**
- * The durations as the place that names its duration `name` meets them: from 1 to the ceiling held,
- * rounded to the nearest whole millisecond, a half up; under a millisecond, a negative, `NaN` and
- * past the ceiling refused; 0 and never as `zero` and `never` say. Each refusal is the one message
- * every place words alike, which offers 0 for at once where 0 is, and `Infinity` for never where
- * never is.
- */
-export const durationsOf = (
-  name: string,
-  { never, zero }: { never: 'never' | 'refused'; zero: 'at once' | 'refused' }
-): IDurationRow[] => {
-  const offered = `${zero === 'refused' ? '' : '0 for at once, or '}a number of milliseconds from 1 to 2147483647${never === 'refused' ? '' : ', or Infinity for never'}`;
-
-  const metOf = (outcome: (typeof DURATIONS)[number]['outcome']): DurationOutcome => {
-    if (outcome === 'zero') {
-      return zero;
-    }
-
-    return outcome === 'never' ? never : outcome;
-  };
-
-  return DURATIONS.map(({ given, held, outcome }) => {
-    const met = metOf(outcome);
-
-    return {
-      given,
-      held: met === 'refused' ? undefined : held,
-      outcome: met,
-      refusal: met === 'refused' ? `${name} is ${offered}, not ${String(given)}` : undefined,
-    };
-  });
 };

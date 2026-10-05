@@ -119,6 +119,12 @@ public sealed record RouterServerOptions
     public Credentials? Credentials { get; init; }
 
     /// <summary>
+    /// What it counts its calls answered, its commands and its notifications sent into, at its gates
+    /// (spec/debugging.md 7.1); none counts nothing.
+    /// </summary>
+    public MetricsRegistry? MetricsRegistry { get; init; }
+
+    /// <summary>
     /// The credential schemes it takes besides <see cref="CredentialScheme.Opaque"/> and those its
     /// credentials give, which <see cref="SessionOf"/> resolves: a test's own.
     /// </summary>
@@ -156,6 +162,11 @@ public sealed record RouterServerOptions
 public sealed class RouterServer : IRouterLike, IDisposable
 {
     private readonly RouterCore _core;
+
+    // what it counts its calls and its notifications through, attached to the registry it was
+    // given; none when it was given none
+    private readonly RouterSeries? _metrics;
+
     private readonly HashSet<string> _connections = [];
     private readonly NotificationManager _notifications;
     private readonly SubscriptionPlaces _places;
@@ -199,6 +210,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             });
         _sessionTokenOf = options?.SessionTokenOf;
         _sessionOf = options?.SessionOf;
+        _metrics = options?.MetricsRegistry?.Give(RouterSide.Server);
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions
@@ -207,6 +219,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 ResolverScheduler = options?.ResolverScheduler,
                 Scheduler = options?.Scheduler,
                 Clock = clock,
+                Metrics = _metrics,
             });
 
         // * what a key set's deadline does goes on the router's scheduler, as its other timers' work
@@ -227,18 +240,26 @@ public sealed class RouterServer : IRouterLike, IDisposable
             options?.Relay);
         _notifications.OnRegister = OnSubscribed;
         _notifications.OnRemove = OnUnsubscribed;
+        _notifications.SeriesOf = _core.NotifyingSeriesOf;
         transport.Connection += OnConnection;
         transport.Message += OnMessage;
         transport.Close += OnClose;
     }
 
-    /// <summary>What went wrong that no call waits on, with the connection it came on.</summary>
-    public event Action<Exception, string>? Error;
+    /// <summary>
+    /// What went wrong that no call waits on, with the connection it came on; none for what belongs
+    /// to no connection's step — a debug listener's error as a notification is traced, say.
+    /// </summary>
+    public event Action<Exception, string?>? Error;
 
     /// <summary>What the router did: sent a request, took a response, sent a notification.</summary>
     public event Action<RouterActivity, string>? Activity;
 
-    /// <summary>Each envelope, out or in, its credential left out; nothing is built while none listens.</summary>
+    /// <summary>
+    /// Each envelope, out or in, on its connection, its credential's scheme alone in place of its
+    /// credential; nothing is built while none listens. A listener that throws is reported through
+    /// <see cref="Error"/>, with that connection, and changes nothing.
+    /// </summary>
     public event Action<DebugDirection, TracedEnvelope>? Debug;
 
     /// <inheritdoc/>
@@ -285,8 +306,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     /// <summary>
     /// A request of the router's own — a command — to the connection its options name, on an even
-    /// call id. One that names none is an <see cref="ArgumentException"/>; one that names a
-    /// connection not open, a <see cref="DisconnectException"/>.
+    /// call id. One that names none is an <see cref="ArgumentException"/>, refused before it starts;
+    /// one that names a connection not open, a <see cref="DisconnectException"/>, as it starts.
     /// </summary>
     public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
     {
@@ -300,17 +321,24 @@ public sealed class RouterServer : IRouterLike, IDisposable
         var connectionHandle = request.Options.ConnectionHandle
             ?? throw new ArgumentException("a server request names the connection it goes to", nameof(request));
 
-        return _core.Loop.Run(() =>
-        {
-            if (!_connections.Contains(connectionHandle))
+        return _core.Request(
+            payload,
+            new CoreRequest
             {
-                return Task.FromException<RouterResult>(new DisconnectException($"{connectionHandle} is not an open connection"));
-            }
+                ConnectionHandle = connectionHandle,
+                OnSent = request.OnSent,
+                Options = request.Options,
+                Procedure = request.Procedure,
+                Series = request.Series,
+            });
+    }
 
-            return _core.Request(
-                payload,
-                new CoreRequest { ConnectionHandle = connectionHandle, Procedure = request.Procedure, Options = request.Options, OnSent = request.OnSent });
-        });
+    /// <inheritdoc/>
+    public ProcedureSeries? DeclareRequester(Procedure procedure)
+    {
+        ArgumentNullException.ThrowIfNull(procedure);
+
+        return _metrics is { } metrics ? new ProcedureSeries(metrics.DeclareRequester(procedure)) : null;
     }
 
     /// <summary>
@@ -333,17 +361,17 @@ public sealed class RouterServer : IRouterLike, IDisposable
             var sending = targets.Select((target) =>
             {
                 var call = new CallAddress(target.CallId, target.ConnectionHandle);
-                var pacing = _notifications.PacingOf(target.CallId, target.ConnectionHandle);
+                var (pacing, series) = _notifications.TargetOf(target.CallId, target.ConnectionHandle);
 
                 if (pacing is null)
                 {
-                    return SendNotification(payload, call);
+                    return SendNotification(payload, (call, series));
                 }
 
                 return pacing.Offer(payload, request.Key) switch
                 {
-                    PacingOutcome.Send => SendNotification(payload, call),
-                    PacingOutcome.Exceeded => Exceed(call, pacing),
+                    PacingOutcome.Send => SendNotification(payload, (call, series)),
+                    PacingOutcome.Exceeded => Exceed(call, (pacing, series)),
                     _ => Task.CompletedTask,
                 };
             }).ToList();
@@ -480,9 +508,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
     {
         return _core.Loop.Run(() =>
         {
-            return Task.WhenAll(_places.Drop(connectionHandle).Select((callId) =>
+            return Task.WhenAll(_places.Drop(connectionHandle).Select((dropped) =>
             {
-                return EndSubscription(new CallAddress(callId, connectionHandle), failure);
+                return EndSubscription((new CallAddress(dropped.CallId, connectionHandle), _core.NotifyingSeriesOf(dropped.Procedure)), failure);
             }).ToList());
         });
     }
@@ -532,8 +560,12 @@ public sealed class RouterServer : IRouterLike, IDisposable
         });
     }
 
-    /// <summary>What went wrong around the router that no call waits on: told to its error event, in its turn.</summary>
-    internal void Report(Exception reason, string connectionHandle)
+    /// <summary>
+    /// What went wrong around the router that no call waits on — a debug listener's error among it —
+    /// told to its error event with the connection it came with, none for what belongs to no
+    /// connection's step, in its turn.
+    /// </summary>
+    public void Report(Exception reason, string? connectionHandle)
     {
         _core.Post(() =>
         {
@@ -561,6 +593,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         Transport.Close -= OnClose;
         _core.Post(() =>
         {
+            DropEstablished(null);
             _connections.Clear();
             _places.Clear();
             _notifications.CleanAll();
@@ -708,9 +741,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
         var failure = Failure.OfProtocol(ProtocolCode.SessionRequired, "its credential's session ended");
 
-        return Task.WhenAll(_places.Drop(place).Select((callId) =>
+        return Task.WhenAll(_places.Drop(place).Select((dropped) =>
         {
-            return EndSubscription(new CallAddress(callId, place.ConnectionHandle), failure);
+            return EndSubscription((new CallAddress(dropped.CallId, place.ConnectionHandle), _core.NotifyingSeriesOf(dropped.Procedure)), failure);
         }).ToList());
     }
 
@@ -727,13 +760,28 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
     }
 
-    // one notification to one subscription; a connection that cannot take it keeps none of the
-    // others from getting theirs
-    private async Task SendNotification(ReadOnlyMemory<byte> payload, CallAddress call)
+    // the subscriptions a close ends — a connection's, or every one — each dropped with no code, at
+    // the side that notifies (spec/debugging.md 10.3)
+    private void DropEstablished(string? connectionHandle)
     {
+        foreach (var (_, procedure) in _places.Established(connectionHandle))
+        {
+            _core.NotifyingSeriesOf(procedure)?.Dropped.Drop(null);
+        }
+    }
+
+    // one notification to one subscription, counted into its series as it is handed to its
+    // transport or as it cannot be; a connection that cannot take it keeps none of the others from
+    // getting theirs
+    private async Task SendNotification(ReadOnlyMemory<byte> payload, (CallAddress Call, NotifyingSeries? Series) to)
+    {
+        var (call, series) = to;
+
         try
         {
-            await _core.Send(new Envelope { Header = new NotificationHeader { CallId = call.CallId }, Payload = payload }, call.ConnectionHandle);
+            await _core.SendNotification(
+                new Envelope { Header = new NotificationHeader { CallId = call.CallId }, Payload = payload },
+                (call.ConnectionHandle, series));
             Activity?.Invoke(RouterActivity.Notification, call.ConnectionHandle);
         }
         catch (Exception reason)
@@ -743,9 +791,13 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     // ends an established subscription with `failure` on its call id, forgotten as the failure goes,
-    // so no notification follows it
-    private async Task EndSubscription(CallAddress call, Failure failure)
+    // so no notification follows it: dropped, by the failure's code, at the side that notifies
+    private async Task EndSubscription((CallAddress Call, NotifyingSeries? Series) subscription, Failure failure)
     {
+        var call = subscription.Call;
+
+        subscription.Series?.Dropped.Drop(failure);
+
         var sending = _core.Send(
             new Envelope { Header = new FailureHeader { CallId = call.CallId }, Failure = failure },
             call.ConnectionHandle);
@@ -764,15 +816,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     // a subscription that queued past its bounds ends: in flight, its call is answered with the
     // failure, which takes away what it subscribed; established, the failure follows its answer
-    private async Task Exceed(CallAddress call, NotificationPacing pacing)
+    private async Task Exceed(CallAddress call, (NotificationPacing Pacing, NotifyingSeries? Series) target)
     {
         var failure = Failure.OfProtocol(
             ProtocolCode.CapacityExceeded,
             $"the notifications queued for call {call.CallId} went past their bounds");
 
-        if (!_requests.TryGetValue(pacing, out var request) || !_core.IsAnswering(new AnswerTarget(call.ConnectionHandle, request)))
+        if (!_requests.TryGetValue(target.Pacing, out var request) || !_core.IsAnswering(new AnswerTarget(call.ConnectionHandle, request)))
         {
-            await EndSubscription(call, failure);
+            await EndSubscription((call, target.Series), failure);
 
             return;
         }
@@ -824,6 +876,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
             // its destinations stay unreachable, whoever takes its handle next
             _relay.CloseConnection(connectionHandle);
+            DropEstablished(connectionHandle);
             _places.Clear(connectionHandle);
             _notifications.Clean(connectionHandle);
             Forget(connectionHandle);
@@ -854,6 +907,20 @@ public sealed class RouterServer : IRouterLike, IDisposable
         public void Activity(RouterActivity activity, string connectionHandle)
         {
             server.Activity?.Invoke(activity, connectionHandle);
+        }
+
+        public bool IsTracing
+        {
+            get
+            {
+                return server.Debug is not null;
+            }
+        }
+
+        // a command to a connection not open fails as one whose connection closes, once it started
+        public bool IsOpen(string connectionHandle)
+        {
+            return server._connections.Contains(connectionHandle);
         }
 
         // a request of the peer's on a subscription's call id would answer that subscription
@@ -894,11 +961,12 @@ public sealed class RouterServer : IRouterLike, IDisposable
         // its end, and is dropped in silence
         public void OnSubscriptionCredit(CreditHeader header, string connectionHandle)
         {
-            var released = server._notifications.PacingOf(header.CallId, connectionHandle)?.Credit(header.CreditEnd) ?? [];
+            var (pacing, series) = server._notifications.TargetOf(header.CallId, connectionHandle);
+            var released = pacing?.Credit(header.CreditEnd) ?? [];
 
             foreach (var payload in released)
             {
-                _ = server.SendNotification(payload, new CallAddress(header.CallId, connectionHandle));
+                _ = server.SendNotification(payload, (new CallAddress(header.CallId, connectionHandle), series));
             }
         }
 
@@ -923,7 +991,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return server._relay.HandlerOf(header);
         }
 
-        public void Report(Exception reason, string connectionHandle)
+        public void Report(Exception reason, string? connectionHandle)
         {
             server.Error?.Invoke(reason, connectionHandle);
         }
@@ -973,9 +1041,26 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return server.Transport.Send(message, connectionHandle);
         }
 
+        // each listener within a guard: what one throws is reported with its connection, and changes
+        // nothing
         public void Trace(DebugDirection direction, TracedEnvelope envelope)
         {
-            server.Debug?.Invoke(direction, envelope);
+            if (server.Debug is not { } debug)
+            {
+                return;
+            }
+
+            foreach (var listener in debug.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<DebugDirection, TracedEnvelope>)listener)(direction, envelope);
+                }
+                catch (Exception reason)
+                {
+                    server.Error?.Invoke(reason, envelope.ConnectionHandle);
+                }
+            }
         }
     }
 

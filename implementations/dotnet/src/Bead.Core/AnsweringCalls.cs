@@ -25,6 +25,9 @@ internal sealed class AnsweringCall
 
     /// <summary>What hears, on the router's scheduler, that the call ended before its answer went: a result going as a transfer.</summary>
     public Action<Exception>? OnAbort { get; set; }
+
+    /// <summary>How it was counted as it started; none once it ended, and for a router given no registry.</summary>
+    public StartedCall? Counted { get; set; }
 }
 
 /// <summary>

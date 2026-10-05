@@ -7,6 +7,7 @@ import type {
   ITransportMessage,
 } from '../../transport/shared/types';
 import type { CredentialScheme } from '../shared/constants';
+import type { IMetricsRegistry, IProcedureSeries } from '../shared/metrics-registry';
 import type {
   DebugDirection,
   DefaultCredential,
@@ -103,6 +104,11 @@ export interface IRouterClient<
       onSent?: ((isHanded: boolean) => void) | undefined;
       options: IResolvedRequestOptions;
       procedure: IProcedure;
+      /**
+       * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s
+       * when none is given.
+       */
+      series?: IProcedureSeries | undefined;
       subscribes?: INotificationLike | undefined;
     }
   ): Promise<IRouterResult>;
@@ -139,6 +145,12 @@ export interface IRouterClientOptions {
    * They must hold together, or the router is a {@link ProgrammerError}.
    */
   limits?: RouterLimitsOptions | undefined;
+  /**
+   * The registry it counts its calls and its notifications into, its `_OTHER` series made as it is
+   * given it: each resolver and notification registered, and each requester made, declared to it.
+   * None counts nothing, and costs nothing.
+   */
+  metricsRegistry?: IMetricsRegistry | undefined;
 }
 
 /** The part of a transport client this router uses — met by any of this package's. */
@@ -166,8 +178,9 @@ export interface IRouterClientTransportLike {
   send(message: ITransportMessage): Promise<void>;
 }
 
-/** An envelope as the router sent or took it. */
+/** An envelope as the router sent or took it, and its one peer, the server. */
 export interface IRouterDebugInfo {
+  connectionHandle: RouterClientConnectionHandle;
   direction: DebugDirection;
   /** A copy, its credential reported by its scheme alone. */
   header: RedactedHeader;
@@ -189,7 +202,10 @@ export type RouterClientEventMap = {
    * scheme alone, never its bytes, so the application renews it.
    */
   credentialWithdrawn: [credentialScheme: CredentialScheme];
-  /** Each envelope, out or in; built only while someone listens. */
+  /**
+   * Each envelope, out or in; built only while someone listens. What a listener throws is reported
+   * to `error`, and changes nothing of the envelope.
+   */
   debug: [info: IRouterDebugInfo];
   /** What went wrong with an envelope no call was waiting on, or in a resolver or a notification. */
   error: [error: Error];

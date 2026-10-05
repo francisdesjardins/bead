@@ -48,7 +48,7 @@ public readonly record struct Credential
 
     /// <summary>
     /// A JWT's token, for <see cref="CredentialScheme.Jwt"/>, a character a byte; none for any other
-    /// scheme.
+    /// scheme, and in a header traced or thrown, which keeps a credential's scheme alone.
     /// </summary>
     public string? Token { get; private init; }
 
@@ -114,6 +114,15 @@ public readonly record struct Credential
         }
 
         return new Credential { Scheme = scheme, Bytes = bytes.ToArray() };
+    }
+
+    /// <summary>
+    /// A credential's scheme alone, its bytes and its token left out: what a header traced or thrown
+    /// carries in place of its credential.
+    /// </summary>
+    internal static Credential SchemeOf(CredentialScheme scheme)
+    {
+        return new Credential { Scheme = scheme };
     }
 
     /// <summary>The credential of <paramref name="token"/>: <see cref="CredentialScheme.Opaque"/>.</summary>

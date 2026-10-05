@@ -83,8 +83,8 @@ const createNotified = (
         return Promise.resolve();
       },
     },
-    trace: (step) => {
-      asked.traced.push(step);
+    trace: (error, rx) => {
+      asked.traced.push({ error, rx });
     },
   });
 
@@ -111,7 +111,7 @@ test.describe('createNotification', () => {
     expect(held.has(notification)).toBe(true);
     expect(asked.requests).toEqual(['first for news']);
     expect(heard).toEqual(['a flash', 'b flash']);
-    expect(asked.traced).toEqual([{ direction: 'rx', rx: 'flash' }]);
+    expect(asked.traced).toEqual([{ error: undefined, rx: 'flash' }]);
   });
 
   test('the last callback out unsubscribes, then unregisters the notification, with no cancel once acknowledged', async () => {
@@ -263,8 +263,8 @@ test.describe('createNotification', () => {
     }).toThrow(FailureError);
     expect(asked.traced).toEqual([
       {
-        direction: 'rx',
         error: expect.objectContaining({ code: ProtocolCode.PAYLOAD_UNDECODABLE }),
+        rx: undefined,
       },
     ]);
   });

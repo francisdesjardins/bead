@@ -10,10 +10,17 @@ writes every `headers` and `envelopes` vector back to its bytes. The why of each
 decisions: [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md) for the
 envelope, [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.md) for pacing.
 
-**Version: 0.1.0**, of layout `0xA1`. Each conformance file repeats it as its `specVersion`, and
-follows its schema in [`schemas/`](schemas/). **Status: every section is written.**
+**Version: 0.1.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+`specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
+written.**
+
+What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
+in its companion [`debugging.md`](debugging.md): a side conforms to the wire by sections 1 to 15,
+whether it builds those or leaves them out.
 
 ## 1. Conventions
+
+_Durations: `spec/durations.json`._
 
 1.1. Every integer is unsigned, in network byte order: its most significant byte first.
 
@@ -28,8 +35,10 @@ message.
 limit, a session's or a transport's bound, a delay — is held as a whole number of milliseconds from
 1 to 2³¹ − 1, as every platform's timers hold one alike, a fraction rounded to the nearest, a half
 up. A side MUST refuse one that, as given, is under a millisecond or past 2³¹ − 1, a delay's 0
-aside. A timeout or a bound is never 0, and may be without end but where its place says it may not;
-one not given is its default. A delay takes 0 as at once.
+aside, and a value that is no number: NaN, or a string or a boolean, as a limit read from JSON may
+be. A timeout or a bound is never 0, and may be without end but where its place says it may not;
+one not given is its default. A delay is a wait before an act — a pause, a reconnection's wait, the
+`wait` a client's listens ask (section 15.10) — is never without end, and takes 0 as at once.
 
 ## 2. The prefix
 
@@ -1034,9 +1043,9 @@ request of the server's fails before it goes, and a relay passes it no request (
 brings back all that is left in a batch of type `application/prs.bead-batch`: each envelope after
 its length on 4 bytes, big-endian, the number of the first in `bead-sequence`, the others following
 one by one. With nothing left, the server holds the listen up to `wait` milliseconds — 30 seconds at
-most by default — and ends it 204; a second listen takes the first's place. A `wait` is a peer's,
-not an application's (section 1.4): fifteen digits at most, a `wait` left out being 0, which answers
-at once, and one past the server's bound held to it. A client reads a batch as it comes, and hears
+most by default — and ends it 204; a second listen takes the first's place. A `wait` the server
+reads is its peer's, not an application's (section 1.4): fifteen digits at most, a `wait` left out
+being 0, which answers at once, and one past the server's bound held to it. A client reads a batch as it comes, and hears
 each envelope as it comes whole; what a listen lost carried past what was heard comes again to the
 next, so nothing is lost and nothing heard twice. An outbox past its bound — two envelopes' worth by
 default — closes its connection, its client having fallen behind. A batch carries no credential
@@ -1046,15 +1055,18 @@ HTTP fails before it goes, `DESTINATION_UNREACHABLE`.
 15.10. A client SHOULD listen from its connect on, asking a `wait` under the server's bound, and
 listen again at once once a listen ends. A listen lost is listened again from where it was: at once,
 then after 1, 2, 4 seconds and on to 30, each wait drawn between half of it and all of it. Its
-inactivity timeout runs from its first loss, on a timer of the client's, never on a reading of its
-wall clock: when it ends, it ends the wait under way, and the listen after it is the last — lost too,
-the client counts the connection lost. A listen heard ends the count.
+inactivity timeout, `inactivityTimeout` (section 15.12), runs from its first loss, on a timer of the
+client's, never on a reading of its wall clock: when it ends, it ends the wait under way, and the
+listen after it is the last — lost too, the client counts the connection lost. A listen heard ends
+the count.
 
 15.11. HTTP carries no transfer: a request's body is in before its answer goes, so no credit could
 come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a payload is what one
 envelope holds.
 
-15.12. A server bounds what its clients hold, and both sides time what is under way, by these names:
+15.12. A server bounds what its clients hold, and times what is under way, by these names; a client
+times its own inactivity by `inactivityTimeout`, its default and whether it may be without end
+alike (section 15.10):
 
 | Bound                          | By default                   | Bounds                                                                            |
 | ------------------------------ | ---------------------------- | --------------------------------------------------------------------------------- |

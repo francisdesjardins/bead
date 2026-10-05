@@ -17,6 +17,12 @@ public sealed record RouterCoreOptions
     public TimeProvider? Clock { get; init; }
 
     /// <summary>
+    /// What it counts its calls and its notifications through, at its gates (spec/debugging.md
+    /// 7.1): its router's, attached to the registry that router was given; none counts nothing.
+    /// </summary>
+    internal RouterSeries? Metrics { get; init; }
+
+    /// <summary>
     /// Where resolvers run, and where a call's signal is cancelled: the thread pool when none. A
     /// test runs them on the router's own scheduler, so it knows when everything settled.
     /// </summary>
@@ -62,7 +68,7 @@ public sealed class RouterCore : IDisposable
     private readonly SendingTransfers _sendings = new();
     private readonly PendingCalls _pendingCalls;
     private readonly AnsweringCalls _answeringCalls;
-    private readonly ConcurrentDictionary<ProcedureAddress, IRequestResolver> _resolvers = new();
+    private readonly ConcurrentDictionary<ProcedureAddress, Registered> _resolvers = new();
     private readonly ConcurrentDictionary<ushort, int> _services = new();
 
     // what each connection was last told of its session: a token, none once told it ended; a
@@ -71,6 +77,9 @@ public sealed class RouterCore : IDisposable
 
     // the handler each request was routed to, by the very header dispatched
     private readonly ConditionalWeakTable<RequestHeader, IRequestHandler> _handlers = [];
+
+    // what it counts through, at its gates: its router's; none when its router was given no registry
+    private readonly RouterSeries? _metrics;
 
     private volatile bool _isDisposed;
 
@@ -86,9 +95,10 @@ public sealed class RouterCore : IDisposable
         Loop = options?.Scheduler ?? new SerialScheduler();
         Loop.OnUnhandled = (exception) =>
         {
-            _port.Report(exception, "");
+            _port.Report(exception, null);
         };
         _resolverScheduler = options?.ResolverScheduler ?? TaskScheduler.Default;
+        _metrics = options?.Metrics;
 
         // a failure's detail fits in an envelope, whatever the limit of a detail says
         _detailBytes = Math.Min(Limits.MaximumDetailBytes, Limits.MaximumEnvelopeBytes - FailureOverheadBytes);
@@ -184,17 +194,17 @@ public sealed class RouterCore : IDisposable
     // helpers
 
     /// <summary>
-    /// A header fit to be traced or thrown: its credential left out, and the scheme it was of; none
-    /// when it carried none.
+    /// A header fit to be traced or thrown: its credential's scheme alone in place of its credential,
+    /// a copy for a header that carries one, the header itself for any other.
     /// </summary>
-    internal static (IEnvelopeHeader Header, CredentialScheme? CredentialScheme) Redact(IEnvelopeHeader header)
+    internal static IEnvelopeHeader Redact(IEnvelopeHeader header)
     {
         return header switch
         {
-            RequestHeader { Credential: { } credential } request => (request with { Credential = null }, credential.Scheme),
-            ResultHeader { Credential: { } credential } result => (result with { Credential = null }, credential.Scheme),
-            FailureHeader { Credential: { } credential } failure => (failure with { Credential = null }, credential.Scheme),
-            _ => (header, null),
+            RequestHeader { Credential: { } credential } request => request with { Credential = Credential.SchemeOf(credential.Scheme) },
+            ResultHeader { Credential: { } credential } result => result with { Credential = Credential.SchemeOf(credential.Scheme) },
+            FailureHeader { Credential: { } credential } failure => failure with { Credential = Credential.SchemeOf(credential.Scheme) },
+            _ => header,
         };
     }
 
@@ -233,8 +243,26 @@ public sealed class RouterCore : IDisposable
     {
         return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, _side))
         {
-            Header = header is null ? null : Redact(header).Header,
+            Header = header is null ? null : Redact(header),
         };
+    }
+
+    // a call counted as it starts, under its series, at this instant
+    private StartedCall StartedOf(CallSeries series)
+    {
+        series.Start();
+
+        return new StartedCall { Clock = _clock, Series = series, Timestamp = _clock.GetTimestamp() };
+    }
+
+    // a call this side answers ends, once, whichever way it ends first
+    private static void EndAnswered(AnsweringCall answering, (CallOutcome Outcome, Failure? Failure) ending)
+    {
+        if (answering.Counted is { } counted)
+        {
+            answering.Counted = null;
+            counted.End(ending);
+        }
     }
 
     // what the core raises itself about an envelope, for the side to hear
@@ -266,15 +294,50 @@ public sealed class RouterCore : IDisposable
     // sends an envelope; `onHandOff` runs once the transport has it, before it settles
     private Task Deliver(Envelope envelope, string connectionHandle, Action? onHandOff = null)
     {
-        return Carrying(envelope, (connectionHandle, null, onHandOff));
+        return Carrying(envelope, (connectionHandle, null, onHandOff, null));
     }
 
     // sends an envelope with what its transport carries beside it — a request's presenting
     // ELSEWHERE — and none for any other; `OnHandOff` runs once the transport has it, before it
-    // settles
-    private async Task Carrying(Envelope envelope, (string ConnectionHandle, string? Carried, Action? OnHandOff) going)
+    // settles. A notification counts into its procedure's series as it is handed off, or as it
+    // cannot be (spec/debugging.md 10.1); one its transport refuses after keeps its count
+    private async Task Carrying(Envelope envelope, (string ConnectionHandle, string? Carried, Action? OnHandOff, NotifyingSeries? Notifying) going)
     {
-        var (connectionHandle, carried, onHandOff) = going;
+        var (connectionHandle, carried, onHandOff, notifying) = going;
+        Task sending;
+        Action restore;
+
+        try
+        {
+            (sending, restore) = HandOver(envelope, (connectionHandle, carried));
+        }
+        catch
+        {
+            notifying?.Failed();
+
+            throw;
+        }
+
+        notifying?.Sent();
+        onHandOff?.Invoke();
+
+        try
+        {
+            await sending;
+        }
+        catch
+        {
+            restore();
+
+            throw;
+        }
+    }
+
+    // hands an envelope to the transport, traced for whoever listens: what the transport settles,
+    // and what undoes its announcement should it not go out
+    private (Task Sending, Action Restore) HandOver(Envelope envelope, (string ConnectionHandle, string? Carried) going)
+    {
+        var (connectionHandle, carried) = going;
 
         // a disposed router is done with its transport: nothing more goes out on it
         if (_isDisposed)
@@ -290,7 +353,6 @@ public sealed class RouterCore : IDisposable
         }
 
         var (announced, restore) = Announce(envelope, connectionHandle);
-        Task sending;
 
         try
         {
@@ -306,23 +368,13 @@ public sealed class RouterCore : IDisposable
                     envelope.Header);
             }
 
-            var (redacted, credentialScheme) = Redact(announced.Header);
+            // * one check an envelope while nobody listens: redacted for a listener alone
+            if (_port.IsTracing)
+            {
+                _port.Trace(DebugDirection.Tx, new TracedEnvelope(connectionHandle, Redact(announced.Header)));
+            }
 
-            _port.Trace(DebugDirection.Tx, new TracedEnvelope(connectionHandle, redacted, credentialScheme));
-            sending = _port.Send(new TransportMessage(bytes, false) { Credential = carried }, connectionHandle);
-        }
-        catch
-        {
-            restore();
-
-            throw;
-        }
-
-        onHandOff?.Invoke();
-
-        try
-        {
-            await sending;
+            return (_port.Send(new TransportMessage(bytes, false) { Credential = carried }, connectionHandle), restore);
         }
         catch
         {
@@ -555,25 +607,22 @@ public sealed class RouterCore : IDisposable
         return (presented, carried);
     }
 
-    private async Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, CoreRequest request)
+    // what a request of the side's own goes out as, or why it does not, before it goes: a
+    // connection not open, its credential, no call id free, its payload past its limit, or a header
+    // that leaves a transfer's opening no byte
+    private (RequestHeader Header, OutgoingTransfer? Outgoing, string? Carried) HeaderOf(
+        ReadOnlyMemory<byte> payload,
+        (CoreRequest Request, int MaximumPayloadBytes) going)
     {
+        var (request, maximumPayloadBytes) = going;
         var options = request.Options;
         var procedure = request.Procedure;
-        var token = options.CancellationToken;
 
-        // what no call can take draws nothing
-        if (procedure.MaximumPayloadBytes is < 1)
+        // a call to a connection not open fails as one whose connection closes: one race with a close
+        if (!_port.IsOpen(request.ConnectionHandle))
         {
-            throw new ArgumentException(
-                $"a payload's limit is a whole number above 0, not {procedure.MaximumPayloadBytes}",
-                nameof(request));
+            throw new DisconnectException($"{request.ConnectionHandle} is not an open connection");
         }
-
-        // held, which its timer, its reservation and its TimeoutException all take
-        var timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), options.Timeout);
-
-        // drawn once the call starts: a cancelled token draws nothing
-        token.ThrowIfCancellationRequested();
 
         var (credential, carried) = PresentedOf(request);
         var callId = _pendingCalls.Draw(request.ConnectionHandle)
@@ -596,7 +645,6 @@ public sealed class RouterCore : IDisposable
         };
 
         // how it goes is decided before anything is kept of it: past its limit, nothing goes
-        var maximumPayloadBytes = PayloadLimitOf(procedure.MaximumPayloadBytes);
         var (outgoing, refusal) = TransferOf(payload, (header, maximumPayloadBytes));
 
         if (refusal is not null)
@@ -604,14 +652,58 @@ public sealed class RouterCore : IDisposable
             throw new FailureException(refusal, new FailureException.Raised(FailureOrigin.Local, _side))
             {
                 DestinationId = options.DestinationId,
-                Header = Redact(header).Header,
+                Header = Redact(header),
                 ProcedureAddress = procedure.Address,
             };
         }
 
+        return (header, outgoing, carried);
+    }
+
+    private async Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, CoreRequest request)
+    {
+        var options = request.Options;
+        var procedure = request.Procedure;
+        var token = options.CancellationToken;
+
+        // what no call can take draws nothing
+        if (procedure.MaximumPayloadBytes is < 1)
+        {
+            throw new ArgumentException(
+                $"a payload's limit is a whole number above 0, not {procedure.MaximumPayloadBytes}",
+                nameof(request));
+        }
+
+        // held, which its timer, its reservation and its TimeoutException all take
+        var timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), options.Timeout);
+
+        // drawn once the call starts: a cancelled token draws nothing
+        token.ThrowIfCancellationRequested();
+
+        // * nothing made it a programmer's error: the call starts (spec/debugging.md 9.3), and each
+        // refusal after ends it in this turn
+        var counted = _metrics is { } metrics ? StartedOf(request.Series?.Calls ?? metrics.Made) : (StartedCall?)null;
+        var maximumPayloadBytes = PayloadLimitOf(procedure.MaximumPayloadBytes);
+        RequestHeader header;
+        OutgoingTransfer? outgoing;
+        string? carried;
+
+        try
+        {
+            (header, outgoing, carried) = HeaderOf(payload, (request, maximumPayloadBytes));
+        }
+        catch (Exception reason)
+        {
+            counted?.End(StartedCall.EndingOf(reason));
+
+            throw;
+        }
+
+        var callId = header.CallId;
         var pendingRequest = new PendingRequest
         {
             Carried = carried,
+            Counted = counted,
             DestinationId = options.DestinationId,
             MaximumPayloadBytes = maximumPayloadBytes,
             OnSent = request.OnSent,
@@ -678,7 +770,7 @@ public sealed class RouterCore : IDisposable
 
         try
         {
-            await Carrying(envelope, (call.ConnectionHandle, pendingRequest.Carried, HandedOff));
+            await Carrying(envelope, (call.ConnectionHandle, pendingRequest.Carried, HandedOff, null));
 
             if (((RequestHeader)envelope.Header).Total is null)
             {
@@ -796,7 +888,7 @@ public sealed class RouterCore : IDisposable
         IRequestHandler? resolver = _handlers.TryGetValue(header, out var routed)
             ? routed
             : header.DestinationId is null && _resolvers.TryGetValue(new ProcedureAddress(header.ServiceId, header.ProcedureId), out var registered)
-                ? registered
+                ? registered.Resolver
                 : null;
 
         var transfer = response.Failure is null
@@ -818,9 +910,11 @@ public sealed class RouterCore : IDisposable
                     connectionHandle,
                     () =>
                     {
-                        // answered: the call id is the peer's to open again
+                        // * answered: its call ends as its answer is handed to its transport
+                        // (spec/debugging.md 9.1), and its call id is the peer's to open again
                         if (answering is not null)
                         {
+                            EndAnswered(answering, response.Failure is { } failed ? (CallOutcome.Failure, failed) : (CallOutcome.Result, null));
                             _answeringCalls.Close(call, answering);
                         }
                     });
@@ -832,11 +926,13 @@ public sealed class RouterCore : IDisposable
         }
         catch
         {
-            // an answer that did not go out leaves nothing done for it behind, and its call closed
+            // an answer that did not go out leaves nothing done for it behind, and its call closed,
+            // ended with no answer handed to its transport
             undo?.Invoke();
 
             if (answering is not null)
             {
+                EndAnswered(answering, (CallOutcome.Error, null));
                 _answeringCalls.Close(call, answering);
             }
 
@@ -943,6 +1039,7 @@ public sealed class RouterCore : IDisposable
                             ProtocolCode.TransferStalled,
                             string.Create(CultureInfo.InvariantCulture, $"no credit came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds"));
 
+                        EndAnswered(answering, (CallOutcome.Failure, stalled));
                         Fail(LocalOf(stalled, header));
                         SendReporting(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = stalled }, connectionHandle);
                     });
@@ -952,10 +1049,11 @@ public sealed class RouterCore : IDisposable
                 Timeout.InfiniteTimeSpan);
         }
 
-        // the last one handed off answers the call
+        // the last one handed off answers the call, and ends it (spec/debugging.md 9.5)
         void Sent()
         {
             Stop();
+            EndAnswered(answering, (CallOutcome.Result, null));
             _answeringCalls.Close(call, answering);
         }
 
@@ -1089,6 +1187,7 @@ public sealed class RouterCore : IDisposable
 
                     if (_answeringCalls.IsAnswering(target))
                     {
+                        EndAnswered(answering, (CallOutcome.Error, null));
                         _answeringCalls.Close(new CallAddress(target.Header.CallId, target.ConnectionHandle), answering);
                     }
 
@@ -1138,9 +1237,7 @@ public sealed class RouterCore : IDisposable
         // a request of the peer's, on a call id free?
         if (kind == (byte)EnvelopeKind.Request && IsAnswerable(callId, connectionHandle))
         {
-            SendReporting(
-                new Envelope { Header = new FailureHeader { CallId = callId }, Failure = failure.Failure },
-                connectionHandle);
+            _ = AnsweringAtGate(failure.Failure, (connectionHandle, callId));
 
             return;
         }
@@ -1180,6 +1277,36 @@ public sealed class RouterCore : IDisposable
             },
             call,
             pendingRequest);
+    }
+
+    // a request answered at the gate, its header unread: it starts and ends in one turn, under
+    // _OTHER (spec/debugging.md 9.3), as its answer is handed to its transport; one that cannot go
+    // out is reported
+    private async Task AnsweringAtGate(Failure failure, (string ConnectionHandle, uint CallId) gated)
+    {
+        var counted = _metrics is { } metrics ? StartedOf(metrics.Answered) : (StartedCall?)null;
+        var isHandedOff = false;
+
+        try
+        {
+            await Deliver(
+                new Envelope { Header = new FailureHeader { CallId = gated.CallId }, Failure = failure },
+                gated.ConnectionHandle,
+                () =>
+                {
+                    isHandedOff = true;
+                    counted?.End((CallOutcome.Failure, failure));
+                });
+        }
+        catch (Exception reason)
+        {
+            if (!isHandedOff)
+            {
+                counted?.End((CallOutcome.Error, null));
+            }
+
+            _port.Report(reason, gated.ConnectionHandle);
+        }
     }
 
     // a chunk that did not read ends the transfer it was for, as invalid — unless its payload came
@@ -1253,6 +1380,7 @@ public sealed class RouterCore : IDisposable
 
         if (answering is not null)
         {
+            EndAnswered(answering, (CallOutcome.Cancelled, null));
             Abort(answering, new OperationCanceledException($"call {callId} was cancelled by its requester"));
         }
     }
@@ -1290,11 +1418,20 @@ public sealed class RouterCore : IDisposable
         }
 
         // one that names a destination goes to the handler this side has for it — a relay's
+        Registered? registered = null;
         IRequestHandler? resolver = header.DestinationId is not null
             ? _port.HandlerOfDestination(header)
-            : _resolvers.TryGetValue(new ProcedureAddress(header.ServiceId, header.ProcedureId), out var registered)
-                ? registered
+            : _resolvers.TryGetValue(new ProcedureAddress(header.ServiceId, header.ProcedureId), out registered)
+                ? registered.Resolver
                 : null;
+
+        // * the call starts as its request opens it, timed from its arrival (spec/debugging.md
+        // 9.1): its procedure's series, through the resolver it is routed to; _OTHER's for a route
+        // refused or a call relayed
+        if (_metrics is { } metrics)
+        {
+            answering.Counted = StartedOf(registered?.Series?.Calls ?? metrics.Answered);
+        }
 
         // one this side has no handler for: this peer relays nothing, to that destination or elsewhere
         if (header.DestinationId is { } unknown && resolver is null)
@@ -1596,7 +1733,7 @@ public sealed class RouterCore : IDisposable
             pendingRequest.Reject(new FailureException(failure, FailureException.RaisedOf(failure, _side))
             {
                 DestinationId = pendingRequest.DestinationId,
-                Header = Redact(header).Header,
+                Header = Redact(header),
                 ProcedureAddress = pendingRequest.ProcedureAddress,
             });
             _port.Activity(RouterActivity.Response, connectionHandle);
@@ -1639,7 +1776,7 @@ public sealed class RouterCore : IDisposable
                 new FailureException(refusal!, new FailureException.Raised(FailureOrigin.Local, _side))
                 {
                     DestinationId = pendingRequest.DestinationId,
-                    Header = Redact(header).Header,
+                    Header = Redact(header),
                     ProcedureAddress = pendingRequest.ProcedureAddress,
                 },
                 call,
@@ -1876,9 +2013,11 @@ public sealed class RouterCore : IDisposable
             return;
         }
 
-        var (redacted, credentialScheme) = Redact(envelope.Header);
-
-        _port.Trace(DebugDirection.Rx, new TracedEnvelope(connectionHandle, redacted, credentialScheme));
+        // * one check an envelope while nobody listens: redacted for a listener alone
+        if (_port.IsTracing)
+        {
+            _port.Trace(DebugDirection.Rx, new TracedEnvelope(connectionHandle, Redact(envelope.Header)));
+        }
 
         switch (envelope.Header)
         {
@@ -1926,6 +2065,7 @@ public sealed class RouterCore : IDisposable
         // waits on one of its own calls, a relay's leg B, hears it ended before that call's rejection
         foreach (var answering in aborted)
         {
+            EndAnswered(answering, (CallOutcome.Closed, null));
             Abort(answering, new DisconnectException(reason));
         }
 
@@ -2011,8 +2151,9 @@ public sealed class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// Registers a resolver; a second one for its procedure, an address of 0, or a payload's limit
-    /// below 1, is an <see cref="ArgumentException"/>.
+    /// Registers a resolver; a second one for its procedure, an address of 0, a payload's limit below
+    /// 1, or a procedure its router's registry refuses to declare (spec/debugging.md 7.3), is an
+    /// <see cref="ArgumentException"/>.
     /// </summary>
     public void RegisterResolver(IRequestResolver resolver)
     {
@@ -2034,7 +2175,16 @@ public sealed class RouterCore : IDisposable
                 nameof(resolver));
         }
 
-        if (!_resolvers.TryAdd(procedure.Address, resolver))
+        if (_resolvers.ContainsKey(procedure.Address))
+        {
+            throw new ArgumentException($"{procedure.ProcedureName} is already a registered resolver", nameof(resolver));
+        }
+
+        // declared as it is registered (spec/debugging.md 7.2): one its router's registry refuses is
+        // not registered either
+        var series = _metrics?.DeclareResolver(procedure, resolver is INotificationResolver);
+
+        if (!_resolvers.TryAdd(procedure.Address, new Registered(resolver, series)))
         {
             throw new ArgumentException($"{procedure.ProcedureName} is already a registered resolver", nameof(resolver));
         }
@@ -2128,6 +2278,24 @@ public sealed class RouterCore : IDisposable
         return _answeringCalls.CallOf(target.Header)?.Session;
     }
 
+    /// <summary>The series a procedure's notifications count into, its resolver's as it was registered; none for none.</summary>
+    internal NotifyingSeries? NotifyingSeriesOf(ProcedureAddress procedure)
+    {
+        return _resolvers.TryGetValue(procedure, out var registered) ? registered.Series?.Notifying : null;
+    }
+
+    /// <summary>
+    /// Sends a notification to a connection, counted into <c>Series</c> as it is handed to its
+    /// transport, or as it cannot be: as <see cref="Send"/> otherwise.
+    /// </summary>
+    internal Task SendNotification(Envelope envelope, (string ConnectionHandle, NotifyingSeries? Series) going)
+    {
+        return Loop.Run(() =>
+        {
+            return Carrying(envelope, (going.ConnectionHandle, null, null, going.Series));
+        });
+    }
+
     /// <summary>
     /// What it holds, its parts' together: the calls it waits on and reserves, those it answers and
     /// abandoned, the transfers it sends and receives, and the connections told of a session; on the
@@ -2154,6 +2322,10 @@ public sealed class RouterCore : IDisposable
         _isDisposed = true;
         RejectPending($"{Disposed} before the answer");
     }
+
+    // a resolver registered, and its series, made as it was declared; none while its router counts
+    // nothing
+    private sealed record Registered(IRequestResolver Resolver, ResolverSeries? Series);
 
     // a request of the peer's, routed: where it is answered, its call, its payload — a transfer's
     // opening, for one — and the credential its transport carried beside it

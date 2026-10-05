@@ -19,6 +19,12 @@ import type {
   ProtocolCode,
 } from './constants';
 import type { IJwtKey, Jwk, JwtAlgorithm } from './jwt-verifier';
+import type {
+  INotifyingSeries,
+  IProcedureSeries,
+  IResolverSeries,
+  IRouterMetrics,
+} from './metrics-registry';
 
 // declarations
 
@@ -537,9 +543,11 @@ export interface IRouterCore<Handle extends string> {
    * Registers a resolver; a second one for its procedure, an address that is not an integer from 1
    * to 65535, or a payload's limit that is not a whole number above 0, is a
    * {@link ProgrammerError}. Its `admit` is asked of each request routed to it, before its payload
-   * is read — or comes.
+   * is read — or comes. Counted, it is declared to the router's metrics — one that has a `notify`
+   * as the side that notifies too — and gives its series; a declaration refused is a
+   * {@link ProgrammerError}, and nothing is registered.
    */
-  registerResolver(resolver: IRequestResolver<Handle>): void;
+  registerResolver(resolver: IRequestResolver<Handle>): IResolverSeries | undefined;
   /**
    * Rejects what waits for an answer — from `connectionHandle` only, when given — with a
    * {@link DisconnectError} saying `reason`, and forgets the calls the connection opened, the call
@@ -577,6 +585,13 @@ export interface IRouterCore<Handle extends string> {
       options: IResolvedRequestOptions;
       paced?: boolean | undefined;
       procedure: Pick<IProcedure, 'maximumPayloadBytes' | 'procedureId' | 'serviceId'>;
+      /**
+       * What refuses the call once it started, before it goes: a credential its side cannot
+       * present, or its transport carry, a connection not open. It draws nothing.
+       */
+      refusal?: Error | undefined;
+      /** The series a counted call counts into: its requester's; `_OTHER`'s when none is given. */
+      series?: IProcedureSeries | undefined;
       transportCredential?: string | undefined;
     }
   ): Promise<IRouterResult>;
@@ -610,6 +625,15 @@ export interface IRouterCore<Handle extends string> {
    */
   send(envelope: OutgoingEnvelope, connectionHandle: Handle): Promise<void>;
   /**
+   * Sends a notification to one subscription, as `send` does, counting it into `series`, when
+   * given: sent once its transport has it, whatever the transport does with it after; failed when
+   * it could not be handed to it.
+   */
+  sendNotification(
+    payload: Uint8Array,
+    subscription: ICallAddress<Handle> & { series?: INotifyingSeries | undefined }
+  ): Promise<void>;
+  /**
    * Rejects what still waits, aborts the signal of each call it still answers, and sends nothing
    * more: no cancel either.
    */
@@ -625,6 +649,11 @@ export interface IRouterCoreOptions {
   clock?: IClock | undefined;
   /** The last call id it draws before its first again; its side's last when not given. */
   lastCallId?: CallId | undefined;
+  /**
+   * What it counts its calls through: its router's, attached to the registry that router was given;
+   * none counts nothing.
+   */
+  metrics?: IRouterMetrics | undefined;
   /**
    * How much it reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing. They must
    * hold together, or the core is a {@link ProgrammerError}: whole numbers, positive but for the
@@ -724,6 +753,8 @@ export interface IRouterCorePort<Handle extends string> {
     envelope: { failure: IReceivedFailure; header: IFailureHeader },
     connectionHandle: Handle
   ): boolean;
+  /** Whether anyone listens to the envelopes traced: nothing is built for `trace` otherwise. */
+  isTracing(): boolean;
   /** What went wrong that no call waits on. */
   report(error: Error, connectionHandle: Handle): void;
   /**
@@ -766,6 +797,12 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   readonly clock: IClock;
   readonly failures: IRouterFailures;
 
+  /**
+   * Declares a requester of `procedure` to the router's metrics, as it is made, and gives the series
+   * each of its calls carries to `request`; none when the router counts nothing. A declaration
+   * refused is a {@link ProgrammerError}.
+   */
+  declareRequester(procedure: IProcedure): IProcedureSeries | undefined;
   /** Whether the router holds this notification — this one, not another of its procedure. */
   hasNotification(notification: INotificationLike): boolean;
   notify(
@@ -784,6 +821,11 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   registerNotification(notification: INotificationLike): Promise<unknown>;
   registerResolver(resolver: IRequestResolver<Handle>): unknown;
   /**
+   * Reports what went wrong that no call waits on through the router's `error` event — with the
+   * connection it came with, on a server: a debug listener that threw, say.
+   */
+  report(error: Error, connectionHandle?: Handle): void;
+  /**
    * Sends a request and resolves with its result. With `subscribes` — the notification the router
    * holds for the procedure — the call subscribes it: the request says it opens a subscription, and
    * what comes under its call id triggers the notification.
@@ -793,6 +835,8 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
     request: {
       options: IResolvedRequestOptions;
       procedure: IProcedure;
+      /** The series its requester's declaration gave; a call that carries none counts as `_OTHER`. */
+      series?: IProcedureSeries | undefined;
       subscribes?: INotificationLike | undefined;
     }
   ): Promise<IRouterResult>;
@@ -996,8 +1040,9 @@ export type ServerConnectionHandle = 'server';
 /**
  * Which `debug` events a listener hears: those of a direction and a type among the ones given — any,
  * when none is — whose procedure's name matches one pattern of `include`, when there is one, and
- * none of `exclude`, which wins. A pattern is a name, whole and without regard to case, where `*`
- * stands for any run of characters.
+ * none of `exclude`, which wins. A pattern is a name, whole, where `*` stands for any run of
+ * characters, line terminators among them, and an ASCII letter for itself in either case; any other
+ * character stands for itself alone.
  */
 export interface IDebugFilter {
   directions?: readonly DebugDirection[] | undefined;
@@ -1288,8 +1333,11 @@ export interface IServiceManagerOptions<Handle extends string = ConnectionHandle
  * a request came from.
  */
 export interface IServiceManager<Handle extends string = ConnectionHandle> {
-  /** Whether anyone listens to `debug`; the calls build nothing for it otherwise. */
-  readonly debug: boolean;
+  /**
+   * Whether anyone listens to `debug`: the calls read no clock and build nothing for it otherwise,
+   * the one check each makes.
+   */
+  readonly isDebugging: boolean;
 
   emit<K extends SERVICE_MANAGER_EVENTS>(event: K, ...params: ServiceManagerEventMap[K]): boolean;
   /**
@@ -1423,7 +1471,10 @@ export type RequestResolverCallback<
 
 /** Event name → the arguments its listeners receive. */
 export type ServiceManagerEventMap = {
-  /** `error` is what the call failed with, or `null`. */
+  /**
+   * `error` is what the call failed with, or `null`. What a listener throws is reported through the
+   * router's `error` — with the call's connection, on a server — and changes nothing of the call.
+   */
   debug: [error: unknown, info: IDebugEvent];
   /** A deprecated procedure was called; its `deprecation` says what to use instead, when it says. */
   deprecated: [procedure: IProcedure];

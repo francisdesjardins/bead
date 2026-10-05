@@ -1,0 +1,3026 @@
+{
+  "$schema": "schemas/durations.schema.json",
+  "$comment": [
+    "Bead's durations: what every place that takes a duration an application gives a side makes of every input (spec 1.4, decision 0014), which every implementation's harness plays at every place, by every way its surface takes that duration.",
+    "inputs is one table, each input named, in one of five forms: milliseconds, a JSON number, given as it is on the TypeScript side and through TimeSpan.FromMilliseconds on the C# side; seconds, a JSON number as a user writes seconds, seconds * 1000 and TimeSpan.FromSeconds, each platform's arithmetic; never, Infinity and Timeout.InfiniteTimeSpan, which JSON has no number for; nan, IEEE 754's NaN, which JSON has none for either; json, a value that is no number, a string or a boolean, as a limit read from JSON may be.",
+    "A place is keyed by its id, its owner and its duration, which nothing but a decision changes. name says what it is, for a reader. kind is delay, a wait before an act, which takes 0 as at once, or timeout, any other, which is never 0. never is taken, held without end, arming nothing; refused; or default, held as the place's default; neverClause is the clause that says so, where 1.4 does not alone.",
+    "clauses are the units of spec.md a place checks, each for what the place observes of it, and nothing else: 1.4, which holds and refuses its durations; its neverClause; and its default's clause. A unit is a clause, 9.2; an item of its numbered list, 9.2.5; or a row of its table, counted from 1, 15.12.8.",
+    "ways are each way the surface takes that duration, by an id stable in its place: each harness keeps a table from each place and way to a function that builds the place on its side's test clock, given one input or none, and fails when that table and this file differ by one. required marks a way whose duration cannot be left out.",
+    "default is where a clause states one: its milliseconds, or never, with that clause, one of the place's own; ways, those a harness builds with nothing given to read it; state, where it holds only so. A default no clause states is left out.",
+    "observed is held, where what the place holds is read: an option read back, the due of the timer it arms on the side's test clock, or the wait a listen asks; at once, no timer armed and the act done; never, no timer armed. Or refusal, for a place on the real clock (decision 0011), whose harness reads whether it refuses alone.",
+    "outcomes holds one outcome an input, in the inputs' order: held, with the whole milliseconds held, a fraction rounded to the nearest, a half away from zero; at once; never; default, with the milliseconds of the default it is held as; taken, at a place observed by its refusal, for an input not refused; or refused, with its reason.",
+    "reason is derived from the input, the place's kind and its never — under the floor, past the ceiling, 0 refused, never refused, or not a number — and held by the regeneration alone: the words of a refusal are each side's, which its harness builds, and a side that reports a refusal by a code checks the reason against that code.",
+    "differs, on an input, a way or an outcome, names a row of docs/support.md, which names this file and what crosses it, and the language that row excuses from it: an input that language cannot be given, a way it lacks, or an outcome it reaches otherwise. A harness plays every input at every place and way but those a differs excuses its language from."
+  ],
+  "specVersion": "0.1.0",
+  "inputs": [
+    {
+      "name": "0",
+      "milliseconds": 0
+    },
+    {
+      "name": "0.00001 ms, under a tick",
+      "milliseconds": 1e-05
+    },
+    {
+      "name": "half a millisecond",
+      "milliseconds": 0.5
+    },
+    {
+      "name": "a millisecond",
+      "milliseconds": 1
+    },
+    {
+      "name": "1.4 ms",
+      "milliseconds": 1.4
+    },
+    {
+      "name": "1.5 ms",
+      "milliseconds": 1.5
+    },
+    {
+      "name": "2.5 ms",
+      "milliseconds": 2.5
+    },
+    {
+      "name": "0.41 s, as written",
+      "seconds": 0.41
+    },
+    {
+      "name": "2.01 s, as written",
+      "seconds": 2.01
+    },
+    {
+      "name": "the ceiling",
+      "milliseconds": 2147483647
+    },
+    {
+      "name": "0.00001 ms past the ceiling",
+      "milliseconds": 2147483647.00001
+    },
+    {
+      "name": "0.4 ms past the ceiling",
+      "milliseconds": 2147483647.4
+    },
+    {
+      "name": "half a millisecond past the ceiling",
+      "milliseconds": 2147483647.5
+    },
+    {
+      "name": "never",
+      "never": true
+    },
+    {
+      "name": "-2 ms",
+      "milliseconds": -2
+    },
+    {
+      "name": "-1 ms",
+      "milliseconds": -1
+    },
+    {
+      "name": "NaN",
+      "nan": true,
+      "differs": [
+        {
+          "row": "A duration that is not a number",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "\"1000\"",
+      "json": "1000",
+      "differs": [
+        {
+          "row": "A duration that is not a number",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "true",
+      "json": true,
+      "differs": [
+        {
+          "row": "A duration that is not a number",
+          "language": "C#"
+        }
+      ]
+    }
+  ],
+  "places": [
+    {
+      "id": "call.timeout",
+      "name": "a call's timeout, given to a call a service manager makes or to its router's request",
+      "clauses": [
+        "1.4",
+        "9.9"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "9.9",
+      "ways": [
+        {
+          "id": "serviceManager",
+          "name": "a call's own options, as its service manager applies its defaults"
+        },
+        {
+          "id": "router",
+          "name": "the options its router's request is given, resolved",
+          "required": true
+        }
+      ],
+      "default": {
+        "milliseconds": 5000,
+        "clause": "9.9",
+        "ways": [
+          "serviceManager"
+        ],
+        "state": "a service manager given no default timeout of its own"
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "serviceManager.defaultTimeout",
+      "name": "a service manager's default timeout for its calls",
+      "clauses": [
+        "1.4",
+        "9.9"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "9.9",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the manager's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 5000,
+        "clause": "9.9",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "router.reservation",
+      "name": "a call id's reservation, a reserve's or a cancel's",
+      "clauses": [
+        "1.4",
+        "10.3"
+      ],
+      "kind": "timeout",
+      "never": "default",
+      "neverClause": "10.3",
+      "ways": [
+        {
+          "id": "reserve",
+          "name": "a call id its router reserves"
+        },
+        {
+          "id": "cancel",
+          "name": "a call id its router cancels"
+        }
+      ],
+      "default": {
+        "milliseconds": 5000,
+        "clause": "10.3",
+        "ways": [
+          "reserve",
+          "cancel"
+        ],
+        "state": "a reserve, or a cancel of a call id no call waits on: a cancel of a call that waits, given none, reserves for that call's own timeout"
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "default",
+          "held": 5000
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "router.transferInactivityTimeout",
+      "name": "a transfer's inactivity, a router's limit",
+      "clauses": [
+        "1.4",
+        "12.2",
+        "12.2.8"
+      ],
+      "kind": "timeout",
+      "never": "refused",
+      "neverClause": "12.2",
+      "ways": [
+        {
+          "id": "limits",
+          "name": "the router's limits, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 30000,
+        "clause": "12.2.8",
+        "ways": [
+          "limits"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "relay.timeout",
+      "name": "a relay's timeout, its own or a destination's at register",
+      "clauses": [
+        "1.4",
+        "14.4"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "14.4",
+      "ways": [
+        {
+          "id": "relay",
+          "name": "the relay's options, as it is built"
+        },
+        {
+          "id": "register",
+          "name": "a destination's, as it is registered"
+        }
+      ],
+      "default": {
+        "never": true,
+        "clause": "14.4",
+        "ways": [
+          "relay",
+          "register"
+        ],
+        "state": "a destination registered with none, under a relay given none"
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "sessionManager.connectionInactivityTimeout",
+      "name": "a session manager's default connection timeout",
+      "clauses": [
+        "1.4",
+        "13.7"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "13.7",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the manager's options, as it is built"
+        }
+      ],
+      "default": {
+        "never": true,
+        "clause": "13.7",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "sessionManager.sessionInactivityTimeout",
+      "name": "a session manager's default session timeout",
+      "clauses": [
+        "1.4",
+        "13.7"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "13.7",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the manager's options, as it is built"
+        }
+      ],
+      "default": {
+        "never": true,
+        "clause": "13.7",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "session.inactivityTimeouts",
+      "name": "a session's two timeouts, as it is set or updated",
+      "clauses": [
+        "1.4",
+        "13.7"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "13.7",
+      "ways": [
+        {
+          "id": "setConnection",
+          "name": "its connection timeout, as its manager sets the session"
+        },
+        {
+          "id": "setSession",
+          "name": "its session timeout, as its manager sets the session"
+        },
+        {
+          "id": "updateConnection",
+          "name": "its connection timeout, as its manager updates it"
+        },
+        {
+          "id": "updateSession",
+          "name": "its session timeout, as its manager updates it"
+        }
+      ],
+      "default": {
+        "never": true,
+        "clause": "13.7",
+        "ways": [
+          "setConnection",
+          "setSession",
+          "updateConnection",
+          "updateSession"
+        ],
+        "state": "a session under a manager given none of its defaults, each left out taking the manager's"
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "sessionManager.resetConnectionInactivityTimeout",
+      "name": "a reset of a connection's timeout",
+      "clauses": [
+        "1.4",
+        "13.7"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "13.7",
+      "ways": [
+        {
+          "id": "reset",
+          "name": "the reset's argument",
+          "required": true
+        }
+      ],
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "sessionManager.resetSessionInactivityTimeout",
+      "name": "a reset of a session's timeout",
+      "clauses": [
+        "1.4",
+        "13.7"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "13.7",
+      "ways": [
+        {
+          "id": "reset",
+          "name": "the reset's argument",
+          "required": true
+        }
+      ],
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "server.connectionInactivityTimeout",
+      "name": "a server's own connection timeout, its server layer's option",
+      "clauses": [
+        "1.4",
+        "13.7"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "13.7",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the server layer's options, as it is built"
+        }
+      ],
+      "default": {
+        "never": true,
+        "clause": "13.7",
+        "ways": [
+          "options"
+        ],
+        "state": "the server layer over a transport that gives it none: an HTTP server gives its own, 30 s (15.12.10), which spec/transports.json's defaults state"
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "httpTransportServer.exchangeTimeout",
+      "name": "an HTTP server's exchange timeout",
+      "clauses": [
+        "1.4",
+        "15.12",
+        "15.12.8"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "15.12",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport server's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 300000,
+        "clause": "15.12.8",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "httpTransportServer.inactivityTimeout",
+      "name": "an HTTP server's inactivity timeout",
+      "clauses": [
+        "1.4",
+        "15.12",
+        "15.12.9"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "15.12",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport server's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 300000,
+        "clause": "15.12.9",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "httpTransportServer.maximumWait",
+      "name": "the longest an HTTP server holds a listen",
+      "clauses": [
+        "1.4",
+        "15.12",
+        "15.12.7"
+      ],
+      "kind": "timeout",
+      "never": "refused",
+      "neverClause": "15.12",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport server's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 30000,
+        "clause": "15.12.7",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "httpTransportClient.inactivityTimeout",
+      "name": "an HTTP client's inactivity timeout",
+      "clauses": [
+        "1.4",
+        "15.12",
+        "15.12.9"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "15.12",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport client's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 300000,
+        "clause": "15.12.9",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "httpTransportClient.wait",
+      "name": "the wait an HTTP client's listens ask",
+      "clauses": [
+        "1.4"
+      ],
+      "kind": "delay",
+      "never": "refused",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport client's options, as it is built"
+        }
+      ],
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "at once"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "httpTransportClient.pause",
+      "name": "an HTTP client's pause between listens",
+      "clauses": [
+        "1.4"
+      ],
+      "kind": "delay",
+      "never": "refused",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport client's options, as it is built"
+        }
+      ],
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "at once"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "webSocketTransport.heartbeat",
+      "name": "a WebSocket's heartbeat, its client's or its server's",
+      "clauses": [
+        "1.4",
+        "15.3"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "15.3",
+      "ways": [
+        {
+          "id": "client",
+          "name": "the transport client's options, as it is built"
+        },
+        {
+          "id": "server",
+          "name": "the transport server's options, as it is built"
+        }
+      ],
+      "observed": "refusal",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "taken"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "transportClient.connectTimeout",
+      "name": "a connect's timeout, on every transport",
+      "clauses": [
+        "1.4"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "ways": [
+        {
+          "id": "http",
+          "name": "an HTTP client's connect"
+        },
+        {
+          "id": "webSocket",
+          "name": "a WebSocket client's connect"
+        },
+        {
+          "id": "worker",
+          "name": "a Web Worker client's connect",
+          "differs": [
+            {
+              "row": "The Web Worker transport",
+              "language": "C#"
+            }
+          ]
+        }
+      ],
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "transportClient.reconnectionDelay",
+      "name": "a reconnection's delay",
+      "clauses": [
+        "1.4"
+      ],
+      "kind": "delay",
+      "never": "refused",
+      "ways": [
+        {
+          "id": "function",
+          "name": "a function of the previous delay and the attempt, its answer"
+        },
+        {
+          "id": "number",
+          "name": "a number",
+          "differs": [
+            {
+              "row": "A reconnection's delay given as a number",
+              "language": "C#"
+            }
+          ]
+        }
+      ],
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "at once"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "refused",
+          "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "webSocketTransportServer.closeTimeout",
+      "name": "a WebSocket server's close timeout",
+      "clauses": [
+        "1.4"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the transport server's options, as it is built"
+        }
+      ],
+      "observed": "refusal",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "taken"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    }
+  ]
+}

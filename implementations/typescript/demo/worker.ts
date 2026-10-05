@@ -10,6 +10,7 @@
 
 // dependencies
 
+import { createMetricsRegistry } from '../src/router/shared/metrics-registry';
 import { createWorkerServer } from '../src/server/worker-server';
 import type {
   IWorkerMessageEventLike,
@@ -51,13 +52,16 @@ const sharedScopeOf = (worker: EventTarget): IWorkerScopeLike => {
 const scope = 'onconnect' in self ? sharedScopeOf(self) : self;
 // drawn at random, as nothing gives the worker a key
 const secret = drawSecret();
+// what the worker's server counts, which its `stats` reads
+const metricsRegistry = createMetricsRegistry();
 // a tab closed before it said so leaves a port that never tells: its silence closes it
 const server = createWorkerServer({
   connectionInactivityTimeout: SILENCE_MILLISECONDS,
   credentials: credentialsOf(secret),
+  metricsRegistry,
   transport: { scope },
 });
 
 void server.transport.start();
-offer(server);
+offer(server, metricsRegistry);
 offerIdentity(server, keyOf(secret));

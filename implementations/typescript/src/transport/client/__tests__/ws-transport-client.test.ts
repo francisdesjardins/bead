@@ -7,7 +7,6 @@ import {
   dispose,
   type ITransportClient,
   type ITransportClientInternal,
-  LONGEST_TIMER,
   ProgrammerError,
   ReadyState,
   ReadyStateError,
@@ -20,8 +19,6 @@ import * as constants from '../../shared/constants';
 import {
   allClosed,
   closedPort,
-  createTestClock,
-  durationsOf,
   host,
   IMPLEMENTATIONS,
   portOf,
@@ -786,62 +783,6 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     expect(closes).toEqual([[false, false]]);
   });
 
-  test('holds its connect’s timeout to a whole number of milliseconds on its clock, rounded, Infinity never timing out, refusing 0 and any other and opening nothing', async () => {
-    for (const { given, held, outcome, refusal } of durationsOf("a connect's timeout", {
-      never: 'never',
-      zero: 'refused',
-    })) {
-      const clock = createTestClock();
-      const { FakeWebSocket, sockets: opened } = createFakeWebSocket();
-      const client = createWSTransportClient({ clock, WebSocket: FakeWebSocket });
-      const controller = new AbortController();
-      const label = String(given);
-      let isSettled = false;
-      const connecting = client
-        .connect({ host: 'h', port: 1, signal: controller.signal, timeout: given })
-        .catch((reason: unknown) => {
-          return reason;
-        })
-        .finally(() => {
-          isSettled = true;
-        });
-
-      if (outcome === 'refused') {
-        expect(await connecting, label).toEqual(new ProgrammerError(refusal));
-        // nothing moved, and nothing is kept for a reconnection
-        expect([opened, client.isUninitialized()], label).toEqual([[], true]);
-        await expect(client.reconnect(), label).rejects.toThrow('transport was never connected');
-
-        continue;
-      }
-
-      // a duration held times the connect out once it passed, its TimeoutError telling it; never
-      // waits on past the longest
-      if (outcome === 'taken' && held !== undefined) {
-        await clock.tickAsync(held - 1);
-
-        expect(client.isConnecting(), label).toBe(true);
-
-        await clock.tickAsync(1);
-
-        const ended = await connecting;
-
-        expect(ended, label).toBeInstanceOf(TimeoutError);
-        expect(ended, label).toHaveProperty('timeout', held);
-      } else {
-        await clock.tickAsync(LONGEST_TIMER);
-
-        expect([isSettled, client.isConnecting()], label).toEqual([false, true]);
-
-        controller.abort();
-
-        expect(await connecting, label).toBeInstanceOf(CancelError);
-      }
-
-      expect(client.isClosed(), label).toBe(true);
-    }
-  });
-
   test('brackets an IPv6 literal host', async () => {
     const urls: string[] = [];
     const { FakeWebSocket, sockets } = createFakeWebSocket();
@@ -954,7 +895,7 @@ test.describe('WSTransportClient, heartbeat', () => {
     await client.disconnect();
   });
 
-  test('beats nothing over a socket that cannot ping, a browser’s, nor with a heartbeat of Infinity; refuses one no timer holds', async () => {
+  test('beats nothing over a socket that cannot ping, a browser’s, nor with a heartbeat of Infinity', async () => {
     const browser = createFakeWebSocket();
     const pinging = createFakeWebSocket({ canPing: true });
     const clients = [
@@ -979,12 +920,6 @@ test.describe('WSTransportClient, heartbeat', () => {
       })
     ).toEqual([true, true]);
     expect(pinging.sockets[0]?.pings).toBe(0);
-
-    for (const heartbeat of [0, 0.5, 2 ** 31]) {
-      expect(() => {
-        return createWSTransportClient({ heartbeat, WebSocket: pinging.FakeWebSocket });
-      }, String(heartbeat)).toThrow(ProgrammerError);
-    }
   });
 
   test('stops beating once disconnected, dropped or closed by its server, and pings no socket that is closing', async () => {

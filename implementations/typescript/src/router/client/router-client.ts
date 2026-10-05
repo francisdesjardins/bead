@@ -12,6 +12,7 @@ import { connectionSessionOf, presentedCredentialOf, uncarriedOf } from '../shar
 import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { FailureError } from '../shared/errors';
+import type { IHearingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
 import type {
@@ -39,6 +40,17 @@ export {
   SERVER_FAILURES,
 } from '../shared/constants';
 export { filterEnvelopeDebug, parseDebugFilter } from '../shared/debug-filter';
+export {
+  createMetricsRegistry,
+  METRICS_CONTENT_TYPE,
+  METRICS_REGISTRY_DEFAULTS,
+} from '../shared/metrics-registry';
+export type {
+  IMetricsExposition,
+  IMetricsRegistry,
+  IMetricsRegistryOptions,
+  IProcedureSeries,
+} from '../shared/metrics-registry';
 export { DisconnectError, FailureError } from '../shared/errors';
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
 export type { IClock, TimeoutId } from '../../transport/shared/clock';
@@ -95,11 +107,13 @@ export type {
 // interfaces
 
 /**
- * A notification bound to the call that subscribed it, how long that call was given, and its pacing
- * when it asked for one.
+ * A notification bound to the call that subscribed it, how long that call was given, its pacing
+ * when it asked for one, whether its answer came, and the series it counts into, when counted.
  */
 interface IBoundNotification {
   callId: CallId;
+  hearing: IHearingSeries | undefined;
+  isAnswered: boolean;
   notification: INotificationLike;
   pacing: IClientPacing | undefined;
   timeout: number;
@@ -195,8 +209,12 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     { below: 'its transport', layer: "a client's router" }
   );
   const emitter = createEmitter<RouterClientEventMap>();
+  // what it counts its calls and notifications through, attached to the registry it was given
+  const metrics = options?.metricsRegistry?.attach('client');
   // the notification registered for each procedure, until it is unregistered or dropped
   const notifications = createProcedureMap<INotificationLike>();
+  // the series each notification registered counts into, declared as it was registered
+  const hearings = new WeakMap<INotificationLike, IHearingSeries>();
   // each subscription by the call id that opened it, and each notification's call id
   const subscriptions = new Map<CallId, IBoundNotification>();
   const callIds = new Map<INotificationLike, CallId>();
@@ -209,6 +227,10 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
   // an error nobody waits on still has somewhere to go, when someone listens
   const report = (error: Error): void => {
     emitter.emit('error', error);
+  };
+  // what a debug listener throws is reported, and the envelope goes on as if nobody listened
+  const reportThrown = (error: unknown): void => {
+    report(toError(error));
   };
 
   // a paced subscription credits as far as its window reaches past what settled, once that is half
@@ -305,6 +327,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
           return (report(unknown), undefined);
         }
 
+        // heard as it is paired with its subscription, whether it decodes or not
+        subscription.hearing?.heard();
+
         // a callback that throws is reported, and the notifications after it still arrive: a paced
         // subscription counts it done
         try {
@@ -326,8 +351,13 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
           return false;
         }
 
-        const { notification } = subscription;
+        const { hearing, isAnswered, notification } = subscription;
         const call = unbind(notification);
+
+        // * dropped at this end once answered; one refused in its own answer is its call's failure
+        if (isAnswered) {
+          hearing?.dropped(failure);
+        }
 
         if (notifications.get(notification) === notification) {
           notifications.delete(notification);
@@ -369,13 +399,17 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
           ? credentials.resolve({ credential, transportCredential }, signal)
           : connectionSessionOf(credential, { token: sessionToken });
       },
+      isTracing: () => {
+        return emitter.listenerCount('debug') > 0;
+      },
       trace: (direction, { header }) => {
-        if (emitter.listenerCount('debug') > 0) {
-          emitter.emit('debug', { direction, header });
-        }
+        emitter.emitEach('debug', {
+          onError: reportThrown,
+          params: [{ connectionHandle: SERVER_CONNECTION_HANDLE, direction, header }],
+        });
       },
     },
-    { clock, limits: options?.limits }
+    { clock, limits: options?.limits, metrics }
   );
 
   // a router that takes a JWT holds its header: its limits hold 1,024 bytes at least
@@ -403,6 +437,8 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
         subscriptions.set(callId, {
           callId,
+          hearing: hearings.get(notification),
+          isAnswered: false,
           notification,
           pacing:
             notification.window === undefined
@@ -422,9 +458,16 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     };
   };
 
-  // the server forgets a connection's subscriptions with it: so does the client, and tells each
+  // the server forgets a connection's subscriptions with it: so does the client, and tells each,
+  // counting each answered dropped with no code
   const dropNotifications = (): void => {
     const dropped = [...notifications.values()];
+
+    for (const { hearing, isAnswered } of subscriptions.values()) {
+      if (isAnswered) {
+        hearing?.dropped(undefined);
+      }
+    }
 
     // emptied first, so what a drop registers again is the next connection's
     notifications.clear();
@@ -503,6 +546,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       return transport;
     },
 
+    declareRequester: (procedure) => {
+      return metrics?.declareRequester(procedure);
+    },
     hasNotification: (notification) => {
       return notifications.get(notification) === notification;
     },
@@ -518,6 +564,17 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         );
       }
 
+      // declared as it is registered: one the registry refuses is not registered either
+      try {
+        const hearing = metrics?.declareNotification(notification);
+
+        if (hearing !== undefined) {
+          hearings.set(notification, hearing);
+        }
+      } catch (reason) {
+        return Promise.reject(toError(reason));
+      }
+
       notifications.set(notification, notification);
 
       return Promise.resolve();
@@ -525,21 +582,40 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     registerResolver: (resolver) => {
       core.registerResolver(resolver);
     },
-    request: (payload, { onSent, options, procedure, subscribes }) => {
+    report,
+    request: (payload, { onSent, options, procedure, series, subscribes }) => {
       const connectionHandle = SERVER_CONNECTION_HANDLE;
+
+      // ! a programmer's error first, before the call starts, so it is never counted: only the
+      // notification held for the procedure is bound, or its notifications would reach none that
+      // is listening
+      if (subscribes !== undefined && notifications.get(procedure) !== subscribes) {
+        return Promise.reject(
+          new ProgrammerError(
+            `${subscribes.procedureName} is not the notification this router holds for ${procedure.procedureName}`
+          )
+        );
+      }
+
       // the call's own credential, or the default, as it is now
       const presentedDefault = options.credential === undefined ? defaultCredential : undefined;
-      let presented: ReturnType<typeof presentedCredentialOf>;
+      let presented: ReturnType<typeof presentedCredentialOf> = {};
+      let refusal: Error | undefined;
 
       // OPAQUE, the session this client learned, as its answers announced it; a JWT, or an
-      // ELSEWHERE beside it
+      // ELSEWHERE beside it. A credential asked of the wrong shape is a programmer's error; OPAQUE
+      // with no session known refuses the call once it started
       try {
         presented = presentedCredentialOf(options.credential ?? presentedDefault, {
           failures: CLIENT_FAILURES,
           token: sessionToken,
         });
       } catch (reason) {
-        return Promise.reject(toError(reason));
+        if (!(reason instanceof FailureError)) {
+          return Promise.reject(toError(reason));
+        }
+
+        refusal = reason;
       }
 
       const { carried, credential } = presented;
@@ -551,19 +627,17 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         isSecure: transport.isSecure === true,
       });
 
-      if (uncarried !== undefined) {
+      if (refusal === undefined && uncarried !== undefined) {
         const { destinationId } = options;
         const { procedureId, serviceId } = procedure;
 
-        return Promise.reject(
-          new FailureError(uncarried, {
-            destinationId,
-            procedureAddress: { procedureId, serviceId },
-          })
-        );
+        refusal = new FailureError(uncarried, {
+          destinationId,
+          procedureAddress: { procedureId, serviceId },
+        });
       }
 
-      const sent = { connectionHandle, credential, onSent, options, procedure };
+      const sent = { connectionHandle, credential, onSent, options, procedure, refusal, series };
       const withdrawing = (reason: unknown): never => {
         withdraw(reason, presentedDefault);
 
@@ -572,16 +646,6 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
       if (subscribes === undefined) {
         return core.request(payload, { ...sent, transportCredential: carried }).catch(withdrawing);
-      }
-
-      // only the notification held for the procedure is bound, or its notifications would reach
-      // none that is listening
-      if (notifications.get(procedure) !== subscribes) {
-        return Promise.reject(
-          new ProgrammerError(
-            `${subscribes.procedureName} is not the notification this router holds for ${procedure.procedureName}`
-          )
-        );
       }
 
       const { onCallId, release } = bindingOf(subscribes, options.timeout);
@@ -596,9 +660,16 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
         })
         .then(
           (result) => {
+            const subscription = subscriptions.get(result.header.callId);
+
+            // answered, it is a subscription: what ends it now drops it
+            if (subscription !== undefined) {
+              subscription.isAnswered = true;
+            }
+
             // the server paces nothing before its answer: the window opens once it came, unless
             // the server ended the subscription since
-            renew(subscriptions.get(result.header.callId));
+            renew(subscription);
 
             return result;
           },

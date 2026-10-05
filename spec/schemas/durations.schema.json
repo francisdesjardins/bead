@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's durations, spec/durations.json",
+  "type": "object",
+  "required": ["$comment", "specVersion", "inputs", "places"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/durations.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
+    "inputs": {
+      "description": "The one table of inputs every place is given, each named.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/input" }
+    },
+    "places": {
+      "description": "Every place that takes a duration an application gives a side, and what it makes of every input.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/place" }
+    }
+  },
+  "$defs": {
+    "input": {
+      "description": "A duration as an application gives it, in one of five forms.",
+      "type": "object",
+      "required": ["name"],
+      "oneOf": [
+        { "required": ["milliseconds"] },
+        { "required": ["seconds"] },
+        { "required": ["never"] },
+        { "required": ["nan"] },
+        { "required": ["json"] }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "milliseconds": {
+          "description": "Milliseconds, as a side is given them: as they are, or through TimeSpan.FromMilliseconds.",
+          "type": "number"
+        },
+        "seconds": {
+          "description": "Seconds, as a user writes them: seconds * 1000, or TimeSpan.FromSeconds.",
+          "type": "number"
+        },
+        "never": {
+          "description": "Never: Infinity, or Timeout.InfiniteTimeSpan.",
+          "const": true
+        },
+        "nan": {
+          "description": "IEEE 754's NaN.",
+          "const": true
+        },
+        "json": {
+          "description": "A value that is no number, as a limit read from JSON may be.",
+          "type": ["string", "boolean"]
+        },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      }
+    },
+    "place": {
+      "description": "A place that takes a duration, keyed by its id, and what it makes of every input.",
+      "type": "object",
+      "required": ["id", "name", "clauses", "kind", "never", "ways", "observed", "outcomes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "The place's owner and its duration, in camelCase, parted by a dot: a key nothing but a decision changes.",
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z]*\\.[a-z][A-Za-z]*$"
+        },
+        "name": {
+          "description": "What the place is, for a reader.",
+          "type": "string",
+          "minLength": 1
+        },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "kind": {
+          "description": "delay, a wait before an act, which takes 0 as at once; timeout, any other, which is never 0.",
+          "enum": ["delay", "timeout"]
+        },
+        "never": {
+          "description": "What the place makes of never: taken, held without end; refused; or default, held as its default.",
+          "enum": ["taken", "refused", "default"]
+        },
+        "neverClause": {
+          "description": "The clause that says whether the place may be without end, where 1.4 does not alone.",
+          "$ref": "#/$defs/unit"
+        },
+        "ways": {
+          "description": "Each way the surface takes the place's duration.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/way" }
+        },
+        "default": { "$ref": "#/$defs/default" },
+        "observed": {
+          "description": "held, what the place holds is read; refusal, whether it refuses alone.",
+          "enum": ["held", "refusal"]
+        },
+        "outcomes": {
+          "description": "One outcome an input, in the inputs' order.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/outcome" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "never": { "const": "default" } } },
+          "then": {
+            "required": ["default"],
+            "properties": { "default": { "required": ["milliseconds"] } }
+          }
+        },
+        {
+          "if": { "properties": { "observed": { "const": "refusal" } } },
+          "then": {
+            "not": { "required": ["default"] },
+            "properties": {
+              "outcomes": {
+                "items": { "properties": { "outcome": { "enum": ["taken", "refused"] } } }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "outcomes": {
+                "items": { "properties": { "outcome": { "not": { "const": "taken" } } } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "timeout" } } },
+          "then": {
+            "properties": {
+              "outcomes": {
+                "items": { "properties": { "outcome": { "not": { "const": "at once" } } } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "way": {
+      "description": "A way the surface takes a place's duration, by an id stable in its place.",
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][A-Za-z]*$" },
+        "name": {
+          "description": "What the way is, for a reader.",
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "description": "A way whose duration cannot be left out.",
+          "const": true
+        },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      }
+    },
+    "default": {
+      "description": "A default a clause states: its milliseconds, or never; the ways a harness builds with nothing given to read it; and the state it holds in, where it holds only so.",
+      "type": "object",
+      "required": ["clause", "ways"],
+      "oneOf": [{ "required": ["milliseconds"] }, { "required": ["never"] }],
+      "additionalProperties": false,
+      "properties": {
+        "milliseconds": { "$ref": "common.schema.json#/$defs/duration" },
+        "never": { "const": true },
+        "clause": { "$ref": "#/$defs/unit" },
+        "ways": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][A-Za-z]*$" }
+        },
+        "state": { "type": "string", "minLength": 1 }
+      }
+    },
+    "outcome": {
+      "description": "What a place makes of an input: held, with the whole milliseconds; at once; never; default, with its milliseconds; taken, at a place observed by its refusal; or refused, with its reason, derived from the input, the place's kind and its never.",
+      "type": "object",
+      "required": ["input", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "input": { "$ref": "common.schema.json#/$defs/name" },
+        "outcome": { "enum": ["held", "at once", "never", "default", "taken", "refused"] },
+        "held": { "$ref": "common.schema.json#/$defs/duration" },
+        "reason": {
+          "enum": [
+            "under the floor",
+            "past the ceiling",
+            "0 refused",
+            "never refused",
+            "not a number"
+          ]
+        },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "enum": ["held", "default"] } } },
+          "then": { "required": ["held"] },
+          "else": { "not": { "required": ["held"] } }
+        },
+        {
+          "if": { "properties": { "outcome": { "const": "refused" } } },
+          "then": { "required": ["reason"] },
+          "else": { "not": { "required": ["reason"] } }
+        }
+      ]
+    },
+    "unit": {
+      "description": "A unit of spec/spec.md, as clauses cites one.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]*\\.[1-9][0-9]*(\\.[1-9][0-9]*)?$"
+    }
+  }
+}

@@ -1317,15 +1317,15 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Tells_each_envelope_out_and_in_with_its_header_and_never_its_credential()
+    public async Task Tells_each_envelope_out_and_in_with_its_connection_server_its_header_and_never_its_session_token()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
-        var seen = new List<(DebugDirection Direction, IEnvelopeHeader Header, CredentialScheme? CredentialScheme)>();
+        var seen = new List<(DebugDirection Direction, TracedEnvelope Envelope)>();
 
         router.Debug += (direction, envelope) =>
         {
-            seen.Add((direction, envelope.Header, envelope.CredentialScheme));
+            seen.Add((direction, envelope));
         };
 
         var answering = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
@@ -1333,8 +1333,13 @@ public sealed partial class RouterClientTests
         transport.Deliver(ResultOf(1, Token));
         Assert.Equal(1u, (await answering.WaitAsync(Patience, Cancelled)).Header.CallId);
         await scripted.Settle();
+
+        // on its one connection, the server, the session announced traced by its scheme alone
         Assert.Equal(
-            [(DebugDirection.Tx, RequestHeaderOf(1), null), (DebugDirection.Rx, new ResultHeader { CallId = 1 }, CredentialScheme.Opaque)],
+            [
+                (DebugDirection.Tx, new TracedEnvelope(RouterClient.ServerConnectionHandle, RequestHeaderOf(1))),
+                (DebugDirection.Rx, new TracedEnvelope(RouterClient.ServerConnectionHandle, new ResultHeader { CallId = 1, Credential = Credential.Opaque() })),
+            ],
             seen);
     }
 
@@ -1399,6 +1404,15 @@ public sealed partial class RouterClientTests
         public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
         {
             return Task.FromException<RouterResult>(new InvalidOperationException("nothing is asked here"));
+        }
+
+        public ProcedureSeries? DeclareRequester(Procedure procedure)
+        {
+            return null;
+        }
+
+        public void Report(Exception reason, string? connectionHandle)
+        {
         }
 
         public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
@@ -1839,12 +1853,13 @@ public sealed partial class RouterClientTests
         private readonly ClientEnd _client = new();
         private readonly ServerEnd _server = new();
 
-        public Link()
+        // both ends given `registry`, when given: one registry summing the two routers
+        public Link(MetricsRegistry? registry = null)
         {
             _client.Peer = _server;
             _server.Peer = _client;
-            Client = new RouterClient(_client);
-            Facade = new Server<string>(_server);
+            Client = new RouterClient(_client, new RouterClientOptions { MetricsRegistry = registry });
+            Facade = new Server<string>(_server, new ServerOptions { MetricsRegistry = registry });
             ClientServices = new ServiceManager(Client);
             ServerServices = Facade.Services;
             InteropService.Offer(Facade);

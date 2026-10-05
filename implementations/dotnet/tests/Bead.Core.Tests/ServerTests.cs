@@ -749,7 +749,7 @@ public sealed class ServerTests : IAsyncLifetime
     [Fact]
     public async Task A_connection_that_closes_takes_its_session_and_a_close_that_fails_is_reported()
     {
-        var errors = new List<(Exception Reason, string ConnectionHandle)>();
+        var errors = new List<(Exception Reason, string? ConnectionHandle)>();
         var refused = new IOException("refused");
 
         Start(Timeout.InfiniteTimeSpan);
@@ -872,53 +872,6 @@ public sealed class ServerTests : IAsyncLifetime
 
         // what the server started with is all it holds
         Assert.Equal(subscribers, _transport.Subscribers);
-    }
-
-    [Fact]
-    public async Task Holds_an_inactivity_timeout_to_a_whole_number_of_milliseconds_as_it_is_built_rounded_refusing_zero_leaving_nothing_on_its_transport_for_one_refused()
-    {
-        foreach (var (given, outcome, held, refusal) in Durations.Of("a connection's inactivity timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
-        {
-            var time = new FakeTimeProvider();
-            var transport = new ScriptedTransport { Clock = time };
-
-            if (outcome == DurationOutcome.Refused)
-            {
-                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                {
-                    return new Server<string>(transport, new ServerOptions { ConnectionInactivityTimeout = given });
-                });
-
-                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                Assert.Equal(nameof(ServerOptions.ConnectionInactivityTimeout), refused.ParamName);
-                Assert.Equal(0, transport.Subscribers);
-
-                continue;
-            }
-
-            await using var server = new Server<string>(
-                transport,
-                new ServerOptions { ConnectionInactivityTimeout = given, ResolverScheduler = _scheduler, Scheduler = _scheduler });
-
-            transport.Open(Handle);
-
-            // a silent connection closes at its due, held; infinite, at none
-            if (held is { } due && due != Timeout.InfiniteTimeSpan)
-            {
-                time.Advance(due - TimeSpan.FromMilliseconds(1));
-                await _scheduler.WhenIdle();
-                Assert.Empty(transport.Closed);
-                time.Advance(TimeSpan.FromMilliseconds(1));
-                await _scheduler.WhenIdle();
-                Assert.Equal([Handle], transport.Closed);
-            }
-            else
-            {
-                time.Advance(Clocks.LongestTimer);
-                await _scheduler.WhenIdle();
-                Assert.Empty(transport.Closed);
-            }
-        }
     }
 
     [Fact]

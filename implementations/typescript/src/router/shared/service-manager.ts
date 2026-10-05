@@ -37,6 +37,7 @@ import type {
   IResolvedRequestOptions,
   IRouterFailures,
   IRouterLike,
+  IRouterResult,
   IServiceManager,
   IServiceManagerOptions,
   NotificationResolverCallback,
@@ -59,7 +60,9 @@ interface IStarted {
 }
 
 /** One step of a call, as `trace` tells it to `debug`. */
-interface ITraceStep {
+interface ITraceStep<Handle extends string> {
+  /** The connection the call came from or goes to, which a listener's error is reported with. */
+  connectionHandle?: Handle | undefined;
   direction: DebugDirection;
   error?: unknown;
   /** Whether the call has answered, so the step carries how long it took. */
@@ -265,41 +268,62 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   // the same one is given
   const notifications = createProcedureMap<{ notification: unknown; procedure: IProcedure }>();
 
-  // now, for a call starting
+  // whether anyone listens to `debug`: the one check a call makes while nobody does
+  const isDebugging = (): boolean => {
+    return emitter.listenerCount(DEBUG_EVENT) > 0;
+  };
+
+  // now, for a call starting, traced: the wall clock for its start, the monotonic for its duration
   const startedNow = (): IStarted => {
     return { instant: clock.Date.now(), timestamp: clock.performance.now() };
   };
 
-  // tells `debug` about one step of a call; nothing is built when nobody listens
-  const trace = (procedure: IProcedure, step: ITraceStep): void => {
-    if (emitter.listenerCount(DEBUG_EVENT) === 0) {
+  // now, for a notification sent or heard, traced: one step, which takes no duration
+  const notifiedNow = (): IStarted => {
+    return { instant: clock.Date.now(), timestamp: 0 };
+  };
+
+  // tells `debug` about one step of a call, each listener within a guard: what one throws is
+  // reported through the router, with the call's connection, and changes nothing of the call
+  const trace = (procedure: IProcedure, step: ITraceStep<Handle>): void => {
+    if (!isDebugging()) {
       return;
     }
 
-    const { direction, error = null, isAnswered = false, options, rx, started, tx, type } = step;
+    const { connectionHandle, direction, error = null, isAnswered = false, options } = step;
+    const { rx, started, tx, type } = step;
     // ! the credential a call presents stays out of what is told: its token, or what its transport
     // carries, never reaches a listener
     const { credential: _credential, ...told } = options ?? {};
 
-    emitter.emit(DEBUG_EVENT, error, {
-      direction,
-      duration: isAnswered ? Math.trunc(clock.performance.now() - started.timestamp) : undefined,
-      options: options === undefined ? undefined : (told as IResolvedRequestOptions),
-      procedureId: procedure.procedureId,
-      procedureName: procedure.procedureName,
-      rx: snapshot(rx),
-      serviceId: procedure.serviceId,
-      serviceRevision: procedure.serviceRevision,
-      startedAt: started.instant,
-      tx: snapshot(tx),
-      type,
+    emitter.emitEach(DEBUG_EVENT, {
+      onError: (thrown) => {
+        router.report(toError(thrown), connectionHandle);
+      },
+      params: [
+        error,
+        {
+          direction,
+          duration: isAnswered
+            ? Math.trunc(clock.performance.now() - started.timestamp)
+            : undefined,
+          options: options === undefined ? undefined : (told as IResolvedRequestOptions),
+          procedureId: procedure.procedureId,
+          procedureName: procedure.procedureName,
+          rx: snapshot(rx),
+          serviceId: procedure.serviceId,
+          serviceRevision: procedure.serviceRevision,
+          startedAt: started.instant,
+          tx: snapshot(tx),
+          type,
+        },
+      ],
     });
   };
 
-  // the requester body that `getRequest`, `getCommand` and a notification's subscribing call share:
-  // the options, the trace, the request, the close on timeout and the decoding; `subscribes` names
-  // the notification the call subscribes; a timeout refused fails as the options are resolved,
-  // before the trace and the deprecation
+  // the requester body that `getRequest`, `getCommand` and a notification's subscribing call share,
+  // declared to the router as it is made, each call carrying the series it gave; `subscribes` names
+  // the notification the call subscribes; a timeout refused fails before the trace and deprecation
   const callOf = <RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     {
@@ -314,6 +338,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   ) => {
     const { serializer } = dependencies;
     const { deprecation } = procedure;
+    const series = router.declareRequester(procedure);
 
     return (requestPayload: RequestPayload) => {
       return async (
@@ -322,71 +347,80 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         const resolvedOptions = resolveRequestOptions(options, defaults);
         const { closeOnTimeout, destinationId } = resolvedOptions;
         const connectionHandle = options?.connectionHandle;
-        const started = startedNow();
-        const step = {
-          options: resolvedOptions,
-          started,
-          tx: requestPayload,
-          type,
-        } as const;
+        // * the one check a call makes while nobody listens: no clock is read, no step is built
+        const step = isDebugging()
+          ? {
+              connectionHandle,
+              options: resolvedOptions,
+              started: startedNow(),
+              tx: requestPayload,
+              type,
+            }
+          : undefined;
 
-        trace(procedure, { ...step, direction: 'tx' });
+        if (step !== undefined) {
+          trace(procedure, { ...step, direction: 'tx' });
+        }
 
         if (deprecation !== undefined) {
           emitter.emit(DEPRECATED_EVENT, procedureOf(procedure));
         }
 
         const encoded = serializer.encode(requestPayload);
-        // what the call fails with once it went out is told as its answer
-        const fail = (reason: unknown): never => {
-          trace(procedure, {
-            ...step,
-            direction: 'rx',
-            error: reason,
-            isAnswered: true,
-            rx: tracedFailureOf(reason),
-          });
+        let result: IRouterResult;
 
-          throw reason;
-        };
-        const { header, payload } = await router
-          .request(encoded, {
+        try {
+          result = await router.request(encoded, {
             options: resolvedOptions,
             procedure: procedureOf(procedure),
+            series,
             subscribes: subscribes?.(),
-          })
-          .catch((reason: unknown) => {
-            // a connection that let it go unanswered is closed, when the call or the manager says so
-            if (
-              reason instanceof TimeoutError &&
-              closeOnTimeout &&
-              connectionHandle !== undefined
-            ) {
-              closeConnection?.(connectionHandle);
-            }
-
-            return fail(reason);
           });
+        } catch (reason) {
+          // a connection that let it go unanswered is closed, when the call or the manager says so
+          if (reason instanceof TimeoutError && closeOnTimeout && connectionHandle !== undefined) {
+            closeConnection?.(connectionHandle);
+          }
+
+          // what the call fails with once it went out is told as its answer
+          if (step !== undefined) {
+            const rx = tracedFailureOf(reason);
+
+            trace(procedure, { ...step, direction: 'rx', error: reason, isAnswered: true, rx });
+          }
+
+          throw reason;
+        }
+
+        const { header, payload } = result;
         let responsePayload: ResponsePayload;
 
         // an answer that does not decode fails here, with the result's header
         try {
           responsePayload = serializer.decode(payload);
         } catch (reason) {
-          return fail(
-            new FailureError(
-              { ...router.failures.payloadUndecodable, detail: toError(reason).message },
-              {
-                cause: reason,
-                destinationId,
-                header,
-                procedureAddress: procedure,
-              }
-            )
+          const failure = new FailureError(
+            { ...router.failures.payloadUndecodable, detail: toError(reason).message },
+            {
+              cause: reason,
+              destinationId,
+              header,
+              procedureAddress: procedure,
+            }
           );
+
+          if (step !== undefined) {
+            const rx = tracedFailureOf(failure);
+
+            trace(procedure, { ...step, direction: 'rx', error: failure, isAnswered: true, rx });
+          }
+
+          throw failure;
         }
 
-        trace(procedure, { ...step, direction: 'rx', isAnswered: true, rx: responsePayload });
+        if (step !== undefined) {
+          trace(procedure, { ...step, direction: 'rx', isAnswered: true, rx: responsePayload });
+        }
 
         return { callId: header.callId, payload: responsePayload };
       };
@@ -446,8 +480,17 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         return callOf(procedure, { dependencies, subscribes, type: 'request' });
       },
       router,
-      trace: (step) => {
-        trace(procedure, { ...step, started: startedNow(), type: 'notification' });
+      // heard, decoded or not: one check while nobody listens, and nothing built
+      trace: (error, rx) => {
+        if (isDebugging()) {
+          trace(procedure, {
+            direction: 'rx',
+            error,
+            rx,
+            started: notifiedNow(),
+            type: 'notification',
+          });
+        }
       },
     });
 
@@ -459,8 +502,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     return notification;
   };
 
-  // the resolver of one procedure, registered in the router; a notification's callback may subscribe
-  // its requester, which a plain request's callback is not typed to see
+  // the resolver of one procedure, for the router to register; a notification's callback may
+  // subscribe its requester, which a plain request's callback is not typed to see
   const createResolver = <RequestPayload, ResponsePayload, Failure extends ResolverFailure>(
     procedure: IProcedure,
     {
@@ -484,8 +527,9 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
     const resolver = nameAfter(async (props: IRequestResolverProps<Handle>): Promise<void> => {
       const { connectionHandle, header, session, signal } = props;
-      // the call starts as it arrives: its admission and its decoding count in its duration
-      const started = startedNow();
+      // * the one check a request makes while nobody listens; traced, the call starts as it
+      // arrives, its admission and its decoding counting in its duration
+      const started = isDebugging() ? startedNow() : undefined;
       const target = { connectionHandle, header };
       // a request is answered once: by its callback, by a refusal, or as failed; the answer sets it,
       // out of the flow a type follows here
@@ -517,7 +561,9 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         return router.respond({ failure: router.failures.payloadUndecodable }, target);
       }
 
-      trace(procedure, { direction: 'rx', rx: requestPayload, started, type });
+      if (started !== undefined) {
+        trace(procedure, { connectionHandle, direction: 'rx', rx: requestPayload, started, type });
+      }
 
       // the callback is handed the request, decoded, its call's session, and no more
       const request: IRequestProps<RequestPayload, Handle> = Object.freeze({
@@ -541,14 +587,18 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
             : { failure: resolverFailureOf(failure, router.failures) };
 
         isAnswered = true;
-        trace(procedure, {
-          direction: 'tx',
-          isAnswered: true,
-          rx: requestPayload,
-          started,
-          tx: failure ?? payload,
-          type,
-        });
+
+        if (started !== undefined) {
+          trace(procedure, {
+            connectionHandle,
+            direction: 'tx',
+            isAnswered: true,
+            rx: requestPayload,
+            started,
+            tx: failure ?? payload,
+            type,
+          });
+        }
 
         try {
           await router.respond(routerAnswer, target);
@@ -586,11 +636,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     }, procedure);
 
     // the router asks the admission itself, before the payload comes
-    const admitted = Object.assign(resolver, { admit });
-
-    router.registerResolver(admitted);
-
-    return admitted;
+    return Object.assign(resolver, { admit });
   };
 
   // a refusal is checked once, as the resolver is asked for, rather than as each request is refused
@@ -621,7 +667,11 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     return (
       callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
     ): IRequestResolver<Handle> => {
-      return createResolver(procedure, { callback, dependencies, type: 'request' });
+      const resolver = createResolver(procedure, { callback, dependencies, type: 'request' });
+
+      router.registerResolver(resolver);
+
+      return resolver;
     };
   };
 
@@ -638,7 +688,11 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     return (
       callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
     ): IRequestResolver<Handle> => {
-      return createResolver(procedure, { callback, dependencies, type: 'command' });
+      const resolver = createResolver(procedure, { callback, dependencies, type: 'command' });
+
+      router.registerResolver(resolver);
+
+      return resolver;
     };
   };
 
@@ -662,34 +716,47 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       callback: NotificationResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
     ): INotificationResolver<NotificationPayload, Handle> => {
       const { serializer } = dependencies;
-      const resolver = createResolver(procedure, { callback, dependencies, type: 'request' });
+      // its `notify` given before it is registered: the router declares a resolver that notifies
+      const resolver = Object.assign(
+        createResolver(procedure, { callback, dependencies, type: 'request' }),
+        {
+          notify: async (
+            notification: NotificationPayload,
+            notifyOptions?: INotifyOptions<Handle>
+          ): Promise<void> => {
+            // * the one check a notification makes while nobody listens
+            const step = isDebugging()
+              ? ({
+                  direction: 'tx',
+                  started: notifiedNow(),
+                  tx: notification,
+                  type: 'notification',
+                } as const)
+              : undefined;
 
-      return Object.assign(resolver, {
-        notify: async (
-          notification: NotificationPayload,
-          notifyOptions?: INotifyOptions<Handle>
-        ): Promise<void> => {
-          const step = {
-            direction: 'tx',
-            started: startedNow(),
-            tx: notification,
-            type: 'notification',
-          } as const;
+            if (step !== undefined) {
+              trace(procedure, step);
+            }
 
-          trace(procedure, step);
+            // what keeps it from going out is told at the start it was sent with
+            try {
+              await router.notify(serializer.encodeNotification(notification), {
+                filter: filterOf(notifyOptions),
+                key: notifyOptions?.key,
+                procedure: procedureOf(resolver),
+              });
+            } catch (reason) {
+              if (step !== undefined) {
+                trace(procedure, { ...step, error: reason });
+              }
+            }
+          },
+        }
+      );
 
-          // what keeps it from going out is told at the start it was sent with
-          await router
-            .notify(serializer.encodeNotification(notification), {
-              filter: filterOf(notifyOptions),
-              key: notifyOptions?.key,
-              procedure: procedureOf(resolver),
-            })
-            .catch((reason: unknown) => {
-              trace(procedure, { ...step, error: reason });
-            });
-        },
-      });
+      router.registerResolver(resolver);
+
+      return resolver;
     };
   };
 
@@ -698,8 +765,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       return manager;
     }),
 
-    get debug() {
-      return emitter.listenerCount(DEBUG_EVENT) > 0;
+    get isDebugging() {
+      return isDebugging();
     },
 
     getCommand: (procedure, dependencies) => {
@@ -731,12 +798,16 @@ export {
 } from './constants';
 export { filterDebug, parseDebugFilter } from './debug-filter';
 export {
-  createDebugStatistics,
-  DEBUG_STATISTICS_DEFAULTS,
-  type IDebugStatistics,
-  type IDebugStatisticsOptions,
-  type IDurationSummary,
-} from './debug-statistics';
+  createMetricsRegistry,
+  METRICS_CONTENT_TYPE,
+  METRICS_REGISTRY_DEFAULTS,
+} from './metrics-registry';
+export type {
+  IMetricsExposition,
+  IMetricsRegistry,
+  IMetricsRegistryOptions,
+  IProcedureSeries,
+} from './metrics-registry';
 export { DisconnectError, FailureError } from './errors';
 export { ProgrammerError } from '../../transport/shared/errors';
 export type { IEventIteratorOptions } from '../../transport/shared/types';

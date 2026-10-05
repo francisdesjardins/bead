@@ -104,6 +104,12 @@ public sealed record RouterClientOptions
     public Credentials? Credentials { get; init; }
 
     /// <summary>
+    /// What it counts its calls, its commands answered and its notifications heard into, at its
+    /// gates (spec/debugging.md 7.1); none counts nothing.
+    /// </summary>
+    public MetricsRegistry? MetricsRegistry { get; init; }
+
+    /// <summary>
     /// Where resolvers run, and notifications' callbacks: the thread pool for the first, one
     /// serial scheduler of their own for the second, in the order they came, when none.
     /// </summary>
@@ -135,8 +141,16 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     private readonly RouterCore _core;
     private readonly TaskScheduler _callbacks;
 
+    // what it counts its calls and its notifications through, attached to the registry it was
+    // given; none when it was given none
+    private readonly RouterSeries? _metrics;
+
     // the notification registered for each procedure, until it is unregistered or dropped
     private readonly ConcurrentDictionary<ProcedureAddress, INotificationLike> _notifications = new();
+
+    // the series of each procedure a notification was registered for, as the side that hears: kept
+    // once declared, as its registry keeps them
+    private readonly Dictionary<ProcedureAddress, HearingSeries> _hearing = [];
 
     // each subscription by the call id that opened it, and each notification's call id: the
     // router's scheduler alone touches them
@@ -165,6 +179,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
         Transport = transport;
         _callbacks = options?.ResolverScheduler ?? new SerialScheduler();
+        _metrics = options?.MetricsRegistry?.Give(RouterSide.Client);
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions
@@ -173,6 +188,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 ResolverScheduler = options?.ResolverScheduler,
                 Scheduler = options?.Scheduler,
                 Clock = clock,
+                Metrics = _metrics,
             });
 
         // * what a key set's deadline does goes on the router's scheduler, as its other timers' work
@@ -190,7 +206,11 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     /// <summary>What the router did: sent a request, took a response, took a notification.</summary>
     public event Action<RouterActivity>? Activity;
 
-    /// <summary>Each envelope, out or in, its credential left out; nothing is built while none listens.</summary>
+    /// <summary>
+    /// Each envelope, out or in, on its connection, <see cref="ServerConnectionHandle"/>, its
+    /// credential's scheme alone in place of its credential; nothing is built while none listens. A
+    /// listener that throws is reported through <see cref="Error"/>, and changes nothing.
+    /// </summary>
     public event Action<DebugDirection, TracedEnvelope>? Debug;
 
     /// <summary>
@@ -343,15 +363,58 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     /// <inheritdoc/>
+    public void Report(Exception reason, string? connectionHandle)
+    {
+        ArgumentNullException.ThrowIfNull(reason);
+
+        _core.Post(() =>
+        {
+            Error?.Invoke(reason);
+        });
+    }
+
+    /// <inheritdoc/>
+    public ProcedureSeries? DeclareRequester(Procedure procedure)
+    {
+        ArgumentNullException.ThrowIfNull(procedure);
+
+        return _metrics is { } metrics ? new ProcedureSeries(metrics.DeclareRequester(procedure)) : null;
+    }
+
+    /// <summary>
+    /// Holds a notification for its procedure, declared to its registry as the side that hears
+    /// (spec/debugging.md 7.2): a second for the same procedure is an
+    /// <see cref="InvalidOperationException"/>, and one its registry refuses an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
     public Task RegisterNotification(INotificationLike notification)
     {
         ArgumentNullException.ThrowIfNull(notification);
 
         return _core.Loop.Run(() =>
         {
-            return _notifications.TryAdd(notification.Procedure.Address, notification)
+            var procedure = notification.Procedure;
+
+            if (_notifications.ContainsKey(procedure.Address))
+            {
+                return Task.FromException(new InvalidOperationException($"{procedure.ProcedureName} is already a registered notification"));
+            }
+
+            try
+            {
+                if (_metrics?.DeclareNotification(procedure) is { } hearing)
+                {
+                    _hearing[procedure.Address] = hearing;
+                }
+            }
+            catch (ArgumentException refused)
+            {
+                return Task.FromException(refused);
+            }
+
+            return _notifications.TryAdd(procedure.Address, notification)
                 ? Task.CompletedTask
-                : Task.FromException(new InvalidOperationException($"{notification.Procedure.ProcedureName} is already a registered notification"));
+                : Task.FromException(new InvalidOperationException($"{procedure.ProcedureName} is already a registered notification"));
         });
     }
 
@@ -399,7 +462,14 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         // a call that gives no credential of its own presents the default, as it is now
         var byDefault = request.Options.Credential is null ? Credential : null;
         var options = byDefault is null ? request.Options : request.Options with { Credential = byDefault };
-        var core = new CoreRequest { ConnectionHandle = ServerConnectionHandle, Procedure = request.Procedure, Options = options, OnSent = request.OnSent };
+        var core = new CoreRequest
+        {
+            ConnectionHandle = ServerConnectionHandle,
+            OnSent = request.OnSent,
+            Options = options,
+            Procedure = request.Procedure,
+            Series = request.Series,
+        };
 
         if (request.Subscribes is not { } subscribes)
         {
@@ -509,7 +579,10 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                             callId,
                             notification,
                             notification.Window is { } window ? new Pacing(window) : null,
-                            request.Options.Timeout);
+                            request.Options.Timeout)
+                        {
+                            Hearing = _hearing.GetValueOrDefault(notification.Procedure.Address),
+                        };
                         _callIds[notification] = callId;
                         bound = callId;
                     },
@@ -525,9 +598,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             throw;
         }
 
-        // the server paces nothing before its answer: the window opens once it came, unless the
-        // server ended the subscription since
-        Renew(_subscriptions.GetValueOrDefault(result.Header.CallId));
+        // answered, it is a subscription, which its end drops; the server paces nothing before its
+        // answer: the window opens once it came, unless the server ended the subscription since
+        if (_subscriptions.GetValueOrDefault(result.Header.CallId) is { } answered)
+        {
+            answered.IsAnswered = true;
+            Renew(answered);
+        }
 
         return result;
     }
@@ -616,10 +693,19 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 _core.Loop);
     }
 
-    // the server forgets a connection's subscriptions with it: so does the client, and tells each
+    // the server forgets a connection's subscriptions with it: so does the client, and tells each;
+    // each answered is dropped, with no code (spec/debugging.md 10.3)
     private void DropNotifications()
     {
         var dropped = _notifications.Values.ToList();
+
+        foreach (var subscription in _subscriptions.Values)
+        {
+            if (subscription.IsAnswered)
+            {
+                subscription.Hearing?.Dropped.Drop(null);
+            }
+        }
 
         // emptied first, so what a drop registers again is the next connection's
         _notifications.Clear();
@@ -678,8 +764,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     // a notification bound to the call that subscribed it, how long that call was given, and its
-    // pacing when it asked for one
-    private sealed record Bound(uint CallId, INotificationLike Notification, Pacing? Pacing, TimeSpan Timeout);
+    // pacing when it asked for one; the series it is heard in, and whether its call was answered
+    private sealed record Bound(uint CallId, INotificationLike Notification, Pacing? Pacing, TimeSpan Timeout)
+    {
+        public HearingSeries? Hearing { get; init; }
+
+        public bool IsAnswered { get; set; }
+    }
 
     // a paced subscription, as its client counts it: the notifications credited, those whose
     // callbacks settled, and how many may be under way
@@ -736,6 +827,8 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 return;
             }
 
+            // * heard as it is paired with a subscription it holds, whether it decodes or not
+            subscription.Hearing?.Heard();
             client.Trigger(subscription, notification.Payload);
             client.Activity?.Invoke(RouterActivity.Notification);
         }
@@ -751,6 +844,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
             var notification = subscription.Notification;
             var call = client.Unbind(notification);
+
+            // * dropped at the side that hears, by the failure's code (spec/debugging.md 10.3)
+            subscription.Hearing?.Dropped.Drop(envelope.Failure);
 
             client._notifications.TryRemove(new KeyValuePair<ProcedureAddress, INotificationLike>(notification.Procedure.Address, notification));
 
@@ -785,7 +881,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             }
         }
 
-        public void Report(Exception reason, string connectionHandle)
+        public void Report(Exception reason, string? connectionHandle)
         {
             client.Error?.Invoke(reason);
         }
@@ -834,9 +930,33 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             return client.Transport.Send(message);
         }
 
+        public bool IsTracing
+        {
+            get
+            {
+                return client.Debug is not null;
+            }
+        }
+
+        // each listener within a guard: what one throws is reported, and changes nothing
         public void Trace(DebugDirection direction, TracedEnvelope envelope)
         {
-            client.Debug?.Invoke(direction, envelope);
+            if (client.Debug is not { } debug)
+            {
+                return;
+            }
+
+            foreach (var listener in debug.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<DebugDirection, TracedEnvelope>)listener)(direction, envelope);
+                }
+                catch (Exception reason)
+                {
+                    client.Error?.Invoke(reason);
+                }
+            }
         }
     }
 }

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { CALL_ID_RANGES, CLIENT_FAILURES, EnvelopeKind, SERVER_FAILURES } from '../constants';
 import { bytesOf, writeEnvelope } from '../envelope';
+import type { IMetricsRegistry } from '../metrics-registry';
 import type { IRouterClientTransportLike } from '../../client/types';
 import type { IRouterServerTransportLike } from '../../server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
@@ -40,6 +41,21 @@ export const callIdsOf = (side: RouterSide): (() => CallId) => {
 
     return callId;
   };
+};
+
+/**
+ * What a registry counted: the line of each series its exposition writes at a count other than 0,
+ * buckets left out, in its order.
+ */
+export const countedOf = (registry: IMetricsRegistry): string[] => {
+  return registry
+    .exposition()
+    .text.split('\n')
+    .filter((line) => {
+      return (
+        line !== '' && !line.startsWith('#') && !line.includes('_bucket') && !line.endsWith(' 0')
+      );
+    });
 };
 
 /** `length` bytes that differ from one to the next, so a byte out of place shows. */
@@ -115,6 +131,9 @@ export const createLoopback = ({
 
       activity: () => {
         return undefined;
+      },
+      isTracing: () => {
+        return false;
       },
       report: (error) => {
         recorded[side].reported.push(error);

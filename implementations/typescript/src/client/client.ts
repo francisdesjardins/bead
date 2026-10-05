@@ -29,6 +29,16 @@ export {
   TimeoutError,
 } from '../transport/shared/errors';
 export type { IClient, IClientLayers, IClientOptions, IClientTransportLike } from './types';
+export {
+  createMetricsRegistry,
+  METRICS_CONTENT_TYPE,
+  METRICS_REGISTRY_DEFAULTS,
+} from '../router/client/router-client';
+export type {
+  IMetricsExposition,
+  IMetricsRegistry,
+  IMetricsRegistryOptions,
+} from '../router/client/router-client';
 export type {
   ICallSession,
   IRouterClientOptions,
@@ -71,6 +81,7 @@ export const createClient = <Transport extends IClientTransportLike>(
     credential: options?.credential,
     credentials: options?.credentials,
     limits: options?.limits,
+    metricsRegistry: options?.metricsRegistry,
   });
 
   // a router a builder made on another clock comes apart, refused

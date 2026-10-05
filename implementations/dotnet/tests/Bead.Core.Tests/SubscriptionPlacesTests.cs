@@ -46,6 +46,15 @@ public sealed class SubscriptionPlacesTests
         return new SubscribingCall(callId, connectionHandle, paced);
     }
 
+    // the call ids of the subscriptions a drop gives, in its order
+    private static List<uint> CallIdsOf(List<(uint CallId, ProcedureAddress Procedure)> dropped)
+    {
+        return [.. dropped.Select((each) =>
+        {
+            return each.CallId;
+        })];
+    }
+
     private static CallAddress CallOf(uint callId, string connectionHandle = First)
     {
         return new CallAddress(callId, connectionHandle);
@@ -249,8 +258,8 @@ public sealed class SubscriptionPlacesTests
         places.Settle(inGrace(7), Subscribing);
         Assert.Equal([1u, 3u, 5u], Held(notifications));
 
-        Assert.Equal([1u], places.Drop(First));
-        Assert.Equal([3u, 5u], places.Drop(new SubscriptionPlace(First, grace with { })));
+        Assert.Equal([1u], CallIdsOf(places.Drop(First)));
+        Assert.Equal([3u, 5u], CallIdsOf(places.Drop(new SubscriptionPlace(First, grace with { }))));
         Assert.Empty(places.Drop(new SubscriptionPlace(First, grace with { Id = "Grace" })));
     }
 
@@ -264,12 +273,29 @@ public sealed class SubscriptionPlacesTests
         places.Settle(SubscribingOf(5), Subscribing);
         places.Settle(SubscribingOf(7), Subscribing with { Procedure = Other });
 
-        Assert.Equal([7u, 5u], places.Drop(First));
+        Assert.Equal([7u, 5u], CallIdsOf(places.Drop(First)));
         Assert.Empty(places.Drop(Second));
 
         places.Settle(holder, Subscribing with { IsFailure = true });
 
         Assert.Equal([7u], Held(notifications));
+    }
+
+    [Fact]
+    public void Established_and_drop_give_each_subscription_answered_with_its_procedure_the_waiting_among_them_never_one_in_flight()
+    {
+        var (_, places, _) = PlacesOf();
+        var holder = SubscribingOf(3);
+
+        places.Subscribe(holder, News);
+        places.Settle(SubscribingOf(5), Subscribing);
+        places.Settle(SubscribingOf(7), Subscribing with { Procedure = Other });
+        places.Settle(SubscribingOf(1, Second), Subscribing);
+
+        // what a close ends, a connection's or every one's, each with the procedure it counts under
+        Assert.Equal([(CallOf(7), Other), (CallOf(5), News)], places.Established(First));
+        Assert.Equal([(CallOf(7), Other), (CallOf(1, Second), News), (CallOf(5), News)], places.Established(null));
+        Assert.Equal([(7u, Other), (5u, News)], places.Drop(First));
     }
 
     [Fact]

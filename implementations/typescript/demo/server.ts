@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
+import { createMetricsRegistry } from '../src/router/shared/metrics-registry';
 import type { HealthStatus } from '../src/server/health';
 import { createHTTPServer } from '../src/server/http-server';
 import { createWSServer } from '../src/server/ws-server';
@@ -25,6 +26,12 @@ const BEAD_PATHNAME = '/bead';
 
 /** Where a probe reads the health of both Bead servers, on this machine alone. */
 const HEALTH_PATHNAME = '/health';
+
+/** Where a scraper reads both Bead servers' metrics, on this machine alone. */
+const METRICS_PATHNAME = '/metrics';
+
+/** What both Bead servers count into, summed: what `stats` and a scrape read. */
+const METRICS_REGISTRY = createMetricsRegistry();
 
 /**
  * The identity provider's key: `DEMO_KEY`'s, in base64url, else one drawn at each start, so no token
@@ -82,12 +89,14 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
 const overWebSocket = createWSServer({
   connectionInactivityTimeout: SILENCE_MILLISECONDS,
   credentials: CREDENTIALS,
+  metricsRegistry: METRICS_REGISTRY,
   transport: { WebSocketServer },
 });
 // behind the relay: the host a page named, and the address the relay says it came from
 const overHTTP = createHTTPServer({
   connectionInactivityTimeout: SILENCE_MILLISECONDS,
   credentials: CREDENTIALS,
+  metricsRegistry: METRICS_REGISTRY,
   transport: {
     createServer: (listener) => {
       return createServer(listener);
@@ -97,8 +106,8 @@ const overHTTP = createHTTPServer({
   },
 });
 
-offer(overWebSocket);
-offer(overHTTP);
+offer(overWebSocket, METRICS_REGISTRY);
+offer(overHTTP, METRICS_REGISTRY);
 
 // each Bead server on a local port the system picks, reached through the public one alone
 const [wsTarget, httpTarget] = await Promise.all([
@@ -137,6 +146,15 @@ const pages = createServer((request, reply) => {
 
   if (pathOf(request) === HEALTH_PATHNAME) {
     return (answerHealth(reply), undefined);
+  }
+
+  // the Prometheus text format 0.0.4, with its media type, as a scrape reads it
+  if (pathOf(request) === METRICS_PATHNAME) {
+    const { contentType, text } = METRICS_REGISTRY.exposition();
+
+    reply.writeHead(200, { 'cache-control': 'no-store', 'content-type': contentType });
+
+    return (reply.end(text), undefined);
   }
 
   // what went wrong stays on the server

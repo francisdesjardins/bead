@@ -296,63 +296,9 @@ client.services.on('debug', (error, info) => {
 await client.connect({ host: 'localhost', port });
 ```
 
-`debug` tells each step of each call — its direction, its type, its procedure, what went out and
-came in, and how long it took — and builds nothing while no one listens; each router's own `debug`
-tells each envelope, its header copied without its credential, its scheme alone. `filterDebug(listener, filter)`
-keeps what a call's listener hears, and `filterEnvelopeDebug` what an envelope's does, in the
-convention of the `DEBUG` variable of the `debug` package: words parted by commas or white space,
-`*` for any run of characters, `-` before a name to leave it out, and the exclusions winning. A
-name is a procedure's, matched whole and without regard to case; every other character is taken
-literally.
-
-| Word                                                                                                                    | Keeps                                                                                |
-| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `d(rx)`, `d(tx)`, `d(rx\|tx)`                                                                                           | the events going that way, calls and envelopes alike                                 |
-| `t(r)`, `t(n)`, `t(c)`, `t(r\|c)`                                                                                       | the requests, notifications or commands, by their first letter                       |
-| `e(request)`, `e(result)`, `e(failure)`, `e(notification)`, `e(chunk)`, `e(credit)`, `e(cancel)`, `e(request\|failure)` | the envelopes of that kind, by its name: `request` and `result` share a first letter |
-| `get*`                                                                                                                  | the procedures whose name matches                                                    |
-| `-getStatus`                                                                                                            | every procedure but those whose name matches                                         |
-
-One filter serves both listeners, as one `DEBUG` serves every namespace: a call's listener does not
-ask the kinds, and an envelope, which carries no procedure's name and no call's type, is asked its
-direction and its kind alone. With no name to keep, every name is kept; an empty filter keeps
-everything. A filter given as a function is asked at each event — an environment variable read
-afresh, say — and compiled again only when it changed. The first must hold, or the listener's
-wrapper throws a `ProgrammerError` as it is set up; one that stops holding later leaves the last
-that held, since a trace never fails a call. `parseDebugFilter` reads a filter's words into its
-parts. The package reads no variable of its own, since it runs in a browser too; the examples name
-theirs `DEBUG_CALLS`, as it filters calls and their envelopes both:
-
-```ts
-const filter = () => {
-  return process.env['DEBUG_CALLS'];
-};
-
-client.services.on(
-  'debug',
-  filterDebug((error, info) => {
-    console.log(info.direction, info.procedureName, error);
-  }, filter)
-);
-client.router.on(
-  'debug',
-  filterEnvelopeDebug(({ direction, header }) => {
-    console.log(direction, header);
-  }, filter)
-);
-```
-
-`createDebugStatistics()` keeps the durations of the last thousand calls — `size` says how many —
-from the `debug` events that carry one, and sums them up: their count, minimum, maximum, mean and
-median, each `undefined` while none is recorded. A call's answer is its round trip on the side that
-asked, and its handling on the side that answered, so a filter keeps one side's alone:
-
-```ts
-const statistics = createDebugStatistics();
-
-client.services.on('debug', filterDebug(statistics.listener, 'd(rx)'));
-console.log(statistics.durations());
-```
+`debug` tells each step of each call, and each router's own `debug` each envelope, at no cost while
+nobody listens; a metrics registry counts the calls and the notifications of the routers it is
+given — see [Debugging and metrics](#debugging-and-metrics).
 
 `server` does the same on the other side, and adds the sessions. A call runs in a session of one of
 two kinds. A connection's session is made by a request — the resolver that opens one, a procedure
@@ -739,6 +685,155 @@ connection on purpose, and is counted for none. What timers hold in closures —
 stalled transfer's — no gauge sees; the tests' timer spies do. Every end-to-end test ends at rest:
 each layer back to nothing once its clients are gone, and a health that passes.
 
+### Debugging and metrics
+
+What a side traces, filters and counts beside the wire is stated by
+[`spec/debugging.md`](../../spec/debugging.md), the spec's companion, which both sides play from
+`spec/debug-filters.json` and `spec/metrics.json`: none of it goes on the wire, and a peer never
+knows whether anyone listens.
+
+A service manager's `debug` tells each step of each call (section 4): its direction, `tx` out and
+`rx` in; its type, `request`, `command` or `notification`; its procedure and its service;
+`startedAt`, on the wall clock, and, once it answered, its `duration`, in whole milliseconds of the
+monotonic reading; its options, their defaults applied and its credential left out; what went out
+and came in, decoded and copied; and what it failed with, a failure by its code, its scope and its
+detail. A call made and its answer, a request received once admitted and decoded and the answer it
+sends, a notification sent or heard: each is a step. Each router's own `debug` tells each envelope
+(section 5), out once it is written within its bound, in once it reads: its direction, its
+connection — `server` on a client — and a copy of its header, which carries its credential's scheme
+in place of its credential.
+
+Neither costs anything while nobody listens (section 3). `isDebugging` says whether anyone does;
+until someone does, a call reads no clock and builds nothing for its trace — no step, no copy of its
+options or its payloads — and an envelope no redacted header: one check a call, and one an envelope.
+
+A listener's error never changes a call (section 2). What a listener throws — the trace's, or a
+filter's around it — goes to its router's `error` event, with the call's connection on a server,
+and the next listener is called all the same: the call keeps its outcome, its answer and what goes
+on the wire, as if nobody listened.
+
+`filterDebug(listener, filter)` keeps what a call's listener hears, and `filterEnvelopeDebug` what
+an envelope's does, in the words of the `DEBUG` variable of the `debug` package, read in ASCII alone
+(section 6): words parted by commas or ASCII white space — space, tab, line feed, vertical tab, form
+feed and carriage return, nothing outside ASCII — `*` for any run of characters, line terminators
+among them, `-` before a name to leave it out, and the exclusions winning. A name is a procedure's,
+matched whole: an ASCII letter matches itself in either case, and every other character itself
+alone, so a name outside ASCII is compared as it is. A selector's letter and its values are read in
+either case too, in ASCII alone: `D(RX)` holds.
+
+| Word                                                                                                                    | Keeps                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `d(rx)`, `d(tx)`, `d(rx\|tx)`                                                                                           | the events going that way, calls and envelopes alike                                   |
+| `t(request)`, `t(command)`, `t(notification)`, `t(r)`, `t(c)`, `t(n)`, `t(r\|c)`                                        | the requests, commands or notifications, by the trace's words or by their first letter |
+| `e(request)`, `e(result)`, `e(failure)`, `e(notification)`, `e(chunk)`, `e(credit)`, `e(cancel)`, `e(request\|failure)` | the envelopes of that kind, by its name: `request` and `result` share a first letter   |
+| `get*`                                                                                                                  | the procedures whose name matches                                                      |
+| `-getStatus`                                                                                                            | every procedure but those whose name matches                                           |
+
+One filter serves both listeners, as one `DEBUG` serves every namespace: a call's listener does not
+ask the kinds, and an envelope, which carries no procedure's name and no call's type, is asked its
+direction and its kind alone. With no name to keep, every name is kept; an empty filter keeps
+everything. A filter that does not hold is a `ProgrammerError`, which names its first word that
+does not, or that word's value, as it was written, quoted as JSON writes a string —
+`a debug filter takes a direction among rx, tx, not "UP"`: a selector empty, `d()`, or with a value
+left empty, `d(rx|)`; a value that names none of its letter's, `d(UP)`; any other word holding a
+parenthesis, `d(rx,tx)` being two such words. `parseDebugFilter` reads a filter's words into its
+parts, and a filter given whole, as those parts, is refused in the grammar's names. A filter given
+as a function is asked at each event — an environment variable read afresh, say — and compiled
+again only when it changed. The first must hold, or the listener's wrapper throws a
+`ProgrammerError` as it is set up; one that stops holding later, or a function that throws, leaves
+the last that held, since a trace never fails a call. The package reads no variable of its own,
+since it runs in a browser too; the examples name theirs `DEBUG_CALLS`, as it filters calls and
+their envelopes both:
+
+```ts
+const filter = () => {
+  return process.env['DEBUG_CALLS'];
+};
+
+client.services.on(
+  'debug',
+  filterDebug((error, info) => {
+    console.log(info.direction, info.procedureName, error);
+  }, filter)
+);
+client.router.on(
+  'debug',
+  filterEnvelopeDebug(({ connectionHandle, direction, header }) => {
+    console.log(connectionHandle, direction, header);
+  }, filter)
+);
+```
+
+A metrics registry counts calls and notifications (sections 7 to 12). `createMetricsRegistry()`
+makes one, and a router given it as its `metricsRegistry` — an option of every client and server,
+which pass it on to the router they build — counts at its gates, on a path no listener runs on: a
+call it answers, from its request's arrival to its answer handed to its transport; a call it makes,
+from its `request` to its settling; a notification, as it is handed to its transport or heard; a
+subscription, as either of its ends drops it. A router given none counts nothing, and one registry
+given to two routers sums them. It counts what its side declares: each resolver registered, each
+notification registered, and each requester made — `getRequest`'s, `getCommand`'s, a
+notification's — which the service manager declares to its router through `declareRequester` as it
+makes it, each of its calls carrying the series the declaration gave back. The registry keys a
+procedure by its address and holds one name for it: a declaration of an address it holds under
+another name, or of a name its service holds at another address, is a `ProgrammerError` as it is
+made, never on a call, and so is one past `maximumProcedures`, the procedures each group of
+families names at most, 1,000 by default. A call it has no declaration for — a service or a
+procedure unknown, a request whose header does not read, a relayed call — counts under `_OTHER`.
+Each series is made at 0 as its procedure is declared, so an alert reads it from its start and a
+rate sees the first call.
+
+| Family                              | Type      | Counts                                                                            |
+| ----------------------------------- | --------- | --------------------------------------------------------------------------------- |
+| `bead_client_call_duration_seconds` | histogram | how long each call this side made took, from its start to its end                 |
+| `bead_client_call_handled_total`    | counter   | each call this side made, as it ended, by `outcome` and `code`                    |
+| `bead_client_call_started_total`    | counter   | each call this side made, as its router took it                                   |
+| `bead_notifications_heard_total`    | counter   | each notification heard under a subscription this side holds                      |
+| `bead_notifications_sent_total`     | counter   | each notification for one subscription, `sent` to its transport or `failed`       |
+| `bead_server_call_duration_seconds` | histogram | how long each call this side answered took, from its arrival to its end           |
+| `bead_server_call_handled_total`    | counter   | each call this side answered, as it ended, by `outcome` and `code`                |
+| `bead_server_call_started_total`    | counter   | each call this side answered, as its request opened it                            |
+| `bead_subscriptions_dropped_total`  | counter   | each subscription ended other than by its client's cancel, at this end, by `code` |
+
+Client and server are a call's roles: `bead_client_*` counts the calls a side makes, a server's
+commands among them, and `bead_server_*` those it answers. A series is labelled by `service`, its
+service's id in decimal, and `procedure`, its name; a call's, by its `type`, `request` or
+`command`; a call ended, by its `outcome` — `result`, `failure`, `timeout`, `cancelled`, `closed` or
+`error` — and a failure by its `code`: the protocol's name for it, `application` for a procedure's
+own, `_OTHER` for one the protocol names none of. What is under way is a family's started count less
+its handled counts, exact at each exposition, and no gauge is kept besides. A duration is whole
+microseconds, in the 42 buckets of gRPC's A66, from 0 to 100 s, each bound written as Prometheus 3
+stores it. Node reads its monotonic clock finer than a microsecond; a browser coarsens it to 100 µs,
+or 5 µs once cross-origin isolated, and the buckets under that hold zeros.
+
+`exposition()` writes every series the registry holds in the Prometheus text format 0.0.4, and gives
+its media type with it: `{ contentType, text }`, `contentType` being `METRICS_CONTENT_TYPE`,
+`text/plain; version=0.0.4; charset=utf-8`, which Prometheus 3 requires of a target. Bead opens no
+port: an application serves the text where it likes, at `/metrics` beside its `/health`, or appends
+it to its own exposition when that one is 0.0.4 too, Bead's families being `bead_*` alone, each one
+group. One whose exposition is OpenMetrics serves Bead's at a path of its own, a second target. A
+mean reads from a histogram's `_sum` and `_count`, and a quantile as Prometheus's
+`histogram_quantile` estimates one, within a bucket.
+
+```ts
+import { createServer } from 'node:http';
+
+const metricsRegistry = createMetricsRegistry();
+const server = createWSServer({ metricsRegistry, transport: { WebSocketServer } });
+
+createServer((request, reply) => {
+  if (request.url === '/metrics') {
+    const { contentType, text } = metricsRegistry.exposition();
+
+    reply.writeHead(200, { 'content-type': contentType });
+    reply.end(text);
+  } else {
+    reply.writeHead(404);
+    reply.end();
+  }
+}).listen(9_464);
+await server.transport.start({ port });
+```
+
 ### Following a call
 
 Three paths cross the stack. Each step names its file under `src/` and the function that takes the
@@ -747,15 +842,17 @@ call there.
 **A request, from a client to a server, and back.**
 
 1. `services.getRequest(procedure, dependencies)(payload)(options)` — `router/shared/service-manager.ts`,
-   `callOf`, the body every requester shares: the trace, the `deprecated` event, `router.request`,
-   the close on timeout, the decoding of the answer.
-2. `request` — `router/client/router-client.ts`: binds the notification a call subscribes, when it
-   subscribes one, and hands the rest to the core.
-3. `request` — `router/shared/router-core.ts`: draws an odd call id and waits under it
-   (`pending-calls.ts`), then `deliver`s the envelope — written by `envelope.ts` and `header.ts`,
-   traced, handed to the transport. A payload too large for one envelope goes as a transfer
-   (`transfer.ts`, `sending-transfers.ts`): its opening first, then each chunk the server's credit
-   lets go, the call waiting on the transfer's inactivity until the last is handed off.
+   `callOf`, the body every requester shares: its declaration to the router, the trace, the
+   `deprecated` event, `router.request` with the series the declaration gave, the close on timeout,
+   the decoding of the answer.
+2. `request` — `router/client/router-client.ts`: refuses a programmer's error first, binds the
+   notification a call subscribes, when it subscribes one, and hands the rest to the core.
+3. `request` — `router/shared/router-core.ts`: refuses a programmer's error or an aborted signal,
+   uncounted, then starts the call, counted when the router has a registry, draws an odd call id
+   and waits under it (`pending-calls.ts`), then `deliver`s the envelope — written by `envelope.ts`
+   and `header.ts`, traced, handed to the transport. A payload too large for one envelope goes as a
+   transfer (`transfer.ts`, `sending-transfers.ts`): its opening first, then each chunk the server's
+   credit lets go, the call waiting on the transfer's inactivity until the last is handed off.
 4. On the server, `server/server.ts` counts the message as its session's activity, and
    `router/server/router-server.ts` notes the connection open. `receive`, in the core, reads the
    prefix and the envelope — what does not read goes through `gate` — and `receiveRequest` checks
@@ -928,8 +1025,9 @@ HTTP, each listen on a local port of their own; the page's HTTP server passes ea
 `/bead` on to the first, byte for byte, and each exchange on `/bead` to the second, through
 `demo/relay.ts`, a small proxy that neither the protocol nor the transports know of. The page goes
 over WebSocket, or over HTTP with `?transport=http`, where what the server sends of its own comes
-back by a listen; `/health` gives both servers' health. With `?transport=worker`, the Bead server
-and the identity provider run in a Web Worker of the page — `demo/worker.ts`, built to
+back by a listen; `/health` gives both servers' health, and `/metrics` what both count into their
+one metrics registry, in the Prometheus text format 0.0.4. With `?transport=worker`, the Bead
+server and the identity provider run in a Web Worker of the page — `demo/worker.ts`, built to
 `dist/worker.js` beside `dist/page.js` — and no backend answers anything but the files: that pair is
 what a playground takes. `yarn playground:build:file` builds it, with the page, into
 `demo/dist/playground/`, every path relative and nothing started — the site publishes it at
@@ -939,8 +1037,9 @@ keeps to the console — and the envelopes, when it asks for them by `e(…)` �
 `removeItem` stops it (`demo/debug.ts`). A listener only queues: the console is written when the
 page is idle, in one collapsed group, since an open console rendering an object per event is what
 slows a page through a burst. A Server panel reads, every second, what the server the page is connected to
-says of itself — its health, the durations of the calls it answered, and what each layer holds — by
-a `stats` call like any other, over whichever transport, which the logs leave out. The procedures, in `demo/offer.ts`, and the tokens, in `demo/token.ts`,
+says of itself — its health, the calls answered as the registry its servers count into counts them,
+how many, their mean and a median estimated within its bucket, and what each layer holds — by a
+`stats` call like any other, over whichever transport, which the logs and those counts leave out. The procedures, in `demo/offer.ts`, and the tokens, in `demo/token.ts`,
 stand on Web Crypto alone, so the worker offers what Node's servers do. There is a button per kind of call — a read, a write, a subscription and its notifications, a
 glyph drawn at random that crosses as a transfer either way and is shown, a slow call cancelled or timed out, a procedure's own failure, a command the
 server sends back — and two logs, the calls and their envelopes, as the client sees them. A burst of

@@ -6,6 +6,7 @@ import type { TransportServerConnectionHandle } from '../../transport/server/typ
 import { ProgrammerError } from '../../transport/shared/errors';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import { sessionKeyOf } from '../shared/call-session';
+import type { INotifyingSeries } from '../shared/metrics-registry';
 import type {
   CallId,
   IProcedureAddress,
@@ -60,6 +61,7 @@ interface INotificationTarget extends IProcedureAddress {
   readonly connectionTargets: Map<CallId, INotificationTarget>;
   readonly identifier: SessionIdentifier | undefined;
   readonly pacing: IPacing | undefined;
+  readonly series: INotifyingSeries | undefined;
   readonly sessionKey: string;
 }
 
@@ -235,9 +237,12 @@ export const createNotificationManager = (
     pacingOf: (callId, connectionHandle) => {
       return targetsByConnection.get(connectionHandle)?.get(callId)?.pacing;
     },
+    seriesOf: (callId, connectionHandle) => {
+      return targetsByConnection.get(connectionHandle)?.get(callId)?.series;
+    },
     register: (
       { procedureId, serviceId },
-      { callId, connectionHandle, identifier, paced: isPaced }
+      { callId, connectionHandle, identifier, paced: isPaced, series }
     ) => {
       const holder = subscriptionOf({ procedureId, serviceId }, { connectionHandle, identifier });
 
@@ -292,6 +297,7 @@ export const createNotificationManager = (
         identifier,
         pacing,
         procedureId,
+        series,
         serviceId,
         sessionKey,
       };

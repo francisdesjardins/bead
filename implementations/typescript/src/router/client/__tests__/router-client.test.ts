@@ -20,10 +20,11 @@ import {
   delaysOn,
   timersUntil,
 } from '../../../transport/shared/__tests__/fixtures';
-import { envelopeOf } from '../../shared/__tests__/fixtures';
+import { countedOf, envelopeOf } from '../../shared/__tests__/fixtures';
 import {
   CancelError,
   CLIENT_FAILURES,
+  createMetricsRegistry,
   createRouterClient,
   CredentialScheme,
   DisconnectError,
@@ -36,6 +37,7 @@ import {
   ProtocolCode,
   SERVER_FAILURES,
   TimeoutError,
+  type IClock,
   type IRouterClient,
   type IRouterClientTransportLike,
 } from '../router-client';
@@ -2245,13 +2247,13 @@ test.describe('createRouterClient', () => {
   });
 
   test.describe('debug', () => {
-    test('tells each envelope out and in, with a copy of its header and never its session token', async () => {
+    test('tells each envelope out and in, with its connection, server, a copy of its header, and never its session token', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
       const seen: unknown[] = [];
 
-      router.on('debug', ({ direction, header }) => {
-        seen.push([direction, { ...header }]);
+      router.on('debug', ({ connectionHandle, direction, header }) => {
+        seen.push([connectionHandle, direction, { ...header }]);
         header.callId = 99;
       });
 
@@ -2261,10 +2263,235 @@ test.describe('createRouterClient', () => {
 
       expect((await answering).header.callId).toBe(1);
       expect(seen).toEqual([
-        ['tx', requestHeaderOf(1)],
-        ['rx', { callId: 1, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT }],
+        ['server', 'tx', requestHeaderOf(1)],
+        [
+          'server',
+          'rx',
+          { callId: 1, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT },
+        ],
       ]);
       expect(JSON.stringify(seen)).not.toContain(TOKEN);
+    });
+
+    test('a debug listener that throws on an envelope is reported, and the envelope and its call go on, every listener told', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport);
+      const errors = recordErrors(router);
+      const failure = new Error('listener bug');
+      const heard: string[] = [];
+
+      router.on('debug', () => {
+        throw failure;
+      });
+      router.on('debug', ({ direction }) => {
+        heard.push(direction);
+      });
+
+      const answering = router.request(new Uint8Array(0), { options, procedure: service });
+
+      deliver(resultOf(1));
+
+      await expect(answering).resolves.toMatchObject({ header: { callId: 1 } });
+      expect(sent).toHaveLength(1);
+      expect(heard).toEqual(['tx', 'rx']);
+      expect(errors).toEqual([failure, failure]);
+    });
+  });
+
+  test.describe('metrics', () => {
+    // a line of echo's series among the calls a client makes, requests, by the rest of its name, its
+    // labels and its value
+    const made = (rest: string): string => {
+      const labels = 'service="2",procedure="echo",type="request"';
+
+      return `bead_client_call_${rest.replace('{}', `{${labels}}`).replace('{outcome', `{${labels},outcome`)}`;
+    };
+
+    test('counts a call refused before it goes, SESSION_REQUIRED or DESTINATION_UNREACHABLE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
+      const metricsRegistry = createMetricsRegistry();
+      const { transport } = createScriptedTransport({ carriesCredential: false });
+      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const series = router.declareRequester(service);
+      const ask = (
+        asked: {
+          options?: Parameters<typeof router.request>[1]['options'];
+          subscribes?: INotificationLike;
+        } = {}
+      ) => {
+        return router
+          .request(new Uint8Array(0), { options, procedure: service, series, ...asked })
+          .catch((reason: unknown) => {
+            return reason;
+          });
+      };
+
+      // OPAQUE with no session known, and an ELSEWHERE its transport cannot carry
+      const noSession = ask({
+        options: { ...options, credential: { scheme: CredentialScheme.OPAQUE } },
+      });
+      const uncarried = ask({ options: { ...options, credential: ELSEWHERE } });
+
+      expect(countedOf(metricsRegistry)).toEqual([
+        made('duration_seconds_count{} 2'),
+        made('handled_total{outcome="failure",code="DESTINATION_UNREACHABLE"} 1'),
+        made('handled_total{outcome="failure",code="SESSION_REQUIRED"} 1'),
+        made('started_total{} 2'),
+      ]);
+
+      // a programmer's error, and a signal aborted already: neither is a call
+      const refused = await Promise.all([
+        ask({ subscribes: notificationOf([]) }),
+        ask({ options: { ...options, credential: { scheme: CredentialScheme.JWT, token: '' } } }),
+        ask({ options: { ...options, timeout: 0 } }),
+        ask({ options: { ...options, signal: AbortSignal.abort() } }),
+      ]);
+
+      expect(
+        refused.map((reason) => {
+          return (reason as Error).name;
+        })
+      ).toEqual(['ProgrammerError', 'ProgrammerError', 'ProgrammerError', 'CancelError']);
+      expect(countedOf(metricsRegistry)).toContain(made('started_total{} 2'));
+      expect(
+        (await Promise.all([noSession, uncarried])).map((reason) => {
+          return (reason as FailureError).code;
+        })
+      ).toEqual([ProtocolCode.SESSION_REQUIRED, ProtocolCode.DESTINATION_UNREACHABLE]);
+    });
+
+    test('counts a call its caller cancels as cancelled, and one its transport refuses as an error', async () => {
+      const metricsRegistry = createMetricsRegistry();
+      const { control, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const series = router.declareRequester(service);
+      const controller = new AbortController();
+      const cancelled = router.request(new Uint8Array(0), {
+        options: { ...options, signal: controller.signal },
+        procedure: service,
+        series,
+      });
+
+      controller.abort();
+
+      await expect(cancelled).rejects.toBeInstanceOf(CancelError);
+
+      control.sendError = new Error('this transport refuses');
+
+      await expect(
+        router.request(new Uint8Array(0), { options, procedure: service, series })
+      ).rejects.toThrow('this transport refuses');
+      expect(countedOf(metricsRegistry)).toEqual([
+        made('duration_seconds_count{} 2'),
+        made('handled_total{outcome="cancelled"} 1'),
+        made('handled_total{outcome="error"} 1'),
+        made('started_total{} 2'),
+      ]);
+    });
+
+    test('counts a notification heard under a subscription it holds, and a subscription dropped at this end by the failure that ends it or with its connection, never by its own cancel', async () => {
+      const metricsRegistry = createMetricsRegistry();
+      const { close, deliver, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const errors = recordErrors(router);
+      const news = notificationOf([]);
+      // subscribed under `callId`, once its answer came
+      const subscribe = async (callId: number): Promise<void> => {
+        await router.registerNotification(news);
+
+        const subscribing = router.request(new Uint8Array(0), {
+          options,
+          procedure: service,
+          subscribes: news,
+        });
+
+        deliver(resultOf(callId));
+        await subscribing;
+      };
+
+      await subscribe(1);
+      deliver(notificationEnvelopeOf(1));
+      // under no subscription: reported, and not heard
+      deliver(notificationEnvelopeOf(9));
+      deliver({
+        failure: { code: ProtocolCode.SESSION_REQUIRED, scope: FailureScope.PROTOCOL },
+        header: { callId: 1, kind: EnvelopeKind.FAILURE },
+        kind: EnvelopeKind.FAILURE,
+      });
+      await subscribe(3);
+      await router.unregisterNotification(news);
+      await subscribe(5);
+      close();
+
+      expect(codesOf(errors)).toEqual([ProtocolCode.SUBSCRIPTION_UNKNOWN]);
+      expect(
+        countedOf(metricsRegistry).filter((line) => {
+          return line.startsWith('bead_notifications') || line.startsWith('bead_subscriptions');
+        })
+      ).toEqual([
+        'bead_notifications_heard_total{service="2",procedure="echo"} 1',
+        'bead_subscriptions_dropped_total{service="2",procedure="echo"} 1',
+        'bead_subscriptions_dropped_total{service="2",procedure="echo",code="SESSION_REQUIRED"} 1',
+      ]);
+    });
+
+    test('observes a call on a clock whose monotonic reading moves by 100 µs, as a browser’s does, as 0 or 100 µs', async () => {
+      const metricsRegistry = createMetricsRegistry();
+      const clock = createTestClock();
+      const read: Pick<IClock, 'performance'> = clock;
+      const fine = read.performance.now.bind(read.performance);
+      const { deliver, transport } = createScriptedTransport();
+
+      // coarsened as W3C High Resolution Time coarsens a browser's reading
+      read.performance.now = () => {
+        return Math.floor(fine() * 10) / 10;
+      };
+
+      using router = createRouterClient(transport, { clock, metricsRegistry });
+      const series = router.declareRequester(service);
+      // a call of 30 µs, from where the clock is now
+      const callOf30 = async (callId: number): Promise<void> => {
+        const answering = router.request(new Uint8Array(0), {
+          options,
+          procedure: service,
+          series,
+        });
+
+        await clock.tickAsync(0.03);
+        deliver(resultOf(callId));
+        await answering;
+      };
+
+      // within one step of the reading, then across one
+      await callOf30(1);
+      await clock.tickAsync(0.05);
+      await callOf30(3);
+
+      expect(countedOf(metricsRegistry)).toEqual([
+        made('duration_seconds_sum{} 0.0001'),
+        made('duration_seconds_count{} 2'),
+        made('handled_total{outcome="result"} 2'),
+        made('started_total{} 2'),
+      ]);
+      // the bucket of 0 holds the first, and the bucket of 100 µs, 0.0001, both
+      const bucketOf = (le: string, count: number): string => {
+        return `bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="request",le="${le}"} ${String(count)}`;
+      };
+
+      expect(
+        metricsRegistry
+          .exposition()
+          .text.split('\n')
+          .filter((line) => {
+            return line.startsWith('bead_client_call_duration_seconds_bucket{service="2"');
+          })
+          .slice(0, 5)
+      ).toEqual([
+        bucketOf('0.0', 1),
+        bucketOf('1e-05', 1),
+        bucketOf('5e-05', 1),
+        bucketOf('0.0001', 2),
+        bucketOf('0.0003', 2),
+      ]);
     });
   });
 

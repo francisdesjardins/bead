@@ -702,7 +702,7 @@ public sealed class WebSocketServerTests
         {
             if (direction == DebugDirection.Rx)
             {
-                presented.Enqueue(envelope.CredentialScheme);
+                presented.Enqueue(envelope.Header is RequestHeader { Credential: { } credential } ? credential.Scheme : null);
             }
         };
         device.Services.GetRequestResolver(Echo, TextAnswered)((request, response) =>

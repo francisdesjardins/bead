@@ -10,6 +10,11 @@ import type {
 } from '../../transport/shared/types';
 import type { IRouterClient } from '../client/types';
 import type {
+  IMetricsRegistry,
+  INotifyingSeries,
+  IProcedureSeries,
+} from '../shared/metrics-registry';
+import type {
   CallId,
   DebugDirection,
   DestinationId,
@@ -64,6 +69,14 @@ export interface INotificationManager {
   /** The pacing of `connectionHandle`'s subscription under `callId`; `undefined` when not paced. */
   pacingOf(callId: CallId, connectionHandle: TransportServerConnectionHandle): IPacing | undefined;
   /**
+   * The series a subscription counts its notifications into, as it was registered with; `undefined`
+   * for one registered with none, or none under that call id.
+   */
+  seriesOf(
+    callId: CallId,
+    connectionHandle: TransportServerConnectionHandle
+  ): INotifyingSeries | undefined;
+  /**
    * Subscribes `subscription.connectionHandle` to `procedureAddress` under the call id of the
    * request that subscribed it, in the session that holds it — paced, when that request asked — and
    * gives that call id. Throws a {@link ProgrammerError}, and registers nothing, when the connection
@@ -112,6 +125,8 @@ export interface ISubscribingCall
    */
   end?: number | undefined;
   paced?: boolean | undefined;
+  /** The series its notifications count into, at the side that notifies; none counts nothing. */
+  series?: INotifyingSeries | undefined;
 }
 
 /**
@@ -511,6 +526,11 @@ export interface IRouterServer<
       onSent?: ((isHanded: boolean) => void) | undefined;
       options: IResolvedRequestOptions;
       procedure: IProcedure;
+      /**
+       * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s
+       * when none is given, as a relay's leg B.
+       */
+      series?: IProcedureSeries | undefined;
       subscribes?: INotificationLike | undefined;
     }
   ): Promise<IRouterResult>;
@@ -529,7 +549,10 @@ export interface IRouterServer<
   [Symbol.dispose](): void;
 }
 
-/** An envelope as the router sent or took it, and the connection it went to or came from. */
+/**
+ * An envelope as the router sent or took it, and the connection it went to or came from. What a
+ * listener throws is reported to `error`, with that connection, and changes nothing of the envelope.
+ */
 export interface IRouterServerDebugInfo {
   connectionHandle: TransportServerConnectionHandle;
   direction: DebugDirection;
@@ -557,6 +580,12 @@ export interface IRouterServerOptions {
    * {@link ProgrammerError}, as are a key not shaped for its algorithm and a key set given no issuer.
    */
   credentials?: ICredentials | undefined;
+  /**
+   * The registry it counts its calls and its notifications into, its `_OTHER` series made as it is
+   * given it: each resolver registered, and each requester made, declared to it. None counts
+   * nothing, and costs nothing.
+   */
+  metricsRegistry?: IMetricsRegistry | undefined;
   /** What a paced subscription queues at most: {@link PACING_DEFAULTS}' where it says nothing. */
   pacing?: PacingLimitsOptions | undefined;
   /** How the router relays a request that names a destination registered in it. */
@@ -746,9 +775,10 @@ export type RouterServerEventMap = {
   debug: [info: IRouterServerDebugInfo];
   /**
    * What went wrong with an envelope no call was waiting on, in a resolver, or with a notification,
-   * and the connection that envelope came from or went to.
+   * and the connection that envelope came from or went to; none for what no connection carries: a
+   * debug listener that throws as a notification is told sent, to whoever is subscribed.
    */
-  error: [error: Error, connectionHandle: TransportServerConnectionHandle];
+  error: [error: Error, connectionHandle: TransportServerConnectionHandle | undefined];
 };
 
 /** The events a server router emits, named by the table that types them. */

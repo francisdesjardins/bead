@@ -14,19 +14,12 @@ import {
   setReadyStateClosing,
   setReadyStateConnecting,
   setReadyStateOpen,
-  TimeoutError,
 } from '../transport-client';
 import * as clocks from '../../shared/clock';
 import * as constants from '../../shared/constants';
 import { createPromise } from '../../shared/create-promise';
-import {
-  createTestClock,
-  delaysOn,
-  durationsOf,
-  type TestClock,
-} from '../../shared/__tests__/fixtures';
+import { createTestClock, delaysOn, type TestClock } from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
-import { createWorkerTransportClient } from '../worker-transport-client';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
 
@@ -204,72 +197,6 @@ test.describe('createTransportClient', () => {
     const fresh = createStubClient();
     await fresh.client[Symbol.asyncDispose]();
     expect(fresh.calls).toEqual(['dispose']);
-  });
-
-  // the worker's transport, which no test of its own times a connect for: a worker that never answers
-  test('holds a connect’s timeout to a whole number of milliseconds, rounded, Infinity never timing out, refusing 0 and any other before anything moves, the worker’s transport as every one', async () => {
-    for (const { given, held: due, outcome, refusal } of durationsOf("a connect's timeout", {
-      never: 'never',
-      zero: 'refused',
-    })) {
-      const clock = createTestClock();
-      const held: MessagePort[] = [];
-      const client = createWorkerTransportClient({
-        clock,
-        worker: {
-          postMessage: (_, transfer) => {
-            held.push(transfer[0] as MessagePort);
-          },
-        },
-      });
-      const controller = new AbortController();
-      const label = String(given);
-      let isSettled = false;
-      const connecting = client
-        .connect({ signal: controller.signal, timeout: given })
-        .catch((reason: unknown) => {
-          return reason;
-        })
-        .finally(() => {
-          isSettled = true;
-        });
-
-      if (outcome === 'refused') {
-        expect(await connecting, label).toEqual(new ProgrammerError(refusal));
-        // no port handed to the worker, and nothing kept for a reconnection
-        expect([held, client.isUninitialized()], label).toEqual([[], true]);
-        await expect(client.reconnect(), label).rejects.toThrow('transport was never connected');
-
-        continue;
-      }
-
-      // a duration held times the connect out once it passed, its TimeoutError telling it; never
-      // waits on past the longest
-      if (outcome === 'taken' && due !== undefined) {
-        await clock.tickAsync(due - 1);
-
-        expect(isSettled, label).toBe(false);
-
-        await clock.tickAsync(1);
-
-        const ended = await connecting;
-
-        expect(ended, label).toBeInstanceOf(TimeoutError);
-        expect(ended, label).toHaveProperty('timeout', due);
-      } else {
-        await clock.tickAsync(clocks.LONGEST_TIMER);
-
-        expect(isSettled, label).toBe(false);
-
-        controller.abort();
-
-        expect(await connecting, label).toBeInstanceOf(CancelError);
-      }
-
-      for (const port of held) {
-        port.close();
-      }
-    }
   });
 
   test('a connect refused after a close keeps the target before it, which a reconnection replays', async () => {
@@ -472,57 +399,6 @@ test.describe('createTransportClient #reconnect', () => {
     expect(calls).toEqual(['connect:1', 'connect:1', 'connect:1']);
     expect(client.clock).toBe(clock);
     expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
-  });
-
-  test('holds a delay to a whole number of milliseconds, rounded, which "tap" hears, 0 waiting none, refusing Infinity and any other before "tap" hears it, ending CLOSED without another attempt', async () => {
-    for (const { given, held, outcome, refusal } of durationsOf('a delay', {
-      never: 'refused',
-      zero: 'at once',
-    })) {
-      const clock = createTestClock();
-      const { calls, client } = createStubClient({ clock, failures: 2 });
-      const taps: number[] = [];
-      const label = String(given);
-
-      await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
-
-      const reconnecting = client.reconnect({
-        delay: given,
-        tap: (nextDelay) => {
-          taps.push(nextDelay);
-        },
-      });
-
-      if (outcome === 'refused') {
-        await expect(reconnecting, label).rejects.toThrow(new ProgrammerError(refusal));
-
-        expect([calls, taps, client.isClosed()], label).toEqual([
-          ['connect:1', 'connect:1'],
-          [],
-          true,
-        ]);
-
-        continue;
-      }
-
-      // a duration held is waited on the clock; 0, none
-      if (outcome === 'taken' && held !== undefined) {
-        await expect
-          .poll(() => {
-            return delaysOn(clock);
-          }, label)
-          .toEqual([held]);
-        await clock.tickAsync(held - 1);
-
-        expect(calls, label).toEqual(['connect:1', 'connect:1']);
-
-        await clock.tickAsync(1);
-      }
-
-      await reconnecting;
-
-      expect([calls, taps], label).toEqual([['connect:1', 'connect:1', 'connect:1'], [held]]);
-    }
   });
 
   test('arms its wait before "tap" hears it, so a tap that moves the clock by the wait lets the next attempt follow with no other move', async () => {

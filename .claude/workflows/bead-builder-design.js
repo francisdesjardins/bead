@@ -16,7 +16,7 @@ const REPO = (args && args.repo) || 'D:/workspace/francisdesjardins/2025/bead';
 const OUT = (args && args.out) || `${REPO}/docs/builder/design.md`;
 
 const CONTEXT = `
-You are designing the API builder of Bead, a binary wire protocol with a normative spec (spec/spec.md), conformance files (spec/vectors.json, spec/conversations.json, spec/interop-service.json), and two implementations at behavioural parity: implementations/typescript and implementations/dotnet. The repository is ${REPO}.
+You are designing the API builder of Bead, a binary wire protocol with a normative spec (spec/spec.md), conformance files (spec/vectors.json, spec/conversations.json, spec/transports.json, spec/clocks.json, spec/durations.json, spec/interop-service.json; and, beside the wire's spec, spec/debugging.md with spec/debug-filters.json and spec/metrics.json), and two implementations at behavioural parity: implementations/typescript and implementations/dotnet. The repository is ${REPO}.
 Read first:
 - ${REPO}/.claude/local/plan.md (phase 5) and the builder's inputs in ${REPO}/.claude/local/builder/: api-builder.md (with the synthesis on the builder at its end) and inspiration.md;
 - the runtimes: how a service, its procedures and its notifications are declared and offered today on both sides (the interop service: offer.ts, InteropService.cs).
@@ -32,7 +32,9 @@ Constraints:
 - Bead's wire carries numeric service and procedure ids, never names.
 - Payloads are opaque to Bead; today they are JSON, text, or raw bytes (an 8 MiB glyph must stay RAW).
 - Notifications are paced subscriptions, not streams.
-- Sessions and admission exist.
+- A request runs in its call's session (decision 0010), which a synchronous admission reads; the builder's admission vocabulary (NONE, SESSION, HOOK(name)) binds to that session once resolved, as 0010 says. Credentials (a JWT's keys and key set, an ELSEWHERE verifier) are the runtime's configuration, never generated.
+- A procedure a side calls is declared once to its router (decision 0013: declareRequester / DeclareRequester, a resolver at registration), which makes its metrics series; generated code declares each requester and resolver once.
+- The identity rules of names and ids (the plan's xhigh item) are not decided yet: the design says what it needs of them, and does not settle them.
 - The C# side has no base classes to inherit (decision 0007: interfaces and composition).
 - Settled by the Tenth Man on names (plan.md): the CLI is \`beadc\`, as \`bead\` is taken on npm, PyPI and crates.io; generated C# qualifies every Bead type as \`global::Bead.…\`, since \`HealthStatus\` collides with ASP.NET's (CS0104); package ids are owner-qualified when published, \`@francisdesjardins/bead\` on npm and \`FrancisDesjardins.Bead.*\` on NuGet; the proto package and extension numbers are reserved in protobuf's global registry when the v1 options freeze.
 - Follow CLAUDE.md and the rules it imports, the names rule first.
@@ -54,7 +56,7 @@ const ANGLES = [
     angle: `THE INTERMEDIATE MODEL AND CONFORMANCE:
 - bead-manifest/1 as the neutral model the front end produces and every template reads, descending from interop-service.json.
 - Its schema, and its identity rules in the spec.
-- How the interop service is written in .proto and regenerated, accepted only if all of these hold: the 72 conversations and the interop, both ways, pass unchanged; make_conversations.py reproduces conversations.json byte for byte; offer.ts and InteropService.cs are replaced by generated code.
+- How the interop service is written in .proto and regenerated, accepted only if all of these hold: the conversations (142 today) and the interop, both ways, pass unchanged; make_conversations.py reproduces conversations.json byte for byte; offer.ts and InteropService.cs are replaced by generated code.
 - How a third language plugs in its templates.`,
   },
   {

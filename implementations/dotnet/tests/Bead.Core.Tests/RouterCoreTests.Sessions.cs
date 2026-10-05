@@ -420,7 +420,9 @@ public sealed partial class RouterCoreTests
         Assert.Equal(
             ((ushort)ProtocolCode.EnvelopeTooLarge, FailureOrigin.Local, (RouterSide?)RouterSide.Client),
             (tooLarge.Code, tooLarge.Origin, tooLarge.Side));
-        Assert.Null(Assert.IsType<RequestHeader>(tooLarge.Header).Credential);
+        // the header thrown keeps its credential's scheme alone, never its token
+        Assert.Equal(Credential.SchemeOf(CredentialScheme.Jwt), Assert.IsType<RequestHeader>(tooLarge.Header).Credential);
+        Assert.Null(((RequestHeader)tooLarge.Header!).Credential!.Value.Token);
         Assert.Equal(5, client.Sent.Count);
         Assert.Equal(long40, ((RequestHeader)client.Sent[4].Header).Credential);
     }

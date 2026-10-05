@@ -81,19 +81,38 @@ test.describe('parseDebugFilter', () => {
     });
   });
 
-  test('refuses a direction or a type letter that is not one, a type in full, and a selector that names none', () => {
-    for (const spec of [
-      'd(up)',
-      't(p)',
-      't(request)',
-      't(n|r|x)',
-      't(constructor)',
-      'd()',
-      't()',
-    ]) {
+  test('refuses a direction or a type that is not one, and a selector that names none', () => {
+    for (const spec of ['d(up)', 't(p)', 't(n|r|x)', 't(constructor)', 'd()', 't()']) {
       expect(() => {
         return parseDebugFilter(spec);
       }, spec).toThrow(ProgrammerError);
+    }
+  });
+
+  test('refuses a filter in sentences that name the word, or the value, as it was written, quoted as JSON', () => {
+    const refusals: [spec: string, sentence: string][] = [
+      ['d(UP)', 'a debug filter takes a direction among rx, tx, not "UP"'],
+      [
+        't(x)',
+        'a debug filter takes a type among request, command, notification, r, c, n, not "x"',
+      ],
+      [
+        'e(chunks)',
+        'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not "chunks"',
+      ],
+      ['d("rx")', 'a debug filter takes a direction among rx, tx, not "\\"rx\\""'],
+      ['d()', `a debug filter's selector names a value, not "d()"`],
+      ['d(rx|)', `a debug filter's selector leaves no value empty, not "d(rx|)"`],
+      [
+        'd(rx,tx)',
+        'a debug filter holds a parenthesis in a selector alone, d(…), t(…) or e(…), not "d(rx"',
+      ],
+    ];
+
+    for (const [spec, sentence] of refusals) {
+      expect(() => {
+        return parseDebugFilter(spec);
+      }, spec).toThrow(new ProgrammerError(sentence));
     }
   });
 });
@@ -142,13 +161,37 @@ test.describe('filterDebug', () => {
   });
 
   test('matches a whole name, and takes every other character literally', () => {
-    const names = [eventOf('get(status'), eventOf('a.b'), eventOf('axb'), eventOf('getStatusNow')];
+    const names = [eventOf('get+status'), eventOf('a.b'), eventOf('axb'), eventOf('getStatusNow')];
 
-    expect(heardOf('get(status', names)).toEqual(['get(status tx request']);
+    expect(heardOf('get+status', names)).toEqual(['get+status tx request']);
     expect(heardOf('a.b', names)).toEqual(['a.b tx request']);
     expect(heardOf('getStatus, a+b, [x], ^a', names)).toEqual([]);
     // neither its start nor its end alone
     expect(heardOf('status, getStatu', [eventOf('getStatus')])).toEqual([]);
+  });
+
+  test('refuses a filter given whole in the grammar’s names, as it is made', () => {
+    const none = () => {
+      return undefined;
+    };
+
+    expect(() => {
+      return filterDebug(none, { types: ['publisher' as DebugType] });
+    }).toThrow(
+      new ProgrammerError(
+        'a debug filter takes a type among request, command, notification, not "publisher"'
+      )
+    );
+    expect(() => {
+      return filterDebug(none, { directions: ['Rx' as DebugDirection] });
+    }).toThrow(new ProgrammerError('a debug filter takes a direction among rx, tx, not "Rx"'));
+    expect(() => {
+      return filterEnvelopeDebug(none, { kinds: [0x99 as EnvelopeKind] });
+    }).toThrow(
+      new ProgrammerError(
+        'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not 153'
+      )
+    );
   });
 
   test('takes a filter as an object, its values checked once, as it is given', () => {

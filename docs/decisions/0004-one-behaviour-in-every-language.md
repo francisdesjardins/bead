@@ -25,10 +25,16 @@ holds what a server of the interop service, `spec/interop-service.json`, does wi
 send, over one connection or several: the envelopes it answers, what it reports, and the silence it
 keeps; `spec/transports.json` holds what a transport's server does at its edge, over HTTP and over a
 WebSocket: the exchanges and the messages it takes, and what it gives back; `spec/clocks.json` holds
-what every side's test clock does when a case advances it. Every implementation's tests read them
-from `spec/`, never a copy: an entry one side does not read is one nobody checks. Four generators
-write them, `spec/generators/make_vectors.py`, `make_conversations.py`, `make_transports.py` and
-`make_clocks.py`, and regenerating gives the same bytes: nothing drawn at random is in them.
+what every side's test clock does when a case advances it; `spec/durations.json` holds what every
+place that takes a duration an application gives a side makes of every input. Beside the wire, its
+companion [`spec/debugging.md`](../../spec/debugging.md) has two files of its own
+([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json` holds
+what a debug filter reads as and keeps, and `spec/metrics.json` what a registry writes and what each
+exit of a call counts. Every implementation's tests read them from `spec/`, never a copy: an entry
+one side does not read is one nobody checks. Seven generators write them,
+`spec/generators/make_vectors.py`, `make_conversations.py`, `make_transports.py`, `make_clocks.py`,
+`make_durations.py`, `make_debug_filters.py` and `make_metrics.py`, and regenerating gives the same
+bytes: nothing drawn at random is in them.
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
 interop service over WebSocket and over HTTP, and each implementation's client calls every other's
@@ -183,7 +189,8 @@ from 1, `"15.6.8"`. Every vector, conversation and transport case cites the unit
 generators writing them, since a generator knows which check each refusal fails. `spec/check.py`
 reads the units out of the spec, refuses a citation to none, and holds `spec/uncited.txt`, the units
 of sections 1 to 15 no entry cites: it fails when that list and the files disagree, a unit newly
-uncited or one listed that an entry now cites.
+uncited or one listed that an entry now cites. The companion's files cite its own units, which
+`spec/debugging-uncited.txt` lists alike.
 
 **The surface is one too.** A name on one side is the same name on every other, in its language's
 case, and any language that can carry the protocol whole mirrors the surface almost name for name;

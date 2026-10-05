@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { CredentialScheme } from '../../shared/constants';
+import type { INotifyingSeries } from '../../shared/metrics-registry';
 import { createNotificationManager } from '../notification-manager';
-import { createSubscriptionPlaces } from '../subscription-places';
+import { createSubscriptionPlaces, type ISubscribed } from '../subscription-places';
 
 // helpers
 
@@ -14,6 +15,28 @@ const other = { procedureId: 7, serviceId: 2 };
 
 /** A success that subscribes, as a notification's resolver answers a request that opens one. */
 const subscribing = { isFailure: false, notifies: true, procedure: news } as const;
+
+/** The call ids of the subscriptions given, in their order. */
+const callIdsOf = (subscribed: ISubscribed[]): number[] => {
+  return subscribed.map(({ callId }) => {
+    return callId;
+  });
+};
+
+/** A series a subscription counts into, which counts nothing: told apart by its identity alone. */
+const seriesOf = (): INotifyingSeries => {
+  return {
+    dropped: () => {
+      return undefined;
+    },
+    failed: () => {
+      return undefined;
+    },
+    sent: () => {
+      return undefined;
+    },
+  };
+};
 
 /** Places over a notification manager of their own, with the connections open in `open`. */
 const createPlaces = (open: TransportServerConnectionHandle[] = [first, second]) => {
@@ -201,8 +224,10 @@ test.describe('createSubscriptionPlaces', () => {
       places.settle(call, subscribing);
     }
 
-    expect(places.drop({ connectionHandle: first })).toEqual([23]);
-    expect(places.drop({ connectionHandle: first, identifier: { ...grace } })).toEqual([21]);
+    expect(callIdsOf(places.drop({ connectionHandle: first }))).toEqual([23]);
+    expect(callIdsOf(places.drop({ connectionHandle: first, identifier: { ...grace } }))).toEqual([
+      21,
+    ]);
   });
 
   test('drop gives the established and the waiting, never one in flight, and no call waits after', () => {
@@ -213,12 +238,33 @@ test.describe('createSubscriptionPlaces', () => {
     places.settle({ callId: 5, connectionHandle: first }, subscribing);
     places.settle({ callId: 7, connectionHandle: first }, { ...subscribing, procedure: other });
 
-    expect(places.drop({ connectionHandle: first })).toEqual([7, 5]);
+    expect(callIdsOf(places.drop({ connectionHandle: first }))).toEqual([7, 5]);
     expect(places.drop({ connectionHandle: second })).toEqual([]);
 
     places.settle(holder, { ...subscribing, isFailure: true });
 
     expect(held()).toEqual([7]);
+  });
+
+  test('subscribedOf and drop give each subscription answered with the series it counts into, the waiting among them, never one in flight', () => {
+    const { places } = createPlaces();
+    const [held, waiting, established] = [seriesOf(), seriesOf(), seriesOf()];
+
+    places.subscribe({ callId: 3, connectionHandle: first, series: held }, news);
+    places.settle({ callId: 5, connectionHandle: first, series: waiting }, subscribing);
+    places.settle(
+      { callId: 7, connectionHandle: first, series: established },
+      { ...subscribing, procedure: other }
+    );
+
+    const answered = [
+      { callId: 7, series: established },
+      { callId: 5, series: waiting },
+    ];
+
+    expect(places.subscribedOf(first)).toEqual(answered);
+    expect(places.subscribedOf(second)).toEqual([]);
+    expect(places.drop({ connectionHandle: first })).toEqual(answered);
   });
 
   test('clear forgets the calls in flight and waiting of a connection, or of every one', () => {

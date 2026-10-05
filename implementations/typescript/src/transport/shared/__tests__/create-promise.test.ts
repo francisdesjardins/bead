@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { createPromise } from '../create-promise';
 import { CancelError, ConnectError, GenericError, ProgrammerError, TimeoutError } from '../errors';
-import { createTestClock, delaysOn, durationsOf } from './fixtures';
+import { DURATIONS, givenOf, isExcused, outcomeOf, placeHolding, refusalOf } from './durations';
+import { createTestClock, delaysOn } from './fixtures';
 
 const activeTimeouts = () => {
   return process.getActiveResourcesInfo().filter((resource) => {
@@ -114,11 +115,20 @@ test.describe('createPromise', () => {
   });
 
   test('holds a delay as 0 at once or a duration, and a timeout as a duration or never, rounded, never running the executor for one refused', async () => {
-    for (const [name, outcomes] of [
-      ['delay', { never: 'refused', zero: 'at once' }],
-      ['timeout', { never: 'never', zero: 'refused' }],
+    // each over every input of the durations file, as a place that holds its durations so
+    for (const [name, policy] of [
+      ['delay', { kind: 'delay', never: 'refused' }],
+      ['timeout', { kind: 'timeout', never: 'taken' }],
     ] as const) {
-      for (const { given, held, outcome, refusal } of durationsOf(`a ${name}`, outcomes)) {
+      const place = placeHolding(policy);
+
+      for (const input of DURATIONS.inputs) {
+        if (isExcused(place, { input })) {
+          continue;
+        }
+
+        const given = givenOf(input);
+        const { held, outcome } = outcomeOf(place, input);
         const clock = createTestClock();
         let ran = false;
         const pending = createPromise(
@@ -127,16 +137,18 @@ test.describe('createPromise', () => {
           },
           { clock, [name]: given }
         );
-        const label = `${name} ${String(given)}`;
+        const label = `${name} ${input.name}`;
 
         if (outcome === 'refused') {
-          await expect(pending, label).rejects.toThrow(new ProgrammerError(refusal));
+          await expect(pending, label).rejects.toThrow(
+            new ProgrammerError(refusalOf(policy, { given, phrase: `a ${name}` }))
+          );
           expect([ran, clock.armed], label).toEqual([false, []]);
         } else {
           // a delay held waits before it runs the executor; a timeout held, at once and never run
           // it at once
           expect([ran, delaysOn(clock)], label).toEqual(
-            outcome === 'taken' ? [name === 'timeout', [held]] : [true, []]
+            outcome === 'held' ? [name === 'timeout', [held]] : [true, []]
           );
         }
       }

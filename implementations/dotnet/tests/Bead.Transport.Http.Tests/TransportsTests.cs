@@ -759,7 +759,7 @@ public sealed class TransportsTests
         private readonly bool _isAnsweringPings;
         private readonly Dictionary<string, Exchange> _exchanges = [];
         private readonly Dictionary<string, string> _captured = [];
-        private readonly ConcurrentQueue<(string Report, string ConnectionHandle)> _reports = new();
+        private readonly ConcurrentQueue<(string Report, string? ConnectionHandle)> _reports = new();
         private int _port;
 
         public Peer(Served served, bool isAnsweringPings)
@@ -1050,7 +1050,7 @@ public sealed class TransportsTests
             Assert.True(_reports.TryDequeue(out var came), $"expected report {expected}, and nothing was reported");
             Assert.Equal(
                 on.Length == 0 ? $"report {expected}" : $"report {expected} on {on}",
-                on.Length == 0 ? $"report {came.Report}" : $"report {came.Report} on {ExchangeOf(came.ConnectionHandle)}");
+                on.Length == 0 ? $"report {came.Report}" : $"report {came.Report} on {ExchangeOf(came.ConnectionHandle ?? "no connection")}");
         }
 
         // the exchange whose socket a connection came by, as its port says; its handle when none did

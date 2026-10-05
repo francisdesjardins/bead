@@ -66,31 +66,6 @@ public sealed class RouterLimitsTests
         Assert.Same(shortest, shortest.Validate());
     }
 
-    // a TimeSpan is never a string read from JSON, which the TypeScript side's twin refuses besides
-    [Fact]
-    public void Holds_a_transfer_s_inactivity_to_a_whole_number_of_milliseconds_rounded_refusing_zero_and_infinite()
-    {
-        foreach (var (given, outcome, held, refusal) in Durations.Of("a transfer's inactivity", (DurationOutcome.Refused, DurationOutcome.Refused)))
-        {
-            var limits = RouterLimits.Default with { TransferInactivityTimeout = given };
-
-            if (outcome == DurationOutcome.Refused)
-            {
-                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                {
-                    return limits.Validate();
-                });
-
-                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                Assert.Equal(nameof(RouterLimits.TransferInactivityTimeout), refused.ParamName);
-            }
-            else
-            {
-                Assert.Equal(held, limits.Validate().TransferInactivityTimeout);
-            }
-        }
-    }
-
     [Fact]
     public void Whole_envelope_limits_take_no_transfer_and_size_the_chunk_and_the_window_on_the_envelope_the_rest_as_given()
     {

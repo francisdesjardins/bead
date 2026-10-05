@@ -531,7 +531,7 @@ public sealed partial class RouterServerTests
             return envelope.Header is RequestHeader;
         }), (envelope) =>
         {
-            Assert.Equal(CredentialScheme.Elsewhere, envelope.CredentialScheme);
+            Assert.Equal(Credential.Elsewhere(), ((RequestHeader)envelope.Header).Credential);
         });
     }
 

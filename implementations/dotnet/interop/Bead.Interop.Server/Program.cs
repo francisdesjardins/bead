@@ -17,9 +17,9 @@ var credentials = InteropService.CredentialsOf(TimeProvider.System);
 await using var server = new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Credentials = credentials } });
 await using var httpServer = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Credentials = credentials } });
 
-void Report(Exception reason, string connectionHandle)
+void Report(Exception reason, string? connectionHandle)
 {
-    Console.Error.WriteLine($"{connectionHandle}: {reason.Message}");
+    Console.Error.WriteLine($"{connectionHandle ?? "no connection"}: {reason.Message}");
 }
 
 server.Router.Error += Report;

@@ -36,7 +36,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     /// subscription that no credential's session bounds, and each call waiting, which no longer
     /// waits. A call in flight is left to its own answer.
     /// </summary>
-    public List<uint> Drop(string connectionHandle)
+    public List<(uint CallId, ProcedureAddress Procedure)> Drop(string connectionHandle)
     {
         return Drop(new SubscriptionPlace(connectionHandle, null));
     }
@@ -46,7 +46,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     /// established subscription it bounds, and each call waiting, which no longer waits. A call in
     /// flight is left to its own answer.
     /// </summary>
-    public List<uint> Drop(SubscriptionPlace place)
+    public List<(uint CallId, ProcedureAddress Procedure)> Drop(SubscriptionPlace place)
     {
         var connectionHandle = place.ConnectionHandle;
 
@@ -77,11 +77,42 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
                 return subscription.Session == place.Session && !IsInFlight(new CallAddress(subscription.CallId, connectionHandle));
             }).Select((subscription) =>
             {
-                return subscription.CallId;
+                return (subscription.CallId, subscription.Procedure);
             }),
             .. successors.Select((successor) =>
             {
-                return successor.CallId;
+                return (successor.CallId, successor.Procedure);
+            }),
+        ];
+    }
+
+    /// <summary>
+    /// The subscriptions a close ends — a connection's alone, when given: each established, never one
+    /// in flight, which its call's own end counts, and each call waiting, which believes it is
+    /// subscribed; each by its procedure.
+    /// </summary>
+    public List<(CallAddress Call, ProcedureAddress Procedure)> Established(string? connectionHandle)
+    {
+        var subscriptions = connectionHandle is null ? notifications.Subscriptions() : notifications.Subscriptions(connectionHandle);
+
+        return
+        [
+            .. subscriptions.Where((subscription) =>
+            {
+                return !IsInFlight(new CallAddress(subscription.CallId, subscription.ConnectionHandle));
+            }).Select((subscription) =>
+            {
+                return (new CallAddress(subscription.CallId, subscription.ConnectionHandle), subscription.Procedure);
+            }),
+            .. _waiting.Where((waiting) =>
+            {
+                return connectionHandle is null || waiting.Key == connectionHandle;
+            }).SelectMany((waiting) =>
+            {
+                return waiting.Value.Values.Select((successor) =>
+                {
+                    return (new CallAddress(successor.CallId, waiting.Key), successor.Procedure);
+                });
             }),
         ];
     }

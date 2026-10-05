@@ -286,6 +286,12 @@ public sealed record RouterRequest(Procedure Procedure, ResolvedRequestOptions O
     /// did not go out.
     /// </summary>
     public Action<bool>? OnSent { get; init; }
+
+    /// <summary>
+    /// The series of its requester, which its router's <c>DeclareRequester</c> gave as the requester
+    /// was made: the call counts into them, at its router's gates. None counts under <c>_OTHER</c>.
+    /// </summary>
+    public ProcedureSeries? Series { get; init; }
 }
 
 /// <summary>A request a router's core sends: where, for which procedure, and how.</summary>
@@ -314,6 +320,9 @@ public sealed record CoreRequest
     /// the transport refuse it.
     /// </summary>
     public Action<bool>? OnSent { get; init; }
+
+    /// <summary>The series it counts into, its requester's; none counts under <c>_OTHER</c>.</summary>
+    public ProcedureSeries? Series { get; init; }
 }
 
 /// <summary>What a router did: sent or took a request, a response, or a notification.</summary>
@@ -340,16 +349,15 @@ public enum DebugDirection
 }
 
 /// <summary>
-/// An envelope fit to be traced: its connection, and its header without its credential, whose
-/// scheme alone it keeps.
+/// An envelope fit to be traced: its connection — <c>server</c> on a client — and its header, which
+/// carries its credential's scheme in place of its credential.
 /// </summary>
 /// <param name="ConnectionHandle">The connection it went on.</param>
-/// <param name="Header">Its header, its credential left out.</param>
-/// <param name="CredentialScheme">The scheme of the credential it carried; none, it carried none.</param>
-public readonly record struct TracedEnvelope(
-    string ConnectionHandle,
-    IEnvelopeHeader Header,
-    CredentialScheme? CredentialScheme);
+/// <param name="Header">
+/// Its header, its credential's scheme alone in place of its credential: a token, a JWT's or a
+/// session's, and what a transport carried, are never traced.
+/// </param>
+public readonly record struct TracedEnvelope(string ConnectionHandle, IEnvelopeHeader Header);
 
 /// <summary>An answer about to be written, and the handler its request was routed to.</summary>
 /// <param name="Target">The request it answers.</param>
@@ -473,8 +481,8 @@ public interface IRouterCorePort
         return false;
     }
 
-    /// <summary>What went wrong that no call waits on.</summary>
-    void Report(Exception reason, string connectionHandle);
+    /// <summary>What went wrong that no call waits on, with its connection; none for what belongs to no connection's step.</summary>
+    void Report(Exception reason, string? connectionHandle);
 
     /// <summary>
     /// Hands <paramref name="message"/> over to the transport, for a connection — an envelope's bytes,
@@ -543,7 +551,28 @@ public interface IRouterCorePort
         return session;
     }
 
-    /// <summary>Each envelope, out or in, its credential left out.</summary>
+    /// <summary>
+    /// Whether anyone hears <see cref="Trace"/>: an envelope is redacted and traced only while one
+    /// does, so it costs one check while nobody does. Nobody does by default.
+    /// </summary>
+    bool IsTracing
+    {
+        get
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a connection is open, as a request of the side's own asks it once the request
+    /// started: one that is not fails as one that closes does. Every one is by default.
+    /// </summary>
+    bool IsOpen(string connectionHandle)
+    {
+        return true;
+    }
+
+    /// <summary>Each envelope, out or in, its credential's scheme alone in place of its credential, while <see cref="IsTracing"/>.</summary>
     void Trace(DebugDirection direction, TracedEnvelope envelope)
     {
     }

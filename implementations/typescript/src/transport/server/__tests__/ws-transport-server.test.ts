@@ -14,7 +14,6 @@ import { CancelError, ConnectError } from '../../shared/errors';
 import {
   allClosed,
   createTestClock,
-  durationsOf,
   host,
   IMPLEMENTATIONS,
   spyIntervals,
@@ -622,26 +621,8 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
-  test('holds its close timeout to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on its peer without end', async () => {
+  test('waits on its peer without end for a close timeout of Infinity, arming no timer', async () => {
     const fake = createFakeWebSocketServer();
-
-    for (const { given, outcome, refusal } of durationsOf('a close timeout', {
-      never: 'never',
-      zero: 'refused',
-    })) {
-      const building = () => {
-        return createWSTransportServer({
-          closeTimeout: given,
-          WebSocketServer: fake.FakeWebSocketServer,
-        });
-      };
-
-      if (outcome === 'refused') {
-        expect(building, String(given)).toThrow(new ProgrammerError(refusal));
-      } else {
-        expect(building, String(given)).not.toThrow();
-      }
-    }
 
     // Infinity arms no timer, where Node's would take it for 1 ms and drop the peer at once
     const server = createWSTransportServer({
@@ -790,7 +771,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     await server.stop();
   });
 
-  test('beats nothing with a heartbeat of Infinity, and refuses one no timer holds', async () => {
+  test('beats nothing with a heartbeat of Infinity', async () => {
     using timers = spyIntervals();
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({
@@ -808,12 +789,6 @@ test.describe('WSTransportServer, heartbeat', () => {
     expect([timers.armed, socket.pings, socket.wasTerminated]).toEqual([[], 0, false]);
 
     await server.stop();
-
-    for (const heartbeat of [0, 0.5, 2 ** 31]) {
-      expect(() => {
-        return createWSTransportServer({ heartbeat, WebSocketServer: fake.FakeWebSocketServer });
-      }, String(heartbeat)).toThrow(ProgrammerError);
-    }
   });
 
   test('keeps the clients that answer its pings — a browser’s as `ws`’s — and drops one that does not, on the wire', async () => {

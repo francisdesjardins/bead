@@ -13,6 +13,11 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
     },
+    "debuggingVersion": {
+      "description": "The version of the companion a file belongs to, as spec/debugging.md states it: Semantic Versioning.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
     "name": {
       "description": "What an entry is about, unique in its file and its group.",
       "type": "string",
@@ -48,8 +53,22 @@
       "minimum": 1,
       "maximum": 2147483647
     },
+    "differs": {
+      "description": "The rows of docs/support.md an entry crosses, each naming it, and the language each excuses from it.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["row", "language"],
+        "additionalProperties": false,
+        "properties": {
+          "row": { "type": "string", "minLength": 1 },
+          "language": { "enum": ["TypeScript", "C#"] }
+        }
+      }
+    },
     "clauses": {
-      "description": "The units of spec/spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
+      "description": "The units an entry checks of the document its file belongs to, spec/spec.md, or spec/debugging.md for a file that repeats its debuggingVersion: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,

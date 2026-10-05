@@ -60,7 +60,7 @@ keep the same API, whatever carries the envelopes.
 ## Layout
 
 ```
-spec/                         spec.md, the conformance files both sides read, and check.py
+spec/                         spec.md, debugging.md, the conformance files both sides read, and check.py
   generators/                 the Python scripts that write them
   schemas/                    their JSON Schemas
 implementations/
@@ -82,17 +82,22 @@ share, above all `spec/`, which both read in their tests.
 ## The specification and its conformance files
 
 [`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each of
-its sections names the vector groups that check it. Beside it:
+its sections names the vector groups that check it. Its companion,
+[`spec/debugging.md`](spec/debugging.md), states what a side traces, filters and counts beside the
+wire, under a version of its own. Beside them:
 
-| File                                                | What it holds                                                                                                                                        |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                 | 221 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts |
-| [`conversations.json`](spec/conversations.json)     | 142 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets         |
-| [`transports.json`](spec/transports.json)           | 56 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                             |
-| [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                             |
-| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, its procedures, what its relay admits and forwards, and the credentials it verifies                       |
+| File                                                | What it holds                                                                                                                                                           |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`vectors.json`](spec/vectors.json)                 | 221 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                    |
+| [`conversations.json`](spec/conversations.json)     | 142 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                            |
+| [`transports.json`](spec/transports.json)           | 56 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                |
+| [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                                                |
+| [`durations.json`](spec/durations.json)             | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why |
+| [`debug-filters.json`](spec/debug-filters.json)     | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 5 filters given as functions, event by event                     |
+| [`metrics.json`](spec/metrics.json)                 | 18 expositions, the text a registry writes for what it counts, byte for byte, and 49 exits of the interop service's server, the series each step moved                  |
+| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, its procedures, what its relay admits and forwards, and the credentials it verifies                                          |
 
-Both implementations read these files from `spec/` in their tests; neither keeps a copy. Four
+Both implementations read these files from `spec/` in their tests; neither keeps a copy. Seven
 generators write them, and regenerating must give the same bytes:
 
 ```sh
@@ -100,12 +105,17 @@ python spec/generators/make_vectors.py
 python spec/generators/make_conversations.py
 python spec/generators/make_transports.py
 python spec/generators/make_clocks.py
+python spec/generators/make_durations.py
+python spec/generators/make_debug_filters.py
+python spec/generators/make_metrics.py
 git diff --exit-code -- spec
 ```
 
 Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repeats the version
-`spec.md` states as its `specVersion`. `spec/check.py` holds both, that the spec's sections and the
-groups of vectors name each other, and that every unit an entry cites is the spec's; then it reports
+`spec.md` states as its `specVersion`, or, for `debug-filters.json` and `metrics.json`, the version
+`debugging.md` states as its `debuggingVersion`. `spec/check.py` holds both, that the spec's sections
+and the groups of vectors name each other, that every unit an entry cites is its document's, and
+that every exposition reads as the Prometheus text format 0.0.4; then it reports
 which groups and files each side's tests read, and fails on one a side does not. It runs on Python
 3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
 

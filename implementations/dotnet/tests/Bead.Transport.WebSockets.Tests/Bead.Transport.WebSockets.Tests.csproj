@@ -19,7 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- the durations every place is held to, each place's outcomes its own -->
+    <!-- the durations, the file both implementations' tests read -->
+    <Content Include="../../../../spec/durations.json" Link="durations.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- what reads the durations, for the client's close timeout, which plays the server's place -->
     <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
   </ItemGroup>
 

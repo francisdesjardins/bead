@@ -2,13 +2,12 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import {
   createTestClock,
-  durationsOf,
   hasRef,
   timersBy,
   timersUntil,
 } from '../../../transport/shared/__tests__/fixtures';
-import { LONGEST_TIMER } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
+import { noop } from '../../../transport/shared/noop';
 import {
   CLIENT_FAILURES,
   CredentialScheme,
@@ -16,12 +15,12 @@ import {
   FailureScope,
   LIMIT_DEFAULTS,
   ProtocolCode,
-  RESERVATION_MILLISECONDS,
   SERVER_FAILURES,
 } from '../constants';
 import { readEnvelope } from '../envelope';
 import { CapacityError, DisconnectError, FailureError } from '../errors';
 import { toSessionToken } from '../identifiers';
+import { createMetricsRegistry } from '../metrics-registry';
 import { createRouterCore } from '../router-core';
 import type {
   Credential,
@@ -43,7 +42,7 @@ import type {
   RouterLimitsOptions,
   SessionToken,
 } from '../types';
-import { callIdsOf, createLoopback, digestOf, envelopeOf, patternOf } from './fixtures';
+import { callIdsOf, countedOf, createLoopback, digestOf, envelopeOf, patternOf } from './fixtures';
 
 // helpers
 
@@ -198,6 +197,9 @@ const createPort = (hooks: Partial<IRouterCorePort<Handle>> = {}) => {
 
     activity: (activity, connectionHandle) => {
       activities.push(`${activity} ${connectionHandle}`);
+    },
+    isTracing: () => {
+      return true;
     },
     report: (error, connectionHandle) => {
       reported.push([error, connectionHandle]);
@@ -2723,49 +2725,6 @@ test.describe('createRouterCore', () => {
       expect([core.isReserved(2, 'a'), core.isReserved(4, 'a')]).toEqual([true, false]);
     });
 
-    test('hold a reservation, and a cancel’s, to a whole number of milliseconds, rounded, refusing 0, Infinity taking the default time, doing nothing for one refused', async () => {
-      for (const { given, held, outcome, refusal } of durationsOf("a call id's reservation", {
-        never: 'never',
-        zero: 'refused',
-      })) {
-        const { port, sent } = createPort();
-        const clock = createTestClock();
-        using core = createRouterCore(port, { clock });
-        const label = String(given);
-        const reserved = () => {
-          return [core.isReserved(1, 'a'), core.isReserved(3, 'a')];
-        };
-
-        if (outcome === 'refused') {
-          expect(() => {
-            core.reserve({ callId: 1, connectionHandle: 'a', timeout: given });
-          }, label).toThrow(new ProgrammerError(refusal));
-          expect(() => {
-            core.cancel({ callId: 3, connectionHandle: 'a', timeout: given });
-          }, label).toThrow(new ProgrammerError(refusal));
-
-          await sleep(0);
-
-          expect([reserved(), sent], label).toEqual([[false, false], []]);
-
-          continue;
-        }
-
-        // reserved for the duration held, or for the default time for never
-        const lasts = outcome === 'taken' && held !== undefined ? held : RESERVATION_MILLISECONDS;
-
-        core.reserve({ callId: 1, connectionHandle: 'a', timeout: given });
-        core.cancel({ callId: 3, connectionHandle: 'a', timeout: given });
-        await clock.tickAsync(lasts - 1);
-
-        expect(reserved(), label).toEqual([true, true]);
-
-        await clock.tickAsync(1);
-
-        expect(reserved(), label).toEqual([false, false]);
-      }
-    });
-
     test('reserve a call id with a timer that keeps no process alive: nothing waits on it', () => {
       const { port } = createPort();
       const clock = createTestClock();
@@ -3146,65 +3105,6 @@ test.describe('createRouterCore', () => {
       expect(drawn).toEqual([2]);
     });
 
-    test("hold a call's timeout to a whole number of milliseconds, rounded, refusing 0, Infinity waiting on, drawing nothing for one refused", async () => {
-      for (const { given, held, outcome, refusal } of durationsOf("a call's timeout", {
-        never: 'never',
-        zero: 'refused',
-      })) {
-        const { port, sent } = createPort();
-        const clock = createTestClock();
-        using core = createRouterCore(port, { clock });
-        const drawn: number[] = [];
-        const label = String(given);
-        let isSettled = false;
-        const asking = core
-          .request(new Uint8Array(0), {
-            connectionHandle: 'a',
-            onCallId: (callId) => {
-              drawn.push(callId);
-            },
-            options: { timeout: given },
-            procedure: echo,
-          })
-          .catch((reason: unknown) => {
-            return reason;
-          })
-          .finally(() => {
-            isSettled = true;
-          });
-
-        if (outcome === 'refused') {
-          expect(await asking, label).toEqual(new ProgrammerError(refusal));
-          expect([drawn, sent], label).toEqual([[], []]);
-
-          continue;
-        }
-
-        await sleep(0);
-
-        expect(drawn, label).toEqual([2]);
-
-        // a duration held ends the call once it passed, its TimeoutError telling it; never waits on
-        // past the longest
-        if (outcome === 'taken' && held !== undefined) {
-          await clock.tickAsync(held - 1);
-
-          expect(isSettled, label).toBe(false);
-
-          await clock.tickAsync(1);
-
-          const ended = await asking;
-
-          expect(ended, label).toBeInstanceOf(TimeoutError);
-          expect(ended, label).toHaveProperty('timeout', held);
-        } else {
-          await clock.tickAsync(LONGEST_TIMER);
-
-          expect(isSettled, label).toBe(false);
-        }
-      }
-    });
-
     test('take the defaults where they say nothing, and let the transfers and the detail be none', () => {
       const { port } = createPort();
 
@@ -3259,38 +3159,6 @@ test.describe('createRouterCore', () => {
         });
         using _shortest = createRouterCore(port, { limits: { transferInactivityTimeout: 1 } });
       }).not.toThrow();
-    });
-
-    test("hold a transfer's inactivity to a whole number of milliseconds, rounded, refusing 0 and Infinity", () => {
-      const { port } = createPort();
-
-      for (const { given, held, outcome, refusal } of durationsOf("a transfer's inactivity", {
-        never: 'refused',
-        zero: 'refused',
-      })) {
-        const building = (): number => {
-          using core = createRouterCore(port, { limits: { transferInactivityTimeout: given } });
-
-          return core.limits.transferInactivityTimeout;
-        };
-
-        if (outcome === 'refused') {
-          expect(building, String(given)).toThrow(new ProgrammerError(refusal));
-        } else {
-          expect(building(), String(given)).toBe(held);
-        }
-      }
-
-      // a limit read from JSON, which a TimeSpan on the C# side never is
-      expect(() => {
-        return createRouterCore(port, {
-          limits: { transferInactivityTimeout: '1000' as unknown as number },
-        });
-      }).toThrow(
-        new ProgrammerError(
-          'a transfer\'s inactivity is a number of milliseconds from 1 to 2147483647, not "1000"'
-        )
-      );
     });
 
     test('refuse a payload past its own limit, and an envelope past its own', async () => {
@@ -4904,6 +4772,270 @@ test.describe('createRouterCore', () => {
         [EnvelopeKind.RESULT, 1, 150, 28],
       ]);
       expect(reported).toEqual([]);
+    });
+  });
+
+  test.describe('its metrics', () => {
+    // a line of echo's series in one role's families, by the rest of its name, its labels and its
+    // value: among the calls a server makes, commands; among those it answers, requests
+    const lineOf = (family: string, labels: string) => {
+      return (rest: string): string => {
+        return `${family}${rest.replace('{}', `{${labels}}`).replace('{outcome', `{${labels},outcome`)}`;
+      };
+    };
+    const made = lineOf('bead_client_call_', 'service="2",procedure="echo",type="command"');
+    const answered = lineOf('bead_server_call_', 'service="2",procedure="echo",type="request"');
+
+    test('count a call made refused before it goes, no call id free, PAYLOAD_TOO_LARGE or ENVELOPE_TOO_LARGE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
+      const registry = createMetricsRegistry();
+      const metrics = registry.attach('server');
+      const { port } = createPort();
+      // one call id alone, 2, and chunks of 64 bytes
+      using core = createRouterCore(port, {
+        clock: createTestClock(),
+        lastCallId: 2,
+        limits,
+        metrics,
+      });
+      const series = metrics.declareRequester(echo);
+      const ask = (
+        payload: Uint8Array,
+        asked: Partial<Parameters<typeof core.request>[1]> = {}
+      ) => {
+        return core
+          .request(payload, { connectionHandle: 'a', options, procedure: echo, series, ...asked })
+          .catch((reason: unknown) => {
+            return reason;
+          });
+      };
+
+      // refused as it starts, before any turn passes
+      const tooLarge = ask(new Uint8Array(9), { procedure: { ...echo, maximumPayloadBytes: 8 } });
+
+      expect(countedOf(registry)).toEqual([
+        made('duration_seconds_count{} 1'),
+        made('handled_total{outcome="failure",code="PAYLOAD_TOO_LARGE"} 1'),
+        made('started_total{} 1'),
+      ]);
+
+      // 40 bytes of token leave a 64-byte opening no byte
+      const noOpening = ask(patternOf(100), {
+        credential: { scheme: CredentialScheme.JWT, token: 'x'.repeat(40) },
+      });
+      const waiting = ask(new Uint8Array(0));
+      const noCallId = ask(new Uint8Array(0));
+
+      expect(countedOf(registry)).toEqual([
+        made('duration_seconds_count{} 3'),
+        made('handled_total{outcome="failure",code="ENVELOPE_TOO_LARGE"} 1'),
+        made('handled_total{outcome="failure",code="PAYLOAD_TOO_LARGE"} 1'),
+        made('handled_total{outcome="failure",code="CAPACITY_EXCEEDED"} 1'),
+        made('started_total{} 4'),
+      ]);
+
+      // a programmer's error, and a signal aborted already: neither is a call
+      const refused = await Promise.all([
+        ask(new Uint8Array(0), { options: { timeout: 0 } }),
+        ask(new Uint8Array(0), { procedure: { ...echo, maximumPayloadBytes: 0 } }),
+        ask(new Uint8Array(0), { options: { ...options, signal: AbortSignal.abort() } }),
+      ]);
+
+      expect(
+        refused.map((reason) => {
+          return (reason as Error).name;
+        })
+      ).toEqual(['ProgrammerError', 'ProgrammerError', 'CancelError']);
+      expect(countedOf(registry)).toContain(made('started_total{} 4'));
+
+      core.receive(resultOf(2), 'a');
+      await Promise.all([tooLarge, noOpening, waiting, noCallId]);
+    });
+
+    test('count a call answered whose answer its transport throws on as an error, and one its transport rejects once it has it as answered', async () => {
+      const registry = createMetricsRegistry();
+      const metrics = registry.attach('server');
+      const refusal = { isThrown: true };
+      const { port } = createPort({
+        send: () => {
+          if (refusal.isThrown) {
+            throw new Error('this transport refuses, as it is handed it');
+          }
+
+          return Promise.reject(new Error('this transport refuses, once it has it'));
+        },
+      });
+      using core = createRouterCore(port, { clock: createTestClock(), metrics });
+      const answers: Promise<unknown>[] = [];
+
+      core.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          answers.push(core.respond({ payload: new Uint8Array(0) }, props).catch(noop));
+
+          return Promise.resolve();
+        }, echo)
+      );
+
+      core.receive(requestOf(1), 'a');
+      await Promise.all(answers);
+
+      refusal.isThrown = false;
+      core.receive(requestOf(3), 'a');
+      await Promise.all(answers);
+
+      expect(countedOf(registry)).toEqual([
+        answered('duration_seconds_count{} 2'),
+        answered('handled_total{outcome="result"} 1'),
+        answered('handled_total{outcome="error"} 1'),
+        answered('started_total{} 2'),
+      ]);
+    });
+
+    test('read the clock twice more for a counted call than for one counted nothing, once at each of its gates', async () => {
+      const readingsOf = async (isCounted: boolean): Promise<number[]> => {
+        const clock = createTestClock();
+        const { port } = createPort();
+        const metrics = isCounted ? createMetricsRegistry().attach('server') : undefined;
+        using core = createRouterCore(port, { clock, metrics });
+        const read = () => {
+          return clock.readings.monotonic + clock.readings.wall;
+        };
+
+        core.registerResolver(
+          Object.assign((props: IRequestResolverProps<Handle>) => {
+            return core.respond({ payload: new Uint8Array(0) }, props);
+          }, echo)
+        );
+
+        // a call answered, then a call made
+        const before = read();
+
+        core.receive(requestOf(1), 'a');
+        await sleep(0);
+
+        const between = read();
+        const asking = core.request(new Uint8Array(0), {
+          connectionHandle: 'a',
+          options,
+          procedure: echo,
+          series: metrics?.declareRequester(echo),
+        });
+
+        core.receive(resultOf(2), 'a');
+        await asking;
+
+        return [between - before, read() - between];
+      };
+      const [answeredUncounted = 0, madeUncounted = 0] = await readingsOf(false);
+
+      expect(await readingsOf(true)).toEqual([answeredUncounted + 2, madeUncounted + 2]);
+    });
+
+    test('count a call it makes as its router settles it, timed to that instant', async () => {
+      const registry = createMetricsRegistry();
+      const metrics = registry.attach('server');
+      const clock = createTestClock();
+      const { control, port } = createPort();
+      using core = createRouterCore(port, { clock, metrics });
+      const series = metrics.declareRequester(echo);
+      const ask = (asked: Partial<Parameters<typeof core.request>[1]> = {}) => {
+        return core
+          .request(new Uint8Array(0), {
+            connectionHandle: 'a',
+            options: { timeout: Infinity },
+            procedure: echo,
+            series,
+            ...asked,
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          });
+      };
+
+      // a result, an application's failure, then its time passed 10 ms after it went
+      const result = ask();
+      const failed = ask();
+      const timed = ask({ options: { timeout: 10 } });
+
+      await sleep(0);
+      core.receive(resultOf(2), 'a');
+      core.receive(
+        envelopeOf({
+          failure: { code: 9, scope: FailureScope.APPLICATION },
+          header: { callId: 4, kind: EnvelopeKind.FAILURE },
+          kind: EnvelopeKind.FAILURE,
+        }),
+        'a'
+      );
+      await clock.tickAsync(10);
+
+      expect(await timed).toBeInstanceOf(TimeoutError);
+
+      // its caller's cancel once it went, its connection gone, and a transport that refuses it
+      const controller = new AbortController();
+      const cancelled = ask({ options: { signal: controller.signal, timeout: Infinity } });
+
+      await sleep(0);
+      controller.abort();
+
+      expect(await cancelled).toBeInstanceOf(CancelError);
+
+      const closed = ask();
+
+      await sleep(0);
+      core.rejectPending('the connection closed before the answer', 'a');
+
+      expect(await closed).toBeInstanceOf(DisconnectError);
+
+      control.sendErrors.set('a', new Error('refused'));
+
+      expect(await ask()).toMatchObject({ message: 'refused' });
+      expect(await result).not.toBeInstanceOf(Error);
+      expect(await failed).toBeInstanceOf(FailureError);
+
+      // the timeout alone took its 10 ms; the five others ended on a clock unmoved, in the bucket of 0
+      expect(registry.exposition().text).toContain(
+        'bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="command",le="0.0"} 5\n'
+      );
+      expect(countedOf(registry)).toEqual([
+        made('duration_seconds_sum{} 0.01'),
+        made('duration_seconds_count{} 6'),
+        made('handled_total{outcome="result"} 1'),
+        made('handled_total{outcome="failure",code="application"} 1'),
+        made('handled_total{outcome="timeout"} 1'),
+        made('handled_total{outcome="cancelled"} 1'),
+        made('handled_total{outcome="closed"} 1'),
+        made('handled_total{outcome="error"} 1'),
+        made('started_total{} 6'),
+      ]);
+    });
+
+    test('count a call that carries no series under _OTHER, and a router given no registry counts nothing', async () => {
+      const registry = createMetricsRegistry();
+      const metrics = registry.attach('server');
+      using counted = createRouterCore(createPort().port, { clock: createTestClock(), metrics });
+      using uncounted = createRouterCore(createPort().port, { clock: createTestClock() });
+
+      // a router given none declares nothing of what it registers
+      expect(uncounted.registerResolver(resolverOf(echo))).toBeUndefined();
+
+      // a call that carries none counts under _OTHER; a router given none counts nothing, not even
+      // into the series another router's registry gave
+      void counted
+        .request(new Uint8Array(0), { connectionHandle: 'a', options, procedure: echo })
+        .catch(noop);
+      void uncounted
+        .request(new Uint8Array(0), {
+          connectionHandle: 'a',
+          options,
+          procedure: echo,
+          series: metrics.declareRequester(echo),
+        })
+        .catch(noop);
+      await sleep(0);
+
+      expect(countedOf(registry)).toEqual([
+        'bead_client_call_started_total{service="_OTHER",procedure="_OTHER",type="command"} 1',
+      ]);
     });
   });
 

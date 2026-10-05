@@ -20,6 +20,12 @@ public sealed record BeadHttpClientOptions
 
     /// <summary>What its router resolves a command presenting a JWT or an ELSEWHERE with, as a server does.</summary>
     public Credentials? Credentials { get; init; }
+
+    /// <summary>
+    /// What its router counts its calls and its notifications into, as its own option of that name
+    /// says; none counts nothing.
+    /// </summary>
+    public MetricsRegistry? MetricsRegistry { get; init; }
 }
 
 /// <summary>
@@ -50,7 +56,13 @@ public sealed class BeadHttpClient : IAsyncDisposable
         {
             MaximumBodyBytes = limits.MaximumEnvelopeBytes,
         });
-        Router = new RouterClient(Transport, new RouterClientOptions { Credential = options?.Credential, Credentials = options?.Credentials, Limits = limits });
+        Router = new RouterClient(Transport, new RouterClientOptions
+        {
+            Credential = options?.Credential,
+            Credentials = options?.Credentials,
+            Limits = limits,
+            MetricsRegistry = options?.MetricsRegistry,
+        });
         Services = new ServiceManager(Router);
     }
 

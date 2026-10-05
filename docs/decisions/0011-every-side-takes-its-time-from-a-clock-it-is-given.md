@@ -132,10 +132,9 @@ transports, session manager and router take `clock`; each layer exposes its own;
 clock that differs from the one beneath it. `timestamp()`'s `{ ms, sec, usec }` goes, as 0003
 already asks, and the reported instants are `lastActivity`. A trace's
 `timestamp: { event, duration }` becomes `startedAt` and `duration`, flat on its event — on the C#
-side a `DateTimeOffset` and a `TimeSpan?` in whole milliseconds, its statistics in `TimeSpan` — and
-a notification's one step starts as it is sent or heard, its failure told at that same start. A
-timeout past the ceiling, which some places read as never and one as 5 seconds, is refused
-everywhere.
+side a `DateTimeOffset` and a `TimeSpan?` in whole milliseconds — and a notification's one
+step starts as it is sent or heard, its failure told at that same start. A timeout past the ceiling,
+which some places read as never and one as 5 seconds, is refused everywhere.
 
 **The TypeScript side's tests take a development dependency**, `@sinonjs/fake-timers`, through its
 own lockfile ([0005](0005-a-toolchain-per-language.md)); `spyTimers`, `timersOf`, `timersWhile`, a

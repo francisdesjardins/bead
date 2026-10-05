@@ -18,6 +18,7 @@ import type {
 import type { TransportServerConnectionHandle } from '../transport/server/types';
 import type { IClock } from '../transport/shared/clock';
 import type { EmitterListener, IGauges, ITransportMessage } from '../transport/shared/types';
+import type { IMetricsRegistry } from '../router/shared/metrics-registry';
 import type { IHealth, ServerGauges } from './health';
 
 // interfaces
@@ -143,6 +144,11 @@ export interface IServerOptions {
    * own `closeOnTimeout` says otherwise for that command. Not when not given.
    */
   closeOnCommandTimeout?: boolean | undefined;
+  /**
+   * The registry its router counts its calls and its notifications into, which it is built with:
+   * served at `/metrics`, say, beside `/health`. None counts nothing.
+   */
+  metricsRegistry?: IMetricsRegistry | undefined;
   /**
    * What a paced subscription queues at most, which its router is built with: `PACING_DEFAULTS`'
    * where it says nothing.

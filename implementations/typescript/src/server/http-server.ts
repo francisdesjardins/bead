@@ -89,6 +89,7 @@ export const createHTTPServer = <Data = unknown>(
       connectionInactivityTimeout:
         options.connectionInactivityTimeout ?? CONNECTION_INACTIVITY_TIMEOUT,
       limits,
+      metricsRegistry: options.metricsRegistry,
       pacing: options.pacing,
       relay: options.relay,
     }

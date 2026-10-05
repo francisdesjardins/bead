@@ -45,6 +45,11 @@ export const createWorkerClient = (options: IWorkerClientOptions): WorkerClient 
       services: options.services,
       transport: createWorkerTransportClient(options.transport),
     },
-    { credential: options.credential, credentials: options.credentials, limits: options.limits }
+    {
+      credential: options.credential,
+      credentials: options.credentials,
+      limits: options.limits,
+      metricsRegistry: options.metricsRegistry,
+    }
   );
 };

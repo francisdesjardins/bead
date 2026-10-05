@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createTestClock, hasRef } from '../../../transport/shared/__tests__/fixtures';
 import { createAnsweringCalls } from '../answering-calls';
 import { EnvelopeKind } from '../constants';
+import { CallEnding, type IProcedureSeries } from '../metrics-registry';
 import type { IRequestHeader } from '../types';
 
 // helpers
@@ -25,6 +26,49 @@ const receivingOf = (name: string, creditEnd = 0): IReceivingOf => {
 // definition
 
 test.describe('createAnsweringCalls', () => {
+  test('count a call opened with a series once: as its end says, else cancelled as it is taken, closed with its connection, an error as it is closed unanswered', async () => {
+    const clock = createTestClock();
+    const calls = createAnsweringCalls<Handle>({ clock });
+    const counted: string[] = [];
+    const series: IProcedureSeries = {
+      end: (ending, microseconds) => {
+        counted.push(`end ${String(ending)} ${String(microseconds)}`);
+      },
+      start: () => {
+        counted.push('start');
+      },
+    };
+    const [ended, taken, closed, unanswered] = [headerOf(1), headerOf(3), headerOf(5), headerOf(7)];
+
+    for (const header of [ended, taken, closed, unanswered]) {
+      calls.open({ connectionHandle: header === closed ? 'b' : 'a', header }, series);
+    }
+
+    await clock.tickAsync(2);
+
+    // its end once: a second, and its close after it, count nothing
+    calls.end({ connectionHandle: 'a', header: ended }, CallEnding.RESULT);
+    calls.end({ connectionHandle: 'a', header: ended }, CallEnding.ERROR);
+    calls.close({ callId: 1, connectionHandle: 'a' }, calls.controllerOf(ended) as AbortController);
+    calls.take({ callId: 3, connectionHandle: 'a' });
+    calls.takeAll('b');
+    calls.close(
+      { callId: 7, connectionHandle: 'a' },
+      calls.controllerOf(unanswered) as AbortController
+    );
+
+    expect(counted).toEqual([
+      'start',
+      'start',
+      'start',
+      'start',
+      `end ${String(CallEnding.RESULT)} 2000`,
+      `end ${String(CallEnding.CANCELLED)} 2000`,
+      `end ${String(CallEnding.CLOSED)} 2000`,
+      `end ${String(CallEnding.ERROR)} 2000`,
+    ]);
+  });
+
   test('open a call as its request is dispatched, and find it again by that very header alone', () => {
     const calls = createAnsweringCalls({ clock: createTestClock() });
     const header = headerOf(3);

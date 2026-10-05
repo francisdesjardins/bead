@@ -1125,12 +1125,21 @@ public sealed partial class RouterCoreTests
                 ?? ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (SessionTokenOf(request.ConnectionHandle), null)));
         }
 
+        // it hears every envelope, so the core traces each
+        public bool IsTracing
+        {
+            get
+            {
+                return true;
+            }
+        }
+
         public void Trace(DebugDirection direction, TracedEnvelope envelope)
         {
             Traces.Add((direction, envelope));
         }
 
-        public void Report(Exception reason, string connectionHandle)
+        public void Report(Exception reason, string? connectionHandle)
         {
             Reports.Add(reason);
         }
@@ -1285,7 +1294,7 @@ public sealed partial class RouterCoreTests
                 }
             }
 
-            public void Report(Exception reason, string connectionHandle)
+            public void Report(Exception reason, string? connectionHandle)
             {
                 link.Reports.Add(reason);
             }

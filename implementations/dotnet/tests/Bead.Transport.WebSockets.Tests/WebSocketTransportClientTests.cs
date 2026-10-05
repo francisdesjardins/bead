@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -801,8 +800,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // a heartbeat refused is the durations' file's to play
     [Fact]
-    public async Task Pings_nothing_with_a_heartbeat_of_infinity_and_refuses_one_no_timer_holds()
+    public async Task Pings_nothing_with_a_heartbeat_of_infinity()
     {
         using var listener = new Listener(IPAddress.Loopback);
 
@@ -836,85 +836,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 }
             }
         }
-
-        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(0.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
-        {
-            Assert.Throws<ArgumentOutOfRangeException>(() =>
-            {
-                return new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = heartbeat });
-            });
-        }
-    }
-
-    [Fact]
-    public async Task Holds_its_connect_s_timeout_to_a_whole_number_of_milliseconds_on_its_clock_rounded_infinite_never_timing_out_refusing_zero_and_any_other_and_opening_nothing()
-    {
-        foreach (var (given, outcome, held, refusal) in Durations.Of("a connect's timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
-        {
-            var time = new FakeTimeProvider();
-            using var listener = new Listener(IPAddress.Loopback);
-            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
-            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-
-            Task Connecting()
-            {
-                return client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = given }, cancelling.Token);
-            }
-
-            if (outcome == DurationOutcome.Refused)
-            {
-                var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(Connecting);
-
-                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                Assert.Equal("Timeout", refused.ParamName);
-
-                // nothing moved, and nothing is kept for a reconnection
-                Assert.Equal((ReadyState.Uninitialized, false, time), (client.ReadyState, listener.IsPending, client.Clock));
-                await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                {
-                    return client.Reconnect();
-                });
-
-                continue;
-            }
-
-            var connecting = Connecting();
-
-            // the handshake reached a peer that never answers it
-            using var peer = (await listener.Next()).Peer;
-
-            // a duration held times the connect out once it passed, its TimeoutException telling it;
-            // infinite waits on past the longest
-            if (outcome == DurationOutcome.Taken)
-            {
-                time.Advance(held!.Value - TimeSpan.FromMilliseconds(1));
-                Assert.Equal(ReadyState.Connecting, client.ReadyState);
-                time.Advance(TimeSpan.FromMilliseconds(1));
-
-                var ended = await Assert.ThrowsAsync<TimeoutException>(() =>
-                {
-                    return connecting.WaitAsync(Patience, Cancelled);
-                });
-
-                Assert.Equal(string.Create(CultureInfo.InvariantCulture, $"timed out after {held.Value.TotalMilliseconds}ms"), ended.Message);
-            }
-            else
-            {
-                time.Advance(Clocks.LongestTimer);
-                Assert.Equal(ReadyState.Connecting, client.ReadyState);
-                await cancelling.CancelAsync();
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                {
-                    return connecting.WaitAsync(Patience, Cancelled);
-                });
-            }
-
-            Assert.Equal(ReadyState.Closed, client.ReadyState);
-        }
     }
 
     // the TypeScript side's client has no close timeout of its own: its platform's bounds its close
-    // (docs/support.md)
+    // (docs/support.md). Until the transports' client part decides, it plays the outcomes of the
+    // server's close timeout, a place of the durations' file
     [Fact]
     public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_and_runs_on_the_clock_it_is_given()
     {
@@ -924,16 +850,20 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Same(time, client.Clock);
         Assert.Same(TimeProvider.System, _client.Clock);
 
-        foreach (var (given, outcome, _, refusal) in Durations.Of("a close timeout", (DurationOutcome.Refused, DurationOutcome.Never)))
+        var place = Durations.PlaceOf("webSocketTransportServer.closeTimeout");
+
+        foreach (var (input, outcome) in Durations.Played(place))
         {
-            if (outcome == DurationOutcome.Refused)
+            var given = input.Given!.Value;
+
+            if (outcome.Outcome == "refused")
             {
                 var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 {
                     return new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = given });
                 });
 
-                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
+                Assert.StartsWith(Durations.RefusalOf(("a close timeout", place), given), refused.Message, StringComparison.Ordinal);
                 Assert.Equal(nameof(WebSocketTransportClientOptions.CloseTimeout), refused.ParamName);
             }
             else
@@ -1295,71 +1225,6 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         Assert.Equal([TimeSpan.Zero, TimeSpan.FromMilliseconds(60), TimeSpan.FromMilliseconds(120)], attempts);
         Assert.False(listener.IsPending);
-    }
-
-    [Fact]
-    public async Task Holds_a_delay_to_a_whole_number_of_milliseconds_rounded_which_its_tap_hears_zero_waiting_none_refusing_infinite_and_any_other_before_its_tap_hears_it_ending_closed_without_another_attempt()
-    {
-        foreach (var (given, outcome, held, refusal) in Durations.Of("a delay", (DurationOutcome.AtOnce, DurationOutcome.Refused)))
-        {
-            var time = new FakeTimeProvider();
-            using var listener = new Listener(IPAddress.Loopback);
-            await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
-            var taps = Channel.CreateUnbounded<TimeSpan>();
-
-            await ConnectRefused(client, listener);
-
-            var reconnecting = client.Reconnect(new TransportReconnectOptions
-            {
-                Delay = DelayOf(given),
-                Tap = (delay, _) =>
-                {
-                    taps.Writer.TryWrite(delay);
-                },
-            });
-            var (first, _) = await listener.Next();
-
-            await Listener.Refuse(first, 503);
-
-            if (outcome == DurationOutcome.Refused)
-            {
-                var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-                {
-                    return reconnecting.WaitAsync(Patience, Cancelled);
-                });
-
-                Assert.StartsWith(refusal!, refused.Message, StringComparison.Ordinal);
-                Assert.Equal(nameof(TransportReconnectOptions.Delay), refused.ParamName);
-
-                // refused before its tap heard it
-                Assert.False(taps.Reader.TryRead(out _));
-                Assert.Equal(ReadyState.Closed, client.ReadyState);
-                Assert.False(listener.IsPending);
-
-                continue;
-            }
-
-            Assert.Equal(held, await Next(taps));
-
-            // a duration held is waited on the clock; zero, none
-            if (outcome == DurationOutcome.Taken)
-            {
-                time.Advance(held!.Value - TimeSpan.FromMilliseconds(1));
-                Assert.False(listener.IsPending);
-                time.Advance(TimeSpan.FromMilliseconds(1));
-            }
-
-            var (peer, head) = await listener.Next();
-
-            using (peer)
-            // open while the server's end holds it, before it lets it go
-            using (await Listener.Answer(peer, head))
-            {
-                await reconnecting.WaitAsync(Patience, Cancelled);
-
-                Assert.Equal(ReadyState.Open, client.ReadyState);
-            }
-        }
     }
 
     [Fact]

@@ -5,13 +5,26 @@
 
 // dependencies
 
-import { createDebugStatistics, filterDebug } from '../src/router/shared/service-manager';
+import type { IMetricsRegistry } from '../src/router/shared/metrics-registry';
 import type { IAdmissionRequest, IBeforeRequest } from '../src/router/shared/types';
 import type { IServer, IServerTransportLike } from '../src/server/types';
 import type { TransportServerConnectionHandle } from '../src/transport/server/types';
 import { answererOf, askerOf, BURST_CHANGES, CALLS, NOTIFICATIONS, type Role } from './procedures';
 import { drawGlyph } from './glyph';
 import { issueToken } from './token';
+
+// interfaces
+
+/**
+ * The calls a server answered, as its registry counts them: how many, their mean, and their median
+ * estimated within its bucket, as Prometheus's `histogram_quantile` estimates one, in milliseconds;
+ * none while none ended.
+ */
+export interface IAnswered {
+  count: number;
+  mean: number | undefined;
+  median: number | undefined;
+}
 
 // constants
 
@@ -28,7 +41,69 @@ export const SILENCE_MILLISECONDS = 120_000;
 /** The code of the failures the demo's procedures answer with themselves: a role unknown, say. */
 const REFUSED = 1;
 
+// a sample of how long each call a server answered took: what it is, its procedure's name as
+// written, its `le` when a bucket, and its value
+const ANSWERED_SAMPLE =
+  /^bead_server_call_duration_seconds_(bucket|sum|count)\{.*procedure="((?:[^"\\]|\\.)*)".*?(?:,le="([^"]+)")?\} (\S+)$/;
+
 // helpers
+
+/**
+ * The calls answered of a registry's exposition, `left` out — a procedure that reads them, whose own
+ * series would count each read: their count and their sum, and the median found in the bucket that
+ * holds it, linearly between its bounds.
+ */
+export const answeredOf = (text: string, left: string): IAnswered => {
+  const buckets = new Map<number, number>();
+  let count = 0;
+  let sum = 0;
+
+  for (const line of text.split('\n')) {
+    const [, sample, procedure, le, value] = ANSWERED_SAMPLE.exec(line) ?? [];
+
+    if (sample === undefined || procedure === left) {
+      continue;
+    }
+
+    if (sample === 'count') {
+      count += Number(value);
+    } else if (sample === 'sum') {
+      sum += Number(value);
+    } else {
+      const bound = le === '+Inf' ? Infinity : Number(le);
+
+      buckets.set(bound, (buckets.get(bound) ?? 0) + Number(value));
+    }
+  }
+
+  if (count === 0) {
+    return { count, mean: undefined, median: undefined };
+  }
+
+  const half = count / 2;
+  let lower = 0;
+  let below = 0;
+  let median: number | undefined;
+
+  for (const [bound, cumulative] of [...buckets].toSorted(([first], [second]) => {
+    return first - second;
+  })) {
+    if (cumulative >= half) {
+      // past the last bound, the estimate is that bound, as histogram_quantile's is
+      median =
+        bound === Infinity
+          ? lower
+          : lower + ((bound - lower) * (half - below)) / Math.max(cumulative - below, 1);
+
+      break;
+    }
+
+    lower = bound;
+    below = cumulative;
+  }
+
+  return { count, mean: (sum / count) * 1_000, median: (median ?? lower) * 1_000 };
+};
 
 export const isRole = (value: string | null): value is Role => {
   return value === 'reader' || value === 'writer';
@@ -66,14 +141,13 @@ const increment = (): Promise<void>[] => {
 /**
  * The demo's procedures, on one server: each transport's server has its own router, which verifies
  * the token each call presents with the credentials it was given, so the procedures are offered on
- * each.
+ * each. `metricsRegistry` is the registry the server counts into, which `stats` reads.
  */
-export const offer = <Transport extends IServerTransportLike>(server: IServer<Transport>): void => {
+export const offer = <Transport extends IServerTransportLike>(
+  server: IServer<Transport>,
+  metricsRegistry: IMetricsRegistry
+): void => {
   const { router, services } = server;
-  // how long this server took to answer its last calls, those that read the statistics aside
-  const statistics = createDebugStatistics();
-
-  services.on('debug', filterDebug(statistics.listener, 'd(tx), -stats'));
 
   // a write needs a call whose session's scope holds `write`, its token's claims as the server
   // verified them, never its payload: in none, it is refused alike
@@ -208,13 +282,17 @@ export const offer = <Transport extends IServerTransportLike>(server: IServer<Tr
     return response(String(SLOW_MILLISECONDS));
   });
 
-  // what a diagnosis reads, over the protocol itself, so a server in a worker answers it too
+  // what a diagnosis reads, over the protocol itself, so a server in a worker answers it too: the
+  // calls answered, as the registry counts them, its own left out
   services.getRequestResolver(CALLS.stats.procedure, {
     serializer: answererOf(CALLS.stats),
   })((_request, response) => {
     return response(
       JSON.stringify({
-        durations: statistics.durations(),
+        answered: answeredOf(
+          metricsRegistry.exposition().text,
+          CALLS.stats.procedure.procedureName
+        ),
         gauges: server.gauges(),
         health: server.health(),
       })
