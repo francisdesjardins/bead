@@ -26,14 +26,20 @@ send, over one connection or several: the envelopes it answers, what it reports,
 keeps; `spec/transports.json` holds what a transport's server does at its edge, over HTTP and over a
 WebSocket: the exchanges and the messages it takes, and what it gives back; `spec/clocks.json` holds
 what every side's test clock does when a case advances it; `spec/durations.json` holds what every
-place that takes a duration an application gives a side makes of every input. Beside the wire, its
+place that takes a duration an application gives a side makes of every input;
+`spec/identities.json` holds what a router takes, or refuses, as a procedure is declared to it
+([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)); `spec/codecs.json`
+holds the bytes every side's codecs write of what they read and of what they are given, in `raw`,
+`text` and `json` ([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). Beside
+the wire, its
 companion [`spec/debugging.md`](../../spec/debugging.md) has two files of its own
 ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json` holds
 what a debug filter reads as and keeps, and `spec/metrics.json` what a registry writes and what each
 exit of a call counts. Every implementation's tests read them from `spec/`, never a copy: an entry
-one side does not read is one nobody checks. Seven generators write them,
+one side does not read is one nobody checks. Nine generators write them,
 `spec/generators/make_vectors.py`, `make_conversations.py`, `make_transports.py`, `make_clocks.py`,
-`make_durations.py`, `make_debug_filters.py` and `make_metrics.py`, and regenerating gives the same
+`make_durations.py`, `make_debug_filters.py`, `make_metrics.py`, `make_codecs.py` and
+`make_identities.py`, and regenerating gives the same
 bytes: nothing drawn at random is in them.
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
@@ -216,7 +222,7 @@ Y, or comes back to it, and Z comes to all of them at once, by a decision that m
 ## Consequences
 
 **Each behaviour is written and tested once per language.** The conformance files take most of that
-cost off the wire: 221 vectors in 10 groups, 142 conversations, 56 transports' cases and 9 clock
+cost off the wire: 221 vectors in 10 groups, 150 conversations, 56 transports' cases and 9 clock
 cases, which both sides play, written once. CI's `spec` job regenerates them and fails on any byte
 that differs, or on any file a generator writes that is not committed.
 

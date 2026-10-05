@@ -140,7 +140,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/debug-filters.json` and `spec/metrics.json`, their schemas and their generators, each
   repeating the companion's version as its `debuggingVersion`: 52 filters, what each reads as and
   keeps of fixed calls and envelopes, or its refusal's reason and what it names, and 5 filters given
-  as functions, event by event; 18 expositions, a registry's text byte for byte, and 49 exits, the
+  as functions, event by event; 22 expositions, a registry's text byte for byte, and 49 exits, the
   interop service's conversations played by a server given a registry, a `counted` step listing the
   series each step moved. `spec/check.py` holds the companion's version, its units, which
   `spec/debugging-uncited.txt` lists where none cites them, and the lines naming its files; reads
@@ -160,8 +160,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   writes its nine families in the Prometheus text format 0.0.4 and gives its media type with it,
   `{ contentType, text }` and `MetricsExposition(ContentType, Text)`, for an application to serve at
   `/metrics` or append to its own 0.0.4 scrape: Bead opens no port.
-- The support matrix's row "The interop service's JSON payloads", open: each side's interop codec
-  writes a payload back as its platform holds it, which a twin test on each side pins.
 - A page's DevTools hook (decision 0015): a client built in a page announces itself to the hook a
   DevTools extension defines under `Symbol.for('@francisdesjardins/bead/devtools-hook')`,
   `DEVTOOLS_HOOK_KEY`, handing it a source of protocol 1 — its `debug` events while the extension
@@ -179,6 +177,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   end in a result — and each exposition as a scrape reads it; the Server panel, the calls answered,
   their mean and a median estimated within its bucket. The reads, `stats` and `metrics`, are left
   out of the logs and of those counts.
+- Spec section 16, the identity rules (decision 0017): a service's id and a procedure's from 1 to
+  65,535, service 0 the protocol's; a service's revision from 1 to 2³¹ − 1, 0 meaning unknown and
+  never declared; a procedure's name, in ABNF, a lower-case ASCII letter then 62 ASCII letters or
+  digits at most, read whole, a character at a time, never by a platform's regular expression or
+  case mapping; two names one when equal once each ASCII upper-case letter is read as its lower-case
+  one; one name an address and one revision a service where a side counts; ids and names for life
+  within a service, and a revision counting its contract's releases, as SHOULDs `beadc breaking`
+  holds. `spec/identities.json`, its schema and its generator, `make_identities.py`, pin what a
+  router refuses with no memory: 31 names and 28 ids and revisions, each declared the five ways a
+  side declares, and 8 folds. Both sides play it, `identities.test.ts` and `IdentitiesTests`, the C#
+  side excused from the 17 inputs no `ushort` or `int` holds, a platform row of the support matrix,
+  "An id or a revision no C# type holds". `common.schema.json` gains the ids, the revision and the
+  name, which `interop-service.schema.json` takes.
+- Spec section 17, payloads (decision 0016): `raw`, its bytes; `text`, UTF-8 read strictly, its
+  leading U+FEFF kept; `json`, one JSON text in UTF-8 read as I-JSON (RFC 7493), a noncharacter
+  taken, nested 64 deep at most, each number the double nearest it, and written in the canonical
+  form of the JSON Canonicalization Scheme (RFC 8785): one value, one sequence of bytes, from every
+  language. `spec/codecs.json`, its schema and its generator, `make_codecs.py`, pin 69 payloads read
+  and 38 values written, RFC 8785's Appendix B among them: the bytes written back, or refused and
+  why. Both sides play it, `codecs.test.ts` and `CodecsTests`, through each runtime's codecs,
+  internal until the builder makes them public: `router/shared/payloads.ts`, outside the package's
+  `exports`, and `Bead.Core`'s `Payloads`, which the interop's serializers delegate to. A platform
+  row of the support matrix, "A value a side's type cannot hold", excuses the TypeScript side from
+  an object naming a member twice and the C# side from `NaN` and `Infinity`. Eight conversations
+  play it over the wire, a payload echoed in its own characters, one echoed in its canonical form,
+  and six answered `PAYLOAD_UNDECODABLE`: 150 conversations. The interop gains a case each way, a
+  value outside ASCII, its members in another order, echoed equal.
+- `spec/check.py` holds both new files: each under its schema, a name once in its group, every unit
+  an entry cites one of the spec's, a `differs` naming a row of the support matrix that names the
+  file and the entry, the `_Identities:` and `_Codecs:` lines naming files of `spec/`, and each
+  side's tests reading both. The `spec` job regenerates them.
 
 ### Changed
 
@@ -313,6 +342,39 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   `SESSION_REQUIRED` and `DESTINATION_UNREACHABLE` before it goes among them, and a command to a
   connection not open, which fails `DisconnectError`, `DisconnectException`, as one whose
   connection closes does.
+- The spec's preamble: a side conforms to the wire by sections 1 to 15, to what it declares by
+  section 16, and to what its codecs write and read by section 17, for each encoding it offers; a
+  relay, which reads no payload, offers none. Sections 6.1 and 9.5 point to section 17.
+- A router refuses a declaration as it is made — a resolver registered, a requester made, a
+  notification registered — out of its range or off its form (spec 16.10), on both sides, before
+  any reason of its own and its registry's: a `ProgrammerError` and an `ArgumentException`, where a
+  requester's and a notification's checked nothing, and a resolver's revision and name were
+  anything. A service manager's `getNotification`, `GetNotification`, checks before its own reason.
+- The metrics registry, on both sides (`spec/debugging.md` 7.3): "its name at another address"
+  compares names as section 16 does, its ASCII letters in either case, where it compared them
+  exactly; and it holds one revision a service, refusing a declaration at another,
+  `another revision of its service`, before the ceiling. The TypeScript side's `DeclaredProcedure`
+  takes `serviceRevision`, and `spec/metrics.json` pins both refusals.
+- The C# side writes a JSON payload in RFC 8785's canonical form, where it wrote
+  `JsonSerializer`'s: a character outside ASCII as it is, and `+`, `<` and `>` too, where it escaped
+  them; a number as ECMAScript writes its double, `1e+21` and `0` where it wrote `1E+21` and `-0`;
+  members sorted. It reads a number with `double.Parse`, a tie to the even, where `JsonElement`
+  reads some ties of 768 digits to the odd neighbour, and refuses bytes that are not UTF-8.
+- The TypeScript side reads a JSON payload as I-JSON: bytes that are not UTF-8, a byte order mark, a
+  name given twice, a surrogate alone, a number past the largest double and a payload nested deeper
+  than 64 are answered `PAYLOAD_UNDECODABLE`, where it read them; it writes members sorted, and
+  refuses what JSON has no value for — `undefined`, `NaN`, a `Date`, a `Map`, a `BigInt`, a function,
+  an object of a class, an array with a hole — where `JSON.stringify` converted it.
+- A JSON payload's value is its canonical form's on both sides: `1.0` is `1`, `-0` is `0`, and an
+  integer past 2⁵³ − 1 is the double nearest it.
+- A value that does not write, on both sides (`spec/debugging.md` 4.3 and 10.1): a request's fails
+  its call before anything goes, written before its trace and its deprecation, so nothing is traced,
+  deprecated or counted; a notification's goes to none of its subscriptions, counted `failed` for
+  each and reported once by its router, and notifying fails no caller. The TypeScript side's
+  `IRouterLike.notify` takes `Uint8Array | Error`, the reason in its payload's place, and the C#
+  side's `NotifyRequest` gains `Unwritten`.
+- `spec/debugging.md` 1.2, 6.10 and 8.3 name sections 16 and 17: no procedure is named `_OTHER`, and
+  every procedure's name is a pattern a debug filter reads.
 
 ### Removed
 
