@@ -65,7 +65,11 @@ const takePage = (port: IPort): void => {
 
   const panel = panels.get(tabId);
 
-  if (panel !== undefined) {
+  // a page that comes back as the service worker starts again may still be watched, for a panel that
+  // closed while it was down: it is told to stop
+  if (panel === undefined) {
+    tell(port, { type: 'unwatch' });
+  } else {
     meet(port, panel);
   }
 };

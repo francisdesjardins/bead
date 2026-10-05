@@ -1106,6 +1106,7 @@ the Network panel does not show. The parts: `hook.ts`, in the page's world at `d
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
 unit project: its pure modules in Node; the extension loaded in Chromium against the demo's static
-build, the page's calls followed to the panel and the watch stopped as the panel closes; and the
+build, the page's calls followed to the panel and the watch stopped as the panel closes —
+`hook.test.ts`, which holds the hook, the bridge and the background, since they run only together; and the
 panel as a page on a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
 `yarn playground:build:file` make what they load.
