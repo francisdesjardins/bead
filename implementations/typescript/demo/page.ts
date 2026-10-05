@@ -38,7 +38,7 @@ import {
   type IProcedureMetrics,
   metricsOf,
   quantileOf,
-} from './metrics';
+} from '../devtools/exposition';
 
 // interfaces
 

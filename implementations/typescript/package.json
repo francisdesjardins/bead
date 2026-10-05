@@ -38,6 +38,7 @@
   "scripts": {
     "comment-budget": "node tools/check-comment-budget.mjs",
     "demo": "node demo/serve.ts",
+    "devtools:build": "node devtools/build.ts",
     "playground:build:file": "node demo/playground.ts",
     "docs:examples": "node tools/check-examples.mjs",
     "docs:examples:fix": "node tools/check-examples.mjs --fix",
@@ -49,6 +50,7 @@
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
+    "test:devtools": "playwright test --config playwright.devtools.config.ts",
     "type-check": "node node_modules/typescript-7/bin/tsc --noEmit",
     "verify:all": "yarn check && yarn test"
   },

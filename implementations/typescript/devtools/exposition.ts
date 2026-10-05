@@ -1,9 +1,8 @@
-// ── Demo metrics, read ────────────────────────────────────────────────────────
+// ── An exposition, read ──────────────────────────────────────────────────────
 
-// What a page reads of a metrics registry's exposition, the Prometheus text format 0.0.4 — the
-// server's, which a `metrics` call answers, or its client's own: each procedure's calls, how they
-// ended and how long they took, and what its subscriptions did. Nothing here touches a page, so
-// whatever else reads an exposition reads it as this does.
+// What the DevTools panel and the demo's page read of a metrics registry's exposition, the
+// Prometheus text format 0.0.4: each procedure's calls, how they ended and how long they took, and
+// what its subscriptions did. Nothing here touches a page.
 
 // interfaces
 

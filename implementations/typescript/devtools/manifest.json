@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Bead DevTools",
+  "version": "%VERSION%",
+  "description": "Bead's calls, envelopes and metrics, in a DevTools panel.",
+  "minimum_chrome_version": "111",
+  "devtools_page": "devtools.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
