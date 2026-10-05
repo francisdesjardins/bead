@@ -84,8 +84,7 @@ system that ignores case never meets two names.
 ### The options weighed
 
 **Where the protocol's own services live.** The project's plan reserves service 0, the builder's
-design gives it to the protocol and names "reflection in service 0" among what comes later, and the
-plan brings a session service for federated nodes. Spec 4.7 reads a service id of 0 and refuses it
+design gives it to the protocol and names "reflection in service 0" among what comes later. Spec 4.7 reads a service id of 0 and refuses it
 by routing; 4.10 never writes one, and neither side's writer does (`header.ts`, with
 `FIELD_MAXIMUMS`).
 

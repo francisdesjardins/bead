@@ -82,8 +82,8 @@ What no entry plays stays with each side's twin tests:
 
 - a destination that is a router the relay calls through, with its two legs' limits and the session
   every requester presenting none or `OPAQUE` shares behind it (spec 14.3 and 14.7):
-  `router/server/__tests__/relay.test.ts` and `Bead.Core.Tests/RelayTests`, until a relay across
-  languages comes with the federation of nodes;
+  `router/server/__tests__/relay.test.ts` and `Bead.Core.Tests/RelayTests`, until the interop plays a
+  relay across languages;
 - a relay that writes the `Authorization` leg A carried to leg B as it came, over HTTP (spec 14.2,
   15.5), which the transports' file, playing a server and not the HTTP client a relay calls through,
   cannot play: twins over real sockets, `router/server/__tests__/relay.test.ts`
