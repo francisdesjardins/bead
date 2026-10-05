@@ -1093,8 +1093,8 @@ first.
   `devtools/exposition.ts`, the demo's reader too, and its exposition as a scrape reads it; a client
   given no registry says so.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
-  panel saw, read with the package's codec: an answer's body, which DevTools gives as bytes, and a
-  `POST`'s, when it gives that one as bytes too.
+  panel saw, read with the package's codec: each `POST`'s envelope, and the batch its answer or a
+  listen brings back.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
 nothing until it reloads; and the hook watches only while a panel is open, so the panel shows what
