@@ -160,6 +160,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   writes its nine families in the Prometheus text format 0.0.4 and gives its media type with it,
   `{ contentType, text }` and `MetricsExposition(ContentType, Text)`, for an application to serve at
   `/metrics` or append to its own 0.0.4 scrape: Bead opens no port.
+- The support matrix's row "The interop service's JSON payloads", open: each side's interop codec
+  writes a payload back as its platform holds it, which a twin test on each side pins.
 - A page's DevTools hook (decision 0015): a client built in a page announces itself to the hook a
   DevTools extension defines under `Symbol.for('@francisdesjardins/bead/devtools-hook')`,
   `DEVTOOLS_HOOK_KEY`, handing it a source of protocol 1 — its `debug` events while the extension

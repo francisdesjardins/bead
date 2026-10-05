@@ -104,6 +104,43 @@ public sealed class InteropServiceTests
         Assert.Equal(outcome, await verifying.WaitAsync(Patience, Cancelled));
     }
 
+    /// <summary>
+    /// The bytes of a request's JSON payload, and what the interop service's codec writes back of
+    /// them, both in hexadecimal, or <c>refused</c>: what the TypeScript side writes otherwise is a row
+    /// of the matrix, "The interop service's JSON payloads".
+    /// </summary>
+    public static TheoryData<string, string> JsonRows { get; } = new()
+    {
+        { "224a6f73c3a920612b62203c783e22", "224a6f735c753030453920615c753030324262205c7530303343785c753030334522" },
+        { "225c75303065395c2f22", "225c75303045392f22" },
+        { "312e30", "312e30" },
+        { "314532", "314532" },
+        { "2d30", "2d30" },
+        { "3132333435363738393031323334353637383930", "3132333435363738393031323334353637383930" },
+        { "7b2261223a312c2261223a327d", "7b2261223a312c2261223a327d" },
+        { "5b2031202c2032205d", "5b312c325d" },
+        { "22ff22", "225c754646464422" },
+        { "efbbbf31", "refused" },
+    };
+
+    [Theory]
+    [MemberData(nameof(JsonRows))]
+    public void The_interop_service_s_codec_writes_back_what_it_reads_as_JsonElement_holds_it_a_difference_from_the_TypeScript_side(string read, string written)
+    {
+        string answer;
+
+        try
+        {
+            answer = Convert.ToHexStringLower(InteropService.Json.Encode(InteropService.Json.Decode(Convert.FromHexString(read))).Span);
+        }
+        catch (JsonException)
+        {
+            answer = "refused";
+        }
+
+        Assert.Equal(written, answer);
+    }
+
     [Fact]
     public async Task The_interop_service_s_key_set_answers_each_issuer_it_names_as_its_words_say_on_its_server_s_clock_whatever_its_signal_and_fails_at_once_for_any_other()
     {

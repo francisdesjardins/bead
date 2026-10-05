@@ -185,6 +185,42 @@ const startServer = async (): Promise<{
 
 // definition
 
+/**
+ * The bytes of a request's JSON payload, and what the interop service's codec writes back of them,
+ * both in hexadecimal, or `refused`: what the C# side writes otherwise is a row of the matrix, "The
+ * interop service's JSON payloads".
+ */
+const JSON_ROWS: readonly (readonly [read: string, written: string])[] = [
+  ['224a6f73c3a920612b62203c783e22', '224a6f73c3a920612b62203c783e22'],
+  ['225c75303065395c2f22', '22c3a92f22'],
+  ['312e30', '31'],
+  ['314532', '313030'],
+  ['2d30', '30'],
+  ['3132333435363738393031323334353637383930', '3132333435363738393031323334353637303030'],
+  ['7b2261223a312c2261223a327d', '7b2261223a327d'],
+  ['5b2031202c2032205d', '5b312c325d'],
+  ['22ff22', '22efbfbd22'],
+  ['efbbbf31', '31'],
+];
+
+test.describe('JSON_SERIALIZER', () => {
+  test('writes back what it reads as JSON.parse and JSON.stringify hold it, a difference from the C# side', () => {
+    for (const [read, written] of JSON_ROWS) {
+      let answer: string;
+
+      try {
+        answer = Buffer.from(
+          JSON_SERIALIZER.encode(JSON_SERIALIZER.decode(Buffer.from(read, 'hex')))
+        ).toString('hex');
+      } catch {
+        answer = 'refused';
+      }
+
+      expect(answer, read).toBe(written);
+    }
+  });
+});
+
 test.describe('the C# server of the interop service', () => {
   test.skip(
     !HAS_DOTNET && !REQUIRED,
