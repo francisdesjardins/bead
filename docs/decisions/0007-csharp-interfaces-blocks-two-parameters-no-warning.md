@@ -146,7 +146,7 @@ test ran. CI's `dotnet` job runs both, then the interop
   JavaScript `Map` keeps the older one's place.
 - An instant a side reports — a transport server client's and a session's `LastActivity`, a trace's
   `StartedAt` — is a `DateTimeOffset` its clock's wall reading gives, and a trace's `Duration` a
-    `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
+  `TimeSpan` in whole milliseconds, where the TypeScript side's are milliseconds, since the epoch
   for an instant.
 - A credential's session's end is a `long` of milliseconds since the epoch, as on the TypeScript
   side, never a `DateTimeOffset`: section 13.8 lets an end run to 2⁵³ − 1 ms, past what a
