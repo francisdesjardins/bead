@@ -249,6 +249,180 @@
       ]
     },
     {
+      "name": "a payload outside ASCII is answered in its own characters, none escaped",
+      "clauses": [
+        "17.7.3"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload is answered in its canonical form, whatever form it came in",
+      "clauses": [
+        "17.8"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 7B 20 22 62 22 20 3A 20 22 4A 6F 73 5C 75 30 30 65 39 22 2C 20 22 61 22 20 3A 20 31 2E 30 20 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "7B 22 61 22 3A 31 2C 22 62 22 3A 22 4A 6F 73 C3 A9 22 7D"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload that starts with a byte order mark is answered PAYLOAD_UNDECODABLE",
+      "clauses": [
+        "17.2.1",
+        "17.5.2"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | EF BB BF 31"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload that names a member twice is answered PAYLOAD_UNDECODABLE",
+      "clauses": [
+        "17.2.1",
+        "17.5.4"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 7B 22 61 22 3A 31 2C 22 61 22 3A 32 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload whose string holds a byte that is not UTF-8 is answered PAYLOAD_UNDECODABLE",
+      "clauses": [
+        "17.2.1",
+        "17.5.1"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 FF 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload whose string holds a surrogate alone is answered PAYLOAD_UNDECODABLE",
+      "clauses": [
+        "17.2.1",
+        "17.5.5"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 5C 75 44 38 30 30 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload nested past 64 is answered PAYLOAD_UNDECODABLE",
+      "clauses": [
+        "17.2.1",
+        "17.5.7"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a payload whose number is past a double is answered PAYLOAD_UNDECODABLE",
+      "clauses": [
+        "17.2.1",
+        "17.5.6"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 31 45 34 30 30"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 50,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable",
       "clauses": [
         "9.2.5"

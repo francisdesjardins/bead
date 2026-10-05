@@ -15,8 +15,10 @@ envelope, [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.
 written.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
-in its companion [`debugging.md`](debugging.md): a side conforms to the wire by sections 1 to 15,
-whether it builds those or leaves them out.
+in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
+side conforms to the wire by sections 1 to 15, to what it declares by section 16, and to what its
+codecs write and read by section 17, for each encoding it offers: a relay, which reads no payload,
+offers none.
 
 ## 1. Conventions
 
@@ -181,7 +183,8 @@ failure's detail SHOULD say which check failed, and is informative.
 _Vectors: `envelopes`, `envelopeRefusals`._
 
 6.1. A request, a result and a notification carry their payload, which MAY be empty. With
-`TRANSFER`, it is the transfer's first bytes.
+`TRANSFER`, it is the transfer's first bytes. Section 17 says how its procedure reads and writes a
+payload.
 
 6.2. A failure carries its record (section 7).
 
@@ -318,9 +321,9 @@ connection closed, or once a new request opened its call id again, the answer MU
 would settle a call it does not belong to.
 
 9.5. A resolver that fails before it answers MUST still answer, with `PROCEDURE_FAILED`, so its
-requester does not wait out its timeout. A payload its procedure cannot read is answered with
-`PAYLOAD_UNDECODABLE`, before the resolver sees it. A procedure's own failure is an application
-failure, with a code from 1 to 65,535 of the procedure's own numbering.
+requester does not wait out its timeout. A payload its procedure cannot read (section 17) is
+answered with `PAYLOAD_UNDECODABLE`, before the resolver sees it. A procedure's own failure is an
+application failure, with a code from 1 to 65,535 of the procedure's own numbering.
 
 9.6. What does not read goes through one gate. A side MUST:
 
@@ -1089,3 +1092,163 @@ may name, `hosts`, against a page that rebinds its name to the server's address,
 browser's exchange may come from besides its own, `origins`. A client's address is its socket's;
 behind a proxy on the same machine, which the server is told to trust, `isProxyTrusted`, it is the
 last entry of the proxy's `X-Forwarded-For`, when that entry is an address.
+
+## 16. Services and procedures
+
+_Identities: `spec/identities.json`._
+
+16.1. A service and its procedures are known by ids and by names. Ids travel: a request names its
+procedure by its service id and its procedure id (section 3.1). Names never do: a procedure's name
+labels what a side traces and counts, beside its service's id, and is what a debug filter keeps or
+leaves out (`debugging.md` sections 4, 6 and 8). This section binds what a side declares: a
+resolver registered, a requester made, a notification registered. It changes no envelope: a
+reader reads every id section 4 lets it read.
+
+16.2. Each id, and a service's revision, is a whole number of this range:
+
+| What                 | Range              | On the wire                               |
+| -------------------- | ------------------ | ----------------------------------------- |
+| A service's id       | 1 to 65,535        | in each request, on 2 bytes (section 3.1) |
+| A procedure's id     | 1 to 65,535        | in each request, on 2 bytes (section 3.1) |
+| A service's revision | 1 to 2,147,483,647 | never                                     |
+
+16.3. Service 0 is the protocol's. No procedure of it is defined, so a side declares none, a writer
+writes none (section 4.10), and a request that names it is refused by routing as `SERVICE_UNKNOWN`
+(section 4.7). A decision that defines one of its procedures gives this section a table of them,
+a row each, and section 4.10 then writes them.
+
+16.4. A procedure's name is 1 to 63 characters of ASCII, in ABNF
+([RFC 5234](https://www.rfc-editor.org/rfc/rfc5234)), each letter's case given by its range:
+
+```abnf
+procedure-name = lower 0*62( lower / upper / DIGIT )
+lower          = %x61-7A
+upper          = %x41-5A
+```
+
+16.5. A name is read whole, character by character. A character outside these rules is in no name,
+whatever a case mapping or a normalization makes of it: U+212A, the Kelvin sign, is no `K`. A line
+terminator after a name leaves it no name, though a regular expression's `$` may let one by. So
+`_OTHER`, the metrics' fallback (`debugging.md` section 8.3), is no procedure's name, and every
+procedure's name is a pattern a debug filter reads (`debugging.md` section 6.1).
+
+16.6. Two names are one when they are equal once each ASCII upper-case letter is read as its
+lower-case one, compared character by character, and nothing else changed: `getHTTPStatus` and
+`getHttpStatus` are one name; `café` and `cafÉ` are two strings, and no name.
+
+16.7. A side SHOULD declare each address — a service id and a procedure id — under one name,
+written the same each time, even where another spelling is one name by section 16.6; each name of a
+service at one address, two names one by section 16.6; and each service at one revision, for as
+long as it runs. A side that counts its calls MUST refuse a declaration that does not
+(`debugging.md` section 7.3). A filter's word reaches the procedures of its name in every service
+(`debugging.md` section 6.5).
+
+16.8. Within a service, an id or a name a release declared SHOULD stay its declaration's in every
+later release, or be reserved, and never be declared for another: so a peer built against an
+earlier release never calls an id that now means another procedure, and within a service a name
+never comes to count another procedure. Between a manifest's releases, `beadc breaking` holds it;
+nothing holds it across manifests, nor on a side written by hand.
+
+16.9. A service's revision counts the releases of its contract, from 1, and does not travel. It
+SHOULD move once in a release whose contract differs from the release before, however much moved,
+and never back, as `beadc breaking` holds it. A side holds 0 for a procedure it knows no revision
+of, a relay's leg B (section 14.2), and declares none at 0.
+
+16.10. A side MUST refuse a declaration as it is made, never on a call, for the first of these
+reasons that applies, before any reason of its own; a declaration refused declares nothing:
+
+| Reason             | A declaration that names                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| `out of its range` | a service id, a procedure id or a revision outside 16.2, service 0 (16.3), or one that is no whole number |
+| `off its form`     | a procedure's name that is no `procedure-name` (16.4, 16.5)                                               |
+
+A side's sentences are its own; a C side reports a code. A side built without the trace and the
+metrics (`debugging.md` section 1.2), which keeps no names, refuses `out of its range` alone, its
+names those of the manifest its tables were generated from.
+
+## 17. Payloads
+
+_Codecs: `spec/codecs.json`._
+
+17.1. A payload is bytes to the envelope (section 6.1), and its procedure reads them: a procedure's
+request, its result and its notifications are each of one encoding, which the procedure's definition
+names and no envelope carries. This section states three, `raw`, `text` and `json`. A side reads a
+payload once it is whole (section 12.6), before its resolver or its caller sees it, and writes one as
+its encoding says. A relay reads none (section 14.2).
+
+17.2. A payload that does not read, or a value that does not write, fails where it is:
+
+1. a request's payload is answered with `PAYLOAD_UNDECODABLE`, and its resolver never sees it
+   (section 9.5);
+2. a result's payload fails its call at the requester with `PAYLOAD_UNDECODABLE`;
+3. a notification's payload is reported as `PAYLOAD_UNDECODABLE`, and no callback hears it;
+4. a request's value fails its call before anything goes out, and no call is made;
+5. an answer's value fails as a resolver that fails: the request is answered with
+   `PROCEDURE_FAILED`, and the failure reported (section 9.5);
+6. a notification's value goes to none of its subscriptions, and the failure is reported.
+
+A writer MUST NOT write what a reader refuses, as section 4.10 has it of an envelope.
+
+17.3. `raw`: the payload is its bytes, any of them, none included, read and written as they are.
+
+17.4. `text`: the payload is a string in UTF-8 (RFC 3629), none included.
+
+1. A reader MUST refuse bytes that are not UTF-8 — a byte no sequence takes, an overlong form, a
+   surrogate's code point, a sequence cut short — where section 7.3 reads a detail's as U+FFFD.
+2. A reader MUST keep a leading U+FEFF as a character of the string, never strip it as a signature
+   (RFC 3629 §6), as section 7.3 keeps a detail's.
+3. A writer MUST refuse a string holding a surrogate alone, where section 7.4 writes a detail's as
+   U+FFFD.
+
+17.5. `json`: the payload is one JSON text ([RFC 8259](https://www.rfc-editor.org/rfc/rfc8259)) in
+UTF-8, read as an I-JSON message ([RFC 7493](https://www.rfc-editor.org/rfc/rfc7493)) is read, but
+for its noncharacters (section 17.6), and written in the canonical form of the JSON Canonicalization
+Scheme ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)), so that one value has one form,
+whichever side writes it. Its value may be of any kind, an object, an array, a string, a number or a
+literal. A reader MUST refuse:
+
+1. bytes that are not UTF-8 (section 17.4.1);
+2. a byte order mark, which RFC 8259 §8.1 lets a parser ignore;
+3. bytes that are not one JSON text: none, two values, a comment, a trailing comma, `NaN`, a leading
+   zero, or white space other than space, tab, line feed and carriage return;
+4. an object that names a member twice, its names compared once their escapes are read (RFC 7493
+   §2.3);
+5. a name or a string holding a surrogate alone, which only an escape writes (RFC 7493 §2.1);
+6. a number that rounds past the largest finite double, as `1E400` does;
+7. an array or an object nested deeper than 64, the outermost at depth 1, as RFC 8259 §9 lets a
+   parser bound it. A reader MUST refuse it before it builds anything deeper.
+
+17.6. A reader reads a number as the IEEE 754 double nearest it, a tie to the even, as ECMAScript's
+`JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 may not stay exact,
+and a number under the smallest double reads as 0. A value that needs more travels as a string, as
+RFC 7493 §2.2 recommends. A reader takes a noncharacter, which RFC 7493 §2.1 refuses and Unicode's
+Corrigendum #9 lets be interchanged. What it hands its application is the value of the payload's
+canonical form (section 17.7): `1.0` and `1` are one value, and `12345678901234567890` is
+`12345678901234567000`.
+
+17.7. A writer writes a value's canonical form (RFC 8785 §3.2), and nothing else:
+
+1. no white space between tokens;
+2. `null`, `true` and `false`;
+3. a string between quotation marks, each character as it is, but `"` and `\` written `\"` and
+   `\\`; U+0008, U+0009, U+000A, U+000C and U+000D written `\b`, `\t`, `\n`, `\f`
+   and `\r`; and the rest of U+0000 to U+001F written `\u` and four lower-case hexadecimal
+   digits;
+4. a number as ECMAScript's Number::toString writes its double, −0 as `0`;
+5. an array's elements in their order;
+6. an object's members sorted by their names, compared as sequences of UTF-16 code units, at every
+   depth;
+7. the whole in UTF-8.
+
+A writer MUST refuse a value no reader takes: a number that is not finite, a name or a string holding
+a surrogate alone, an object that names a member twice, an array or an object nested deeper than 64,
+and anything else JSON has no value for, a language's own — JavaScript's `undefined`, a function, a
+`BigInt` — among them.
+
+17.8. A value a side writes reads back to the value of its canonical form, as section 17.6 reads it,
+and a payload read and written again is its canonical form: an echo answers
+`{ "b" : "Jos\u00e9", "a" : 1.0 }` with `{"a":1,"b":"José"}`:
+
+```text
+7B 22 61 22 3A 31 2C 22 62 22 3A 22 4A 6F 73 C3 A9 22 7D
+```

@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's codecs, spec/codecs.json",
+  "type": "object",
+  "required": ["$comment", "specVersion", "payloads", "values"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/codecs.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
+    "payloads": {
+      "description": "Bytes read, in an encoding, and the bytes written back of what was read, or the reason they are refused for.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/payload" }
+    },
+    "values": {
+      "description": "A value given to a writer, in an encoding, and the bytes it writes, or the reason it is refused for.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/value" }
+    }
+  },
+  "$defs": {
+    "encoding": {
+      "description": "An encoding of spec section 17: raw (17.3), text (17.4) or json (17.5 to 17.8).",
+      "enum": ["raw", "text", "json"]
+    },
+    "payload": {
+      "description": "Bytes read, in an encoding: written, the bytes its writer writes back of the value its reader read; or refused, the reason its reader refuses them for.",
+      "type": "object",
+      "required": ["name", "encoding", "clauses", "bytes"],
+      "oneOf": [{ "required": ["written"] }, { "required": ["refused"] }],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "encoding": { "$ref": "#/$defs/encoding" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+        "written": { "$ref": "common.schema.json#/$defs/bytes" },
+        "refused": { "$ref": "#/$defs/reason" },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "encoding": { "const": "raw" } } },
+          "then": { "not": { "required": ["refused"] } }
+        },
+        {
+          "if": { "properties": { "encoding": { "const": "text" } } },
+          "then": { "properties": { "refused": { "const": "not UTF-8" } } }
+        },
+        {
+          "if": { "properties": { "encoding": { "const": "json" } } },
+          "then": {
+            "properties": {
+              "refused": {
+                "enum": [
+                  "not UTF-8",
+                  "a byte order mark",
+                  "not JSON",
+                  "a name twice",
+                  "a surrogate alone",
+                  "a number past a double",
+                  "nested past 64"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "value": {
+      "description": "A value given to a writer, in an encoding: written, the bytes it writes; or refused, the reason it refuses the value for.",
+      "type": "object",
+      "required": ["name", "encoding", "clauses", "value"],
+      "oneOf": [{ "required": ["written"] }, { "required": ["refused"] }],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "encoding": { "$ref": "#/$defs/encoding" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "value": { "$ref": "#/$defs/given" },
+        "written": { "$ref": "common.schema.json#/$defs/bytes" },
+        "refused": { "$ref": "#/$defs/reason" },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "encoding": { "const": "raw" } } },
+          "then": {
+            "not": { "required": ["refused"] },
+            "properties": { "value": { "required": ["bytes"] } }
+          }
+        },
+        {
+          "if": { "properties": { "encoding": { "const": "text" } } },
+          "then": {
+            "properties": {
+              "value": {
+                "oneOf": [
+                  { "required": ["text"] },
+                  { "required": ["form"], "properties": { "form": { "const": "loneSurrogate" } } }
+                ]
+              },
+              "refused": { "const": "a surrogate alone" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "encoding": { "const": "json" } } },
+          "then": {
+            "properties": {
+              "value": {
+                "oneOf": [
+                  { "required": ["json"] },
+                  { "required": ["double"] },
+                  { "required": ["number"] },
+                  { "required": ["form"] },
+                  { "required": ["nested"] }
+                ]
+              },
+              "refused": {
+                "enum": [
+                  "a surrogate alone",
+                  "a name twice",
+                  "nested past 64",
+                  "not a finite number",
+                  "no JSON value"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "given": {
+      "description": "A value in one of seven forms: a JSON value; a double by its 64 bits; a number by its text; a text; bytes; a form no JSON text holds; or arrays nested that deep.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "json": { "description": "A JSON value, as the file holds it." },
+        "double": {
+          "description": "A double by its 64 bits, in lower-case hexadecimal, the sign first.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "number": {
+          "description": "A JSON number's text, as RFC 8259 writes one.",
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?$"
+        },
+        "text": { "description": "A string, given to a text writer.", "type": "string" },
+        "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
+        "form": {
+          "description": "loneSurrogate, the string a, U+D800, b; loneSurrogateName, an object whose one member is named so; nameTwice, an object of two members both named a; undefined, what a language holds that JSON has no value for.",
+          "enum": ["loneSurrogate", "loneSurrogateName", "nameTwice", "undefined"]
+        },
+        "nested": {
+          "description": "That many arrays, one in another, the innermost empty.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      }
+    },
+    "reason": {
+      "description": "Why a reader refuses bytes, or a writer a value, derived and held by the regeneration alone: no harness reads it.",
+      "enum": [
+        "not UTF-8",
+        "a byte order mark",
+        "not JSON",
+        "a name twice",
+        "a surrogate alone",
+        "a number past a double",
+        "nested past 64",
+        "not a finite number",
+        "no JSON value"
+      ]
+    }
+  }
+}

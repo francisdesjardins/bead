@@ -1,0 +1,795 @@
+{
+  "$schema": "schemas/identities.schema.json",
+  "$comment": [
+    "Bead's identities: what a router does as a procedure is declared to it (spec section 16, decision 0017), taken, or refused by the first reason of 16.10 that applies, out of its range before off its form, as it is declared and never on a call; a declaration refused declares nothing. And which two names are one (16.6).",
+    "ways are the five ways a side declares, each by an id its harness keys its table by: a resolver registered on a client's router and on a server's, a requester made on each, and a notification registered on a client's. A harness plays each entry of names and ids each way, each on a router of its own, given no metrics registry.",
+    "names: a procedure's name, procedureName, declared at service 1, procedure 1, revision 1. ids: a service id, a procedure id and a service revision, each any JSON value, as a value read from JSON may be, declared under the name echo, or under procedureName where the entry gives one.",
+    "refused, where given, is the reason the declaration is refused; absent, it is taken. The reason is derived, and held by the regeneration alone: the words of a refusal are each side's, and a side that reports a refusal by a code checks the reason against that code.",
+    "folds: two names, and one, whether they are one name by 16.6, each ASCII upper-case letter read as its lower-case one and nothing else changed; a harness plays them through the one helper every comparison of names on its side goes through.",
+    "differs names the row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: an input that language cannot be given. A harness plays every entry but those a differs excuses its language from.",
+    "clauses are the units of spec.md an entry checks: a clause, 16.4; a row of its table, counted from 1, 16.2.1."
+  ],
+  "specVersion": "0.1.0",
+  "ways": [
+    "client-resolver",
+    "server-resolver",
+    "client-requester",
+    "server-requester",
+    "client-notification"
+  ],
+  "names": [
+    {
+      "name": "a",
+      "clauses": [
+        "16.4"
+      ],
+      "procedureName": "a"
+    },
+    {
+      "name": "x9",
+      "clauses": [
+        "16.4"
+      ],
+      "procedureName": "x9"
+    },
+    {
+      "name": "echo",
+      "clauses": [
+        "16.4"
+      ],
+      "procedureName": "echo"
+    },
+    {
+      "name": "endSessionsOf",
+      "clauses": [
+        "16.4"
+      ],
+      "procedureName": "endSessionsOf"
+    },
+    {
+      "name": "getHTTPStatus2",
+      "clauses": [
+        "16.4"
+      ],
+      "procedureName": "getHTTPStatus2"
+    },
+    {
+      "name": "63 characters",
+      "clauses": [
+        "16.4"
+      ],
+      "procedureName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "64 characters",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refused": "off its form"
+    },
+    {
+      "name": "the empty name",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "",
+      "refused": "off its form"
+    },
+    {
+      "name": "Echo",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "Echo",
+      "refused": "off its form"
+    },
+    {
+      "name": "9lives",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "9lives",
+      "refused": "off its form"
+    },
+    {
+      "name": "_OTHER",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "_OTHER",
+      "refused": "off its form"
+    },
+    {
+      "name": "get_thing",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "get_thing",
+      "refused": "off its form"
+    },
+    {
+      "name": "get-thing",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "get-thing",
+      "refused": "off its form"
+    },
+    {
+      "name": "a.b",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "a.b",
+      "refused": "off its form"
+    },
+    {
+      "name": "a b",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "a b",
+      "refused": "off its form"
+    },
+    {
+      "name": "*",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "*",
+      "refused": "off its form"
+    },
+    {
+      "name": "-echo",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "-echo",
+      "refused": "off its form"
+    },
+    {
+      "name": "d(rx)",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "d(rx)",
+      "refused": "off its form"
+    },
+    {
+      "name": "say\"hi\"",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "say\"hi\"",
+      "refused": "off its form"
+    },
+    {
+      "name": "echo and a line feed",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "echo\n",
+      "refused": "off its form"
+    },
+    {
+      "name": "a line feed and echo",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "\necho",
+      "refused": "off its form"
+    },
+    {
+      "name": "echo and a carriage return",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "echo\r",
+      "refused": "off its form"
+    },
+    {
+      "name": "echo and a NUL",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "echo\u0000",
+      "refused": "off its form"
+    },
+    {
+      "name": "a byte order mark and echo",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "﻿echo",
+      "refused": "off its form"
+    },
+    {
+      "name": "the Kelvin sign",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "Kelvin",
+      "refused": "off its form"
+    },
+    {
+      "name": "the Kelvin sign within a name",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "maKe",
+      "refused": "off its form"
+    },
+    {
+      "name": "the long s",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "ſtatus",
+      "refused": "off its form"
+    },
+    {
+      "name": "a capital I with a dot above",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "İd",
+      "refused": "off its form"
+    },
+    {
+      "name": "a full-width e",
+      "clauses": [
+        "16.5",
+        "16.10.2"
+      ],
+      "procedureName": "ｅcho",
+      "refused": "off its form"
+    },
+    {
+      "name": "café",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "café",
+      "refused": "off its form"
+    },
+    {
+      "name": "an emoji",
+      "clauses": [
+        "16.4",
+        "16.10.2"
+      ],
+      "procedureName": "echo😀",
+      "refused": "off its form"
+    }
+  ],
+  "ids": [
+    {
+      "name": "service 0",
+      "clauses": [
+        "16.2.1",
+        "16.3",
+        "16.10.1"
+      ],
+      "serviceId": 0,
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "refused": "out of its range"
+    },
+    {
+      "name": "service 1",
+      "clauses": [
+        "16.2.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": 1
+    },
+    {
+      "name": "service 65535",
+      "clauses": [
+        "16.2.1"
+      ],
+      "serviceId": 65535,
+      "procedureId": 1,
+      "serviceRevision": 1
+    },
+    {
+      "name": "service 65536",
+      "clauses": [
+        "16.2.1",
+        "16.10.1"
+      ],
+      "serviceId": 65536,
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "service -1",
+      "clauses": [
+        "16.2.1",
+        "16.10.1"
+      ],
+      "serviceId": -1,
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "service 1.5",
+      "clauses": [
+        "16.2",
+        "16.2.1",
+        "16.10.1"
+      ],
+      "serviceId": 1.5,
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "service \"1\"",
+      "clauses": [
+        "16.2",
+        "16.2.1",
+        "16.10.1"
+      ],
+      "serviceId": "1",
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "service true",
+      "clauses": [
+        "16.2",
+        "16.2.1",
+        "16.10.1"
+      ],
+      "serviceId": true,
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "service null",
+      "clauses": [
+        "16.2",
+        "16.2.1",
+        "16.10.1"
+      ],
+      "serviceId": null,
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "procedure 0",
+      "clauses": [
+        "16.2.2",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 0,
+      "serviceRevision": 1,
+      "refused": "out of its range"
+    },
+    {
+      "name": "procedure 1",
+      "clauses": [
+        "16.2.2"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": 1
+    },
+    {
+      "name": "procedure 65535",
+      "clauses": [
+        "16.2.2"
+      ],
+      "serviceId": 1,
+      "procedureId": 65535,
+      "serviceRevision": 1
+    },
+    {
+      "name": "procedure 65536",
+      "clauses": [
+        "16.2.2",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 65536,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "procedure -1",
+      "clauses": [
+        "16.2.2",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": -1,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "procedure 1.5",
+      "clauses": [
+        "16.2",
+        "16.2.2",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1.5,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "procedure \"1\"",
+      "clauses": [
+        "16.2",
+        "16.2.2",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": "1",
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "procedure true",
+      "clauses": [
+        "16.2",
+        "16.2.2",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": true,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "procedure null",
+      "clauses": [
+        "16.2",
+        "16.2.2",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": null,
+      "serviceRevision": 1,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "revision 0",
+      "clauses": [
+        "16.2.3",
+        "16.9",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": 0,
+      "refused": "out of its range"
+    },
+    {
+      "name": "revision -1",
+      "clauses": [
+        "16.2.3",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": -1,
+      "refused": "out of its range"
+    },
+    {
+      "name": "revision 1",
+      "clauses": [
+        "16.2.3"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": 1
+    },
+    {
+      "name": "revision 2147483647",
+      "clauses": [
+        "16.2.3"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": 2147483647
+    },
+    {
+      "name": "revision 2147483648",
+      "clauses": [
+        "16.2.3",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": 2147483648,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "revision 1.5",
+      "clauses": [
+        "16.2",
+        "16.2.3",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": 1.5,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "revision \"1\"",
+      "clauses": [
+        "16.2",
+        "16.2.3",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": "1",
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "revision true",
+      "clauses": [
+        "16.2",
+        "16.2.3",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": true,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "revision null",
+      "clauses": [
+        "16.2",
+        "16.2.3",
+        "16.10.1"
+      ],
+      "serviceId": 1,
+      "procedureId": 1,
+      "serviceRevision": null,
+      "refused": "out of its range",
+      "differs": [
+        {
+          "row": "An id or a revision no C# type holds",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "service 0 under the name Echo",
+      "clauses": [
+        "16.3",
+        "16.10",
+        "16.10.1"
+      ],
+      "serviceId": 0,
+      "procedureId": 1,
+      "serviceRevision": 1,
+      "procedureName": "Echo",
+      "refused": "out of its range"
+    }
+  ],
+  "folds": [
+    {
+      "name": "getHTTPStatus and getHttpStatus",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "getHTTPStatus",
+        "getHttpStatus"
+      ],
+      "one": true
+    },
+    {
+      "name": "echo and ECHO",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "echo",
+        "ECHO"
+      ],
+      "one": true
+    },
+    {
+      "name": "echo and echa",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "echo",
+        "echa"
+      ],
+      "one": false
+    },
+    {
+      "name": "key and the Kelvin sign",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "key",
+        "Key"
+      ],
+      "one": false
+    },
+    {
+      "name": "café and cafÉ",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "café",
+        "cafÉ"
+      ],
+      "one": false
+    },
+    {
+      "name": "id and a capital I with a dot above",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "id",
+        "İd"
+      ],
+      "one": false
+    },
+    {
+      "name": "an at sign and a grave accent, 32 apart",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "a@",
+        "a`"
+      ],
+      "one": false
+    },
+    {
+      "name": "the empty strings",
+      "clauses": [
+        "16.6"
+      ],
+      "names": [
+        "",
+        ""
+      ],
+      "one": true
+    }
+  ]
+}

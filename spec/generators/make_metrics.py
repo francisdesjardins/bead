@@ -7,6 +7,7 @@ import os
 
 import make_conversations as talk
 from debugging_version import debugging_version
+from make_identities import folded
 
 # the conformance files sit one folder up from their generators
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
@@ -103,6 +104,8 @@ class Registry:
     def __init__(self, maximum=1000):
         self.maximum = maximum
         self.names = {}
+        # the revision each service is held at (7.3)
+        self.revisions = {}
         # the addresses each group of families names, for its ceiling (7.4)
         self.declared = {'client': set(), 'server': set(), 'notification': set()}
         # (role, address, type) -> {'started', 'handled': {(outcome, code): n}, 'buckets', 'sum', 'count'}
@@ -122,13 +125,19 @@ class Registry:
         for role in ('client', 'server'):
             self.call_series(role, None, TYPES[(role, router)], EVERY_CODE)
 
-    def declare(self, router, way, address, name, notifies=False):
-        """A procedure declared on a router of that side (7.2), or Refused with its reason (7.3)."""
+    def declare(self, router, way, address, name, notifies=False, revision=1):
+        """A procedure declared on a router of that side (7.2), or Refused with its reason (7.3): its name
+        at its address compared exactly, at another address of its service as spec 16.6 makes two names
+        one."""
         if address in self.names and self.names[address] != name:
             raise Refused('another name at its address')
 
-        if any(held == name and other[0] == address[0] and other != address for other, held in self.names.items()):
+        if any(folded(held) == folded(name) and other[0] == address[0] and other != address
+               for other, held in self.names.items()):
             raise Refused('its name at another address')
+
+        if self.revisions.get(address[0], revision) != revision:
+            raise Refused('another revision of its service')
 
         groups = {'resolver': ['server'] + (['notification'] if notifies else []),
                   'requester': ['client'], 'notification': ['notification']}[way]
@@ -137,6 +146,7 @@ class Registry:
             raise Refused('past the ceiling')
 
         self.names[address] = name
+        self.revisions[address[0]] = revision
 
         for group in groups:
             self.declared[group].add(address)
@@ -277,25 +287,30 @@ assert series_count(counted) == 73 + 74
 # the units of spec/debugging.md each entry checks
 REGISTRY, DECLARED, DECLARED_REFUSED, CEILING, MADE_AHEAD, CODES_OF, SERIES_COUNTS = (
     '7.1', '7.2', '7.3', '7.4', '7.5', '7.6', '7.7')
-ANOTHER_NAME, ANOTHER_ADDRESS, PAST_CEILING = '7.3.1', '7.3.2', '7.3.3'
+ANOTHER_NAME, ANOTHER_ADDRESS, ANOTHER_REVISION, PAST_CEILING = '7.3.1', '7.3.2', '7.3.3', '7.3.4'
 FAMILY_TABLE, ROLES, LABELED, OUTCOME, UNDER_WAY = '8.1', '8.2', '8.3', '8.4', '8.5'
 DURATION, OBSERVED, BUCKETS = '11.1', '11.2', '11.3'
 EXPOSED, GROUPED, ORDERED, LABELS, NUMBERS, LINES = '12.1', '12.2', '12.3', '12.4', '12.5', '12.6'
 
 
-def resolver(router, service, procedure, name, notifies=False, refused=None):
+def revised(revision):
+    """A declaration's revision, written where it is not 1, which a declaration that gives none is at."""
+    return {} if revision == 1 else {'serviceRevision': revision}
+
+
+def resolver(router, service, procedure, name, notifies=False, refused=None, revision=1):
     return {'router': router, 'as': 'resolver', 'serviceId': service, 'procedureId': procedure, 'procedureName': name,
-            **({'notifies': True} if notifies else {}), **({'refused': refused} if refused else {})}
+            **revised(revision), **({'notifies': True} if notifies else {}), **({'refused': refused} if refused else {})}
 
 
-def requester(router, service, procedure, name, refused=None):
+def requester(router, service, procedure, name, refused=None, revision=1):
     return {'router': router, 'as': 'requester', 'serviceId': service, 'procedureId': procedure, 'procedureName': name,
-            **({'refused': refused} if refused else {})}
+            **revised(revision), **({'refused': refused} if refused else {})}
 
 
-def notification(router, service, procedure, name, refused=None):
+def notification(router, service, procedure, name, refused=None, revision=1):
     return {'router': router, 'as': 'notification', 'serviceId': service, 'procedureId': procedure,
-            'procedureName': name, **({'refused': refused} if refused else {})}
+            'procedureName': name, **revised(revision), **({'refused': refused} if refused else {})}
 
 
 def address_of(service=None, procedure=None):
@@ -333,7 +348,7 @@ def play(routers, declarations, counts, maximum=None):
         try:
             registry.declare(routers[declaration['router']], declaration['as'],
                              (declaration['serviceId'], declaration['procedureId']), declaration['procedureName'],
-                             declaration.get('notifies', False))
+                             declaration.get('notifies', False), declaration.get('serviceRevision', 1))
         except Refused as refused:
             assert declaration.get('refused') == str(refused), (declaration, refused)
         else:
@@ -428,10 +443,26 @@ EXPOSITIONS = [
     ('a declaration of an address the registry holds under another name is refused, and declares nothing',
      [DECLARED_REFUSED, ANOTHER_NAME], None, ['server'],
      [resolver(SERVER, 1, 1, 'echo'), requester(SERVER, 1, 1, 'other', refused='another name at its address')], []),
+    ('a declaration of an address the registry holds under another spelling of its name is refused: an address keeps its name as written',
+     [DECLARED_REFUSED, ANOTHER_NAME], None, ['server'],
+     [resolver(SERVER, 1, 1, 'getHTTPStatus'), requester(SERVER, 1, 1, 'getHttpStatus', refused='another name at its address')], []),
     ('a declaration of a name its service holds at another address is refused; another service may hold it',
      [DECLARED_REFUSED, ANOTHER_ADDRESS], None, ['server'],
      [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 2, 'echo', refused='its name at another address'),
       resolver(SERVER, 2, 1, 'echo')], []),
+    ('a declaration of a name its service holds at another address in another case is refused: an ASCII letter is one in either case',
+     [DECLARED_REFUSED, ANOTHER_ADDRESS], None, ['server'],
+     [resolver(SERVER, 1, 1, 'getHTTPStatus'), requester(SERVER, 1, 2, 'getHttpStatus', refused='its name at another address'),
+      resolver(SERVER, 1, 3, 'gethttpstatus', refused='its name at another address'), resolver(SERVER, 2, 1, 'getHttpStatus')],
+     []),
+    ('names apart outside ASCII are two names, each at an address of its own',
+     [DECLARED_REFUSED, ANOTHER_ADDRESS], None, ['client'],
+     [notification(SERVER, 1, 1, 'caf' + chr(0xE9)), notification(SERVER, 1, 2, 'caf' + chr(0xC9))], []),
+    ('a declaration of a service at another revision than the registry holds is refused, and declares nothing; at its service\'s revision it is taken',
+     [DECLARED_REFUSED, ANOTHER_REVISION], None, ['client', 'server'],
+     [resolver(1, 1, 1, 'echo'), resolver(1, 1, 2, 'fail', refused='another revision of its service', revision=2),
+      requester(0, 1, 2, 'fail', refused='another revision of its service', revision=2), resolver(1, 1, 2, 'fail'),
+      resolver(1, 2, 1, 'echo', revision=2)], []),
     ('a declaration past its families\' ceiling is refused; one of a procedure they name already, or of other families, is not',
      [DECLARED_REFUSED, PAST_CEILING, CEILING], 2, ['server'],
      [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 2, 'fail'), resolver(SERVER, 1, 3, 'slow', refused='past the ceiling'),
@@ -468,9 +499,11 @@ def interop_registry():
         address = (SERVICE, procedure['procedureId'])
 
         if procedure.get('offeredBy') == 'client':
-            registry.declare('server', 'requester', address, procedure['procedureName'])
+            registry.declare('server', 'requester', address, procedure['procedureName'],
+                             revision=talk.SERVICE['serviceRevision'])
         else:
-            registry.declare('server', 'resolver', address, procedure['procedureName'], 'notifies' in procedure)
+            registry.declare('server', 'resolver', address, procedure['procedureName'], 'notifies' in procedure,
+                             talk.SERVICE['serviceRevision'])
 
     return registry
 
@@ -754,7 +787,7 @@ document = {
         "Bead's metrics: what a registry writes, byte for byte, for what it is given to count, and what each exit of a call or a notification the interop service's server reaches counts, step by step (spec/debugging.md, sections 7 to 12; decision 0013).",
         'mediaType is the media type an exposition is given with (12.1).',
         'An exposition is a registry played on its own. maximumProcedures, where given, is its ceiling (7.4), else its default. routers are the routers it is given, each by its side, client or server, in their order; a declaration or a count names its router by its index among them.',
-        'declarations are made in their order (7.2): as is how the procedure is declared, resolver, its resolver registered, notifies true when its procedure notifies; requester, a requester made; notification, a notification registered, on the side that hears. refused, where given, is the reason the declaration is refused (7.3), which declares nothing.',
+        'declarations are made in their order (7.2): as is how the procedure is declared, resolver, its resolver registered, notifies true when its procedure notifies; requester, a requester made; notification, a notification registered, on the side that hears. refused, where given, is the reason the declaration is refused (7.3), which declares nothing. serviceRevision, where given, is its service\'s revision; left out, it is 1.',
         'counts are counted in their order, each on its router. A call, answered or made, is counted whole, from its start to its end, by its outcome, its code when it has one, and its microseconds; one with no outcome started, and is under way. A notification sent or failed counts at the side that notifies, heard at the side that hears; dropped is a subscription dropped at that end, by its code when it has one. A count with no serviceId and procedureId is _OTHER\'s.',
         'exposition is the text the registry writes then: these lines, each ended by a line feed.',
         'An exit is a conversation of the interop service\'s server (conversations.json), played as it is, its steps, its limits, its pacing and its relay those of conversations.json, its server given a registry of its own, with its default ceiling, through the option its router takes, metricsRegistry, MetricsRegistry. The server declares to it as it is built: each procedure it offers as a resolver, ticks as one that notifies, and clock, the command it calls, as a requester.',

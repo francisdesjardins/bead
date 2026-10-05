@@ -60,7 +60,7 @@
       "minimum": 0
     },
     "declaration": {
-      "description": "A procedure declared on a router (spec/debugging.md 7.2): as its resolver is registered, notifying or not; as a requester is made; as a notification is registered, on the side that hears. refused is the reason it is refused (7.3), when it is.",
+      "description": "A procedure declared on a router (spec/debugging.md 7.2): as its resolver is registered, notifying or not; as a requester is made; as a notification is registered, on the side that hears. serviceRevision is its service's revision, 1 when left out. refused is the reason it is refused (7.3), when it is.",
       "type": "object",
       "required": ["router", "as", "serviceId", "procedureId", "procedureName"],
       "additionalProperties": false,
@@ -70,9 +70,15 @@
         "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
         "procedureId": { "$ref": "common.schema.json#/$defs/u16" },
         "procedureName": { "type": "string" },
+        "serviceRevision": { "$ref": "common.schema.json#/$defs/serviceRevision" },
         "notifies": { "const": true },
         "refused": {
-          "enum": ["another name at its address", "its name at another address", "past the ceiling"]
+          "enum": [
+            "another name at its address",
+            "its name at another address",
+            "another revision of its service",
+            "past the ceiling"
+          ]
         }
       },
       "dependentSchemas": {
