@@ -144,7 +144,7 @@ public sealed class MetricsTests
                 ServiceId = declaration.GetProperty("serviceId").GetUInt16(),
                 ProcedureId = declaration.GetProperty("procedureId").GetUInt16(),
                 ProcedureName = declaration.GetProperty("procedureName").GetString()!,
-                ServiceRevision = 1,
+                ServiceRevision = declaration.TryGetProperty("serviceRevision", out var revision) ? revision.GetInt32() : 1,
             };
             var key = (router, procedure.Address);
 

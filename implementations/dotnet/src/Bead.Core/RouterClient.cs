@@ -377,19 +377,30 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     public ProcedureSeries? DeclareRequester(Procedure procedure)
     {
         ArgumentNullException.ThrowIfNull(procedure);
+        Identity.Check(procedure, nameof(procedure));
 
         return _metrics is { } metrics ? new ProcedureSeries(metrics.DeclareRequester(procedure)) : null;
     }
 
     /// <summary>
     /// Holds a notification for its procedure, declared to its registry as the side that hears
-    /// (spec/debugging.md 7.2): a second for the same procedure is an
-    /// <see cref="InvalidOperationException"/>, and one its registry refuses an
+    /// (spec/debugging.md 7.2): one out of its range or off its form (spec 16.10), first, is an
+    /// <see cref="ArgumentException"/>; a second for the same procedure an
+    /// <see cref="InvalidOperationException"/>; and one its registry refuses an
     /// <see cref="ArgumentException"/>.
     /// </summary>
     public Task RegisterNotification(INotificationLike notification)
     {
         ArgumentNullException.ThrowIfNull(notification);
+
+        try
+        {
+            Identity.Check(notification.Procedure, nameof(notification));
+        }
+        catch (ArgumentException refused)
+        {
+            return Task.FromException(refused);
+        }
 
         return _core.Loop.Run(() =>
         {

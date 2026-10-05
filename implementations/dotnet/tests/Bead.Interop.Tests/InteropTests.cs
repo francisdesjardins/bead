@@ -178,6 +178,20 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Equal(new string('x', 1_000), (await RequesterOf(client, "bytes")(JsonOf("{\"length\":1000}"))().WaitAsync(Patience, Cancelled)).GetString());
     }
 
+    // the two codecs read each other's bytes: each side writes its members sorted, in UTF-8
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task A_value_outside_ASCII_its_members_in_another_order_echoed_equal(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var value = JsonOf("{\"z\":\"Jos\u00E9 \U0001F600\",\"a\":[1e21,0.000001]}");
+        var echoed = await RequesterOf(client, "echo")(value)().WaitAsync(Patience, Cancelled);
+
+        Assert.True(JsonElement.DeepEquals(value, echoed), echoed.GetRawText());
+    }
+
     // HTTP carries no transfer: a payload is what one envelope holds
     [Fact(Skip = Reason, SkipUnless = nameof(IsInterop))]
     public async Task A_payload_that_goes_as_a_transfer_comes_back_as_one_and_so_does_a_result_too_large_for_one_envelope()

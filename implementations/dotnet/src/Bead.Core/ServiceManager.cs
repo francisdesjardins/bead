@@ -12,7 +12,10 @@ public interface IRouterLike
     /// <summary>What the router's timers run on: its transport's clock.</summary>
     TimeProvider Clock { get; }
 
-    /// <summary>Registers a resolver; a second one for its procedure is an <see cref="ArgumentException"/>.</summary>
+    /// <summary>
+    /// Registers a resolver; one out of its range or off its form (spec 16.10), or a second one for
+    /// its procedure, is an <see cref="ArgumentException"/>.
+    /// </summary>
     void RegisterResolver(IRequestResolver resolver);
 
     /// <summary>Answers a request, while its call is open.</summary>
@@ -24,8 +27,9 @@ public interface IRouterLike
     /// <summary>
     /// Declares a requester of <paramref name="procedure"/> to the router's registry, as the
     /// requester is made (spec/debugging.md 7.2), and gives the series each of its calls carries as
-    /// <see cref="RouterRequest.Series"/>; one the registry refuses is an
-    /// <see cref="ArgumentException"/>. A router given no registry gives none.
+    /// <see cref="RouterRequest.Series"/>; one out of its range or off its form (spec 16.10), first,
+    /// or one the registry refuses, is an <see cref="ArgumentException"/>. A router given no
+    /// registry gives none.
     /// </summary>
     ProcedureSeries? DeclareRequester(Procedure procedure);
 
@@ -37,7 +41,9 @@ public interface IRouterLike
     void Report(Exception reason, string? connectionHandle);
 
     /// <summary>
-    /// Notifies the connections subscribed to a procedure: a server's router does; a client's, which
+    /// Notifies the connections subscribed to a procedure: a server's router does; or, given why its
+    /// value did not write in its payload's place (<see cref="NotifyRequest.Unwritten"/>), sends it to
+    /// none, counts it failed for each, and reports why once (spec 17.2, item 6). A client's, which
     /// notifies nobody, throws an <see cref="InvalidOperationException"/>.
     /// </summary>
     Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request);
@@ -52,7 +58,8 @@ public interface IRouterLike
     bool HasNotification(INotificationLike notification);
 
     /// <summary>
-    /// Holds a notification for its procedure: a client's router does, a second for the same
+    /// Holds a notification for its procedure: a client's router does, one out of its range or off
+    /// its form (spec 16.10), first, an <see cref="ArgumentException"/>, and a second for the same
     /// procedure an <see cref="InvalidOperationException"/>; a server's, which subscribes nobody,
     /// cannot.
     /// </summary>
@@ -234,7 +241,15 @@ public delegate Task RequestResolverCallback<TRequest, TResponse>(RequestProps<T
 /// credential's, by its identifier; its connection's, none; each does when none.
 /// </param>
 /// <param name="Key">What it replaces, queued for a paced subscription: the one of the same key.</param>
-public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, SessionIdentifier?, bool>? Filter, object? Key);
+public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, SessionIdentifier?, bool>? Filter, object? Key)
+{
+    /// <summary>
+    /// Why its value did not write, given in its payload's place, which is then empty: a server's
+    /// router sends it to none of the subscriptions it was for, counts it failed for each, and
+    /// reports it once (spec 17.2, item 6; spec/debugging.md 10.1). None for a payload written.
+    /// </summary>
+    public Exception? Unwritten { get; init; }
+}
 
 /// <summary>Who a notification goes to, as its code says: the connections, and what it is about.</summary>
 public sealed record NotifyOptions
@@ -476,7 +491,9 @@ public sealed class ServiceManager
     /// The notification of <paramref name="procedure"/>, which callbacks register on: the first
     /// registration subscribes, by a request that opens a subscription — paced, with a window — and
     /// the last one taken away unsubscribes. The same procedure asked for again gives the same
-    /// notification; asked for differently, it is an <see cref="InvalidOperationException"/>.
+    /// notification; asked for differently, it is an <see cref="InvalidOperationException"/>, after
+    /// its router's check: one out of its range or off its form (spec 16.10) is an
+    /// <see cref="ArgumentException"/> first.
     /// </summary>
     public INotification<TRequest, TNotification> GetNotification<TRequest, TResponse, TNotification>(
         Procedure procedure,
@@ -484,6 +501,9 @@ public sealed class ServiceManager
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(dependencies);
+
+        // * the router's reasons come before the manager's own, as at every layer (spec 16.10)
+        Identity.Check(procedure, nameof(procedure));
 
         lock (_notifications)
         {
@@ -589,6 +609,7 @@ public sealed class ServiceManager
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(dependencies);
+        Identity.Check(procedure, nameof(procedure));
 
         return (callback) =>
         {
@@ -713,6 +734,8 @@ public sealed class ServiceManager
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(made.Dependencies);
+        // as the resolver is asked for, before its callback is given, as every side refuses it (spec 16.10)
+        Identity.Check(procedure, nameof(procedure));
 
         return (callback) =>
         {
@@ -776,14 +799,16 @@ public sealed class ServiceManager
 
     // one call — a request, a command, or the request that subscribes a notification: its options
     // with the defaults applied, its trace, the request, the close on timeout, and its result
-    // decoded; a timeout refused fails as the options are resolved, before the trace and the
-    // deprecation
+    // decoded; a timeout refused fails as the options are resolved, and a value that does not write
+    // as it is written, both before the trace and the deprecation: no call is made (spec 17.2,
+    // item 4; spec/debugging.md 4.3)
     private async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
         TRequest payload,
         (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes, ProcedureSeries? Series) Made) call)
     {
         var (procedure, serializer, given, (type, subscribes, series)) = call;
         var options = OptionsOf(given);
+        var encoded = serializer.Encode(payload);
 
         // * one check a call while nobody listens: no clock read, no step, no copy of its options;
         // a credential stays out of what a side tells, and the trace carries none
@@ -816,7 +841,6 @@ public sealed class ServiceManager
             Deprecated?.Invoke(procedure);
         }
 
-        var encoded = serializer.Encode(payload);
         RouterResult result;
 
         try
@@ -941,18 +965,34 @@ public sealed class ServiceManager
                 manager.Trace(Procedure, step);
             }
 
+            // * a value that does not write goes to none of its subscriptions: handed to the router in
+            // its payload's place, which counts it failed for each and reports it (spec 17.2, item 6)
+            ReadOnlyMemory<byte> encoded = default;
+            Exception? failure = null;
+
+            try
+            {
+                encoded = made.Serializer.EncodeNotification(notification);
+            }
+            catch (Exception reason)
+            {
+                failure = reason;
+            }
+
             // what keeps it from going out is the router's to report, and the trace's to tell, at the
             // start it was sent with: notifying never fails its caller
             try
             {
-                await manager._router.Notify(made.Serializer.EncodeNotification(notification), new NotifyRequest(Procedure.Address, filtered, options?.Key));
+                await manager._router.Notify(encoded, new NotifyRequest(Procedure.Address, filtered, options?.Key) { Unwritten = failure });
             }
             catch (Exception reason)
             {
-                if (step is not null)
-                {
-                    manager.Trace(Procedure, step with { Error = reason });
-                }
+                failure = reason;
+            }
+
+            if (failure is not null && step is not null)
+            {
+                manager.Trace(Procedure, step with { Error = failure });
             }
         }
     }
