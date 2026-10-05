@@ -32,6 +32,8 @@ interface IDeclaration {
   refused?: string;
   router: number;
   serviceId: number;
+  /** Its service's revision; 1 when the file leaves it out. */
+  serviceRevision?: number;
 }
 
 /** A count, as the file writes one: a call, a notification, or a subscription dropped. */
@@ -78,6 +80,7 @@ const {
 const REASONS: readonly string[] = [
   'another name at its address',
   'its name at another address',
+  'another revision of its service',
   'past the ceiling',
 ];
 
@@ -204,7 +207,8 @@ test.describe('the expositions', () => {
         return { answered: new Map(), hearing: new Map(), made: new Map(), notifying: new Map() };
       });
 
-      for (const [index, declaration] of declarations.entries()) {
+      for (const [index, given] of declarations.entries()) {
+        const declaration = { ...given, serviceRevision: given.serviceRevision ?? 1 };
         const { as, notifies, procedureId, refused, router, serviceId } = declaration;
         const at = `${String(serviceId)}/${String(procedureId)}`;
         const metrics = routers[router] as IRouterMetrics;

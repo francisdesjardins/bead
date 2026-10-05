@@ -2,7 +2,7 @@
   "$schema": "schemas/interop-service.schema.json",
   "$comment": [
     "Bead's interop service: the procedures every implementation's interop server offers alike, so a client of one calls a server of another, and the conversations of conversations.json play against any of them.",
-    "Payloads are JSON, in UTF-8, written without a space. A payload that is not JSON is answered with PAYLOAD_UNDECODABLE.",
+    "Payloads are JSON, read and written as spec section 17 states: in UTF-8, in canonical form. A payload that does not read is answered with PAYLOAD_UNDECODABLE.",
     "answers says what a procedure answers; admits, what its admission lets through, when it has one.",
     "offeredBy client: a command, which a client offers and its server calls; any other procedure, the server offers.",
     "notifies: what a notification procedure notifies its subscribers.",

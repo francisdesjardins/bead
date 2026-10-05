@@ -20,19 +20,30 @@ public readonly record struct ProcedureAddress(ushort ServiceId, ushort Procedur
 /// <param name="ConnectionHandle">The connection.</param>
 public readonly record struct CallAddress(uint CallId, string ConnectionHandle);
 
-/// <summary>One procedure of one service, which names what is made for it.</summary>
+/// <summary>
+/// One procedure of one service, which names what is made for it. A router refuses to declare one
+/// out of its range or off its form, as it is declared (spec 16.10).
+/// </summary>
 public sealed record Procedure
 {
-    /// <summary>The service the procedure is in, from 1.</summary>
+    /// <summary>The service the procedure is in, from 1 to 65535; 0 is the protocol's (spec 16.3).</summary>
     public required ushort ServiceId { get; init; }
 
-    /// <summary>The procedure's own number in its service, from 1.</summary>
+    /// <summary>The procedure's own number in its service, from 1 to 65535 (spec 16.2).</summary>
     public required ushort ProcedureId { get; init; }
 
-    /// <summary>Its name, for a trace and an error.</summary>
+    /// <summary>
+    /// Its name, for a trace, the metrics and an error: a lower-case ASCII letter, then up to 62
+    /// ASCII letters or digits (spec 16.4); two names equal but for the case of their ASCII letters
+    /// are one (spec 16.6). It does not travel.
+    /// </summary>
     public required string ProcedureName { get; init; }
 
-    /// <summary>Which revision of its service the procedure is; it does not travel.</summary>
+    /// <summary>
+    /// Which revision of its service the procedure is, from 1 to 2147483647 (spec 16.2); it does not
+    /// travel. 0 is held for a procedure whose revision a side does not know, a relay's leg B, and
+    /// is never declared (spec 16.9).
+    /// </summary>
     public required int ServiceRevision { get; init; }
 
     /// <summary>

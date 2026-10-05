@@ -665,24 +665,22 @@ public static class InteropService
         }
     }
 
-    // JSON, in UTF-8, written without a space, either way
+    // JSON, read and written as spec section 17 states, either way: the runtime's json codec
     private sealed class JsonPayloads : INotificationSerializerServer<JsonElement, JsonElement, JsonElement>, IRequestSerializerClient<JsonElement, JsonElement>
     {
         public JsonElement Decode(ReadOnlyMemory<byte> request)
         {
-            using var document = JsonDocument.Parse(request);
-
-            return document.RootElement.Clone();
+            return Bead.Payloads.ReadJson(request);
         }
 
         public ReadOnlyMemory<byte> Encode(JsonElement response)
         {
-            return JsonSerializer.SerializeToUtf8Bytes(response);
+            return Bead.Payloads.WriteJson(response);
         }
 
         public ReadOnlyMemory<byte> EncodeNotification(JsonElement notification)
         {
-            return JsonSerializer.SerializeToUtf8Bytes(notification);
+            return Bead.Payloads.WriteJson(notification);
         }
     }
 }

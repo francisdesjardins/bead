@@ -774,10 +774,13 @@ given to two routers sums them. It counts what its side declares: each resolver 
 notification registered, and each requester made — `getRequest`'s, `getCommand`'s, a
 notification's — which the service manager declares to its router through `declareRequester` as it
 makes it, each of its calls carrying the series the declaration gave back. The registry keys a
-procedure by its address and holds one name for it: a declaration of an address it holds under
-another name, or of a name its service holds at another address, is a `ProgrammerError` as it is
-made, never on a call, and so is one past `maximumProcedures`, the procedures each group of
-families names at most, 1,000 by default. A call it has no declaration for — a service or a
+procedure by its address and holds one name for it, and one revision for each service: a
+declaration of an address it holds under another name, of a name its service holds at another
+address — two names one when they are equal once their ASCII letters are read in one case (spec
+16.6) — or of a service at another revision than it holds, is a `ProgrammerError` as it is made,
+never on a call, and so is one past `maximumProcedures`, the procedures each group of families names
+at most, 1,000 by default. Its router refuses first, whatever its registry, a declaration off
+section 16: an id or a revision out of its range, or a procedure's name off its form. A call it has no declaration for — a service or a
 procedure unknown, a request whose header does not read, a relayed call — counts under `_OTHER`.
 Each series is made at 0 as its procedure is declared, so an alert reads it from its start and a
 rate sees the first call.
@@ -851,7 +854,8 @@ call there.
 **A request, from a client to a server, and back.**
 
 1. `services.getRequest(procedure, dependencies)(payload)(options)` — `router/shared/service-manager.ts`,
-   `callOf`, the body every requester shares: its declaration to the router, the trace, the
+   `callOf`, the body every requester shares: its declaration to the router, its value written — one
+   that does not write fails the call before anything goes, nothing traced —, the trace, the
    `deprecated` event, `router.request` with the series the declaration gave, the close on timeout,
    the decoding of the answer.
 2. `request` — `router/client/router-client.ts`: refuses a programmer's error first, binds the

@@ -14,6 +14,7 @@ import { presentedCredentialOf, uncarriedOf } from '../shared/call-session';
 import { CredentialScheme, EnvelopeKind, SERVER_FAILURES } from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { DisconnectError, FailureError } from '../shared/errors';
+import { checkDeclaration } from '../shared/identity';
 import type { INotifyingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
@@ -616,6 +617,8 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     },
 
     declareRequester: (procedure) => {
+      checkDeclaration(procedure);
+
       return metrics?.declareRequester(procedure);
     },
     destinations: () => {
@@ -659,6 +662,19 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         .filter(({ connectionHandle, identifier }) => {
           return filter === undefined || filter(connectionHandle, identifier);
         });
+
+      // a value that does not write goes to none, never queued: each subscription it was for counts
+      // it failed, and why is reported once (spec 17.2, item 6)
+      if (payload instanceof Error) {
+        for (const { callId, connectionHandle } of targets) {
+          notifications.seriesOf(callId, connectionHandle)?.failed();
+        }
+
+        report(payload);
+
+        return;
+      }
+
       // offered in order, each before the next: a paced subscription sends it, queues it, or ends
       const sending = targets.map(({ callId, connectionHandle }) => {
         const call = { callId, connectionHandle };

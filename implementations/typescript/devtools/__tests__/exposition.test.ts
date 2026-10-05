@@ -4,9 +4,24 @@ import { answeredOf, metricsOf, quantileOf, samplesOf } from '../exposition';
 
 // helpers
 
-const READ = Object.freeze({ procedureId: 3, procedureName: 'read', serviceId: 1 });
-const COUNTER = Object.freeze({ procedureId: 5, procedureName: 'counter', serviceId: 1 });
-const STATS = Object.freeze({ procedureId: 15, procedureName: 'stats', serviceId: 1 });
+const READ = Object.freeze({
+  procedureId: 3,
+  procedureName: 'read',
+  serviceId: 1,
+  serviceRevision: 1,
+});
+const COUNTER = Object.freeze({
+  procedureId: 5,
+  procedureName: 'counter',
+  serviceId: 1,
+  serviceRevision: 1,
+});
+const STATS = Object.freeze({
+  procedureId: 15,
+  procedureName: 'stats',
+  serviceId: 1,
+  serviceRevision: 1,
+});
 
 /** A server's registry that answered `read` three times, one of them refused, and notified. */
 const answeredExposition = (): string => {
@@ -104,7 +119,12 @@ test.describe('metricsOf', () => {
 
   test('sorts by procedure and by type, made before answered', () => {
     const registry = createMetricsRegistry();
-    const clock = Object.freeze({ procedureId: 11, procedureName: 'clock', serviceId: 1 });
+    const clock = Object.freeze({
+      procedureId: 11,
+      procedureName: 'clock',
+      serviceId: 1,
+      serviceRevision: 1,
+    });
 
     const server = registry.attach('server');
 

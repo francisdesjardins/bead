@@ -331,6 +331,29 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Makes_no_call_of_a_request_whose_value_does_not_write_tracing_deprecating_and_sending_nothing()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var deprecated = new List<Procedure>();
+        var requester = manager.GetRequest(
+            Echo with { Deprecation = new ProcedureDeprecation() },
+            new RequestDependencies<Text, Text> { Serializer = new Unwritable() });
+
+        manager.Deprecated += deprecated.Add;
+
+        // * written before its trace and its deprecation: no call is made (spec 17.2, item 4)
+        Assert.Equal("cannot write", (await Assert.ThrowsAsync<FormatException>(() =>
+        {
+            return requester(new Text("x"))().WaitAsync(Patience, Cancelled);
+        })).Message);
+        Assert.Empty(seen);
+        Assert.Empty(deprecated);
+        Assert.Empty(router.Requests);
+    }
+
+    [Fact]
     public async Task A_deprecated_procedure_raises_deprecated_at_each_call_and_only_a_deprecated_one()
     {
         var manager = new ServiceManager(new RecordingRouter());
@@ -1378,6 +1401,30 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task A_notification_whose_value_does_not_write_goes_to_its_router_in_its_payload_s_place_its_failure_told_at_its_start_and_resolves()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var resolver = manager.GetNotificationResolver(
+            Echo,
+            new NotificationResolverDependencies<Text, Text, Text> { Serializer = new UnwritableNotification() })(UnansweringNotified);
+
+        await resolver.Notify(new Text("news")).WaitAsync(Patience, Cancelled);
+
+        var refusal = Assert.Single(router.Unwritten);
+
+        Assert.Equal("cannot write", refusal.Message);
+        Assert.Empty(router.Notified);
+        Assert.Equal<(Exception?, DebugDirection, DateTimeOffset)>(
+            [(null, DebugDirection.Tx, seen[0].Event.StartedAt), (refusal, DebugDirection.Tx, seen[0].Event.StartedAt)],
+            seen.Select((told) =>
+            {
+                return (told.Error, told.Event.Direction, told.Event.StartedAt);
+            }));
+    }
+
+    [Fact]
     public async Task Its_callback_may_subscribe_the_requester_before_answering_and_is_given_the_call_id_not_after()
     {
         var router = new RecordingRouter();
@@ -2349,6 +2396,40 @@ public sealed class ServiceManagerTests
         }
     }
 
+    // a requester's serializer that cannot write its request
+    private sealed class Unwritable : IRequestSerializerClient<Text, Text>
+    {
+        public ReadOnlyMemory<byte> Encode(Text request)
+        {
+            throw new FormatException("cannot write");
+        }
+
+        public Text Decode(ReadOnlyMemory<byte> response)
+        {
+            return Json.Decode(response);
+        }
+    }
+
+    // a notifying side's serializer that reads a request and writes an answer, and cannot write its
+    // notification
+    private sealed class UnwritableNotification : INotificationSerializerServer<Text, Text, Text>
+    {
+        public Text Decode(ReadOnlyMemory<byte> request)
+        {
+            return Json.Decode(request);
+        }
+
+        public ReadOnlyMemory<byte> Encode(Text response)
+        {
+            return Json.Encode(response);
+        }
+
+        public ReadOnlyMemory<byte> EncodeNotification(Text notification)
+        {
+            throw new FormatException("cannot write");
+        }
+    }
+
     // a router that records every call, answers each request as a test scripts it — its own payload
     // unless told otherwise — and holds notifications; it raises the failures of its side, a
     // server's unless given, and subscribes a request under its own call id
@@ -2366,6 +2447,9 @@ public sealed class ServiceManagerTests
         public List<Responded> Responses { get; } = [];
 
         public List<(Text Payload, NotifyRequest Request)> Notified { get; } = [];
+
+        // why each notification whose value did not write was handed on with no payload
+        public List<Exception> Unwritten { get; } = [];
 
         public List<AnswerTarget> Subscribed { get; } = [];
 
@@ -2468,7 +2552,14 @@ public sealed class ServiceManagerTests
         {
             lock (_gate)
             {
-                Notified.Add((Json.Decode(payload), request));
+                if (request.Unwritten is { } unwritten)
+                {
+                    Unwritten.Add(unwritten);
+                }
+                else
+                {
+                    Notified.Add((Json.Decode(payload), request));
+                }
             }
 
             await NotifyGate;

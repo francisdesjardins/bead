@@ -12,6 +12,7 @@ import { connectionSessionOf, presentedCredentialOf, uncarriedOf } from '../shar
 import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { FailureError } from '../shared/errors';
+import { checkDeclaration } from '../shared/identity';
 import type { IHearingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
@@ -547,6 +548,8 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     },
 
     declareRequester: (procedure) => {
+      checkDeclaration(procedure);
+
       return metrics?.declareRequester(procedure);
     },
     hasNotification: (notification) => {
@@ -558,6 +561,13 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       );
     },
     registerNotification: (notification) => {
+      // * spec 16.10: its identity first, before the router's reasons and its registry's
+      try {
+        checkDeclaration(notification);
+      } catch (reason) {
+        return Promise.reject(toError(reason));
+      }
+
       if (notifications.has(notification)) {
         return Promise.reject(
           new ProgrammerError(`${notification.procedureName} is already a registered notification`)

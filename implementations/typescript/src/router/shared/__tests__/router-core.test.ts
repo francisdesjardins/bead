@@ -1052,7 +1052,7 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    test('refuses a second resolver for one procedure, and an address outside 1 to 65535', () => {
+    test('refuses a second resolver for one procedure, and an address, a revision or a name outside section 16', () => {
       using core = createRouterCore(createPort().port);
 
       core.registerResolver(resolverOf(echo));
@@ -1061,18 +1061,38 @@ test.describe('createRouterCore', () => {
         core.registerResolver(resolverOf({ ...echo, procedureName: 'again' }));
       }).toThrow(ProgrammerError);
 
-      for (const address of [
+      for (const procedure of [
         { procedureId: 0, serviceId: 2 },
         { procedureId: 1, serviceId: 0 },
         { procedureId: 0x10000, serviceId: 2 },
         { procedureId: 1, serviceId: 1.5 },
+        { serviceRevision: 0 },
+        { serviceRevision: 2 ** 31 },
       ]) {
         expect(() => {
-          core.registerResolver(resolverOf({ ...echo, ...address }));
-        }, JSON.stringify(address)).toThrow(ProgrammerError);
+          core.registerResolver(resolverOf({ ...echo, procedureId: 2, ...procedure }));
+        }, JSON.stringify(procedure)).toThrow(/: out of its range$/);
       }
 
-      core.registerResolver(resolverOf({ ...echo, procedureId: 0xffff, serviceId: 0xffff }));
+      for (const procedureName of ['Echo', '_OTHER', 'echo\n', 'get_thing', 'a'.repeat(64)]) {
+        expect(() => {
+          core.registerResolver(resolverOf({ ...echo, procedureId: 2, procedureName }));
+        }, procedureName).toThrow(/: off its form$/);
+      }
+
+      // its identity before any reason of the router's: a payload limit of 0, at service 0
+      expect(() => {
+        core.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 0, serviceId: 0 }));
+      }).toThrow(/: out of its range$/);
+
+      core.registerResolver(
+        resolverOf({
+          ...echo,
+          procedureId: 0xffff,
+          serviceId: 0xffff,
+          serviceRevision: 2 ** 31 - 1,
+        })
+      );
     });
   });
 

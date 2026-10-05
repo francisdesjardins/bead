@@ -91,6 +91,9 @@ public sealed class MetricsRegistry
     // the one name each address is held under
     private readonly Dictionary<ProcedureAddress, string> _names = [];
 
+    // the one revision each service is held at
+    private readonly Dictionary<ushort, int> _revisions = [];
+
     // the addresses each group of families names, for its ceiling (7.4)
     private readonly HashSet<ProcedureAddress> _client = [];
     private readonly HashSet<ProcedureAddress> _server = [];
@@ -201,12 +204,14 @@ public sealed class MetricsRegistry
     }
 
     // a declaration of a procedure to some groups of families, or its refusal (7.3): an address held
-    // under another name, a name its service holds at another address, or one procedure past a
-    // group's ceiling. Under the lock; a declaration refused declares nothing
+    // under another name, compared exactly; a name its service holds at another address, the two
+    // one by spec 16.6; a service held at another revision; or one procedure past a group's
+    // ceiling. Under the lock; a declaration refused declares nothing
     private void Declare(Procedure procedure, HashSet<ProcedureAddress>[] groups)
     {
         var address = procedure.Address;
         var name = procedure.ProcedureName;
+        var revision = procedure.ServiceRevision;
 
         if (_names.TryGetValue(address, out var held) && !string.Equals(held, name, StringComparison.Ordinal))
         {
@@ -217,12 +222,19 @@ public sealed class MetricsRegistry
 
         foreach (var (other, otherName) in _names)
         {
-            if (other.ServiceId == address.ServiceId && other != address && string.Equals(otherName, name, StringComparison.Ordinal))
+            if (other.ServiceId == address.ServiceId && other != address && Identity.AreOneName(otherName, name))
             {
                 throw new ArgumentException(
-                    string.Create(CultureInfo.InvariantCulture, $"a metrics registry holds \"{name}\" at {other.ServiceId}/{other.ProcedureId}: {address.ServiceId}/{address.ProcedureId} is its name at another address"),
+                    string.Create(CultureInfo.InvariantCulture, $"a metrics registry holds \"{otherName}\" at {other.ServiceId}/{other.ProcedureId}: \"{name}\" at {address.ServiceId}/{address.ProcedureId} is its name at another address"),
                     nameof(procedure));
             }
+        }
+
+        if (_revisions.TryGetValue(address.ServiceId, out var heldRevision) && heldRevision != revision)
+        {
+            throw new ArgumentException(
+                string.Create(CultureInfo.InvariantCulture, $"a metrics registry holds service {address.ServiceId} at revision {heldRevision}: \"{name}\" at {address.ServiceId}/{address.ProcedureId}, revision {revision}, is another revision of its service"),
+                nameof(procedure));
         }
 
         foreach (var group in groups)
@@ -236,6 +248,7 @@ public sealed class MetricsRegistry
         }
 
         _names[address] = name;
+        _revisions[address.ServiceId] = revision;
 
         foreach (var group in groups)
         {

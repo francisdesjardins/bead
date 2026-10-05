@@ -202,7 +202,10 @@ export interface IRouterLimits {
   windowBytes: number;
 }
 
-/** Where a procedure is: its service, and its own number in that service. */
+/**
+ * Where a procedure is: its service, and its own number in that service, each a whole number from 1
+ * to 65535 that a side declares (spec 16.2); service 0 is the protocol's (16.3).
+ */
 export interface IProcedureAddress {
   procedureId: ProcedureId;
   serviceId: ServiceId;
@@ -540,9 +543,9 @@ export interface IRouterCore<Handle extends string> {
    */
   receive(message: Data | ITransportMessage, connectionHandle: Handle): void;
   /**
-   * Registers a resolver; a second one for its procedure, an address that is not an integer from 1
-   * to 65535, or a payload's limit that is not a whole number above 0, is a
-   * {@link ProgrammerError}. Its `admit` is asked of each request routed to it, before its payload
+   * Registers a resolver; a procedure off spec section 16 — its ids or its revision out of their
+   * range, its name off its form, refused first — a second one for its procedure, or a payload's
+   * limit that is not a whole number above 0, is a {@link ProgrammerError}. Its `admit` is asked of each request routed to it, before its payload
    * is read — or comes. Counted, it is declared to the router's metrics — one that has a `notify`
    * as the side that notifies too — and gives its series; a declaration refused is a
    * {@link ProgrammerError}, and nothing is registered.
@@ -799,14 +802,20 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
 
   /**
    * Declares a requester of `procedure` to the router's metrics, as it is made, and gives the series
-   * each of its calls carries to `request`; none when the router counts nothing. A declaration
-   * refused is a {@link ProgrammerError}.
+   * each of its calls carries to `request`; none when the router counts nothing. A procedure off
+   * spec section 16, refused first, or a declaration its registry refuses, is a
+   * {@link ProgrammerError}.
    */
   declareRequester(procedure: IProcedure): IProcedureSeries | undefined;
   /** Whether the router holds this notification — this one, not another of its procedure. */
   hasNotification(notification: INotificationLike): boolean;
+  /**
+   * Sends a notification's payload to each subscription its procedure holds that `filter` keeps; or,
+   * given why its value does not write (spec 17.2, item 6), sends it to none, counts it failed for
+   * each of them, and reports why once.
+   */
   notify(
-    payload: Uint8Array,
+    payload: Uint8Array | Error,
     notification: {
       /**
        * Whether a subscription gets it, by its connection and the session that holds it — a
@@ -818,6 +827,10 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
       procedure: IProcedureAddress;
     }
   ): Promise<unknown>;
+  /**
+   * Registers a notification; a procedure off spec section 16, refused first, rejects with a
+   * {@link ProgrammerError}, as one already registered does.
+   */
   registerNotification(notification: INotificationLike): Promise<unknown>;
   registerResolver(resolver: IRequestResolver<Handle>): unknown;
   /**
@@ -1150,7 +1163,9 @@ export interface INotificationResolver<
    * and resolves once the router has tried each of them; a paced subscription past its credit
    * queues it instead, and the transport has it later. A router that cannot notify, as a
    * client's, rejects, and that is only told to `debug`; a server's reports each connection it
-   * could not reach to its own `error`, with the connection.
+   * could not reach to its own `error`, with the connection. A value that does not write goes to
+   * none: a server's router counts it failed for each subscription it was for and reports why once,
+   * and it resolves all the same (spec 17.2, item 6).
    */
   notify: (notification: NotificationPayload, options?: INotifyOptions<Handle>) => Promise<void>;
 }
@@ -1295,10 +1310,17 @@ export interface IProcedure extends IProcedureAddress {
    * router's alone when not given.
    */
   maximumPayloadBytes?: number | undefined;
+  /**
+   * Its name, which labels what a side traces and counts and never travels: a lower-case ASCII
+   * letter, then 62 ASCII letters and digits at most (spec 16.4); two names equal once their ASCII
+   * letters are read in one case are one (16.6).
+   */
   procedureName: string;
   /**
    * Which revision of its service the procedure is, for `debug` and to tell two asks apart; it does
    * not travel. A revision, not a version: the version is the protocol's, as its layout byte says.
+   * A count of its service's releases, from 1 to 2³¹ − 1 (spec 16.2, 16.9); 0, which a relay's leg
+   * B holds, is no revision a side declares.
    */
   serviceRevision: ServiceRevision;
 }
@@ -1351,8 +1373,9 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
   /**
    * A procedure whose answer is a subscription. One request goes out however many callbacks
    * register at once; once registered, a callback joins without a request. The same procedure
-   * gives the same notification, since the router holds one per procedure; asking for it under
-   * another name, revision, deprecation or payload limit is a {@link ProgrammerError}. A registration cancelled or
+   * gives the same notification, since the router holds one per procedure; asking for it off spec
+   * section 16, checked first, or under another name, revision, deprecation or payload limit, is a
+   * {@link ProgrammerError}. A registration cancelled or
    * timed out once its request went out cancels its call, so the other end holds no subscription for
    * it. The serializer of the first ask is the one kept: one procedure's payloads are one
    * procedure's.
@@ -1401,15 +1424,19 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
   ): (
     callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
   ) => IRequestResolver<Handle>;
-  /** A procedure to call; a deprecated one emits `deprecated` at each call. */
+  /**
+   * A procedure to call; a deprecated one emits `deprecated` at each call. A call whose value does
+   * not write fails before anything goes, and is neither traced nor deprecated: no call is made.
+   */
   getRequest<RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
   ): IRequest<RequestPayload, ResponsePayload, Handle>;
   /**
    * A procedure to answer: given its callback, the resolver is made and registered in the router.
-   * A request `beforeRequest` refuses — before its payload is read — or whose payload does not
-   * decode, is answered with a failure of the router's without reaching the callback.
+   * A procedure off spec section 16 is a {@link ProgrammerError}, before any other reason. A request
+   * `beforeRequest` refuses — before its payload is read — or whose payload does not decode, is
+   * answered with a failure of the router's without reaching the callback.
    */
   getRequestResolver<
     RequestPayload,

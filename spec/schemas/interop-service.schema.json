@@ -15,11 +15,10 @@
       "$ref": "common.schema.json#/$defs/specVersion"
     },
     "serviceId": {
-      "$ref": "common.schema.json#/$defs/u16"
+      "$ref": "common.schema.json#/$defs/serviceId"
     },
     "serviceRevision": {
-      "type": "integer",
-      "minimum": 1
+      "$ref": "common.schema.json#/$defs/serviceRevision"
     },
     "relay": {
       "description": "What the interop server's relay admits, what it forwards, and whether it verifies what it forwards.",
@@ -51,11 +50,10 @@
         "additionalProperties": false,
         "properties": {
           "procedureId": {
-            "$ref": "common.schema.json#/$defs/u16"
+            "$ref": "common.schema.json#/$defs/procedureId"
           },
           "procedureName": {
-            "type": "string",
-            "pattern": "^[a-z][A-Za-z0-9]*$"
+            "$ref": "common.schema.json#/$defs/procedureName"
           },
           "request": {
             "type": "string",

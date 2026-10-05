@@ -33,6 +33,7 @@ import {
 } from './errors';
 import { headerBytesOf, readPrefix } from './header';
 import { sideOfCallId } from './identifiers';
+import { checkDeclaration } from './identity';
 import { CallEnding, endingOf, type IResolverSeries, microsecondsOf } from './metrics-registry';
 import {
   assertReservation,
@@ -191,11 +192,6 @@ const MAY_BE_NONE: ReadonlySet<keyof IRouterLimits> = new Set([
 ]);
 
 // helpers
-
-/** Whether `value` is an address a resolver may be registered under: 1 to 65535. */
-const isAddressPart = (value: number): boolean => {
-  return Number.isInteger(value) && value >= 1 && value <= 0xffff;
-};
 
 /** `reason` as the failure it is, or as an envelope malformed in a way the codec did not name. */
 const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMalformed'>) => {
@@ -1877,13 +1873,10 @@ export const createRouterCore = <Handle extends string>(
     },
     receive,
     registerResolver: (resolver) => {
-      const { maximumPayloadBytes, procedureId, procedureName, serviceId } = resolver;
+      const { maximumPayloadBytes, procedureName } = resolver;
 
-      if (!isAddressPart(serviceId) || !isAddressPart(procedureId)) {
-        throw new ProgrammerError(
-          `${procedureName} is at a service and a procedure from 1 to 65535, not ${String(serviceId)}/${String(procedureId)}`
-        );
-      }
+      // * spec 16.10: its identity first, before any reason of the router's and its registry's
+      checkDeclaration(resolver);
 
       if (!isPayloadLimit(maximumPayloadBytes)) {
         throw new ProgrammerError(

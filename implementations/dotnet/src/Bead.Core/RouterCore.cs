@@ -2151,9 +2151,9 @@ public sealed class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// Registers a resolver; a second one for its procedure, an address of 0, a payload's limit below
-    /// 1, or a procedure its router's registry refuses to declare (spec/debugging.md 7.3), is an
-    /// <see cref="ArgumentException"/>.
+    /// Registers a resolver; a procedure out of its range or off its form (spec 16.10), first, then a
+    /// second one for its procedure, a payload's limit below 1, or a procedure its router's registry
+    /// refuses to declare (spec/debugging.md 7.3), is an <see cref="ArgumentException"/>.
     /// </summary>
     public void RegisterResolver(IRequestResolver resolver)
     {
@@ -2161,12 +2161,7 @@ public sealed class RouterCore : IDisposable
 
         var procedure = resolver.Procedure;
 
-        if (procedure.ServiceId == 0 || procedure.ProcedureId == 0)
-        {
-            throw new ArgumentException(
-                $"{procedure.ProcedureName} is at a service and a procedure from 1 to 65535, not {procedure.ServiceId}/{procedure.ProcedureId}",
-                nameof(resolver));
-        }
+        Identity.Check(procedure, nameof(resolver));
 
         if (resolver.MaximumPayloadBytes is < 1)
         {

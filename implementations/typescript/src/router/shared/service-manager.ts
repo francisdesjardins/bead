@@ -10,6 +10,7 @@ import { noop } from '../../transport/shared/noop';
 import { admissionOf, isAdmissionFailure } from './admission';
 import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT, FailureScope } from './constants';
 import { FailureError } from './errors';
+import { checkDeclaration } from './identity';
 import { createNotification } from './notification';
 import { createProcedureMap } from './procedure-map';
 import type {
@@ -323,7 +324,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
   // the requester body that `getRequest`, `getCommand` and a notification's subscribing call share,
   // declared to the router as it is made, each call carrying the series it gave; `subscribes` names
-  // the notification the call subscribes; a timeout refused fails before the trace and deprecation
+  // the notification the call subscribes; a timeout refused, or a value not written, fails first
   const callOf = <RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     {
@@ -347,6 +348,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         const resolvedOptions = resolveRequestOptions(options, defaults);
         const { closeOnTimeout, destinationId } = resolvedOptions;
         const connectionHandle = options?.connectionHandle;
+        const encoded = serializer.encode(requestPayload);
         // * the one check a call makes while nobody listens: no clock is read, no step is built
         const step = isDebugging()
           ? {
@@ -366,7 +368,6 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
           emitter.emit(DEPRECATED_EVENT, procedureOf(procedure));
         }
 
-        const encoded = serializer.encode(requestPayload);
         let result: IRouterResult;
 
         try {
@@ -452,6 +453,9 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     procedure: IProcedure,
     dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>
   ): INotification<RequestPayload, NotificationPayload> => {
+    // * the router's check before the manager's own reason, so spec 16.10's order holds here too
+    checkDeclaration(procedure);
+
     const known = notifications.get(procedure);
 
     // the router holds one notification per procedure, so a second one would never be triggered
@@ -639,11 +643,14 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     return Object.assign(resolver, { admit });
   };
 
-  // a refusal is checked once, as the resolver is asked for, rather than as each request is refused
+  // a refusal is checked once, as the resolver is asked for, rather than as each request is refused,
+  // after the procedure's identity, which spec 16.10 checks before any reason of the manager's
   const assertRefusal = (
     procedure: IProcedure,
     { beforeRequest }: Pick<IRequestResolverDependencies<never, never, Handle>, 'beforeRequest'>
   ): void => {
+    checkDeclaration(procedure);
+
     if (
       beforeRequest?.refusal !== undefined &&
       !isAdmissionFailure(beforeRequest.refusal, router.failures)
@@ -738,17 +745,31 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
               trace(procedure, step);
             }
 
-            // what keeps it from going out is told at the start it was sent with
+            // a value that does not write goes to the router in its payload's place, for it to count
+            // failed at each subscription it was for and report, as spec 17.2, item 6, has it
+            let payload: Uint8Array | Error;
+            let failure: unknown;
+
             try {
-              await router.notify(serializer.encodeNotification(notification), {
+              payload = serializer.encodeNotification(notification);
+            } catch (reason) {
+              payload = toError(reason);
+              failure = payload;
+            }
+
+            try {
+              await router.notify(payload, {
                 filter: filterOf(notifyOptions),
                 key: notifyOptions?.key,
                 procedure: procedureOf(resolver),
               });
             } catch (reason) {
-              if (step !== undefined) {
-                trace(procedure, { ...step, error: reason });
-              }
+              failure = reason;
+            }
+
+            // what keeps it from going out is told at the start it was sent with
+            if (failure !== undefined && step !== undefined) {
+              trace(procedure, { ...step, error: failure });
             }
           },
         }

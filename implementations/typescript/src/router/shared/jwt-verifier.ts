@@ -1,6 +1,7 @@
 // dependencies
 
 import { ProgrammerError } from '../../transport/shared/errors';
+import { namesOnce, STRICT_UTF8 } from './payloads';
 
 // interfaces
 
@@ -89,9 +90,6 @@ const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678
 // the media type of an access token (RFC 9068 §4), whole or without its `application/`
 const ACCESS_TOKEN_TYPES: ReadonlySet<unknown> = new Set(['at+jwt', 'application/at+jwt']);
 
-// ! a byte order mark kept, so that JSON refuses it as .NET's reader does
-const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-
 // helpers
 
 const refused = (reason: JwtRefusal): JwtVerdict => {
@@ -147,53 +145,6 @@ const stringOf = (object: Record<string, unknown>, name: string): string | undef
   return typeof value === 'string' && value.isWellFormed() ? value : undefined;
 };
 
-/**
- * Whether every object of `text`, a JSON text already parsed, names each member once, by a
- * well-formed name: `JSON.parse` keeps the last of two, and .NET's reader both.
- */
-const namesOnce = (text: string): boolean => {
-  // each open object's names, undefined for an array
-  const scopes: (Set<string> | undefined)[] = [];
-  let expectsName = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-
-    if (character === '"') {
-      let end = index + 1;
-
-      while (end < text.length && text[end] !== '"') {
-        end += text[end] === '\\' ? 2 : 1;
-      }
-
-      const names = scopes.at(-1);
-
-      if (expectsName && names !== undefined) {
-        const name = JSON.parse(text.slice(index, end + 1)) as string;
-
-        if (!name.isWellFormed() || names.has(name)) {
-          return false;
-        }
-
-        names.add(name);
-        expectsName = false;
-      }
-
-      index = end;
-    } else if (character === '{' || character === '[') {
-      scopes.push(character === '{' ? new Set() : undefined);
-      expectsName = character === '{';
-    } else if (character === '}' || character === ']') {
-      scopes.pop();
-      expectsName = false;
-    } else if (character === ',') {
-      expectsName = scopes.at(-1) !== undefined;
-    }
-  }
-
-  return true;
-};
-
 /** A header or a claims set: a JSON object in UTF-8 that names each member once; `undefined` for any other part. */
 const objectOf = (part: string): Record<string, unknown> | undefined => {
   const bytes = fromBase64url(part);
@@ -203,7 +154,8 @@ const objectOf = (part: string): Record<string, unknown> | undefined => {
   }
 
   try {
-    const text = UTF8.decode(bytes);
+    // ! a byte order mark kept as a character, so that JSON refuses it as .NET's reader does
+    const text = STRICT_UTF8.decode(bytes);
     const value: unknown = JSON.parse(text);
 
     return isObject(value) && namesOnce(text) ? value : undefined;

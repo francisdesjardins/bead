@@ -41,7 +41,7 @@ public sealed class MetricsRegistryTests
                 server.DeclareRequester(Echo with { ProcedureName = "other" });
             }));
         Assert.Equal(
-            "a metrics registry holds \"echo\" at 1/1: 1/3 is its name at another address (Parameter 'procedure')",
+            "a metrics registry holds \"echo\" at 1/1: \"echo\" at 1/3 is its name at another address (Parameter 'procedure')",
             RefusalOf(() =>
             {
                 server.DeclareResolver(Echo with { ProcedureId = 3 }, false);
@@ -58,6 +58,48 @@ public sealed class MetricsRegistryTests
         Assert.Contains(
             "bead_client_call_started_total{service=\"1\",procedure=\"slow\",type=\"command\"} 0",
             registry.Exposition().Text.Split('\n'));
+    }
+
+    [Fact]
+    public void Refuses_a_name_its_service_holds_at_another_address_in_another_case_and_a_service_at_another_revision_declaring_nothing()
+    {
+        var registry = new MetricsRegistry();
+        var server = registry.Give(RouterSide.Server);
+
+        string RefusalOf(Action declare)
+        {
+            return Assert.Throws<ArgumentException>(declare).Message;
+        }
+
+        server.DeclareResolver(Echo with { ProcedureName = "getHTTPStatus" }, false);
+
+        Assert.Equal(
+            "a metrics registry holds \"getHTTPStatus\" at 1/1: \"getHttpStatus\" at 1/2 is its name at another address (Parameter 'procedure')",
+            RefusalOf(() =>
+            {
+                server.DeclareRequester(Echo with { ProcedureId = 2, ProcedureName = "getHttpStatus" });
+            }));
+        Assert.Equal(
+            "a metrics registry holds service 1 at revision 1: \"fail\" at 1/2, revision 2, is another revision of its service (Parameter 'procedure')",
+            RefusalOf(() =>
+            {
+                server.DeclareResolver(Echo with { ProcedureId = 2, ProcedureName = "fail", ServiceRevision = 2 }, false);
+            }));
+
+        // refused, each declared nothing: the address takes another name at its service's revision,
+        // and another service holds the name at a revision of its own
+        server.DeclareResolver(Echo with { ProcedureId = 2, ProcedureName = "fail" }, false);
+        server.DeclareResolver(Echo with { ServiceId = 2, ProcedureName = "getHttpStatus", ServiceRevision = 2 }, false);
+        Assert.Equal(
+            [
+                "bead_server_call_started_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\"} 0",
+                "bead_server_call_started_total{service=\"1\",procedure=\"fail\",type=\"request\"} 0",
+                "bead_server_call_started_total{service=\"2\",procedure=\"getHttpStatus\",type=\"request\"} 0",
+            ],
+            registry.Exposition().Text.Split('\n').Where((line) =>
+            {
+                return line.StartsWith("bead_server_call_started_total{service=\"", StringComparison.Ordinal) && !line.Contains("_OTHER", StringComparison.Ordinal);
+            }));
     }
 
     [Fact]
@@ -96,7 +138,7 @@ public sealed class MetricsRegistryTests
     }
 
     [Fact]
-    public void A_router_refuses_a_resolver_its_registry_refuses_registering_nothing_and_a_manager_a_requester_as_it_is_made()
+    public void A_router_refuses_a_resolver_its_registry_refuses_registering_nothing_and_a_manager_a_requester_as_it_is_made_its_names_folded_and_its_service_at_one_revision()
     {
         var registry = new MetricsRegistry();
 
@@ -110,16 +152,27 @@ public sealed class MetricsRegistryTests
             return response.Answer("echo");
         });
 
-        // the same procedure under another name, at another address, past nothing
+        // the same procedure under its name, at another address, its case another: one name (spec 16.6)
         var renamed = Assert.Throws<ArgumentException>(() =>
         {
-            services.GetRequestResolver(Echo with { ProcedureId = 2 }, dependencies)((_, response) =>
+            services.GetRequestResolver(Echo with { ProcedureId = 2, ProcedureName = "eCHO" }, dependencies)((_, response) =>
             {
                 return response.Answer("again");
             });
         });
 
         Assert.Contains("is its name at another address", renamed.Message, StringComparison.Ordinal);
+
+        // its service at another revision
+        var revised = Assert.Throws<ArgumentException>(() =>
+        {
+            services.GetRequestResolver(Echo with { ProcedureId = 3, ProcedureName = "slow", ServiceRevision = 4 }, dependencies)((_, response) =>
+            {
+                return response.Answer("slow");
+            });
+        });
+
+        Assert.Contains("is another revision of its service", revised.Message, StringComparison.Ordinal);
 
         // registered nothing: its address is free, for its own name
         services.GetRequestResolver(Echo with { ProcedureId = 2, ProcedureName = "twice" }, dependencies)((_, response) =>

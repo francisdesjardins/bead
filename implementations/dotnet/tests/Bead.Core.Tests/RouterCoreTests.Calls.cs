@@ -418,7 +418,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public void Refuses_a_second_resolver_for_one_procedure_and_an_address_of_0()
+    public void Refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_or_a_name_outside_section_16()
     {
         var server = new Peer(RouterSide.Server);
 
@@ -437,9 +437,17 @@ public sealed partial class RouterCoreTests
         });
         Assert.Throws<ArgumentException>(() =>
         {
+            server.Core.RegisterResolver(new Held(server.Core) { Procedure = Echo with { ProcedureId = 9, ServiceRevision = 0 } });
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            server.Core.RegisterResolver(new Held(server.Core) { Procedure = Echo with { ProcedureId = 9, ProcedureName = "Echo" } });
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
             server.Core.RegisterResolver(new Held(server.Core) { Procedure = Echo with { ProcedureId = 9 }, MaximumPayloadBytes = 0 });
         });
-        server.Core.RegisterResolver(new Held(server.Core) { Procedure = Echo with { ServiceId = ushort.MaxValue, ProcedureId = ushort.MaxValue } });
+        server.Core.RegisterResolver(new Held(server.Core) { Procedure = Echo with { ServiceId = ushort.MaxValue, ProcedureId = ushort.MaxValue, ServiceRevision = int.MaxValue } });
     }
 
     [Fact]

@@ -8,7 +8,7 @@ import {
 
 // helpers
 
-const echo = { procedureId: 1, procedureName: 'echo', serviceId: 2 };
+const echo = { procedureId: 1, procedureName: 'echo', serviceId: 2, serviceRevision: 3 };
 
 // definition
 
@@ -18,7 +18,7 @@ test.describe('createMetricsRegistry', () => {
 
     registry
       .attach('client')
-      .declareNotification({ procedureId: 1, procedureName: 'a\uD800b', serviceId: 2 })
+      .declareNotification({ ...echo, procedureName: 'a\uD800b' })
       .heard();
 
     expect(registry.exposition().text).toContain(
@@ -45,12 +45,26 @@ test.describe('createMetricsRegistry', () => {
       return metrics.declareRequester({ ...echo, procedureId: 2 });
     }).toThrow(
       new ProgrammerError(
-        'the metrics registry holds "echo" at 2/1, and is given it at 2/2: its name at another address'
+        'the metrics registry holds "echo" at 2/1, and is given "echo" at 2/2: its name at another address'
+      )
+    );
+    expect(() => {
+      return metrics.declareRequester({ ...echo, procedureId: 2, procedureName: 'ECHO' });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds "echo" at 2/1, and is given "ECHO" at 2/2: its name at another address'
+      )
+    );
+    expect(() => {
+      return metrics.declareRequester({ ...echo, serviceRevision: 4 });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds service 2 at revision 3, and is given 2/1 at revision 4: another revision of its service'
       )
     );
     expect(() => {
       return metrics.declareResolver(
-        { procedureId: 3, procedureName: 'slow', serviceId: 2 },
+        { ...echo, procedureId: 3, procedureName: 'slow' },
         { notifies: false }
       );
     }).toThrow(
@@ -59,6 +73,34 @@ test.describe('createMetricsRegistry', () => {
       )
     );
     expect(registry.exposition().text).toBe(before);
+  });
+
+  test('folds ASCII letters alone as it compares names, a name outside ASCII its own, and takes a name at its address exactly', () => {
+    const metrics = createMetricsRegistry().attach('server');
+    const resolve = (procedureId: number, procedureName: string) => {
+      return metrics.declareResolver({ ...echo, procedureId, procedureName }, { notifies: false });
+    };
+
+    resolve(1, 'caf\u00e9');
+    resolve(2, 'caf\u00c9');
+    resolve(3, 'key');
+    resolve(4, '\u212aey');
+    metrics.declareRequester({ ...echo, procedureName: 'caf\u00e9' });
+
+    expect(() => {
+      return metrics.declareRequester({ ...echo, procedureName: 'CAF\u00e9' });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds 2/1 as "caf\u00e9", and is given "CAF\u00e9": another name at its address'
+      )
+    );
+    expect(() => {
+      return resolve(5, 'KEY');
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds "key" at 2/3, and is given "KEY" at 2/5: its name at another address'
+      )
+    );
   });
 
   test('refuses a ceiling that is not a whole number above 0, and names 1,000 procedures by default', () => {

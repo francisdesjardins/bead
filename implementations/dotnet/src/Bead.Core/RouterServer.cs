@@ -337,6 +337,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     public ProcedureSeries? DeclareRequester(Procedure procedure)
     {
         ArgumentNullException.ThrowIfNull(procedure);
+        Identity.Check(procedure, nameof(procedure));
 
         return _metrics is { } metrics ? new ProcedureSeries(metrics.DeclareRequester(procedure)) : null;
     }
@@ -344,7 +345,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// <summary>
     /// Notifies each connection subscribed to a procedure, as its filter keeps them, in order: a
     /// paced subscription sends it, queues it, or ends past its bounds. Settles once each was sent or
-    /// queued; one that cannot go out is reported, and keeps none of the others from going.
+    /// queued; one that cannot go out is reported, and keeps none of the others from going. One whose
+    /// value did not write, <see cref="NotifyRequest.Unwritten"/>, goes to none: it is counted failed
+    /// for each subscription it was for, and reported once (spec 17.2, item 6).
     /// </summary>
     public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
     {
@@ -358,6 +361,19 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 return request.Filter is null
                     || request.Filter(candidate.ConnectionHandle, _notifications.SubscriptionAt(candidate.CallId, candidate.ConnectionHandle)?.Session);
             }).ToList();
+
+            if (request.Unwritten is { } unwritten)
+            {
+                foreach (var target in targets)
+                {
+                    _notifications.TargetOf(target.CallId, target.ConnectionHandle).Series?.Failed();
+                }
+
+                Error?.Invoke(unwritten, null);
+
+                return Task.CompletedTask;
+            }
+
             var sending = targets.Select((target) =>
             {
                 var call = new CallAddress(target.CallId, target.ConnectionHandle);

@@ -2112,7 +2112,8 @@ public sealed partial class RouterServerTests : IDisposable
         }
     }
 
-    // text, in UTF-8, either way
+    // text, in UTF-8, either way; a notification through the runtime's text codec, which refuses a
+    // surrogate alone
     private sealed class TextPayloads : INotificationSerializerServer<string, string, string>, INotificationSerializerClient<string, string, string>
     {
         public string Decode(ReadOnlyMemory<byte> request)
@@ -2127,7 +2128,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         public ReadOnlyMemory<byte> EncodeNotification(string notification)
         {
-            return BytesOf(notification);
+            return Payloads.WriteText(notification);
         }
 
         public string DecodeNotification(ReadOnlyMemory<byte> notification)

@@ -4,7 +4,15 @@
 
 import { ProgrammerError } from '../../transport/shared/errors';
 import { FailureScope, ProtocolCode } from './constants';
-import type { IFailure, IProcedure, ProcedureId, RouterSide, ServiceId } from './types';
+import { areOneName } from './identity';
+import type {
+  IFailure,
+  IProcedure,
+  ProcedureId,
+  RouterSide,
+  ServiceId,
+  ServiceRevision,
+} from './types';
 
 // interfaces
 
@@ -151,8 +159,11 @@ interface ICallFamilies {
 
 // types
 
-/** A procedure as it is declared: its address, and its name. */
-export type DeclaredProcedure = Pick<IProcedure, 'procedureId' | 'procedureName' | 'serviceId'>;
+/** A procedure as it is declared: its address, its name, and its service's revision. */
+export type DeclaredProcedure = Pick<
+  IProcedure,
+  'procedureId' | 'procedureName' | 'serviceId' | 'serviceRevision'
+>;
 
 /** A family: its name, its help, and its type. */
 type IFamily = readonly [name: string, help: string, type: string];
@@ -531,9 +542,11 @@ const maximumOf = (given: number | undefined): number => {
  * A registry of Bead's metrics, which a router counts into once given it as its `metricsRegistry`,
  * and the servers and clients that build a router pass on: one given to two routers sums them. It
  * counts what its side declares — each resolver registered, each requester made, each notification
- * registered — each procedure keyed by its address under one name, its series made at 0 as it is
- * declared, and refuses, with a {@link ProgrammerError}, a declaration of an address it holds under
- * another name, of a name its service holds at another address, or past `maximumProcedures`. Its
+ * registered — each procedure keyed by its address under one name, and each service at one
+ * revision, its series made at 0 as it is declared, and refuses, with a {@link ProgrammerError}, a
+ * declaration of an address it holds under another name, of a name its service holds at another
+ * address — two names one when their ASCII letters are read in one case (spec 16.6) — of a service
+ * at another revision than it holds, or past `maximumProcedures`. Its
  * exposition is the Prometheus text format 0.0.4, at `/metrics` or appended to a scrape of that
  * format: Bead opens no port.
  *
@@ -554,6 +567,8 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
   const entries = new Map<number, IEntry>();
   // each service's names, and the procedure each names
   const names = new Map<ServiceId, Map<string, ProcedureId>>();
+  // each service's one revision
+  const revisions = new Map<ServiceId, ServiceRevision>();
   const groups = Object.freeze({
     answered: { keys: new Set<number>(), what: 'server families' },
     made: { keys: new Set<number>(), what: 'client families' },
@@ -563,24 +578,48 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
   const otherMade = new Map<CallType, ICallData>();
   const otherAnswered = new Map<CallType, ICallData>();
 
+  // the name its service holds at another address that is one with `procedureName` by spec 16.6,
+  // and that address; none when the service holds none
+  const elsewhereOf = ({
+    procedureName,
+    serviceId,
+  }: DeclaredProcedure): [name: string, procedureId: ProcedureId] | undefined => {
+    for (const named of names.get(serviceId) ?? []) {
+      if (areOneName(named[0], procedureName)) {
+        return named;
+      }
+    }
+
+    return undefined;
+  };
+
   // the entry `procedure` is declared as, to `declared`, refused as `spec/debugging.md` 7.3 says
   const admit = (procedure: DeclaredProcedure, declared: readonly IGroup[]): IEntry => {
-    const { procedureId, procedureName, serviceId } = procedure;
+    const { procedureId, procedureName, serviceId, serviceRevision } = procedure;
     const key = serviceId * 0x1_00_00 + procedureId;
     const held = entries.get(key);
     const at = `${String(serviceId)}/${String(procedureId)}`;
 
+    // * a name held at its address is taken as it is, exactly, with no fold
     if (held !== undefined && held.name !== procedureName) {
       throw new ProgrammerError(
         `the metrics registry holds ${at} as ${JSON.stringify(held.name)}, and is given ${JSON.stringify(procedureName)}: another name at its address`
       );
     }
 
-    const elsewhere = names.get(serviceId)?.get(procedureName);
+    const elsewhere = held === undefined ? elsewhereOf(procedure) : undefined;
 
-    if (held === undefined && elsewhere !== undefined) {
+    if (elsewhere !== undefined) {
       throw new ProgrammerError(
-        `the metrics registry holds ${JSON.stringify(procedureName)} at ${String(serviceId)}/${String(elsewhere)}, and is given it at ${at}: its name at another address`
+        `the metrics registry holds ${JSON.stringify(elsewhere[0])} at ${String(serviceId)}/${String(elsewhere[1])}, and is given ${JSON.stringify(procedureName)} at ${at}: its name at another address`
+      );
+    }
+
+    const revision = revisions.get(serviceId);
+
+    if (revision !== undefined && revision !== serviceRevision) {
+      throw new ProgrammerError(
+        `the metrics registry holds service ${String(serviceId)} at revision ${String(revision)}, and is given ${at} at revision ${String(serviceRevision)}: another revision of its service`
       );
     }
 
@@ -617,6 +656,7 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
 
     named.set(procedureName, procedureId);
     names.set(serviceId, named);
+    revisions.set(serviceId, serviceRevision);
     entries.set(key, entry);
 
     return entry;

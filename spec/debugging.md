@@ -21,10 +21,10 @@ unchanged. **Status: every section is written.**
 count its calls and its notifications, as this document states.
 
 1.2. A constrained profile MAY leave out, at build time, the trace and the filter, or the metrics,
-or both. It conforms to the wire, sections 1 to 15 of `spec.md`, either way, and to this document
-for what it builds: what it leaves out is a row of the support matrix, not a difference of the
-protocol. A side built without the metrics plays `spec/debug-filters.json` alone, one built without
-the trace `spec/metrics.json` alone.
+or both. It conforms to `spec.md` either way, its wire by sections 1 to 15, what it declares by
+section 16 and its codecs by section 17, and to this document for what it builds: what it leaves out
+is a row of the support matrix, not a difference of the protocol. A side built without the metrics
+plays `spec/debug-filters.json` alone, one built without the trace `spec/metrics.json` alone.
 
 1.3. This document names the wire's kinds and codes as `spec.md` states them, its kinds by section
 3.1 and its codes by section 8. A code that section 8 gains adds a value to `code` (section 8.4),
@@ -101,7 +101,8 @@ side, each in its platform's case:
 | a notification sent, and its failure to go at that start | `tx`      |
 | a notification heard, or its failure to decode           | `rx`      |
 
-4.3. A request refused by its admission, or whose payload does not decode, is not traced.
+4.3. A request refused by its admission, or whose payload does not decode, is not traced; nor is a
+call whose value does not write, which is not made (`spec.md` 17.2).
 
 ## 5. The trace of envelopes
 
@@ -185,8 +186,8 @@ types and its kinds.
 first it gives MUST hold, or the listener is not made; one that later fails to hold, or a function
 that throws, leaves the last that held.
 
-6.10. The filter compares the names it is given: what a procedure's name may hold is the identity
-rules' decision, not this document's.
+6.10. The filter compares the names it is given, whatever they hold; `spec.md` section 16 states
+what a procedure's name holds, and every such name is a pattern the filter reads.
 
 ## 7. The registry
 
@@ -205,15 +206,17 @@ and the clients that build a router pass on. One registry given to two routers s
 3. as a notification is registered, on the side that hears, to the notification families.
 
 7.3. A registry keys a procedure by its address, its service id and its procedure id, whichever
-families declare it, and holds one name for it: a declaration of an address it holds under the same
-name takes the same series. A side MUST refuse a declaration as it is made, never on a call, as it
-refuses a resolver registered twice, for one of these reasons:
+families declare it, and holds one name for it and one revision for its service: a declaration of
+an address it holds under the same name takes the same series. A router refuses first what
+`spec.md` section 16.10 refuses. A side MUST refuse a declaration as it is made, never on a call, as
+it refuses a resolver registered twice, for one of these reasons:
 
-| Reason                        | A declaration that names                                |
-| ----------------------------- | ------------------------------------------------------- |
-| `another name at its address` | an address the registry holds under another name        |
-| `its name at another address` | a name its service holds at another address             |
-| `past the ceiling`            | one procedure more than its families name at most (7.4) |
+| Reason                            | A declaration that names                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| `another name at its address`     | an address the registry holds under another name, one by `spec.md` 16.6 or not |
+| `its name at another address`     | a name its service holds at another address, the two one by `spec.md` 16.6     |
+| `another revision of its service` | a service the registry holds at another revision                               |
+| `past the ceiling`                | one procedure more than its families name at most (7.4)                        |
 
 A declaration refused declares nothing.
 
@@ -284,7 +287,8 @@ read, a service or a procedure unknown, a request that names a destination, a ca
 no series. A relay counts the calls it relays under its server families' `_OTHER`, and their leg B,
 which carries none, as `_OTHER` in client families: `command` toward a connection of the relay's
 own, through its own router's `request`, in its registry; `request` through a router it calls, in
-that router's. A procedure named `_OTHER` keeps series of its own, its `service` a decimal. The
+that router's. No procedure is named `_OTHER`, which starts with no lower-case letter
+(`spec.md` 16.4); a registry given one keeps its series apart, its `service` a decimal. The
 notification families have no `_OTHER`: a notification sent, heard or ended belongs to a procedure
 its side declared. No label is ever a connection, a session, a call id, a destination or a
 credential.
@@ -388,7 +392,8 @@ _Metrics: `spec/metrics.json`._
 
 10.1. `bead_notifications_sent_total` counts at the side that notifies: `sent` for a notification
 handed to its transport for one subscription, and `failed` for one that cannot be, too large for one
-envelope (`spec.md` 12.1), its router disposed, a transport that throws as it is handed it, which is
+envelope (`spec.md` 12.1), a value that does not write (`spec.md` 17.2), counted for each
+subscription it was for, its router disposed, a transport that throws as it is handed it, which is
 reported.
 
 10.2. `bead_notifications_heard_total` counts at the side that hears a notification its router pairs

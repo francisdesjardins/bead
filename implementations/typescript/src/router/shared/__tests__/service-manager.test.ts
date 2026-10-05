@@ -114,7 +114,8 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
     notify: [] as {
       filter: ((connectionHandle: string, identifier?: SessionIdentifier) => boolean) | undefined;
       key: NotificationKey | undefined;
-      payload: IText;
+      /** What it notifies, decoded; or why its value does not write, as the manager hands it. */
+      payload: Error | IText;
       procedure: IProcedureAddress;
     }[],
     registerNotification: [] as string[],
@@ -168,7 +169,12 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
       return notifications.get(keyOf(notification)) === notification;
     },
     notify: async (payload, { filter, key, procedure }) => {
-      calls.notify.push({ filter, key, payload: decode(payload) as IText, procedure });
+      calls.notify.push({
+        filter,
+        key,
+        payload: payload instanceof Error ? payload : (decode(payload) as IText),
+        procedure,
+      });
       await control.notifyGate;
 
       if (control.notifyError !== undefined) {
@@ -416,6 +422,35 @@ test.describe('createServiceManager', () => {
         lookalike
       );
       expect(seen[3]?.info.rx).toBeUndefined();
+    });
+
+    test('a call whose value does not write fails before anything goes: nothing requested, traced or deprecated', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const deprecated: IProcedure[] = [];
+      const refusal = new TypeError('this value does not write');
+
+      manager.on('deprecated', (procedure) => {
+        deprecated.push(procedure);
+      });
+
+      const request = manager.getRequest(
+        { ...echo, deprecation: { message: 'use another' } },
+        {
+          serializer: {
+            ...serializer,
+            encode: () => {
+              throw refusal;
+            },
+          },
+        }
+      );
+
+      await expect(request({ text: 'x' })()).rejects.toBe(refusal);
+      expect(calls.request).toEqual([]);
+      expect(seen).toEqual([]);
+      expect(deprecated).toEqual([]);
     });
 
     test('declares its requester to its router as it is made, and hands each of its calls the series it gave', async () => {
@@ -820,6 +855,22 @@ test.describe('createServiceManager', () => {
         calls.request[0]?.request.procedure,
       ]).toEqual([64, { ...echo, maximumPayloadBytes: 64 }]);
       expect(calls.registerResolver[0]).not.toHaveProperty('extra');
+    });
+
+    test('refuses a resolver off section 16 as it is asked for, before its callback is given', () => {
+      const manager = createServiceManager(createFakeRouter().router);
+      const named = { ...echo, procedureName: 'Echo' };
+      const ranged = { ...echo, serviceRevision: 0 };
+
+      expect(() => {
+        manager.getRequestResolver(named, { serializer: serverSerializer });
+      }).toThrow(/: off its form$/);
+      expect(() => {
+        manager.getCommandResolver(named, { serializer: serverSerializer });
+      }).toThrow(/: off its form$/);
+      expect(() => {
+        manager.getNotificationResolver(ranged, { serializer: serverSerializer });
+      }).toThrow(/: out of its range$/);
     });
 
     test('makes and registers the resolver only once it is given its callback', () => {
@@ -1582,6 +1633,38 @@ test.describe('createServiceManager', () => {
       ).toEqual([7, 'seven']);
     });
 
+    test("a notification whose value does not write goes to its router in its payload's place, its failure told at its start, and resolves", async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const refusal = new TypeError('this value does not write');
+      const resolver = manager.getNotificationResolver(echo, {
+        serializer: {
+          ...serverSerializer,
+          encodeNotification: () => {
+            throw refusal;
+          },
+        },
+      })(() => {
+        return Promise.resolve();
+      });
+
+      await expect(resolver.notify({ text: 'news' })).resolves.toBeUndefined();
+      expect(
+        calls.notify.map(({ payload }) => {
+          return payload;
+        })
+      ).toStrictEqual([refusal]);
+      expect(
+        seen.map(({ error, info: { direction, startedAt } }) => {
+          return [error, direction, startedAt];
+        })
+      ).toEqual([
+        [null, 'tx', seen[0]?.info.startedAt],
+        [refusal, 'tx', seen[0]?.info.startedAt],
+      ]);
+    });
+
     test('a failed notify resolves all the same, and only debug hears of it', async () => {
       const { control, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -2136,6 +2219,20 @@ test.describe('createServiceManager', () => {
       expect(manager.getNotification(echo, { serializer: { ...serializer } })).toBe(
         manager.getNotification(echo, { serializer })
       );
+    });
+
+    test("refuses a procedure off section 16 before its own reason, a notification's asked for otherwise", () => {
+      const { router } = createFakeRouter('client');
+      const manager = createServiceManager(router);
+
+      manager.getNotification(echo, { serializer });
+
+      expect(() => {
+        manager.getNotification({ ...echo, procedureName: 'Echo' }, { serializer });
+      }).toThrow(/: off its form$/);
+      expect(() => {
+        manager.getNotification({ ...echo, serviceRevision: 0 }, { serializer });
+      }).toThrow(/: out of its range$/);
     });
 
     test('a trigger the router never registered is a programmer error', () => {

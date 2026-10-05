@@ -25,6 +25,10 @@ PROTOCOL, APPLICATION = 0, 1
 
 SLOW = '{"milliseconds":3600000}'
 
+# a backslash, which opens a JSON escape, and a JSON string outside ASCII with what a lenient writer escapes
+BACKSLASH = chr(92)
+OUTSIDE_ASCII = '"Jos' + chr(0xE9) + ' a+b <x>"'
+
 
 def hexadecimal(data):
     return ' '.join(f'{byte:02X}' for byte in data)
@@ -698,6 +702,25 @@ conversations = [
         json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED), report('exception')]),
     ('a payload that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.5'], None, [
         request(1, 'echo', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
+    # 17: a json payload read as section 17.5 reads it, and written in its canonical form, whichever side
+    # answers; each of these reaches another outcome on a side that reads and writes as its platform does
+    ('a payload outside ASCII is answered in its own characters, none escaped', ['17.7.3'], None, [
+        json_request(1, 'echo', OUTSIDE_ASCII), result(1, OUTSIDE_ASCII)]),
+    ('a payload is answered in its canonical form, whatever form it came in', ['17.8'], None, [
+        json_request(1, 'echo', '{ "b" : "Jos' + BACKSLASH + 'u00e9", "a" : 1.0 }'),
+        result(1, '{"a":1,"b":"Jos' + chr(0xE9) + '"}')]),
+    ('a payload that starts with a byte order mark is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.2'], None, [
+        request(1, 'echo', 'EF BB BF 31'), failure(1, PAYLOAD_UNDECODABLE)]),
+    ('a payload that names a member twice is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.4'], None, [
+        json_request(1, 'echo', '{"a":1,"a":2}'), failure(1, PAYLOAD_UNDECODABLE)]),
+    ('a payload whose string holds a byte that is not UTF-8 is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.1'], None, [
+        request(1, 'echo', '22 FF 22'), failure(1, PAYLOAD_UNDECODABLE)]),
+    ('a payload whose string holds a surrogate alone is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.5'], None, [
+        json_request(1, 'echo', '"' + BACKSLASH + 'uD800"'), failure(1, PAYLOAD_UNDECODABLE)]),
+    ('a payload nested past 64 is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.7'], None, [
+        json_request(1, 'echo', '[' * 65 + ']' * 65), failure(1, PAYLOAD_UNDECODABLE)]),
+    ('a payload whose number is past a double is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.6'], None, [
+        json_request(1, 'echo', '1E400'), failure(1, PAYLOAD_UNDECODABLE)]),
     ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.5'], None, [
         request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),

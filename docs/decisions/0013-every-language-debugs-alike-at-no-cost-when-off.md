@@ -229,8 +229,8 @@ character  = first / "-"
 - A filter given as a function is asked at each event. The first it gives must hold, or the listener
   is not made; one that later fails, or a function that throws, leaves the last that held.
 
-The identity rules of a procedure's name stay with their own decision: the filter compares the names
-it is given.
+The filter compares the names it is given, whatever they hold: section 16 of `spec/spec.md` states
+what a procedure's name holds ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)), and every such name is a pattern the filter reads.
 
 **A registry counts what its side declares, for a router given one.** A router given none counts
 nothing. Its families take OpenTelemetry's semantic conventions for RPC
@@ -264,9 +264,9 @@ role, as OpenTelemetry's messaging conventions do:
   names a destination, a call made that carries no `series`. A relay counts the calls it relays
   under its server families' `_OTHER`, and their leg B, which carries none, as `_OTHER` in client
   families: `type="command"` toward a connection of the relay's own, through its own `request`, in
-  its registry; `type="request"` through a router it calls, in that router's. A procedure named
-  `_OTHER` keeps series of its own, its `service` a decimal; whether a name may start with an
-  underscore is the identity rules' decision. The notification families have no `_OTHER`: a
+  its registry; `type="request"` through a router it calls, in that router's. No procedure is
+  named `_OTHER`, which starts with no lower-case letter ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)); a registry given one keeps its
+  series apart, its `service` a decimal. The notification families have no `_OTHER`: a
   notification sent, heard or ended belongs to a procedure its side declared. No label is ever a
   connection, a session, a call id, a destination or a credential.
 - **`outcome`** says how a call ended — `result`, `failure`, `timeout` (a call made alone),
@@ -287,10 +287,12 @@ as its resolver is registered; as a requester is made, through the router's `dec
 hears; and as a notification's resolver is registered, on the side that notifies. Its service id and
 procedure id key it, whichever families declare it, and the registry holds one name for it: a
 declaration of an address it holds under the same name takes the same series; one that names an
-address it holds under another name, or a name its service holds at another address, is refused, as
-a resolver registered twice is — a `ProgrammerError` on the TypeScript side, an `ArgumentException`
-on the C# side, a code on a C side — as it is made, never on a call. The identity rules' decision may
-relax it.
+address it holds under another name, or a name its service holds at another address — two names one
+when they are equal once their ASCII letters are read in one case, as section 16 compares them — is
+refused, as a resolver registered twice is — a `ProgrammerError` on the TypeScript side, an
+`ArgumentException` on the C# side, a code on a C side — as it is made, never on a call. It holds
+one revision a service, and refuses a declaration at another the same way. Its router refuses first
+a declaration off section 16 ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)).
 
 **Each family's procedures have a ceiling, and a declaration past it is refused.** A side's client
 families name `maximumProcedures` procedures at most, its server families as many, its notification
@@ -620,8 +622,9 @@ pass it: a declaration past the ceiling is refused as the side is built. Each fa
 of the codes its exits can end with, and no series waits at 0 for a code its exits never reach.
 
 **A declaration can be refused.** A resolver registered, or a requester made, under a name the
-registry holds at another address, or at an address it holds under another name, is refused as the
-side is built; the identity rules' decision may relax it.
+registry holds at another address, at an address it holds under another name, or at another revision
+of a service it holds, is refused as the side is built, and so is one off section 16, by its router
+([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)).
 
 **Latency is not split by outcome.** A histogram carries no `outcome`, which would multiply its
 series by its five or six outcomes: a burst of quick refusals lowers its quantiles, and the handled

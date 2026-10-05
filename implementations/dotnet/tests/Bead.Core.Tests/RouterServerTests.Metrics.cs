@@ -62,6 +62,56 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
+    public async Task Counts_a_notification_whose_value_does_not_write_failed_for_each_subscription_it_was_for_reports_it_once_and_fails_no_caller()
+    {
+        var registry = new MetricsRegistry();
+        var told = new List<(Exception? Error, DebugDirection Direction)>();
+
+        Start(new RouterServerOptions { MetricsRegistry = registry });
+        Services.Debug += (error, step) =>
+        {
+            told.Add((error, step.Direction));
+        };
+        _transport.Open(First);
+        _transport.Open(Second);
+
+        var news = NotifierOf(async (_, response) =>
+        {
+            await response.RegisterNotification();
+            await response.Answer("ok");
+        });
+
+        Deliver(First, SubscribingOf(1));
+        Deliver(Second, SubscribingOf(1));
+        await Settle();
+        told.Clear();
+        _transport.Sent.Clear();
+
+        // a surrogate alone, which the text codec refuses: sent to none, settled all the same
+        await news.Notify("a\ud800b").WaitAsync(Patience, Cancelled);
+        await Settle();
+
+        Assert.Empty(_transport.Sent);
+        Assert.Equal(["a text value holds a surrogate alone no connection"], Reported());
+        Assert.Equal(
+            [
+                "bead_notifications_sent_total{outcome=\"failed\"} 2",
+            ],
+            CountedOf((registry, "news")).Where((line) =>
+            {
+                return line.StartsWith("bead_notifications_", StringComparison.Ordinal);
+            }));
+
+        // told as a notification sent, then as its failure to go at that start (spec/debugging.md 4.2)
+        Assert.Equal<(bool, DebugDirection)>(
+            [(false, DebugDirection.Tx), (true, DebugDirection.Tx)],
+            told.Select((step) =>
+            {
+                return (step.Error is FormatException, step.Direction);
+            }));
+    }
+
+    [Fact]
     public async Task Counts_a_call_whose_admission_fails_PROCEDURE_FAILED_and_one_whose_subscription_its_connection_cannot_carry_back_SUBSCRIPTION_UNSUPPORTED()
     {
         var registry = new MetricsRegistry();
