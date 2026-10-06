@@ -144,7 +144,7 @@ export const failure = (failure: IFailureLike & { origin?: string }, o?: IGoodOp
   return failure.code + (o?.a ?? 0);
 };
 
-// listed, its options first and its defaults after
+// refused: options first, and a second options object after them
 export const resolveRequestOptions = (options?: IGoodOptions, defaults: IOtherOptions = {}) => {
   return { ...defaults, ...options };
 };

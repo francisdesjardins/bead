@@ -739,14 +739,14 @@ const connectOn = (fake: FakeHTTPServer, isListening: boolean): string => {
  * as `measured` acts on the connection `drawn` makes; none built, refused.
  */
 const heldByHTTPServer = async (
-  options: Partial<IHTTPTransportServerOptions>,
   {
     drawn,
     measured,
   }: {
     drawn: (fake: FakeHTTPServer) => string;
     measured: (fake: FakeHTTPServer, connectionToken: string) => void;
-  }
+  },
+  options?: Partial<IHTTPTransportServerOptions>
 ): Promise<IReport> => {
   const clock = createTestClock();
   const fake = createFakeHTTPServer();
@@ -782,7 +782,6 @@ const heldByHTTPServer = async (
 // an exchange handed on, waiting its answer, its connection's rest without end
 const exchangeOfOptions: Way = (given) => {
   return heldByHTTPServer(
-    { inactivityTimeout: Infinity, ...optionOf('exchangeTimeout', given) },
     {
       drawn: (fake) => {
         return connectOn(fake, false);
@@ -794,14 +793,14 @@ const exchangeOfOptions: Way = (given) => {
 
         fake.feed(request, [REQUEST]);
       },
-    }
+    },
+    { inactivityTimeout: Infinity, ...optionOf('exchangeTimeout', given) }
   );
 };
 
 // a connection drawn, with no exchange under way
 const restOfOptions: Way = (given) => {
   return heldByHTTPServer(
-    { exchangeTimeout: Infinity, ...optionOf('inactivityTimeout', given) },
     {
       drawn: () => {
         return '';
@@ -809,14 +808,14 @@ const restOfOptions: Way = (given) => {
       measured: (fake) => {
         connectOn(fake, false);
       },
-    }
+    },
+    { exchangeTimeout: Infinity, ...optionOf('inactivityTimeout', given) }
   );
 };
 
 // a listen asking a longer wait, held to the longest
 const maximumWaitOfOptions: Way = (given) => {
   return heldByHTTPServer(
-    { exchangeTimeout: Infinity, inactivityTimeout: Infinity, ...optionOf('maximumWait', given) },
     {
       drawn: (fake) => {
         return connectOn(fake, true);
@@ -828,7 +827,8 @@ const maximumWaitOfOptions: Way = (given) => {
           url: '/bead?wait=999999999999999',
         });
       },
-    }
+    },
+    { exchangeTimeout: Infinity, inactivityTimeout: Infinity, ...optionOf('maximumWait', given) }
   );
 };
 

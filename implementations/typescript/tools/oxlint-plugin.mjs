@@ -38,18 +38,6 @@ const LISTED_RESTS = Object.freeze({
     "an event a fake socket hears, and its values, as `ws`'s socket emits them",
 });
 
-/** The signatures past the rule, by owner, each work to do. */
-const LISTED_SIGNATURES = Object.freeze({
-  resolveRequestOptions:
-    'public, its options before its defaults, a second options object: reordering them is a break',
-  // the tests'
-  connectHTTP: "a server's options, then the case's own: one options object to make of them",
-  greeterOf: 'a hook given a default, of a required member: the hook to require, or its members',
-  heldByHTTPServer: "a server's options before the case's essentials: to reorder",
-  'startScripted.connectScripted':
-    "a socket's address, then the case's options: one options object to make of them",
-});
-
 /** The events of three values, as `map.event`: each goes with the decision on such events (0007). */
 const LISTED_EVENTS = Object.freeze({
   'SessionManagerEventMap.connectionInactivityTimeoutChanged': 'a session, its new value, its old',
@@ -356,8 +344,7 @@ function slotFaults(slots) {
 
 function judgeSignature(node, scope) {
   const { faults, slots } = signatureOf(node, scope);
-  const isListed = Object.hasOwn(LISTED_SIGNATURES, ownerOf(node));
-  for (const fault of [...faults, ...(isListed ? [] : slotFaults(slots))]) {
+  for (const fault of [...faults, ...slotFaults(slots)]) {
     scope.context.report(fault);
   }
 }

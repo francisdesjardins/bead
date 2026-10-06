@@ -4,7 +4,7 @@ import { FailureError } from '../../router/shared/errors';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import type { IProcedure, IRequestResolver } from '../../router/shared/types';
 import { ProgrammerError } from '../../transport/shared/errors';
-import { requestOf } from '../descriptors';
+import { type IAdmissionHook, requestOf } from '../descriptors';
 import { createServiceClient } from '../service-client';
 import { createServiceServer } from '../service-server';
 import { CONNECTION, connectWorker, GreeterFailures, GreeterProcedures } from './fixtures';
@@ -18,7 +18,7 @@ const loud = {
 };
 
 /** The greeter's server side, its hook admitting every call unless one is given. */
-const greeterOf = (hook: { admits: () => boolean; detail?: string } = loud) => {
+const greeterOf = (hook: IAdmissionHook = loud) => {
   return createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
     admissions: { loud: hook },
   });

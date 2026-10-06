@@ -282,6 +282,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to a file or a heading that exists.
 - The parameter rule takes an options object after two parameters, as Deno's style guide counts them,
   held by `max-params` at 3 and `bead/options-last` on the TypeScript side, and by review.
+  `resolveRequestOptions` takes its defaults first, `RequestDefaults`, and the call's options last.
 - The SESSION block gives way to the CREDENTIAL block (decision 0010): bit `0x08`, the header's last
   block, a credential scheme on 2 bytes — `NONE`, `OPAQUE`, `JWT`, `ELSEWHERE`, or one to come — its
   length on 2, its bytes padded to a word, so a header holds 1,020 bytes; `0x01` is kept for a block
