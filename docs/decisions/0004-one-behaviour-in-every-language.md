@@ -228,11 +228,12 @@ that differs, or on any file a generator writes that is not committed.
 
 **What no entry plays stays with each side's twin tests**, and `docs/support.md` says so: a
 destination that is a router the relay calls through, with its two legs' limits and the session
-every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 14.7), until the interop
-plays a relay across languages; HTTP/2 and TLS, which both servers serve, an
-open row of the matrix naming both; keep-alive, pipelining and a connection used again, which one
-socket per exchange leaves out; and the transport's contract with its router — its events, its
-handles, its gauges.
+every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 14.7), until the
+interop plays a relay across languages, which is open work
+([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); HTTP/2 and TLS, which both
+servers serve, an open row of the matrix naming both; keep-alive, pipelining and a connection used
+again, which one socket per exchange leaves out; and the transport's contract with its router — its
+events, its handles, its gauges.
 
 **Nothing is retired in this change.** A twin test leaves both sides one assertion at a time, in the
 change that pairs each of its assertions with the case that plays it, and the cell of the matrix it
