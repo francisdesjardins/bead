@@ -35,6 +35,7 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 | A side holds a duration as section 1.4 states, at every place that takes one                                        | `typescript`, `dotnet`                           |
 | Each side's client speaks to the other's server                                                                     | `dotnet`, the interop both ways                  |
 | The TypeScript side's types, lint, format and comments                                                              | `typescript`                                     |
+| A TypeScript function takes at most two parameters, then one options object; an event, at most two values           | `typescript`                                     |
 | The C# side's layout, code style, analyzers and doc comments                                                        | `dotnet`                                         |
 | A lockfile changes only on purpose                                                                                  | `spec`, `typescript`, `dotnet`                   |
 | The root's files keep the house format                                                                              | `typescript`                                     |
@@ -53,9 +54,11 @@ what the code weighs today.
 
 **A rule no tool can check is written as a preference**, with who holds it. Review holds these: one
 word, one meaning ([0003](0003-one-word-one-meaning.md)), with the Tenth Man for every renaming
-([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)); the parameter rule, its count on
-the C# side and on both sides what a third parameter may be, the one optional positional, and an
-event's values, with the C# side's classes without a base
+([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)); the parameter rule on the C#
+side, its count, what a third parameter may be and an event's values, and on the TypeScript side
+what `bead/options-last` lets pass, a callback aliased under a name ending in `Options` and the
+exceptions it lists, the events of three values among them, with the one optional positional on
+both sides and the C# side's classes without a base
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); git-flow's branch names and
 the CHANGELOG's entries; the spec's version and its companion's, each moved by the release that
 changes its document, and their `spec-v` and `debugging-v` tags
@@ -85,7 +88,6 @@ vector cannot.
   ([0004](0004-one-behaviour-in-every-language.md));
 - a check of the C# side's parameters, which no analyzer of .NET's recommended set counts
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
-- the TypeScript side's check of what a third parameter may be, `bead/options-last`;
 - `beadc check`, which holds a manifest to section 16 and to the builder's rules, and
   `beadc breaking`, which holds a manifest to the last release's
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)).

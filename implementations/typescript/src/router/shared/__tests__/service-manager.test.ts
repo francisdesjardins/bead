@@ -272,25 +272,26 @@ test.describe('resolveRequestOptions', () => {
     const options = { connectionHandle, destinationId: undefined };
 
     expect(REQUEST_DEFAULTS).toEqual({ timeout: 5_000 });
-    expect(resolveRequestOptions()).toEqual({ ...REQUEST_DEFAULTS });
+    expect(resolveRequestOptions(REQUEST_DEFAULTS)).toEqual({ ...REQUEST_DEFAULTS });
     // a destination is the call's alone, passed on as it is, left undefined included
-    expect(resolveRequestOptions(options)).toEqual({
+    expect(resolveRequestOptions(REQUEST_DEFAULTS, options)).toEqual({
       ...REQUEST_DEFAULTS,
       connectionHandle,
       destinationId: undefined,
     });
-    expect(resolveRequestOptions({ destinationId: 4, timeout: 10 })).toEqual({
+    expect(resolveRequestOptions(REQUEST_DEFAULTS, { destinationId: 4, timeout: 10 })).toEqual({
       destinationId: 4,
       timeout: 10,
     });
     // a close on timeout only where the call or the defaults have one
-    expect(resolveRequestOptions(undefined, { ...REQUEST_DEFAULTS, closeOnTimeout: true })).toEqual(
-      { ...REQUEST_DEFAULTS, closeOnTimeout: true }
-    );
+    expect(resolveRequestOptions({ ...REQUEST_DEFAULTS, closeOnTimeout: true })).toEqual({
+      ...REQUEST_DEFAULTS,
+      closeOnTimeout: true,
+    });
     expect(
       resolveRequestOptions(
-        { closeOnTimeout: false },
-        { ...REQUEST_DEFAULTS, closeOnTimeout: true }
+        { ...REQUEST_DEFAULTS, closeOnTimeout: true },
+        { closeOnTimeout: false }
       )
     ).toEqual({ ...REQUEST_DEFAULTS, closeOnTimeout: false });
     expect(options).toEqual({ connectionHandle, destinationId: undefined });

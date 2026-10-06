@@ -410,6 +410,7 @@ export interface IHTTPServerLike {
   close(callback?: (error?: Error) => void): unknown;
   /** Ends the keep-alive sockets too, without which a stop waits on them; HTTP/1's since Node 18.2. */
   closeAllConnections?(): void;
+  // oxlint-disable-next-line bead/options-last -- Node's own, `listen(port, host, callback)`
   listen(port: number, host: string, callback?: () => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
   /** HTTP/2's: each session, which a stop closes, since it outlives the server's close. */

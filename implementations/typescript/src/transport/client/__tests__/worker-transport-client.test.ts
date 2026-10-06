@@ -64,7 +64,7 @@ const startWorker = async () => {
 
 const nextEvent = (client: WorkerTransportClient, event: 'close' | 'message') => {
   return new Promise<unknown[]>((resolve) => {
-    client.once(event, (...params: unknown[]) => {
+    client.once(event, (...params) => {
       resolve(params);
     });
   });

@@ -182,10 +182,13 @@ const startScripted = async (options?: Partial<IHTTPTransportServerOptions>) => 
   const events = recordOf(server);
 
   // a connect: its token, and the handle it drew; `isListening`, its client listens
-  const connectScripted = (
-    socket?: { remoteAddress?: string; remotePort?: number },
-    { isListening = false }: { isListening?: boolean } = {}
-  ) => {
+  const connectScripted = ({
+    isListening = false,
+    socket,
+  }: {
+    isListening?: boolean;
+    socket?: { remoteAddress?: string; remotePort?: number };
+  } = {}) => {
     const { response } = fake.exchange({
       headers: {
         'content-type': BEAD_MEDIA_TYPE,
@@ -1375,7 +1378,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(
       fake.exchange({ headers: { 'content-type': BEAD_MEDIA_TYPE }, socket: {} }).response.status
     ).toBe(400);
-    connectScripted({ remoteAddress: '10.0.0.4' });
+    connectScripted({ socket: { remoteAddress: '10.0.0.4' } });
 
     expect(server.clients.at(-1)?.port).toBe(0);
     await server.stop();
@@ -1638,7 +1641,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
   test('bounds its connections all together, whichever address each comes from', async () => {
     const { connectScripted, fake, server } = await startScripted({ maximumConnections: 1 });
 
-    connectScripted({ remoteAddress: '10.0.0.1', remotePort: 40_000 });
+    connectScripted({ socket: { remoteAddress: '10.0.0.1', remotePort: 40_000 } });
 
     const { response } = fake.exchange({
       headers: { 'content-type': BEAD_MEDIA_TYPE },
@@ -1866,9 +1869,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       inactivityTimeout: Infinity,
       maximumWait: 1_000,
     });
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const lapsing = listenOf(connectionToken, 'wait=60000');
 
     // waiting, as long as the server lets it
@@ -1901,9 +1902,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
   test('lets a second listen take the place of the first, which ends empty; a listen lost closes nothing, and what it carried comes again', async () => {
     const { connectScripted, events, listenOf, server } = await startScripted();
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const first = listenOf(connectionToken, 'wait=20000');
     const second = listenOf(connectionToken, 'wait=20000');
 
@@ -1936,9 +1935,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
   test('brings back all that waits in one batch, however large, numbered from its first', async () => {
     const { connectScripted, listenOf, server } = await startScripted({ maximumBodyBytes: 32 });
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const envelopes = [8, 8, 32].map((extra, index) => {
       return envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 2 * index + 1, extra });
     });
@@ -1965,7 +1962,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
   test('keeps for a listen an answer whose exchange ended, and anything else the server sends; one that does not listen drops the one, and rejects the other', async () => {
     const { connectScripted, listenOf, server } = await startScripted();
-    const listening = connectScripted(undefined, { isListening: true });
+    const listening = connectScripted({ isListening: true });
     const deaf = connectScripted();
     const late = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
     const command = envelopeOf(EnvelopeKind.REQUEST, { callId: 2 });
@@ -1990,7 +1987,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
   test('refuses a listen where none was declared, 409, and one that asks what it cannot, 400; a connect that says it listens in any other way', async () => {
     const { connectScripted, fake, listenOf, server } = await startScripted();
-    const listening = connectScripted(undefined, { isListening: true });
+    const listening = connectScripted({ isListening: true });
     const deaf = connectScripted();
     const statusOf = (exchange: ReturnType<typeof listenOf>) => {
       return [exchange.response.status, exchange.response.headers?.[REFUSAL_HEADER]];
@@ -2049,7 +2046,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       });
     };
     const deaf = connectScripted();
-    const listening = connectScripted(undefined, { isListening: true });
+    const listening = connectScripted({ isListening: true });
 
     expect([listenOf(deaf.connectionToken).response.status, stampsOf()]).toEqual([
       409,
@@ -2086,9 +2083,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     });
 
     const deaf = connectScripted();
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
 
     // undeclared, 409, and asking what it cannot, 400: no timer stopped nor armed
     const refused = timersBy(clock, () => {
@@ -2127,9 +2122,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     const { connectScripted, events, listenOf, server } = await startScripted({
       maximumOutboxBytes: 20,
     });
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const envelope = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1, extra: 2 });
 
     // 10 bytes, then 20: held
@@ -2155,7 +2148,7 @@ test.describe('createHTTPTransportServer, listening', () => {
     expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
 
     // a listen held as its connection closes learns it is gone
-    const other = connectScripted(undefined, { isListening: true });
+    const other = connectScripted({ isListening: true });
     const waiting = listenOf(other.connectionToken, 'wait=20000');
 
     await server.close(other.connectionHandle);
@@ -2176,9 +2169,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       started = await startScripted({ clock, inactivityTimeout: Infinity });
 
       const { connectScripted, listenOf, server } = started;
-      const { connectionHandle, connectionToken } = connectScripted(undefined, {
-        isListening: true,
-      });
+      const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
       const held = listenOf(connectionToken, 'wait=20000');
       const first = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
       const second = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 3 });
@@ -2211,7 +2202,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       clock,
       inactivityTimeout: Infinity,
     });
-    const { connectionToken } = connectScripted(undefined, { isListening: true });
+    const { connectionToken } = connectScripted({ isListening: true });
     let status: number | undefined;
     const { armed } = timersBy(clock, () => {
       status = listenOf(connectionToken, 'wait=0').response.status;
@@ -2223,9 +2214,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
   test('keeps a notification for a listen, even on the call id of a request still waiting, which it never answers', async () => {
     const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted();
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const asking = exchangeOf(connectionToken);
     const notification = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
 
@@ -2245,7 +2234,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       clock,
       inactivityTimeout: 2_000,
     });
-    const { connectionToken } = connectScripted(undefined, { isListening: true });
+    const { connectionToken } = connectScripted({ isListening: true });
 
     listenOf(connectionToken, 'wait=20000');
 
@@ -2270,9 +2259,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       clock,
       inactivityTimeout: 2_000,
     });
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const before = clock.armed.length;
     const held = listenOf(connectionToken, 'wait=20000');
     const delays = () => {
@@ -2298,20 +2285,16 @@ test.describe('createHTTPTransportServer, listening', () => {
     const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({
       maximumOutboxBytes: 64,
     });
-    const listening = connectScripted(undefined, { isListening: true });
-    const queued = connectScripted(
-      { remoteAddress: '10.0.0.1', remotePort: 40_001 },
-      {
-        isListening: true,
-      }
-    );
-    const other = connectScripted({ remoteAddress: '10.0.0.2', remotePort: 40_002 });
-    const smaller = connectScripted(
-      { remoteAddress: '10.0.0.1', remotePort: 40_003 },
-      {
-        isListening: true,
-      }
-    );
+    const listening = connectScripted({ isListening: true });
+    const queued = connectScripted({
+      isListening: true,
+      socket: { remoteAddress: '10.0.0.1', remotePort: 40_001 },
+    });
+    const other = connectScripted({ socket: { remoteAddress: '10.0.0.2', remotePort: 40_002 } });
+    const smaller = connectScripted({
+      isListening: true,
+      socket: { remoteAddress: '10.0.0.1', remotePort: 40_003 },
+    });
     const asking = exchangeOf(other.connectionToken);
     const cancelling = exchangeOf(other.connectionToken);
     const coming = exchangeOf(other.connectionToken);
@@ -2378,9 +2361,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
   test('refuses a listen on a connection gone, 404, as any exchange on it', async () => {
     const { connectScripted, listenOf, server } = await startScripted();
-    const { connectionHandle, connectionToken } = connectScripted(undefined, {
-      isListening: true,
-    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
 
     await server.close(connectionHandle);
 

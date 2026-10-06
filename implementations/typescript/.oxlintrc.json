@@ -117,6 +117,7 @@
       "files": [
         "tools/check-comment-budget.mjs",
         "tools/check-examples.mjs",
+        "tools/check-oxlint-plugin.mjs",
         "tools/check-protobuf.mjs"
       ],
       "rules": {
@@ -140,6 +141,8 @@
     // protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to its
     // generator
     "**/*_pb.ts",
+    // the plugin's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
+    "tools/oxlint-plugin.cases.ts",
     ".yarn/**"
   ]
 }

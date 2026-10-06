@@ -18,7 +18,10 @@ import { createSessionManager } from '../router/server/session-manager';
 import type { ISession } from '../router/server/types';
 import { connectionSessionOf } from '../router/shared/call-session';
 import { createServiceManager } from '../router/shared/service-manager';
-import type { TransportServerConnectionHandle } from '../transport/server/types';
+import type {
+  TransportServerConnectionHandle,
+  TransportServerEventMap,
+} from '../transport/server/types';
 import { assertHeld, clockOf, type TimeoutId } from '../transport/shared/clock';
 import {
   CLOSE_EVENT,
@@ -233,11 +236,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   // before the router's own: a resolver that stores a session as the router reads the envelope finds
   // its connection open already
   const onConnection = (
-    ...[, , connectionHandle]: [
-      socket: unknown,
-      request: unknown,
-      connectionHandle: TransportServerConnectionHandle,
-    ]
+    ...[, , connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
   ): void => {
     connections.add(connectionHandle);
     wait(connectionHandle);

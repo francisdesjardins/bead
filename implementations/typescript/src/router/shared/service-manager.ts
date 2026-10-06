@@ -80,6 +80,9 @@ interface ITraceStep<Handle extends string> {
 
 export type REQUEST_DEFAULTS = typeof REQUEST_DEFAULTS;
 
+/** What a call falls back on where its options say nothing: a timeout, and a close on timeout. */
+export type RequestDefaults = Pick<IResolvedRequestOptions, 'closeOnTimeout' | 'timeout'>;
+
 // constants
 
 export const REQUEST_DEFAULTS = Object.freeze({
@@ -163,8 +166,8 @@ const nameAfter = <Resolver extends (...params: never[]) => unknown>(
  * any other not from 1 to 2³¹ − 1, 0 among them. `options` is left alone.
  */
 export const resolveRequestOptions = (
-  options?: IRequestOptions,
-  defaults: Pick<IResolvedRequestOptions, 'closeOnTimeout' | 'timeout'> = REQUEST_DEFAULTS
+  defaults: RequestDefaults,
+  options?: IRequestOptions
 ): IResolvedRequestOptions => {
   const {
     closeOnTimeout = defaults.closeOnTimeout,
@@ -354,7 +357,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       return async (
         options?: IRequestOptions<Handle>
       ): Promise<{ callId: CallId; payload: ResponsePayload }> => {
-        const resolvedOptions = resolveRequestOptions(options, defaults);
+        const resolvedOptions = resolveRequestOptions(defaults, options);
         const { closeOnTimeout, destinationId } = resolvedOptions;
         const connectionHandle = options?.connectionHandle;
         const encoded = serializer.encode(requestPayload);
