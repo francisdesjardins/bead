@@ -32,9 +32,9 @@ layer yet, and eight things it needs are missing or differ between the sides:
   only pick the trace's type, and both routers declare a requester alike.
 - **The codecs of section 17 are internal.** `PAYLOAD_CODECS` and `IPayloadCodec` live outside the
   package's `exports` (`router/shared/payloads.ts`), and `Payloads` is `internal`
-  (`Bead.Core/Payloads.cs`), as [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)
-  left them "until the builder names them". No codec reads a protobuf message, and no conformance
-  file pins what a side answers to one that does not decode.
+  (`Bead.Core/Payloads.cs`): [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)
+  puts them in the runtimes and leaves their names to this record. No codec reads a protobuf
+  message, and no conformance file pins what a side answers to one that does not decode.
 - **Admission is a function and a refusal, written by hand at each resolver.** The interop builds
   its `nobody` admission inline on both sides (`interop/offer.ts`,
   `Bead.Interop/InteropService.cs`); generated code needs names for none, a session, and a hook
