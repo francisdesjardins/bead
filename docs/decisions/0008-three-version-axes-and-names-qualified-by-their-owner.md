@@ -7,8 +7,8 @@
 
 Bead is published to no registry, yet its name is public already: the demo francisdesjardins.ca
 serves carries it. Three things change at different speeds: the bytes of an envelope, which every
-peer must agree on; the spec that states them, whose text and conformance files grow faster than
-the bytes; and each implementation, which ships fixes the wire never sees.
+peer must agree on; the spec that states them, whose text and conformance files grow faster than the
+bytes; and each implementation, which ships fixes the wire never sees.
 
 One version for all of them would tie a fix in one implementation to the wire, or hide a change of
 the wire in a package's patch. A version negotiated at connect costs a round trip and a state before
@@ -29,16 +29,16 @@ promise to be decided at once, on the day of the first release.
    here rewrites `0xA1`, its spec, its vectors and both implementations at once, and no reader of an
    earlier `0xA1` is kept. From the first publication on, a change that a reader of the layout
    before it cannot read takes the next layout byte.
-2. **The spec**: its text, its vectors, its conversations and the interop service move together,
-   and are tagged `spec-v*`. `spec/spec.md` states their version, which each conformance file
-   repeats as its `specVersion`, as CloudEvents names its own `specversion`. It follows Semantic
-   Versioning at `0.x`, without pre-releases: the minor moves when an implementation must change to
-   keep passing — an expectation changed, a field, a group or a file added — and the patch when a
-   conforming implementation passes unchanged — a vector or a conversation added for what the spec
-   already requires, a clarification. It moves in the release commit, as the manifests' versions
-   do, and a release whose spec moved tags `spec-v` and that version beside its `v*`. The spec's
-   companion, `spec/debugging.md`, which states what a side traces, filters and counts beside the
-   wire ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), runs on this axis under a
+2. **The spec**: its text and every conformance file move together, and are tagged `spec-v*`.
+   `spec/spec.md` states their version, which each conformance file repeats as its `specVersion`, as
+   CloudEvents names its own `specversion`. It follows Semantic Versioning at `0.x`, without
+   pre-releases: the minor moves when an implementation must change to keep passing — an expectation
+   changed, a field, a group or a file added — and the patch when a conforming implementation passes
+   unchanged — a vector or a conversation added for what the spec already requires, a clarification.
+   It moves in the release commit, as the manifests' versions do, and a release whose spec moved
+   tags `spec-v` and that version beside its `v*`. The spec's companion, `spec/debugging.md`, which
+   states what a side traces, filters and counts beside the wire
+   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), runs on this axis under a
    version of its own: its files repeat it as their `debuggingVersion`, it moves by the same rule, a
    code the wire gains moving both, and a release whose companion moved tags `debugging-v` and that
    version.
@@ -75,13 +75,13 @@ Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manife
   record that decided it says why.
 - A name costs more the further it travels: a rename at `0.x` costs every side's call sites, a line
   in the CHANGELOG and the Tenth Man; after a publication, it costs every consumer besides.
-- The generated C# is longer for its `global::` prefixes, and never ambiguous.
+- The C# the builder generates is longer for its `global::` prefixes, and never ambiguous.
 
 ## The Tenth Man
 
 The names this record settles met the Tenth Man
-([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). Its objections, each with its
-answer:
+([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). Its objections, and the options
+it proposed itself, each with its answer:
 
 | Objection                                                                                                                         | Answer                                                                                                                                                                                                |
 | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -91,8 +91,7 @@ answer:
 | The builder's protobuf package and extension numbers belong in protobuf's global registry                                         | Accepted, when its options freeze at v1, not before.                                                                                                                                                  |
 | "Nothing is published" does not hold: the demo carries the name, and names are due at the first publication, not the first commit | Accepted: the repository is kept as if it were published.                                                                                                                                             |
 | Another name for the protocol, one free on every registry                                                                         | Refused: the name weighed sounds like a binary WebSocket library in the same languages; the names Bead publishes under are qualified by their owner, and free; and a rename is a decision of its own. |
-
-Refused, as the Tenth Man proposed itself: another npm scope, since an account can become an
-organization; another media type than `application/prs.bead`, since RFC 6838's personal tree fits
-it; another namespace than `Bead` in `Bead.Core`, as Polly's is `Polly`; and one spelling of
-WebSocket across the sides, against `ws` and `WS`, each language's idiom.
+| another npm scope                                                                                                                 | Refused: an account can become an organization.                                                                                                                                                       |
+| another media type than `application/prs.bead`                                                                                    | Refused: RFC 6838's personal tree fits it.                                                                                                                                                            |
+| another namespace than `Bead` in `Bead.Core`                                                                                      | Refused: a library's namespace is its name, as Polly's is `Polly`.                                                                                                                                    |
+| one spelling of WebSocket across the sides                                                                                        | Refused: `ws` and `WS` are each language's idiom.                                                                                                                                                     |

@@ -262,6 +262,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The decision records state what holds and where Bead goes: their index groups them by theme under
+  its rules and names, under "Where Bead goes", the parts the records bind before the repository
+  holds them; 0001's relay is decision 0019 and the connection HTTP draws decision 0020; the rule of
+  a duration moves from 0011 to 0014; 0006 keeps its table as rule and job, with its gates owed;
+  each Tenth Man section keeps its rounds in order, each answer the one that holds; and the C# side
+  has a README of its layout and its modules. A gate in CI's `commits` job,
+  `tools/check-links.mjs`, holds every relative link of the repository's Markdown, and its anchor,
+  to a file or a heading that exists.
 - The parameter rule takes an options object after two parameters, as Deno's style guide counts them,
   held by `max-params` at 3 and by review.
 - The SESSION block gives way to the CREDENTIAL block (decision 0010): bit `0x08`, the header's last

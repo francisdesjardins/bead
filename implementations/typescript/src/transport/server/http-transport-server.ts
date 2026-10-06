@@ -177,9 +177,9 @@ export const START_DEFAULTS = Object.freeze({
 } satisfies ITransportServerStartOptions);
 
 /**
- * What the transport reads of an envelope, and nothing else, as 0001 lays out the prefix every
- * layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the call id
- * in its fifth to eighth.
+ * What the transport reads of an envelope, and nothing else (0020), in the prefix 0001 lays out and
+ * every layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the
+ * call id in its fifth to eighth.
  */
 export const ENVELOPE_PREFIX = Object.freeze({
   bytes: 8,

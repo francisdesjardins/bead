@@ -1,7 +1,9 @@
 name: CI
 
 # Every job on every push and pull request: the spec is shared, so a change anywhere can break
-# either side. `ci-ok` is the only required check; it fails when any other job did not pass.
+# either side. `ci-ok` stands for every job; it fails when any other job did not pass. Branch
+# protection, which would make it the one check a branch requires, waits on GitHub Pro or a public
+# repository.
 on:
   # Branches only: a tag pushed by a release points at a commit its branch's run already checked.
   push:
@@ -155,7 +157,8 @@ jobs:
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
-  # left out, git-flow writes them.
+  # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
+  # anchor, resolves: here, since the job runs once, on the Node it already has.
   commits:
     name: Commits
     runs-on: ubuntu-26.04
@@ -187,10 +190,12 @@ jobs:
             set -- "$AFTER" --not --exclude="origin/$BRANCH" --remotes=origin
           fi
           node tools/check-commits.mjs "$@"
+      - name: Check the links
+        run: node tools/check-links.mjs
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
-  # The only required check: green when every job above passed, red otherwise, including when one
-  # was cancelled or skipped.
+  # The one check that stands for every job: green when every job above passed, red otherwise,
+  # including when one was cancelled or skipped.
   ci-ok:
     name: CI ok
     if: always()

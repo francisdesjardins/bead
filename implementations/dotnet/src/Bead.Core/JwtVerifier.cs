@@ -11,7 +11,7 @@ namespace Bead;
 /// </summary>
 public enum JwtAlgorithm
 {
-    /// <summary>ECDSA on P-256 with SHA-256 (RFC 7518 §3.4), for keys a federation shares by their public half.</summary>
+    /// <summary>ECDSA on P-256 with SHA-256 (RFC 7518 §3.4), for keys the services that trust one issuer share by their public half.</summary>
     Es256,
 
     /// <summary>HMAC with SHA-256 (RFC 7518 §3.2), for one trust domain.</summary>

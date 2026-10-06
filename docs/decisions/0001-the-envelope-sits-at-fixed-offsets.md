@@ -1,15 +1,18 @@
 # 0001 — The envelope sits at fixed big-endian offsets, behind an 8-byte prefix and its layout byte
 
 - **Status**: accepted
-- **Scope**: the protocol, and every implementation
+- **Scope**: the protocol, and every implementation: the envelope, its calls, its transfers and its
+  cancel. A relay is [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s, and
+  the connection HTTP draws
+  [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s.
 
 ## Context
 
-Bead's routers need a unit to carry a call across a transport that already delimits its messages:
-a WebSocket message, an HTTP body, a Web Worker's message. A peer may decode that unit by hand, on a
-constrained device, where a field read at a fixed offset costs nothing and a parser costs code. A
-transport that pairs an answer with its exchange, or a relay that passes a payload on undecoded,
-wants to read a few fields and nothing else.
+Bead's routers need a unit to carry a call across a transport that already delimits its messages: a
+WebSocket message, an HTTP body, a Web Worker's message, or whatever message a transport delimits. A
+peer may decode that unit by hand, on a constrained device, where a field read at a fixed offset
+costs nothing and a parser costs code. A transport that pairs an answer with its exchange, or a
+relay that passes a payload on undecoded, wants to read a few fields and nothing else.
 
 Four layouts were weighed. A header of fixed 32-bit words with an exact payload length keeps every
 offset fixed, but its length caps a payload at 16 MiB, its fields share bits, and an error written
@@ -20,6 +23,8 @@ serialization framework ties every peer to that framework. None of them keeps th
 while dropping the length and the double error.
 
 ## Decision
+
+### The envelope
 
 **An envelope is an 8-byte prefix at fixed offsets, in network byte order**: the layout byte
 (`0xA1`), the kind, the flags, the header's length in 4-byte words, then the call id on four bytes.
@@ -64,6 +69,14 @@ none. A credential scheme to come is no bit: its block is read whole, by the len
 the request is refused at admission, `CREDENTIAL_UNSUPPORTED`, which names the schemes the side
 takes ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
+**What does not read goes through one gate**: a request whose prefix reads, of the peer's parity, on
+a call id neither open nor held, is answered with a failure on that call id; an answer of this
+layout ends the call it answers, and a chunk the transfer it was for, while its payload is not
+whole; anything else is reported, never answered, since an answer on any other call id could settle
+someone else's call.
+
+### Transfers
+
 **A payload larger than an envelope goes as a transfer, in this same layout**, as HTTP/2 splits a
 stream into frames rather than sending one frame of a 64-bit length. The request or the result that
 opens it declares the payload's total, eight bytes behind the TRANSFER flag, and carries its first
@@ -82,70 +95,29 @@ chunk under the credit granted is dropped in silence. A notification, a failure,
 call that opens a subscription are never split: nothing arrives ahead of a result still coming, and
 no end of a session cuts one.
 
-**A relay terminates each leg**, as a gateway does for what stands behind it, each destination
-answering the same procedures. A request that names a destination is asked the relay's admission on
-its header, then whether its destination exists, then the smaller of both legs' limits; every
-refusal falls on the opening, and a requester not admitted learns only whether the relay has any
-destination. It then goes on to its target as a request of the relay's own, its payload's bytes
-undecoded, under a call id of that leg. The answer comes back under the requester's call id: a
-result as it came, a failure of the target's one relay more. What the relay raises itself says how
-far the request went, as every code does: `DESTINATION_UNREACHABLE` (17) while the relay's transport
-was never handed the request, or refused it, so nothing was tried, and `DESTINATION_LOST` (65) once
-that transport had it and the target was lost, the procedure run or not: HTTP's gateway 502 against
-its 504, and what gRPC's retry rules turn on. Those failures name no address behind the relay: why
-leg B failed is reported where the relay runs. A cancel on leg A cancels leg B. A destination on a
-connection of the relay's own dies with that connection, so a newcomer under the same handle is
-never taken for it. An answer names its call alone, so no RESULT or FAILURE carries a destination:
-an id means something to its relay only. A relay carries no subscription yet: it refuses a request
-that opens one with `SUBSCRIPTION_UNSUPPORTED` (22), the code of any path that carries no
-notification back. It forms no chain: leg B names no destination, so no loop can form, and a request
-on its way further would need a count of the relays it crossed, as IP's TTL and HTTP's `Via`
-(RFC 9110 §7.6.3) have.
+### What a transport owes
 
 **The transports carry bytes**, and one that carries transfers owes four things: it delimits its
-messages; it knows the envelope's size at both ends, since nothing announces it yet; it delivers
-every chunk and every credit, in any order, a copy tolerated, since Bead retransmits nothing and a
-loss ends in the transfer's inactivity; and it carries both ways, the credit against the chunks. The
+messages; it knows the envelope's size at both ends, since nothing announces it; it delivers every
+chunk and every credit, in any order, a copy tolerated, since Bead retransmits nothing and a loss
+ends in the transfer's inactivity; and it carries both ways, the credit against the chunks. The
 router copies what it reads, so a transport may use its buffers again. Whether a connection is alive
 is the transport's to know, not Bead's, which has no ping: over WebSocket, each end sends the
 protocol's own PING control frame at an interval and drops a connection that leaves one unanswered
 (RFC 6455 §5.5.2), so a peer gone without a word ends in a close, as every loss does.
 
-**A transport that keeps no connection draws one.** Over HTTP, and over any such transport to come,
-the transport draws a 16-byte token from a cryptographic source when a client connects, and the
-client presents it on every exchange. The router, the sessions and the relays see a connection, as
-over a socket, and the token names the connection and nothing else: a call presents its session or
-its credential in its own header, or in its exchange's `Authorization`
-([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). The token is worth the session its
-connection holds: it crosses only TLS off the machine, and no URL, handle, detail or log carries it.
-Such a transport reads three things of an envelope and nothing else, its layout, its kind and its
-call id, in the prefix every layout keeps, to hand an answer to the exchange that carried its
-request, as HTTP/2 hands a frame to its stream by an id at a fixed offset (RFC 9113 §4.1). An
-exchange waits only for the answer to a request of the peer's parity; any other ends at once and
-empty, a cancel's included, so a cancel is still never answered. An exchange lost closes the
-connection at both ends, as a socket that drops does, and a client's send settles on the head of its
-answer, so a relay still tells a request never tried, refused by a status the transport marks as its
-own, from one lost after, which any other status is: an intermediary's may come once the request
-ran. What the server sends of its own has no exchange to go on, so it waits, numbered, in the
-connection's outbox, for its client to listen: to ask for it by an exchange of its own, which the
-server holds until something comes, long polling as RFC 6202 lays it out rather than a response held
-open. Each listen acknowledges what its client heard whole; what it did not comes again, as a
-stream's lost frames are sent again (RFC 9000 §13.3). The client reads a batch as it comes and
-bounds each envelope alone, as HTTP/2 bounds its frames and never its streams (RFC 9113 §4.2). A
-client says at connect, once for the connection's life, whether it listens, and the server says it
-back, as a WebSocket subprotocol is chosen once (RFC 6455 §4.2.2): to one that does not listen, a
-request that opens a subscription is refused, `SUBSCRIPTION_UNSUPPORTED`. A transfer, whose credit
-would have to come back as its request goes, is not taken.
+**A transport carries each envelope whole.** Order and a single copy are what its connection gives,
+a WebSocket's both and HTTP's exchanges neither, and the router needs neither: a chunk and a credit
+are placed by their offset and their absolute end, a copy is dropped, and a cancel that overtakes
+its request is buried by the transport of the side that answers (below). A transport that keeps no
+connection draws one, as HTTP's does
+([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)).
 
-**What does not read goes through one gate**: a request whose prefix reads, of the peer's parity, on
-a call id neither open nor held, is answered with a failure on that call id; an answer of this
-layout ends the call it answers, and a chunk the transfer it was for, while its payload is not
-whole; anything else is reported, never answered, since an answer on any other call id could settle
-someone else's call.
+### The cancel
 
 **A requester gives up a call with a cancel**: 8 bytes, the prefix alone, on a call it still holds
-open (unanswered, a subscription, a transfer it refuses), never on one it holds complete. A cancel is
-never answered, and one that names no call is dropped in silence, having crossed its answer. The
+open (unanswered, a subscription, a transfer it refuses), never on one it holds complete. A cancel
+is never answered, and one that names no call is dropped in silence, having crossed its answer. The
 other end forgets the call, takes away what it subscribed, then stops what still works on it, so
 nothing more goes out on that call id. The requester reserves the call id as long as the call was
 given, 5 seconds when it was given no time, or, once a result came to it as a transfer, as long as
@@ -173,27 +145,14 @@ other whose exchanges race: the router would drop it as naming no call, and the 
 The transport of the side that answers buries such a call id for the least a requester reserves one,
 5 seconds, and drops the request that comes under it; HTTP's does.
 
-**A connection's session is a 128-bit token drawn from a cryptographic source**, announced on an
-answer only when it changes, and presented by a client only on a call that asks for it, `OPAQUE`, so
-that call runs in no other session; a credential's session is what a verifier makes of a credential
-a call presents, and is never announced
-([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
-
-**Every requester behind a relay shares its leg B**: one space of call ids, and the target's
-transfer places. One that presents none or `OPAQUE` shares its session at the target too: the
-relay's admission, which sees the procedure and the destination, is where its rights are checked,
-and the target sees the relay alone. One that presents a `JWT` or an `ELSEWHERE` runs at the target
-in the session its own credential resolves to, which the target verifies
-([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
-
 **A payload is bounded by the router's limits, not by the envelope**: 16,777,216 bytes by default,
 and more when both ends are set so. One whose envelope would pass a chunk, 1 MiB, goes as a
 transfer, which costs one round trip more than a whole envelope, its throughput bounded by the
 window over the round trip: 4 MiB at 100 ms, some 40 MiB a second. A payload is whole in memory at
 both ends, and what a router receives holds a budget of its own, 256 MiB by default, reserved as the
-credit grants it: a transfer admitted may still stall should that budget not free. Payloads of
-several gigabytes wait for streams.
+credit grants it: a transfer admitted may still stall should that budget not free. A payload of
+several gigabytes needs a stream, a decision of its own.
 
-**The why is here, the rule is in [`spec/spec.md`](../../spec/spec.md)**, sections 1 to 10 and 12 to
+**The why is here, the rule is in [`spec/spec.md`](../../spec/spec.md)**, sections 1 to 10, 12 and
 15, and the bytes are in `spec/vectors.json`, which every implementation reads
 ([0004](0004-one-behaviour-in-every-language.md)).
