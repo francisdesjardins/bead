@@ -18,15 +18,15 @@ companion's help and type, its buckets rising under the companion's bounds, each
 canonical number for its bound, each _count the sum of its handled counts, none started below
 handled; each implementation's tests read every group, the conversations, the transports' cases,
 any of which may name the row of docs/support.md it crosses, the clock cases, the debug filters, the
-metrics, the codecs' payloads and values and the identities' names, ids, folds and calls, an entry of
-either naming, where it crosses a row of docs/support.md, a row that names the file and the entry; the
-encodings section 17 states are the codecs' schema's, each played, and spec.md names each .proto of
-spec/, and no other; the
-durations name each place by one id and each input by one name, give every place an outcome for
-every input in their order, cite at each place only what it observes, and name, where they cross a
-row of docs/support.md, a row that names the file and them; each implementation plays them in one
-harness, which names every place, through one helper, which alone reads the file; and no file git
-lists outside spec/, the tests and the interop service names a published test key.
+metrics, the codecs' payloads and values and the identities' names, ids, folds and procedure kinds,
+an entry of either naming, where it crosses a row of docs/support.md, a row that names the file and
+the entry; the encodings section 17 states are the codecs' schema's, each played, and spec.md names
+each .proto of spec/, and no other; the durations name each place by one id and each input by one
+name, give every place an outcome for every input in their order, cite at each place only what it
+observes, and name, where they cross a row of docs/support.md, a row that names the file and them;
+each implementation plays them in one harness, which names every place, through one helper, which
+alone reads the file; and no file git lists outside spec/, the tests and the interop service names a
+published test key.
 Exit 1 on any of them.
 
   python spec/check.py --write-uncited
@@ -80,7 +80,7 @@ WHOLE = {
     'debug-filters': ('filters', 'sources'),
     'metrics': ('expositions', 'exits'),
     'codecs': ('payloads', 'values'),
-    'identities': ('names', 'ids', 'folds', 'calls'),
+    'identities': ('names', 'ids', 'folds', 'procedureKinds'),
 }
 
 # the companion's files, which repeat its version and cite its units, each named by a line of it, and
@@ -233,7 +233,7 @@ named['values'] = documents['codecs']['values']
 named['names'] = documents['identities']['names']
 named['ids'] = documents['identities']['ids']
 named['folds'] = documents['identities']['folds']
-named['calls'] = documents['identities']['calls']
+named['procedureKinds'] = documents['identities']['procedureKinds']
 
 for group, entries in named.items():
     seen = set()
@@ -866,7 +866,8 @@ print(f'spec: {version}, its companion {companion_version}; {len(documents)} fil
       f'{len(named["expositions"])} expositions and {len(named["exits"])} exits, each read as 0.0.4; '
       f'{len(named["payloads"])} payloads read and {len(named["values"])} values written, in '
       f'{len(stated)} encodings; {len(named["names"])} names, {len(named["ids"])} ids and revisions and '
-      f'{len(named["calls"])} calls, each declared {len(documents["identities"]["ways"])} ways, and '
+      f'{len(named["procedureKinds"])} procedure kinds, each declared '
+      f'{len(documents["identities"]["ways"])} ways, and '
       f'{len(named["folds"])} folds; '
       f'{len(units["spec"]) - len(uncited["spec"])} of the spec\'s {len(units["spec"])} units cited, the others '
       f'listed in uncited.txt; {len(units["debugging"]) - len(uncited["debugging"])} of the companion\'s '

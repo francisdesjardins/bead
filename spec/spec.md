@@ -1161,20 +1161,22 @@ reasons that applies, before any reason of its own; a declaration refused declar
 | ------------------ | --------------------------------------------------------------------------------------------------------- |
 | `out of its range` | a service id, a procedure id or a revision outside 16.2, service 0 (16.3), or one that is no whole number |
 | `off its form`     | a procedure's name that is no `procedure-name` (16.4, 16.5)                                               |
-| `against its call` | a procedure whose call the way it is declared does not take (16.11)                                       |
+| `against its kind` | a procedure whose kind the way it is declared does not take (16.11)                                       |
 
 A side's sentences are its own; a C side reports a code. A side built without the trace and the
 metrics (`debugging.md` section 1.2), which keeps no names, never refuses `off its form`, its names
 those of the manifest its tables were generated from.
 
-16.11. A procedure's definition may name its call, how it is called: `request`, a request a client
+16.11. A procedure's definition may name its kind, how it is called: `request`, a request a client
 makes of its server; `notifies`, such a request to a procedure that notifies, which may open a
 subscription to it (section 11.2); or `command`, a request a server makes of a client (section
-9.1). A requester made on a client's router takes `request` and `notifies`, and one made on a
-server's takes `command`; a resolver registered on a server's router takes `request` where it
-notifies nothing, and `notifies` where it notifies; one registered on a client's router takes
-`command`; and a notification registered on a client's router takes `notifies`. Every way takes a
-procedure whose definition names no call.
+9.1). A procedure's kind is never its envelopes': every call opens with a `REQUEST` (sections 3.1,
+9.1), a command's too; and the trace types a call to a procedure that notifies `request`
+(`debugging.md` section 4.1). A requester made on a client's router takes `request` and
+`notifies`, and one made on a server's takes `command`; a resolver registered on a server's router
+takes `request` where it notifies nothing, and `notifies` where it notifies; one registered on a
+client's router takes `command`; and a notification registered on a client's router takes
+`notifies`. Every way takes a procedure whose definition names no kind.
 
 ## 17. Payloads
 
