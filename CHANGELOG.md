@@ -359,6 +359,11 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 
 - The Tenth Man meets every change to what every language's tests answer to: the spec, its
   conformance files, their shape and their tooling, and the gates the implementations share.
+- Spec 15.1: on a connection, a transport hands each envelope on once, in the order its side sent
+  it, unless its section says otherwise, stating what may overtake and what a copy is; 15.9: over
+  HTTP, a failure that ends a subscription may come before its call's result, which the client then
+  reports as `CALL_UNKNOWN`. Every transport and both sides keep it as they are. Debugging 3.4: a
+  latency bench measures, and gates nothing.
 - The Tenth Man's objections are kept in the repository, in the record whose decision a change makes
   or changes, or whose Scope holds what it changes; 0007 holds the parameter rule's.
 - The conversations' steps are named by who acts, `send` and `expect` where they said `in` and

@@ -233,7 +233,9 @@ has its reason:
 **Nothing is paid while nobody listens and no registry is given** (debugging 3). One check a call,
 one an envelope, is the whole cost. A side that counts reads the monotonic clock twice a call, at
 its router's gates, never the wall clock, and adds to series it reaches through what it holds
-already, with no lookup of its own and no allocation.
+already, with no lookup of its own and no allocation. A latency bench measures what a counted call
+costs against one not counted, on each side, and gates nothing: what the clause bounds, the readings
+and the allocations, its gates hold.
 
 - **Its gates** ([0006](0006-a-rule-has-its-gate.md)): each side's test clock counts its readings;
   twin tests over a manager on a fake router show a call made, a request answered, a notification
@@ -242,8 +244,7 @@ already, with no lookup of its own and no allocation.
   `GC.GetAllocatedBytesForCurrentThread()` around a call's synchronous steps, with no `await` within
   them, shows a counted call allocating not a byte more than an uncounted one, and pins what a call
   allocates with nobody listening. The TypeScript side has no allocation count a test reads, and
-  holds that part by inspection, a row of the matrix. A latency bench measures a counted call
-  against one not counted, on each side.
+  holds that part by inspection, a row of the matrix.
 - **Two build switches**, for a side whose platform builds that way: one leaves out the trace and
   the filter, the other the registry, each alone or both, so a 1 kHz loop that wants its dashboard
   builds the registry without the trace. A C side takes them as its preprocessor's, in its own
@@ -314,7 +315,7 @@ supervision link or a relay's, is the C side's to decide.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-two rounds. Its objections, each with the answer that holds:
+three rounds. Its objections, each with the answer that holds:
 
 ### The first round
 
@@ -344,3 +345,9 @@ two rounds. Its objections, each with the answer that holds:
 | `bead_notifications_total` mixes two roles in one family, the fault the draft fixed for calls                                                              | Chosen, as the Context weighs it: three families — `bead_notifications_sent_total`, `sent` or `failed`; `bead_notifications_heard_total`; `bead_subscriptions_dropped_total`, by `code` — the subscriptions dropped counted at the router at both ends, never from the manager's event.                                                                                                                                                                                                                                                                                                                                 |
 | `_OTHER` absorbs the ceiling's overflow, unlike the OpenTelemetry SDK it cites; A66 is misquoted; the claim about OpenTelemetry's dashboards does not hold | Chosen, as the Context weighs it: `_OTHER` for every value a label does not know, `code` included, as OpenTelemetry's `rpc.method` and `error.type` spell it; a declaration past the ceiling refused as it is made, so `_OTHER` never stands for a bound reached; A66 cited for its started counters and the bounds taken from it, never for a fallback, which it spells `other`; a dashboard made for OpenTelemetry's RPC metrics reads Bead's families once its queries are rewritten. A series is made at 0 only for a code its family's exits can end with, as the exit tables list them.                           |
 | The 10 µs floor assumes a clock the TypeScript side lacks in a browser, with no row in the matrix; and the buckets weighed against loops at other periods  | Chosen, as the Context weighs it: A66's bounds, its 0 included — 41 bounds and `+Inf`, 61 and 74 series a procedure — so a loop at 1 kHz, 500 Hz or 250 Hz finds its period among them; a row of the matrix, a TypeScript side in a browser reading its durations at its platform's coarsening, with its test.                                                                                                                                                                                                                                                                                                          |
+
+### On the bench
+
+| Objection                                                                                                                                             | Answer                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The latency bench is a gate in this record and in the decisions' README, not in 0006's gates owed, and the change strikes it from the companion alone | Accepted: no clause of section 3 states a threshold a bench could fail on, so it measures and gates nothing. It leaves the companion's 3.4 and this record's gates together, stays here as what a bench measures, and the README names it under "Where Bead goes". |

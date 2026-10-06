@@ -937,20 +937,24 @@ verifies.
 
 _Transports: `spec/transports.json`._
 
-15.1. A transport carries envelopes between two sides, whole and in order on each connection, and
-tells when a connection opens and when it closes, and, over HTTP, when a listen is held and when it
-ends (section 13.7). It reads nothing of an envelope but what this section says; what it refuses of
-its own is no envelope, and the router never sees it. A connection that closes ends what was under
-way on it (sections 9.4, 12.10, 13.7). A transport may carry a credential beside an envelope, both
-ways: it hands the router what it carried with an envelope it took, and carries what the router
-gives it with one it sends. That credential is what a request presenting `ELSEWHERE` stands for
-(section 9.2, step 5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves
-as its header says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a
-request's `POST` (section 15.5); over a WebSocket, none (section 15.2). A transport says whether it
-carries a credential beside an envelope it sends, and whether it is secure — under TLS, on the
-loopback, or never leaving the machine — so that a side fails before it goes a call whose
-credential it cannot carry (section 13.4). No failure's detail, event, trace or log carries that
-credential, nor a header's: only its credential scheme.
+15.1. A transport carries envelopes between two sides, each whole, and tells when a connection opens
+and when it closes, and, over HTTP, when a listen is held and when it ends (section 13.7). On a
+connection, it hands each envelope on once, in the order its side sent it, unless its section says
+otherwise: HTTP keeps the outbox's order for what the server sends of its own (section 15.9), and
+none between a client's exchanges, so that a CANCEL may come before its REQUEST (section 15.5). A
+transport that keeps no order states what may overtake, and one that may hand an envelope on twice
+states what a copy is, each with what the side that receives it does of it. It reads nothing of an
+envelope but what this section says; what it refuses of its own is no envelope, and the router never
+sees it. A connection that closes ends what was under way on it (sections 9.4, 12.10, 13.7). A
+transport may carry a credential beside an envelope, both ways: it hands the router what it carried
+with an envelope it took, and carries what the router gives it with one it sends. That credential is
+what a request presenting `ELSEWHERE` stands for (section 9.2, step 5), and nothing else: a request
+that presents none, `OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried.
+Over HTTP, it is the `Authorization` field of a request's `POST` (section 15.5); over a WebSocket,
+none (section 15.2). A transport says whether it carries a credential beside an envelope it sends,
+and whether it is secure — under TLS, on the loopback, or never leaving the machine — so that a side
+fails before it goes a call whose credential it cannot carry (section 13.4). No failure's detail,
+event, trace or log carries that credential, nor a header's: only its credential scheme.
 
 ### WebSocket
 
@@ -1048,9 +1052,12 @@ its length on 4 bytes, big-endian, the number of the first in `bead-sequence`, t
 one by one. With nothing left, the server holds the listen up to `wait` milliseconds — 30 seconds at
 most by default — and ends it 204; a second listen takes the first's place. A `wait` the server
 reads is its peer's, not an application's (section 1.4): fifteen digits at most, a `wait` left out
-being 0, which answers at once, and one past the server's bound held to it. A client reads a batch as it comes, and hears
-each envelope as it comes whole; what a listen lost carried past what was heard comes again to the
-next, so nothing is lost and nothing heard twice. An outbox past its bound — two envelopes' worth by
+being 0, which answers at once, and one past the server's bound held to it. A client reads a batch
+as it comes, and hears each envelope as it comes whole; what a listen lost carried past what was
+heard comes again to the next, so nothing is lost and nothing heard twice. A failure that ends a
+subscription, in a batch, may come before the result that answered its call, in a `POST`'s body: the
+client pairs the failure with the call still waiting, which fails with it (section 9.7), and reports
+the result that follows as `CALL_UNKNOWN`. An outbox past its bound — two envelopes' worth by
 default — closes its connection, its client having fallen behind. A batch carries no credential
 beside its envelopes, nor does an answer: a command of the server's that presents `ELSEWHERE` over
 HTTP fails before it goes, `DESTINATION_UNREACHABLE`.

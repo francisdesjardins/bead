@@ -52,6 +52,11 @@ whose credit would have to come back as its request goes, is not taken.
 side that answers buries the call id for the least a requester reserves one, and drops the request
 that comes under it ([0001](0001-the-envelope-sits-at-fixed-offsets.md)).
 
+**A failure can come before the result its call waits for**: a failure that ends a subscription
+comes in a listen's batch, the result that answered its call in a `POST`'s body, and the two race.
+The client fails the call with the failure, and reports the result that follows as `CALL_UNKNOWN`
+(spec 15.9).
+
 **A connection lives as long as its client listens or speaks**: silence is counted between listens,
 never while one is held ([0012](0012-a-listen-held-is-not-silence.md)).
 
@@ -61,3 +66,9 @@ what it reads of an envelope, and what it gives of order and copies.
 **The rule is the HTTP part of section 15 of [`spec/spec.md`](../../spec/spec.md)**, and
 `spec/transports.json` plays it over real sockets against every implementation's server
 ([0004](0004-one-behaviour-in-every-language.md)).
+
+## The Tenth Man
+
+The order of HTTP's outbox and of its exchanges, and a failure that comes before its call's result
+(spec 15.9), met the Tenth Man with a transport's order and copies, whose round
+[0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps.

@@ -64,8 +64,7 @@ notification sent and one heard read none while nobody listens, and a call three
 on a router, a counted call reads two more than an uncounted one. Where its platform counts what a
 thread allocates, a counted call's synchronous steps allocate not a byte more than an uncounted
 one's, and what a call allocates while nobody listens is pinned; where it does not, the side holds
-that part by inspection, a row of the support matrix. A latency bench measures a counted call
-against one not counted.
+that part by inspection, a row of the support matrix.
 
 3.5. A side whose platform builds that way has two build switches: one leaves out the trace and the
 filter, the other the registry, each alone or both. Built with the registry and without the trace, a
