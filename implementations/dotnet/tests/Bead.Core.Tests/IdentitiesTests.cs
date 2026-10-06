@@ -3,13 +3,14 @@ using System.Text.Json;
 namespace Bead.Tests;
 
 /// <summary>
-/// Bead's identities, <c>spec/identities.json</c>, played whole (decision 0017): each entry of
-/// <c>names</c> and <c>ids</c> declared each of the five ways a side declares, on routers of its
-/// own given no metrics registry, taken, or refused for the reason it names, which the refusal's
-/// sentence holds, the router then taking a declaration as if it had not been made; and each pair
-/// of <c>folds</c> through <see cref="Identity.AreOneName"/>, which every comparison of names on
-/// this side goes through. An entry a row of the support matrix excuses this side from, an id or a
-/// revision no C# type holds, is counted and not played. The TypeScript side plays the same file.
+/// Bead's identities, <c>spec/identities.json</c>, played whole (decisions 0017 and 0018): each
+/// entry of <c>names</c>, <c>ids</c> and <c>procedureKinds</c> declared each of the six ways a side declares,
+/// on routers of its own given no metrics registry, taken, or refused for the reason it names at the
+/// ways it names, which the refusal's sentence holds, the router then taking a declaration as if it
+/// had not been made; and each pair of <c>folds</c> through <see cref="Identity.AreOneName"/>, which
+/// every comparison of names on this side goes through. An entry a row of the support matrix
+/// excuses this side from, an id or a revision no C# type holds, is counted and not played. The
+/// TypeScript side plays the same file.
 /// </summary>
 public sealed class IdentitiesTests
 {
@@ -37,6 +38,12 @@ public sealed class IdentitiesTests
         ["server-resolver"] = (procedure, routers) =>
         {
             routers.Server.RegisterResolver(new Resolver(procedure));
+
+            return Task.CompletedTask;
+        },
+        ["server-notification-resolver"] = (procedure, routers) =>
+        {
+            routers.Server.RegisterResolver(new NotifyingResolver(procedure));
 
             return Task.CompletedTask;
         },
@@ -125,13 +132,15 @@ public sealed class IdentitiesTests
             revision.ValueKind == JsonValueKind.Number && revision.TryGetInt32(out var held) ? held : null);
     }
 
-    // declares a procedure each way, each on routers of its own: taken, or refused for its reason,
-    // and then declaring nothing, the same way taking Echo
-    private static async Task PlaysEachWay(Procedure procedure, string? refused)
+    // declares a procedure each way, each on routers of its own: taken, or refused for its entry's
+    // reason at every way, or at the ways its refusedAt lists, and then declaring nothing, the same
+    // way taking Echo
+    private static async Task PlaysEachWay(Procedure procedure, JsonElement entry)
     {
         foreach (var way in Root.GetProperty("ways").EnumerateArray())
         {
             var declare = Ways[way.GetString()!];
+            var refused = RefusedOf(entry, way.GetString()!);
 
             using var client = new RouterClient(new UnconnectedClient());
             using var server = new RouterServer(new UnconnectedServer());
@@ -153,9 +162,32 @@ public sealed class IdentitiesTests
         }
     }
 
-    private static string? RefusedOf(JsonElement entry)
+    // the reason an entry is refused for at a way: at every way, or at those its refusedAt lists
+    private static string? RefusedOf(JsonElement entry, string way)
     {
-        return entry.TryGetProperty("refused", out var refused) ? refused.GetString() : null;
+        if (!entry.TryGetProperty("refused", out var refused))
+        {
+            return null;
+        }
+
+        var isRefusedHere = !entry.TryGetProperty("refusedAt", out var refusedAt) || refusedAt.EnumerateArray().Any((at) =>
+        {
+            return at.GetString() == way;
+        });
+
+        return isRefusedHere ? refused.GetString() : null;
+    }
+
+    // a procedure's kind as the file names it
+    private static ProcedureKind KindOf(string procedureKind)
+    {
+        return procedureKind switch
+        {
+            "request" => ProcedureKind.Request,
+            "notifies" => ProcedureKind.Notifies,
+            "command" => ProcedureKind.Command,
+            _ => throw new ArgumentException($"no kind {procedureKind}", nameof(procedureKind)),
+        };
     }
 
     // definition
@@ -169,13 +201,16 @@ public sealed class IdentitiesTests
     /// <summary>The names of every entry of <c>folds</c>.</summary>
     public static TheoryData<string> Folds { get; } = PlayedOf("folds");
 
+    /// <summary>The names of every entry of <c>procedureKinds</c>.</summary>
+    public static TheoryData<string> ProcedureKinds { get; } = PlayedOf("procedureKinds");
+
     [Theory]
     [MemberData(nameof(Names))]
     public Task Declares_each_name_each_way_taken_or_refused_off_its_form_declaring_nothing(string name)
     {
         var entry = EntryOf(("names", name));
 
-        return PlaysEachWay(Echo with { ProcedureName = entry.GetProperty("procedureName").GetString()! }, RefusedOf(entry));
+        return PlaysEachWay(Echo with { ProcedureName = entry.GetProperty("procedureName").GetString()! }, entry);
     }
 
     [Theory]
@@ -192,7 +227,22 @@ public sealed class IdentitiesTests
             ServiceRevision = serviceRevision!.Value,
         };
 
-        return PlaysEachWay(procedure, RefusedOf(entry));
+        return PlaysEachWay(procedure, entry);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProcedureKinds))]
+    public Task Declares_each_procedure_kind_each_way_taken_or_refused_against_its_kind_at_the_ways_that_do_not_take_it_after_its_range_and_its_form(string name)
+    {
+        var entry = EntryOf(("procedureKinds", name));
+        var procedure = Echo with
+        {
+            ProcedureKind = entry.TryGetProperty("procedureKind", out var procedureKind) ? KindOf(procedureKind.GetString()!) : null,
+            ProcedureName = entry.TryGetProperty("procedureName", out var procedureName) ? procedureName.GetString()! : Echo.ProcedureName,
+            ServiceId = entry.TryGetProperty("serviceId", out var serviceId) ? serviceId.GetUInt16() : Echo.ServiceId,
+        };
+
+        return PlaysEachWay(procedure, entry);
     }
 
     [Theory]
@@ -241,6 +291,7 @@ public sealed class IdentitiesTests
         Assert.Equal(17, excused.Count);
         Assert.DoesNotContain(Root.GetProperty("names").EnumerateArray(), IsExcused);
         Assert.DoesNotContain(Root.GetProperty("folds").EnumerateArray(), IsExcused);
+        Assert.DoesNotContain(Root.GetProperty("procedureKinds").EnumerateArray(), IsExcused);
         Assert.Contains("revision -1", Ids.Select((row) =>
         {
             return row.Data;
@@ -249,6 +300,30 @@ public sealed class IdentitiesTests
 
     // a resolver of a procedure, which no call reaches
     private sealed class Resolver(Procedure procedure) : IRequestResolver
+    {
+        public Procedure Procedure { get; } = procedure;
+
+        public int? MaximumPayloadBytes
+        {
+            get
+            {
+                return null;
+            }
+        }
+
+        public Failure? Admit(AdmissionRequest request)
+        {
+            return null;
+        }
+
+        public Task Handle(RequestResolverProps props)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    // a resolver of a procedure that notifies, which no call reaches
+    private sealed class NotifyingResolver(Procedure procedure) : INotificationResolver
     {
         public Procedure Procedure { get; } = procedure;
 

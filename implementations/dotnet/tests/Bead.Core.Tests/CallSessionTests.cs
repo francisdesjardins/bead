@@ -105,8 +105,8 @@ public sealed class CallSessionTests
             new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "é" });
 
         // where a subscription is held: the connection's session apart from every credential's
-        Assert.NotEqual(new SubscriptionPlace("first", null), new SubscriptionPlace("first", grace));
-        Assert.Equal(new SubscriptionPlace("first", grace), new SubscriptionPlace("first", grace with { }));
-        Assert.NotEqual(new SubscriptionPlace("first", grace), new SubscriptionPlace("second", grace));
+        Assert.NotEqual(new Subscriber { ConnectionHandle = "first" }, new Subscriber { ConnectionHandle = "first", Identifier = grace });
+        Assert.Equal(new Subscriber { ConnectionHandle = "first", Identifier = grace }, new Subscriber { ConnectionHandle = "first", Identifier = grace with { } });
+        Assert.NotEqual(new Subscriber { ConnectionHandle = "first", Identifier = grace }, new Subscriber { ConnectionHandle = "second", Identifier = grace });
     }
 }

@@ -42,7 +42,7 @@ public sealed record BeadHttpClientOptions
 /// await client.Connect(new HttpConnectOptions { Host = host, Port = port });
 /// </code>
 /// </example>
-public sealed class BeadHttpClient : IAsyncDisposable
+public sealed class BeadHttpClient : IClient
 {
     // ends with the client: a reconnection it started must not outlive it
     private readonly CancellationTokenSource _lifetime = new();

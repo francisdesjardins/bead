@@ -95,6 +95,45 @@ public sealed class FailureException : Exception
         }
     }
 
+    /// <summary>Whether this is the procedure's own failure, whatever its code.</summary>
+    public bool IsApplication()
+    {
+        return Scope == FailureScope.Application;
+    }
+
+    /// <summary>Whether this is the procedure's own failure <paramref name="code"/>, never a protocol code of the same number.</summary>
+    public bool IsApplication(ushort code)
+    {
+        return Scope == FailureScope.Application && Code == code;
+    }
+
+    /// <summary>Whether this is the procedure's own failure, one of <paramref name="codes"/>.</summary>
+    public bool IsApplication(IReadOnlyCollection<ushort> codes)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        return Scope == FailureScope.Application && codes.Contains(Code);
+    }
+
+    /// <summary>
+    /// Whether this is the protocol's <paramref name="code"/> — raised by the peer, here, or behind a
+    /// relay — and by <paramref name="side"/>, when given. A failure through a relay has no side
+    /// known, so it never passes with one: its scope, which travels, is what tells the protocol's
+    /// codes from a procedure's.
+    /// </summary>
+    public bool IsProtocol(ProtocolCode code, RouterSide? side = null)
+    {
+        return Scope == FailureScope.Protocol && Code == (ushort)code && (side is null || side == Side);
+    }
+
+    /// <summary>As <see cref="IsProtocol(ProtocolCode, RouterSide?)"/>, for one of <paramref name="codes"/>.</summary>
+    public bool IsProtocol(IReadOnlyCollection<ProtocolCode> codes, RouterSide? side = null)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        return Scope == FailureScope.Protocol && codes.Contains((ProtocolCode)Code) && (side is null || side == Side);
+    }
+
     /// <summary>
     /// One of the protocol's failures, as a router of <paramref name="side"/> raises it here.
     /// </summary>

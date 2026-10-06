@@ -114,7 +114,11 @@
     },
     {
       // the gates' CLIs, the commands `check` runs: stdout is their whole output contract
-      "files": ["tools/check-comment-budget.mjs", "tools/check-examples.mjs"],
+      "files": [
+        "tools/check-comment-budget.mjs",
+        "tools/check-examples.mjs",
+        "tools/check-protobuf.mjs"
+      ],
       "rules": {
         "no-console": "off",
         "curly": "off",
@@ -133,6 +137,9 @@
     "**/test-results/**",
     "**/coverage/**",
     "**/*.d.ts",
+    // protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to its
+    // generator
+    "**/*_pb.ts",
     ".yarn/**"
   ]
 }

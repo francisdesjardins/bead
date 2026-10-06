@@ -168,6 +168,8 @@ const keptOf = (filter: string): { calls: number[]; envelopes: number[] } => {
 // definition
 
 test.describe('the debug filters', () => {
+  test.describe.configure({ retries: 0 });
+
   for (const { filter, keeps, name, parsed, refused } of FILTERS) {
     test(name, () => {
       if (refused !== undefined) {
@@ -205,6 +207,8 @@ test.describe('the debug filters', () => {
 });
 
 test.describe('the debug filters given as functions', () => {
+  test.describe.configure({ retries: 0 });
+
   for (const { listener: whose, name, steps } of SOURCES) {
     test(name, () => {
       // what the function does now: gives a filter, or throws

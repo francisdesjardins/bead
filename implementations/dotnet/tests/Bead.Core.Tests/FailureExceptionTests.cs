@@ -66,4 +66,42 @@ public sealed class FailureExceptionTests
             "client protocol failure 77",
             new FailureException(failure, new FailureException.Raised(FailureOrigin.Peer, RouterSide.Client)).Message);
     }
+
+    [Fact]
+    public void IsProtocol_matches_the_protocol_codes_and_the_side_when_given_through_a_relay_the_code_alone()
+    {
+        var error = FailureException.OfReceived(Failure.OfProtocol(ProtocolCode.ServiceUnknown), RouterSide.Client);
+
+        Assert.True(error.IsProtocol(ProtocolCode.ServiceUnknown));
+        Assert.True(error.IsProtocol([ProtocolCode.ProcedureUnknown, ProtocolCode.ServiceUnknown]));
+        Assert.False(error.IsProtocol(ProtocolCode.ProcedureUnknown));
+        Assert.True(error.IsProtocol(ProtocolCode.ServiceUnknown, RouterSide.Server));
+        Assert.False(error.IsProtocol(ProtocolCode.ServiceUnknown, RouterSide.Client));
+        Assert.False(error.IsApplication());
+
+        var relayed = FailureException.OfReceived(Failure.OfProtocol(ProtocolCode.ServiceUnknown) with { Relays = 1 }, RouterSide.Client);
+
+        // its scope travelled with it; who raised it did not
+        Assert.True(relayed.IsProtocol(ProtocolCode.ServiceUnknown));
+        Assert.False(relayed.IsProtocol(ProtocolCode.ProcedureUnknown));
+        Assert.False(relayed.IsProtocol(ProtocolCode.ServiceUnknown, RouterSide.Server));
+        Assert.False(relayed.IsProtocol(ProtocolCode.ServiceUnknown, RouterSide.Client));
+    }
+
+    [Fact]
+    public void IsApplication_matches_the_procedure_s_own_codes_never_a_protocol_code_of_the_same_number()
+    {
+        var error = FailureException.OfReceived(Failure.OfApplication(21), RouterSide.Client);
+
+        Assert.True(error.IsApplication());
+        Assert.True(error.IsApplication(21));
+        Assert.True(error.IsApplication([7, 21]));
+        Assert.False(error.IsApplication(7));
+        Assert.False(error.IsProtocol(ProtocolCode.SubscriptionUnknown));
+
+        var protocol = FailureException.OfProtocol(ProtocolCode.SubscriptionUnknown, RouterSide.Server);
+
+        Assert.False(protocol.IsApplication());
+        Assert.False(protocol.IsApplication(21));
+    }
 }

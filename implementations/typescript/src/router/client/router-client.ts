@@ -12,7 +12,7 @@ import { connectionSessionOf, presentedCredentialOf, uncarriedOf } from '../shar
 import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { FailureError } from '../shared/errors';
-import { checkDeclaration } from '../shared/identity';
+import { checkDeclaration, checkProcedureKind } from '../shared/identity';
 import type { IHearingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
@@ -549,6 +549,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
     declareRequester: (procedure) => {
       checkDeclaration(procedure);
+      checkProcedureKind(procedure, 'client-requester');
 
       return metrics?.declareRequester(procedure);
     },
@@ -561,9 +562,11 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       );
     },
     registerNotification: (notification) => {
-      // * spec 16.10: its identity first, before the router's reasons and its registry's
+      // * spec 16.10: its identity first, then its kind, before the router's reasons and its
+      // registry's
       try {
         checkDeclaration(notification);
+        checkProcedureKind(notification, 'client-notification');
       } catch (reason) {
         return Promise.reject(toError(reason));
       }
@@ -590,6 +593,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       return Promise.resolve();
     },
     registerResolver: (resolver) => {
+      // * spec 16.10: its identity, then its kind, before the core's reasons and its registry's
+      checkDeclaration(resolver);
+      checkProcedureKind(resolver, 'client-resolver');
       core.registerResolver(resolver);
     },
     report,

@@ -320,7 +320,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         var mark = _transport.Sent.Count;
 
-        await Router.Notify(BytesOf(Probe), new NotifyRequest(procedure.Address, null, null)).WaitAsync(Patience, Cancelled);
+        await Router.Notify(BytesOf(Probe), new NotifyRequest { Procedure = procedure.Address }).WaitAsync(Patience, Cancelled);
         await Settle();
 
         var reached = _transport.Sent.Skip(mark).Select((entry) =>
@@ -811,9 +811,9 @@ public sealed partial class RouterServerTests : IDisposable
             })];
         }
 
-        bool IsNotFirst(string connectionHandle, SessionIdentifier? identifier)
+        bool IsNotFirst(Subscriber subscriber)
         {
-            return connectionHandle != First;
+            return subscriber.ConnectionHandle != First;
         }
 
         Assert.Equal(["first", "second", "third"], await Reached());
@@ -836,9 +836,9 @@ public sealed partial class RouterServerTests : IDisposable
             return response.Answer("ok");
         });
 
-        bool Filter(string connectionHandle, SessionIdentifier? identifier)
+        bool Filter(Subscriber subscriber)
         {
-            if (connectionHandle == Second)
+            if (subscriber.ConnectionHandle == Second)
             {
                 throw failure;
             }
@@ -860,7 +860,7 @@ public sealed partial class RouterServerTests : IDisposable
         // manager tells nowhere yet: it is seen here as the router's notify throws it
         var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return Router.Notify(BytesOf("flash"), new NotifyRequest(News.Address, Filter, null)).WaitAsync(Patience, Cancelled);
+            return Router.Notify(BytesOf("flash"), new NotifyRequest { Procedure = News.Address, Filter = Filter }).WaitAsync(Patience, Cancelled);
         });
 
         Assert.Same(failure, thrown);
@@ -915,7 +915,7 @@ public sealed partial class RouterServerTests : IDisposable
         await Settle();
         _transport.Sent.Clear();
 
-        await Router.Notify(new byte[0x1000001], new NotifyRequest(News.Address, null, null)).WaitAsync(Patience, Cancelled);
+        await Router.Notify(new byte[0x1000001], new NotifyRequest { Procedure = News.Address }).WaitAsync(Patience, Cancelled);
         await Settle();
 
         Assert.Empty(_transport.Sent);
@@ -938,8 +938,8 @@ public sealed partial class RouterServerTests : IDisposable
         _transport.Sent.Clear();
 
         // its header takes 8 bytes of the 64
-        await Router.Notify(new byte[57], new NotifyRequest(News.Address, null, null)).WaitAsync(Patience, Cancelled);
-        await Router.Notify(new byte[56], new NotifyRequest(News.Address, null, null)).WaitAsync(Patience, Cancelled);
+        await Router.Notify(new byte[57], new NotifyRequest { Procedure = News.Address }).WaitAsync(Patience, Cancelled);
+        await Router.Notify(new byte[56], new NotifyRequest { Procedure = News.Address }).WaitAsync(Patience, Cancelled);
         await Settle();
 
         Assert.Equal(["PayloadTooLarge first", "PayloadTooLarge second"], Reported());
@@ -1847,9 +1847,9 @@ public sealed partial class RouterServerTests : IDisposable
                 word,
                 new NotifyOptions
                 {
-                    Filter = (connectionHandle, _) =>
+                    Filter = (subscriber) =>
                     {
-                        return connectionHandle == First;
+                        return subscriber.ConnectionHandle == First;
                     },
                 }).WaitAsync(Patience, Cancelled);
         }

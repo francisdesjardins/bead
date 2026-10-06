@@ -21,8 +21,26 @@ public readonly record struct ProcedureAddress(ushort ServiceId, ushort Procedur
 public readonly record struct CallAddress(uint CallId, string ConnectionHandle);
 
 /// <summary>
+/// A procedure's kind, how it is called: a request, a request that may also notify (spec 11.2), or a
+/// command a server makes of a client (spec 16.11). Never an envelope's kind, which is
+/// <c>REQUEST</c> for every call, nor a debug event's <see cref="DebugEvent.Type"/>, which is a
+/// step's.
+/// </summary>
+public enum ProcedureKind
+{
+    /// <summary>A request a client makes of its server.</summary>
+    Request,
+
+    /// <summary>A request whose call may open a subscription to its notifications.</summary>
+    Notifies,
+
+    /// <summary>A request a server makes of a client.</summary>
+    Command,
+}
+
+/// <summary>
 /// One procedure of one service, which names what is made for it. A router refuses to declare one
-/// out of its range or off its form, as it is declared (spec 16.10).
+/// out of its range, off its form, or against its kind, as it is declared (spec 16.10).
 /// </summary>
 public sealed record Procedure
 {
@@ -57,6 +75,15 @@ public sealed record Procedure
     /// <c>Deprecated</c> at each call, and its message says what to use instead, when it says.
     /// </summary>
     public ProcedureDeprecation? Deprecation { get; init; }
+
+    // ! named as its type: inside this record, ProcedureKind is this property, so a member written
+    // here names the enum Bead.ProcedureKind
+    /// <summary>
+    /// Its kind, how it is called, which each router checks as it is declared, by the way it is
+    /// declared (spec 16.11); none checks nothing. Never an envelope's kind, which is <c>REQUEST</c>
+    /// for every call, nor a debug event's <see cref="DebugEvent.Type"/>, which is a step's.
+    /// </summary>
+    public ProcedureKind? ProcedureKind { get; init; }
 
     /// <summary>Where the procedure is.</summary>
     public ProcedureAddress Address

@@ -475,8 +475,11 @@ export const offerInterop = (server: InteropServer): void => {
       const held = holdsKeyOf(request);
 
       await ticks.notify(value, {
-        filter: (handle, identifier) => {
-          return handle === connectionHandle && sessionKeyOf(identifier) === sessionKey;
+        filter: (subscriber) => {
+          return (
+            subscriber.connectionHandle === connectionHandle &&
+            sessionKeyOf(subscriber.identifier) === sessionKey
+          );
         },
         ...(key === undefined ? {} : { key }),
       });

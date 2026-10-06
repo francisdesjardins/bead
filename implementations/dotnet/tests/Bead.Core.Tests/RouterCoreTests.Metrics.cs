@@ -289,7 +289,8 @@ public sealed partial class RouterCoreTests
     public async Task Allocates_not_a_byte_more_for_a_call_it_counts_than_for_one_it_does_not()
     {
         // what a call made and a call answered allocate on the router's thread, from the request
-        // taken to the answer settled, warmed up first so nothing is allocated once and for all
+        // taken to the answer settled: the least of eight rounds, since what else runs on the thread
+        // only ever adds bytes, and the first rounds allocate what is allocated once and for all
         async Task<(long Made, long Answered)> AllocatedOf(MetricsRegistry? given)
         {
             var client = new CountedPort((RouterSide.Client, given));
@@ -300,7 +301,7 @@ public sealed partial class RouterCoreTests
                 Header = new RequestHeader { CallId = 1, ServiceId = Echo.ServiceId, ProcedureId = Echo.ProcedureId },
                 Payload = new byte[] { 1 },
             });
-            var (made, answered) = (0L, 0L);
+            var (made, answered) = (long.MaxValue, long.MaxValue);
 
             server.Core.RegisterResolver(new Answering(server.Core));
 
@@ -320,7 +321,7 @@ public sealed partial class RouterCoreTests
                     client.Core.Receive(result, Handle);
                     client.Core.Post(() =>
                     {
-                        made = GC.GetAllocatedBytesForCurrentThread() - before;
+                        made = Math.Min(made, GC.GetAllocatedBytesForCurrentThread() - before);
                     });
 
                     return call;
@@ -337,7 +338,7 @@ public sealed partial class RouterCoreTests
                     {
                         server.Core.Post(() =>
                         {
-                            answered = GC.GetAllocatedBytesForCurrentThread() - before;
+                            answered = Math.Min(answered, GC.GetAllocatedBytesForCurrentThread() - before);
                         });
                     });
 

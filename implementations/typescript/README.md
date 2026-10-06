@@ -4,9 +4,9 @@ Bead is a binary wire protocol: the envelopes of a request, its result or failur
 notifications of a subscription and the commands a server sends back, written at fixed offsets.
 This project is its TypeScript implementation — a WebSocket, an HTTP and a Web Worker transport,
 each a client and a server, a client and a server router over them, the service, session and
-notification managers, and the client and server that put the three layers together. Nothing in
-it imports a framework at run time. The specification and the conformance files both sides play
-are in [`spec/`](../../spec/).
+notification managers, the client and server that put the three layers together, and the service
+layer a service is served and called through. Nothing in it imports a framework at run time. The
+specification and the conformance files both sides play are in [`spec/`](../../spec/).
 
 ```ts
 import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
@@ -209,7 +209,10 @@ client.router.on('credentialWithdrawn', () => {
 A request may name a `destinationId`, what it is for behind the peer, which a server's relay passes
 on to it — see [Relays](#relays). `router-server` runs over any transport server that meets
 `IRouterServerTransportLike`: it sends its own requests to the connection their options name — the
-types require one — and notifies the connections subscribed to a procedure.
+types require one — and notifies the connections subscribed to a procedure, those a filter among
+`notify`'s options keeps: it is handed each subscriber, `{ connectionHandle, identifier }`, the
+identifier the credential's session's it is held in, none for its connection's, and keeps those it
+returns `true` for.
 
 A subscription is the call that made it, left open. The request says it opens one: a client sets the
 SUBSCRIPTION flag on a call that subscribes a notification, and a server subscribes the requester of
@@ -237,7 +240,8 @@ window: 1 })` sets PACED beside SUBSCRIPTION, and the server then sends a notifi
 the client has credited one, the first by asking. The client credits the next once every callback of
 the one before has settled, the promises they return included, so a callback that fetches hears
 nothing meanwhile, then the latest; a `window` of more lets that many be under way, renewed at half,
-as a transfer's credit is. The credit is a CREDIT with PACED on the subscription's call id: the
+as a transfer's credit is. A service manager holds one notification per procedure, at one window:
+asked for again at another, or with none against one, it is a `ProgrammerError`. The credit is a CREDIT with PACED on the subscription's call id: the
 count of notifications the server may have sent, absolute, as RSocket's `REQUEST_N` counts its
 demand; PACED tells it apart from a transfer's credit, in bytes, which a subscription's result may
 share the call id with. Past its credit, a notification waits in its subscription's queue. The code
@@ -378,6 +382,127 @@ await server.transport.start({ port });
 ```
 
 `http-client` and `http-server` are the same over HTTP — see [HTTP](#http).
+
+### The service layer
+
+`@francisdesjardins/bead/service` is the layer a service is served and called through, and the one
+entry generated code imports
+([0018](../../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
+A service is its procedures, each a typed descriptor — `requestOf` for a request, `notification`
+given for one that notifies, `commandOf` for a command — holding its procedure, who may call it, the
+failures it lists, and its payloads' codecs; its failures are a catalogue, `failuresOf`:
+
+```ts
+const { text } = PAYLOAD_CODECS;
+
+export const GreeterFailures = failuresOf({ codes: { NOBODY_TO_GREET: 1 }, serviceId: 7 });
+
+export const GreeterProcedures = Object.freeze({
+  clock: commandOf({
+    admission: 'none',
+    failures: {},
+    procedure: { procedureId: 9, procedureName: 'clock', serviceId: 7, serviceRevision: 1 },
+    request: text,
+    result: text,
+  }),
+  news: requestOf({
+    admission: 'session',
+    failures: {},
+    notification: text,
+    procedure: { procedureId: 2, procedureName: 'news', serviceId: 7, serviceRevision: 1 },
+    request: text,
+    result: text,
+  }),
+  sayHello: requestOf({
+    admission: { hook: 'polite' },
+    failures: { NOBODY_TO_GREET: 1 },
+    procedure: { procedureId: 1, procedureName: 'sayHello', serviceId: 7, serviceRevision: 1 },
+    request: text,
+    result: text,
+  }),
+});
+```
+
+A descriptor sets its procedure's kind, `procedureKind` — `request`, `notifies` or `command` — and
+each router checks it as the procedure is declared, by the way it is declared (spec 16.11): a
+requester on a client's router takes a request, and one that notifies; on a server's, a command; a
+resolver on a server's, a request where it notifies nothing and one that notifies where it
+notifies; on a client's, a command; a notification, one that notifies. A procedure written by hand
+may state its `procedureKind`, and one that states none is taken every way. A procedure's kind is
+never its envelopes': every call opens with a `REQUEST`, a command's too. A procedure the runtime
+hands out is a function that carries its procedure's members, read bare.
+
+The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last reading a `JsonValue`
+and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
+functions, a protobuf message's from protobuf-es's `fromBinary(schema, bytes, { recursionLimit:
+101 })` and `toBinary` — 101, since protobuf-es counts the top message, and section 17.9 bounds a
+message 100 deep below it.
+
+```ts
+const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
+  admissions: {
+    polite: {
+      admits: ({ session }) => {
+        return session !== undefined;
+      },
+      detail: 'a greeting needs a session',
+    },
+  },
+});
+
+greeter.on('sayHello', (request, response) => {
+  return request.payload === ''
+    ? response(null, GreeterFailures.of('NOBODY_TO_GREET', 'a name is needed'))
+    : response(`Hello, ${request.payload}!`);
+});
+greeter.offer(server);
+
+await greeter.notify.news('a new greeting', { key: 'latest' });
+await greeter.command.clock('now')({ connectionHandle });
+```
+
+The server side's `on` registers a resolver, before or after `offer`, once a procedure; `offer`
+binds every resolver, now and later, to one Bead server, once; `command.<name>` is a command's
+requester, made as the service is offered, a `ProgrammerError` called before; `notify.<name>`
+notifies a procedure's subscribers, and sends nothing before the service is offered; and
+`proceduresWithoutResolver()` lists what no `on` answers, which the router answers
+`PROCEDURE_UNKNOWN`. An admission rule is `none`; `session`, the server's `requireSession`; or a
+hook by name, `{ admits, detail }`, synchronous, refused `ACCESS_DENIED` with its detail: the
+options give every hook the procedures name, and a hook they lack, or one no procedure names, is a
+`ProgrammerError` as the server side is made. A resolver answers a result, a failure its procedure
+lists, `GreeterFailures.of(name, detail)`, or a refusal of admission; a code its procedure does not
+list, which only a cast reaches, goes as written and is reported through the router's `error`
+event.
+
+```ts
+const greeter = createServiceClient(GreeterProcedures, { client, windows: { news: 1 } });
+
+greeter.on('clock', (_request, response) => {
+  return response('noon');
+});
+
+const greeting = await greeter.request
+  .sayHello('Ada')({ timeout: 2_000 })
+  .catch((error: unknown) => {
+    return GreeterFailures.is(error, 'NOBODY_TO_GREET') ? 'nobody' : Promise.reject(error);
+  });
+
+await using news = await greeter.notifications.news('subscribe', (item) => {
+  render(item);
+})();
+```
+
+The client side makes a requester of each procedure its server answers, `request.<name>`, and a
+notification of each that notifies, `notifications.<name>`, at the window its caller gives, unpaced
+by default; a request to a procedure that notifies opens no subscription. Its `on` answers a
+command, its `session` admission refused with the client router's own `SESSION_REQUIRED`; a client
+side is given no hooks, so a command a hook admits is a `ProgrammerError` there. Each requester and
+resolver is declared once. A call stays curried, `request.sayHello(payload)(options)`: what the
+payload gives is a bound call, `IBoundCall`, or `IRegistrar` for a notification, whose `then` no
+promise matches, so `await greeter.request.sayHello('Ada')`, its options' call forgotten, does not
+compile. A descriptor may carry `validate`, which throws on a request its rules refuse: the side
+that answers calls it before the resolver, and a client whose options say `validates: true` before
+the request is written.
 
 ### Transfers
 
@@ -780,8 +905,10 @@ address — two names one when they are equal once their ASCII letters are read 
 16.6) — or of a service at another revision than it holds, is a `ProgrammerError` as it is made,
 never on a call, and so is one past `maximumProcedures`, the procedures each group of families names
 at most, 1,000 by default. Its router refuses first, whatever its registry, a declaration off
-section 16: an id or a revision out of its range, or a procedure's name off its form. A call it has no declaration for — a service or a
-procedure unknown, a request whose header does not read, a relayed call — counts under `_OTHER`.
+section 16: an id or a revision out of its range, a procedure's name off its form, or a procedure
+whose kind the way it is declared does not take, against its kind. A call it has no declaration
+for — a service or a procedure unknown, a request whose header does not read, a relayed call —
+counts under `_OTHER`.
 Each series is made at 0 as its procedure is declared, so an alert reads it from its start and a
 rate sees the first call.
 
@@ -1008,21 +1135,23 @@ router's `respond`.
 **The names, and the words they are chosen over.** Every name says one thing, and none is
 abbreviated ([0003](../../docs/decisions/0003-one-word-one-meaning.md)).
 
-| Not                           | Bead says                               | Why                                                                                                                                             |
-| ----------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| message id                    | `callId`                                | one number pairs a request, its answer, its cancel and its notifications: odd from a client, even from a server                                 |
-| frame, frame type             | envelope, `kind`                        | a frame is what WebSocket carries the envelope in                                                                                               |
-| header version                | the layout byte, `0xA1`                 | the first byte says how the rest is laid out                                                                                                    |
-| error info beside the payload | a FAILURE, whose payload is the failure | a failure travels once                                                                                                                          |
-| function id, function name    | `procedureId`, `procedureName`          | no abbreviation                                                                                                                                 |
-| service version               | `serviceRevision`                       | the version is the protocol's                                                                                                                   |
-| device id                     | `destinationId`                         | what is behind the peer, which a relay passes the call on to                                                                                    |
-| session id                    | an `OPAQUE` `credential`                | 16 bytes, announced only when it changes                                                                                                        |
-| auth type, token type         | a credential scheme, `credentialScheme` | a type is a media type's or a language's, and a bare scheme a URI's: the credential scheme names a format, as HTTP's authentication scheme does |
-| notification id               | the subscribing call's `callId`         | nothing of it travels in a payload                                                                                                              |
-| req, res, err                 | `request`, `response`, `failure`        | no abbreviation                                                                                                                                 |
-| exclude self                  | `exclude`                               | it names the connection to leave out                                                                                                            |
-| an error with a code          | `FailureError`                          | it says its side, its scope and where it was raised                                                                                             |
+| Not                           | Bead says                                    | Why                                                                                                                                             |
+| ----------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| message id                    | `callId`                                     | one number pairs a request, its answer, its cancel and its notifications: odd from a client, even from a server                                 |
+| frame, frame type             | envelope, `kind`                             | a frame is what WebSocket carries the envelope in                                                                                               |
+| header version                | the layout byte, `0xA1`                      | the first byte says how the rest is laid out                                                                                                    |
+| error info beside the payload | a FAILURE, whose payload is the failure      | a failure travels once                                                                                                                          |
+| function id, function name    | `procedureId`, `procedureName`               | no abbreviation                                                                                                                                 |
+| service version               | `serviceRevision`                            | the version is the protocol's                                                                                                                   |
+| device id                     | `destinationId`                              | what is behind the peer, which a relay passes the call on to                                                                                    |
+| session id                    | an `OPAQUE` `credential`                     | 16 bytes, announced only when it changes                                                                                                        |
+| auth type, token type         | a credential scheme, `credentialScheme`      | a type is a media type's or a language's, and a bare scheme a URI's: the credential scheme names a format, as HTTP's authentication scheme does |
+| notification id               | the subscribing call's `callId`              | nothing of it travels in a payload                                                                                                              |
+| req, res, err                 | `request`, `response`, `failure`             | no abbreviation                                                                                                                                 |
+| exclude self                  | `exclude`                                    | it names the connection to leave out                                                                                                            |
+| procedure type                | `procedureKind`                              | a type is a debug event's step; a procedure's kind is how it is called, never its envelopes'                                                    |
+| API server, API client        | `createServiceServer`, `createServiceClient` | each serves or calls one service, and _API_ is an abbreviation                                                                                  |
+| an error with a code          | `FailureError`                               | it says its side, its scope and where it was raised                                                                                             |
 
 Four names mean exactly this, and no more. `hasNotification` asks whether the router holds this very
 notification, not any of its procedure's. `registerNotification` holds a notification on a client's

@@ -1161,10 +1161,22 @@ reasons that applies, before any reason of its own; a declaration refused declar
 | ------------------ | --------------------------------------------------------------------------------------------------------- |
 | `out of its range` | a service id, a procedure id or a revision outside 16.2, service 0 (16.3), or one that is no whole number |
 | `off its form`     | a procedure's name that is no `procedure-name` (16.4, 16.5)                                               |
+| `against its kind` | a procedure whose kind the way it is declared does not take (16.11)                                       |
 
 A side's sentences are its own; a C side reports a code. A side built without the trace and the
-metrics (`debugging.md` section 1.2), which keeps no names, refuses `out of its range` alone, its
-names those of the manifest its tables were generated from.
+metrics (`debugging.md` section 1.2), which keeps no names, never refuses `off its form`, its names
+those of the manifest its tables were generated from.
+
+16.11. A procedure's definition may name its kind, how it is called: `request`, a request a client
+makes of its server; `notifies`, such a request to a procedure that notifies, which may open a
+subscription to it (section 11.2); or `command`, a request a server makes of a client (section
+9.1). A procedure's kind is never its envelopes': every call opens with a `REQUEST` (sections 3.1,
+9.1), a command's too; and the trace types a call to a procedure that notifies `request`
+(`debugging.md` section 4.1). A requester made on a client's router takes `request` and
+`notifies`, and one made on a server's takes `command`; a resolver registered on a server's router
+takes `request` where it notifies nothing, and `notifies` where it notifies; one registered on a
+client's router takes `command`; and a notification registered on a client's router takes
+`notifies`. Every way takes a procedure whose definition names no kind.
 
 ## 17. Payloads
 
@@ -1172,9 +1184,9 @@ _Codecs: `spec/codecs.json`._
 
 17.1. A payload is bytes to the envelope (section 6.1), and its procedure reads them: a procedure's
 request, its result and its notifications are each of one encoding, which the procedure's definition
-names and no envelope carries. This section states three, `raw`, `text` and `json`. A side reads a
-payload once it is whole (section 12.6), before its resolver or its caller sees it, and writes one as
-its encoding says. A relay reads none (section 14.2).
+names and no envelope carries. This section states four, `raw`, `text`, `json` and `proto`. A side
+reads a payload once it is whole (section 12.6), before its resolver or its caller sees it, and
+writes one as its encoding says. A relay reads none (section 14.2).
 
 17.2. A payload that does not read, or a value that does not write, fails where it is:
 
@@ -1252,3 +1264,20 @@ and a payload read and written again is its canonical form: an echo answers
 ```text
 7B 22 61 22 3A 31 2C 22 62 22 3A 22 4A 6F 73 C3 A9 22 7D
 ```
+
+17.9. `proto`: the payload is a protobuf message in protobuf's binary wire format, its message the
+one the procedure's definition names. What that format takes, refuses and writes is protobuf's, as
+its [Encoding](https://protobuf.dev/programming-guides/encoding/) guide and its
+[Language Guide](https://protobuf.dev/programming-guides/proto3/) state it; this section restates
+none of it, and a side reads and writes through its stock protobuf library and the code its
+generator writes for the message. What is Bead's:
+
+1. Bytes that are no encoding of the message do not read (section 17.2).
+2. An empty payload is the message with no field set.
+3. A reader MUST refuse a message nested more than 100 deep below the top one, and sets that bound
+   in its library rather than leaving it to the library's default.
+4. A string's leading U+FEFF is a character of it (section 17.4.2).
+
+Where two stock libraries part on what protobuf states no rule of, the support matrix says what
+each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of
+`spec/codecs.proto`.

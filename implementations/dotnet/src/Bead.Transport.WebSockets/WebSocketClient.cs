@@ -31,7 +31,7 @@ public sealed record WebSocketClientOptions
 /// transport's clock. What an application
 /// starts from.
 /// </summary>
-public sealed class WebSocketClient : IAsyncDisposable
+public sealed class WebSocketClient : IClient
 {
     // ends with the client: a reconnection it started must not outlive it
     private readonly CancellationTokenSource _lifetime = new();

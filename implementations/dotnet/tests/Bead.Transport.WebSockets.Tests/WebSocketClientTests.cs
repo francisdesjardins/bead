@@ -43,7 +43,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         return document.RootElement.Clone();
     }
 
-    private Func<JsonElement, Requester<JsonElement>> RequesterOf(string procedureName)
+    private Func<JsonElement, BoundCall<JsonElement>> RequesterOf(string procedureName)
     {
         return _client.Services.GetRequest(
             InteropService.ProcedureOf(procedureName),
@@ -62,6 +62,17 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         await _client.DisposeAsync();
         await _server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Each_client_is_an_IClient()
+    {
+        await using var client = new WebSocketClient();
+
+        var beadClient = Assert.IsAssignableFrom<IClient>(client);
+
+        Assert.Same(client.Router, beadClient.Router);
+        Assert.Same(client.Services, beadClient.Services);
     }
 
     [Fact]

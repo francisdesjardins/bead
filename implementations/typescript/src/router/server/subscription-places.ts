@@ -7,8 +7,14 @@ import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { sessionKeyOf } from '../shared/call-session';
 import type { INotifyingSeries } from '../shared/metrics-registry';
-import type { CallId, ICallAddress, IProcedureAddress, SessionIdentifier } from '../shared/types';
-import type { INotificationManager, ISubscriber, ISubscribingCall } from './types';
+import type {
+  CallId,
+  ICallAddress,
+  IProcedureAddress,
+  ISubscriber,
+  SessionIdentifier,
+} from '../shared/types';
+import type { INotificationManager, ISubscribingCall } from './types';
 
 // types
 
@@ -50,7 +56,7 @@ export interface ISubscriptionPlaces {
    * longer waits. A call in flight, registered from the moment it subscribes and still owed its
    * answer, is left to that answer.
    */
-  drop(subscriber: ISubscriber): ISubscribed[];
+  drop(subscriber: ISubscriber<TransportServerConnectionHandle>): ISubscribed[];
   /** The subscribing calls in flight and those waiting for a place, counted, and their connections. */
   gauges(): IGauges<TransportServerConnectionHandle>;
   /**

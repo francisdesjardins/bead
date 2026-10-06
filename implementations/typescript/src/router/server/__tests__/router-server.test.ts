@@ -1136,7 +1136,7 @@ test.describe('createRouterServer', () => {
       expect(await reached({ exclude: second })).toEqual([first, third]);
       expect(
         await reached({
-          filter: (connectionHandle) => {
+          filter: ({ connectionHandle }) => {
             return connectionHandle !== first;
           },
         })
@@ -1144,7 +1144,7 @@ test.describe('createRouterServer', () => {
       expect(
         await reached({
           exclude: third,
-          filter: (connectionHandle) => {
+          filter: ({ connectionHandle }) => {
             return connectionHandle !== first;
           },
         })
@@ -1177,7 +1177,7 @@ test.describe('createRouterServer', () => {
       sent.length = 0;
 
       await resolver.notify('flash', {
-        filter: (connectionHandle) => {
+        filter: ({ connectionHandle }) => {
           if (connectionHandle === second) {
             throw failure;
           }
@@ -2728,6 +2728,48 @@ test.describe('createRouterServer, credentials', () => {
     }).toThrow(ProgrammerError);
   });
 
+  test("hands the filter one subscriber, its connection and its session's identifier", async () => {
+    const { carry, deliver, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      credentials: {
+        verify: (carried) => {
+          return Promise.resolve({ data: carried, id: carried });
+        },
+      },
+    });
+    const notification = createServiceManager(router).getNotificationResolver(news, {
+      serializer: answering,
+    })((_request, response) => {
+      return response('subscribed');
+    });
+    const envelope = subscribingOf(3);
+    const seen: unknown[] = [];
+
+    deliver(first, subscribingOf(1));
+    carry(first, {
+      credential: 'ada',
+      envelope: {
+        ...envelope,
+        header: { ...envelope.header, credential: ELSEWHERE },
+      } as OutgoingEnvelope,
+    });
+    await sleep(0);
+
+    await notification.notify('to none', {
+      filter: (subscriber) => {
+        seen.push(subscriber);
+
+        return false;
+      },
+    });
+
+    // * its subscriber alone: nothing of the subscription's call reaches a filter
+    expect(seen).toStrictEqual([
+      { connectionHandle: first },
+      { connectionHandle: first, identifier: { id: 'ada', scheme: CredentialScheme.ELSEWHERE } },
+    ]);
+  });
+
   test('holds one subscription a procedure per session of a connection, its connection’s and each credential’s, each notified alone, and ends a credential’s by its identifier', async () => {
     const { carry, deliver, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport, {
@@ -2769,7 +2811,7 @@ test.describe('createRouterServer, credentials', () => {
     sent.length = 0;
 
     await notification.notify('to ada', {
-      filter: (_connectionHandle, identifier) => {
+      filter: ({ identifier }) => {
         return identifier !== undefined && 'id' in identifier && identifier.id === 'ada';
       },
     });
@@ -4138,7 +4180,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
 
     for (const word of ['a', 'b', 'c', 'd']) {
       await resolver.notify(word, {
-        filter: (connectionHandle) => {
+        filter: ({ connectionHandle }) => {
           return connectionHandle === first;
         },
       });

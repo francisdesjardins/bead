@@ -1,14 +1,16 @@
 // ── Codecs ────────────────────────────────────────────────────────────────────
 
 // Bead's codecs, `spec/codecs.json`, played against the TypeScript side's: each payload read, and
-// written back or refused, and each value written or refused, through the codec of its encoding.
-// The C# side plays the same file.
+// written back or refused, and each value written or refused, through its encoding's codec —
+// `proto`'s made by `payloadCodecOf` over the generated `Probe`. The C# side plays the same file.
 
 // dependencies
 
 import { readFileSync } from 'node:fs';
+import { create, fromBinary, type MessageInitShape, toBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
-import { type IPayloadCodec, PAYLOAD_CODECS } from '../payloads';
+import { type IPayloadCodec, PAYLOAD_CODECS, payloadCodecOf } from '../payloads';
+import { type Probe, ProbeSchema } from './codecs_pb';
 
 // interfaces
 
@@ -22,19 +24,34 @@ interface IDiffers {
 interface IEntry {
   clauses: string[];
   differs?: IDiffers[];
-  encoding: keyof typeof PAYLOAD_CODECS;
+  encoding: keyof typeof CODECS_BY_ENCODING;
   name: string;
   refused?: string;
   /** The bytes written, in hexadecimal, two digits each and a space between. */
   written?: string;
 }
 
-/** Bytes read, in hexadecimal. */
+/** Bytes read, in hexadecimal; of a `proto` payload taken, what its reader read of them. */
 interface IPayloadEntry extends IEntry {
   bytes: string;
+  read?: IProbeRead;
 }
 
-/** A value given to a writer, in one of the file's seven forms. */
+/** What a `proto` reader read of the top `Probe`: its text in UTF-16 code units, number, depth. */
+interface IProbeRead {
+  nested: number;
+  number: number;
+  text: string;
+}
+
+/** A `Probe` given to a writer, one field set or none: its text as UTF-16 code units. */
+interface IProbeValue {
+  child?: Record<string, never>;
+  number?: number;
+  text?: string;
+}
+
+/** A value given to a writer, in one of the file's eight forms. */
 interface IValueEntry extends IEntry {
   value: {
     bytes?: string;
@@ -43,6 +60,7 @@ interface IValueEntry extends IEntry {
     json?: unknown;
     nested?: number;
     number?: string;
+    probe?: IProbeValue;
     text?: string;
   };
 }
@@ -57,6 +75,23 @@ const LANGUAGE = 'TypeScript';
 
 // the string the form loneSurrogate names: a, U+D800, b
 const LONE_SURROGATE = `a${String.fromCharCode(0xd800)}b`;
+
+/**
+ * `Probe`'s codec, as generated code makes a `proto` binding's: protobuf-es's reader with spec
+ * 17.9.3's bound, and its writer over the initializer it takes.
+ */
+const PROBE_CODEC = payloadCodecOf<Probe, MessageInitShape<typeof ProbeSchema>>({
+  decode: (bytes) => {
+    // ! protobuf-es counts the top message: 101 is spec 17.9's 100 below it
+    return fromBinary(ProbeSchema, bytes, { recursionLimit: 101 });
+  },
+  encode: (given) => {
+    return toBinary(ProbeSchema, create(ProbeSchema, given));
+  },
+});
+
+// each encoding's codec, by the file's names
+const CODECS_BY_ENCODING = Object.freeze({ ...PAYLOAD_CODECS, proto: PROBE_CODEC });
 
 // helpers
 
@@ -73,6 +108,45 @@ const hexOf = (bytes: Uint8Array): string => {
     .toString('hex')
     .toUpperCase()
     .replace(/(..)(?!$)/g, '$1 ');
+};
+
+/** A string of the file's UTF-16 code units, four hexadecimal digits each and a space between. */
+const stringOfUnits = (units: string): string => {
+  return String.fromCharCode(
+    ...units
+      .split(' ')
+      .filter(Boolean)
+      .map((unit) => {
+        return Number.parseInt(unit, 16);
+      })
+  );
+};
+
+/** `text`'s UTF-16 code units, as the file writes them. */
+const unitsOf = (text: string): string => {
+  return Array.from({ length: text.length }, (_, index) => {
+    return text.charCodeAt(index).toString(16).toUpperCase().padStart(4, '0');
+  }).join(' ');
+};
+
+/** What a read of `probe` gives, as the file writes it: how many messages nest below it. */
+const readOf = (probe: Probe): IProbeRead => {
+  let nested = 0;
+
+  for (let child = probe.child; child !== undefined; child = child.child) {
+    nested += 1;
+  }
+
+  return { nested, number: probe.number, text: unitsOf(probe.text) };
+};
+
+/** A `Probe`'s initializer, as a row gives one. */
+const probeOf = ({ child, number, text }: IProbeValue): MessageInitShape<typeof ProbeSchema> => {
+  return {
+    ...(child === undefined ? {} : { child: {} }),
+    ...(number === undefined ? {} : { number }),
+    ...(text === undefined ? {} : { text: stringOfUnits(text) }),
+  };
 };
 
 /** Whether a row of the matrix excuses this side from `entry`. */
@@ -118,6 +192,10 @@ const valueOf = ({ value }: IValueEntry): unknown => {
     return nested;
   }
 
+  if (value.probe !== undefined) {
+    return probeOf(value.probe);
+  }
+
   if (value.form === 'loneSurrogate') {
     return LONE_SURROGATE;
   }
@@ -147,7 +225,9 @@ const thrownBy = (act: () => unknown): unknown => {
 // definition
 
 test.describe('the codecs', () => {
-  test('plays every entry of the file but the one a row of the matrix excuses this side from', () => {
+  test.describe.configure({ retries: 0 });
+
+  test('plays every entry of the file but those a row of the matrix excuses this side from', () => {
     expect(
       [...CODECS.payloads, ...CODECS.values]
         .filter((entry) => {
@@ -156,14 +236,39 @@ test.describe('the codecs', () => {
         .map(({ name }) => {
           return name;
         })
-    ).toEqual(['an object naming a member twice']);
+    ).toEqual(["a string's leading U+FEFF", 'an object naming a member twice']);
+  });
+
+  test('plays every encoding of the file through a codec of its own, and no other', () => {
+    const encodings = new Set(
+      [...CODECS.payloads, ...CODECS.values].map(({ encoding }) => {
+        return encoding;
+      })
+    );
+
+    expect([...encodings].toSorted()).toEqual(Object.keys(CODECS_BY_ENCODING).toSorted());
   });
 
   for (const entry of CODECS.payloads) {
     test(`payloads: ${entry.name}`, () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
-      const codec = PAYLOAD_CODECS[entry.encoding] as IPayloadCodec<unknown>;
+      if (entry.encoding === 'proto') {
+        const read = (): IProbeRead => {
+          return readOf(PROBE_CODEC.decode(bytesOf(entry.bytes)));
+        };
+
+        // * a refusal's class is protobuf-es's own: the words of a refusal are each side's
+        if (entry.refused === undefined) {
+          expect(read()).toEqual(entry.read);
+        } else {
+          expect(thrownBy(read)).toBeInstanceOf(Error);
+        }
+
+        return;
+      }
+
+      const codec = CODECS_BY_ENCODING[entry.encoding] as IPayloadCodec<unknown>;
 
       if (entry.refused !== undefined) {
         expect(
@@ -188,7 +293,7 @@ test.describe('the codecs', () => {
     test(`values: ${entry.name}`, () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
-      const codec = PAYLOAD_CODECS[entry.encoding] as IPayloadCodec<unknown>;
+      const codec = CODECS_BY_ENCODING[entry.encoding] as IPayloadCodec<unknown>;
       const value = valueOf(entry);
 
       if (entry.refused !== undefined) {
@@ -204,4 +309,39 @@ test.describe('the codecs', () => {
       expect(hexOf(codec.encode(value))).toBe(entry.written);
     });
   }
+
+  // * the matrix's rows of protobuf-es: where it parts from 17.9.4, and where Bead states no rule
+
+  test("a string's leading U+FEFF in a proto payload, as protobuf-es strips it", () => {
+    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 04 EF BB BF 61')))).toEqual({
+      nested: 0,
+      number: 0,
+      text: '0061',
+    });
+  });
+
+  test('a proto field at another wire type, as protobuf-es reads it', () => {
+    // its text at the varint wire type, and its number at the fixed32 one, refused; its number at
+    // the length-delimited one, an empty run, read as the number 0
+    expect(
+      thrownBy(() => {
+        return PROBE_CODEC.decode(bytesOf('08 61'));
+      })
+    ).toBeInstanceOf(Error);
+    expect(readOf(PROBE_CODEC.decode(bytesOf('12 00')))).toEqual({
+      nested: 0,
+      number: 0,
+      text: '',
+    });
+    expect(
+      thrownBy(() => {
+        return PROBE_CODEC.decode(bytesOf('15 01 02 03 04'));
+      })
+    ).toBeInstanceOf(Error);
+  });
+
+  test('a proto string holding a surrogate alone, as protobuf-es writes it', () => {
+    // U+FFFD in its place, where a text or a json writer refuses it
+    expect(hexOf(PROBE_CODEC.encode({ text: LONE_SURROGATE }))).toBe('0A 05 61 EF BF BD 62');
+  });
 });

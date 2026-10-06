@@ -16,6 +16,7 @@ import type {
   EnvelopeKind,
   FAILURE_KEYS,
   FailureScope,
+  ProcedureKind,
   ProtocolCode,
 } from './constants';
 import type { IJwtKey, Jwk, JwtAlgorithm } from './jwt-verifier';
@@ -818,10 +819,10 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
     payload: Uint8Array | Error,
     notification: {
       /**
-       * Whether a subscription gets it, by its connection and the session that holds it — a
-       * credential's, by its identifier; its connection's, none; each does when not given.
+       * Whether a subscription gets it, by its subscriber: its connection and the session that
+       * holds it; each does when not given.
        */
-      filter?: ((connectionHandle: Handle, identifier?: SessionIdentifier) => boolean) | undefined;
+      filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined;
       /** What it replaces, queued for a paced subscription: the one of the same key. */
       key?: NotificationKey | undefined;
       procedure: IProcedureAddress;
@@ -898,6 +899,15 @@ export interface ISessionRequest<Handle extends string = ConnectionHandle> {
    * its `POST`'s `Authorization`, as it came; none when nothing was carried.
    */
   transportCredential?: string | undefined;
+}
+
+/**
+ * Who holds a subscription: a connection, in a session of its own — a credential's, named by its
+ * identifier; its connection's session, which a call presenting none runs in, none.
+ */
+export interface ISubscriber<Handle extends string = ConnectionHandle> {
+  readonly connectionHandle: Handle;
+  readonly identifier?: SessionIdentifier | undefined;
 }
 
 // types
@@ -1051,6 +1061,25 @@ export type ServerConnectionHandle = 'server';
 // interfaces
 
 /**
+ * A call bound to its payload: called with its options, it goes. Never a promise: awaiting it, its
+ * options' call forgotten, is a compile error (TS1320), where it would send nothing.
+ */
+export interface IBoundCall<Result, Options extends unknown[] = RequestOptionsParameters<string>> {
+  (...options: Options): Promise<Result>;
+  /** Never set: what makes awaiting the bound call, its options' call forgotten, TS1320. */
+  readonly then?: (guard: never) => never;
+}
+
+/**
+ * A subscribing call bound to its payload and its callback: called with its options, it registers
+ * the callback, as {@link INotification} says.
+ */
+export type IRegistrar = IBoundCall<
+  INotificationRegistration,
+  [options?: Pick<IRequestOptions, 'destinationId' | 'signal' | 'timeout'>]
+>;
+
+/**
  * Which `debug` events a listener hears: those of a direction and a type among the ones given — any,
  * when none is — whose procedure's name matches one pattern of `include`, when there is one, and
  * none of `exclude`, which wins. A pattern is a name, whole, where `*` stands for any run of
@@ -1101,9 +1130,7 @@ export interface INotification<RequestPayload, NotificationPayload> extends INot
   (
     requestPayload: RequestPayload,
     callback: (notification: NotificationPayload) => unknown
-  ): (
-    options?: Pick<IRequestOptions, 'destinationId' | 'signal' | 'timeout'>
-  ) => Promise<INotificationRegistration>;
+  ): IRegistrar;
 }
 
 export interface INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload> {
@@ -1206,9 +1233,7 @@ export interface IRequest<
   ResponsePayload,
   Handle extends string = ConnectionHandle,
 > extends IProcedure {
-  (
-    requestPayload: RequestPayload
-  ): (...options: RequestOptionsParameters<Handle>) => Promise<ResponsePayload>;
+  (requestPayload: RequestPayload): IBoundCall<ResponsePayload, RequestOptionsParameters<Handle>>;
 }
 
 export interface IRequestDependencies<RequestPayload, ResponsePayload> {
@@ -1220,10 +1245,11 @@ export interface INotifyOptions<Handle extends string = ConnectionHandle> {
   /** A connection left out: the one whose request made the change, say. */
   exclude?: Handle | undefined;
   /**
-   * Whether a subscription gets it, by its connection and the session that holds it — a
-   * credential's, by its identifier; its connection's, none: those of one user, say.
+   * Whether a subscription gets it, by its subscriber — its connection and the session that holds
+   * it: those of one user, say. One argument, so what a subscriber holds may grow without breaking
+   * a filter.
    */
-  filter?: ((connectionHandle: Handle, identifier?: SessionIdentifier) => boolean) | undefined;
+  filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined;
   /**
    * What it is about — the entity whose state it carries, say — for a paced subscription: queued
    * past its credit, it replaces the one queued under the same key, in its place. None, it is queued
@@ -1311,6 +1337,12 @@ export interface IProcedure extends IProcedureAddress {
    */
   maximumPayloadBytes?: number | undefined;
   /**
+   * Its kind, how it is called (spec 16.11), which each router holds its declaration to; none given,
+   * nothing checks it. Never an envelope's kind, which is `REQUEST` for every call, nor a debug
+   * event's `type`, which is a step's.
+   */
+  procedureKind?: ProcedureKind | undefined;
+  /**
    * Its name, which labels what a side traces and counts and never travels: a lower-case ASCII
    * letter, then 62 ASCII letters and digits at most (spec 16.4); two names equal once their ASCII
    * letters are read in one case are one (16.6).
@@ -1374,8 +1406,8 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
    * A procedure whose answer is a subscription. One request goes out however many callbacks
    * register at once; once registered, a callback joins without a request. The same procedure
    * gives the same notification, since the router holds one per procedure; asking for it off spec
-   * section 16, checked first, or under another name, revision, deprecation or payload limit, is a
-   * {@link ProgrammerError}. A registration cancelled or
+   * section 16, checked first, or under another kind, name, revision, deprecation, payload limit or
+   * window — unpaced and paced are two — is a {@link ProgrammerError}. A registration cancelled or
    * timed out once its request went out cancels its call, so the other end holds no subscription for
    * it. The serializer of the first ask is the one kept: one procedure's payloads are one
    * procedure's.

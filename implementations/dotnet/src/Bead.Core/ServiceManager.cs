@@ -13,8 +13,8 @@ public interface IRouterLike
     TimeProvider Clock { get; }
 
     /// <summary>
-    /// Registers a resolver; one out of its range or off its form (spec 16.10), or a second one for
-    /// its procedure, is an <see cref="ArgumentException"/>.
+    /// Registers a resolver; one out of its range, off its form or against its kind (spec 16.10), or a
+    /// second one for its procedure, is an <see cref="ArgumentException"/>.
     /// </summary>
     void RegisterResolver(IRequestResolver resolver);
 
@@ -27,9 +27,9 @@ public interface IRouterLike
     /// <summary>
     /// Declares a requester of <paramref name="procedure"/> to the router's registry, as the
     /// requester is made (spec/debugging.md 7.2), and gives the series each of its calls carries as
-    /// <see cref="RouterRequest.Series"/>; one out of its range or off its form (spec 16.10), first,
-    /// or one the registry refuses, is an <see cref="ArgumentException"/>. A router given no
-    /// registry gives none.
+    /// <see cref="RouterRequest.Series"/>; one out of its range, off its form or against its kind
+    /// (spec 16.10), first, or one the registry refuses, is an <see cref="ArgumentException"/>. A
+    /// router given no registry gives none.
     /// </summary>
     ProcedureSeries? DeclareRequester(Procedure procedure);
 
@@ -41,12 +41,18 @@ public interface IRouterLike
     void Report(Exception reason, string? connectionHandle);
 
     /// <summary>
-    /// Notifies the connections subscribed to a procedure: a server's router does; or, given why its
-    /// value did not write in its payload's place (<see cref="NotifyRequest.Unwritten"/>), sends it to
-    /// none, counts it failed for each, and reports why once (spec 17.2, item 6). A client's, which
+    /// Notifies the connections subscribed to a procedure: a server's router does. A client's, which
     /// notifies nobody, throws an <see cref="InvalidOperationException"/>.
     /// </summary>
     Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request);
+
+    /// <summary>
+    /// A notification whose value did not write, given why in its payload's place: a server's router
+    /// sends it to none of the subscriptions it was for, counts it failed for each, and reports why
+    /// once (spec 17.2, item 6; spec/debugging.md 10.1). A client's, which notifies nobody, throws an
+    /// <see cref="InvalidOperationException"/>.
+    /// </summary>
+    Task Notify(Exception unwritten, NotifyRequest request);
 
     /// <summary>
     /// Subscribes the connection a request came from to that request's procedure, and gives the call
@@ -97,9 +103,9 @@ public sealed record RequestDependencies<TRequest, TResponse>
     public required IRequestSerializerClient<TRequest, TResponse> Serializer { get; init; }
 }
 
-/// <summary>One call of a procedure, its payload given: its options, when any, then its result.</summary>
+/// <summary>A call bound to its payload: given its options, when any, it goes, and gives its result.</summary>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
-public delegate Task<TResponse> Requester<TResponse>(RequestOptions? options = null);
+public delegate Task<TResponse> BoundCall<TResponse>(RequestOptions? options = null);
 
 /// <summary>
 /// How the side that answers a request reads it and writes the answer. A failure is the router's to
@@ -234,21 +240,30 @@ public interface IResponse<TPayload>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
 public delegate Task RequestResolverCallback<TRequest, TResponse>(RequestProps<TRequest> request, IResponse<TResponse> response);
 
-/// <summary>What a notification goes to: its procedure, which subscriptions, and its key.</summary>
-/// <param name="Procedure">The procedure that notifies.</param>
-/// <param name="Filter">
-/// Whether a subscription gets it, by its connection and the session that holds it — a
-/// credential's, by its identifier; its connection's, none; each does when none.
-/// </param>
-/// <param name="Key">What it replaces, queued for a paced subscription: the one of the same key.</param>
-public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, SessionIdentifier?, bool>? Filter, object? Key)
+/// <summary>
+/// Who holds a subscription: a connection, and the identifier of the session holding it — a
+/// credential's; none for its connection's (spec 11.3).
+/// </summary>
+public readonly record struct Subscriber
 {
-    /// <summary>
-    /// Why its value did not write, given in its payload's place, which is then empty: a server's
-    /// router sends it to none of the subscriptions it was for, counts it failed for each, and
-    /// reports it once (spec 17.2, item 6; spec/debugging.md 10.1). None for a payload written.
-    /// </summary>
-    public Exception? Unwritten { get; init; }
+    /// <summary>Its connection.</summary>
+    public required string ConnectionHandle { get; init; }
+
+    /// <summary>Its credential's session's identifier; none for its connection's session.</summary>
+    public SessionIdentifier? Identifier { get; init; }
+}
+
+/// <summary>What a notification goes to: its procedure, which subscriptions, and its key.</summary>
+public sealed record NotifyRequest
+{
+    /// <summary>The procedure that notifies.</summary>
+    public required ProcedureAddress Procedure { get; init; }
+
+    /// <summary>Whether a subscriber gets it; each does when none.</summary>
+    public Func<Subscriber, bool>? Filter { get; init; }
+
+    /// <summary>What it replaces, queued for a paced subscription: the one of the same key.</summary>
+    public object? Key { get; init; }
 }
 
 /// <summary>Who a notification goes to, as its code says: the connections, and what it is about.</summary>
@@ -258,10 +273,10 @@ public sealed record NotifyOptions
     public string? Exclude { get; init; }
 
     /// <summary>
-    /// Whether a subscription gets it, by its connection and the session that holds it — a
-    /// credential's, by its identifier; its connection's, none: those of one user, say.
+    /// Whether a subscriber gets it, by its connection and the identifier of the session that holds
+    /// its subscription: those of one user, say.
     /// </summary>
-    public Func<string, SessionIdentifier?, bool>? Filter { get; init; }
+    public Func<Subscriber, bool>? Filter { get; init; }
 
     /// <summary>
     /// What it is about — the entity whose state it carries — for a paced subscription: queued past
@@ -490,10 +505,11 @@ public sealed class ServiceManager
     /// <summary>
     /// The notification of <paramref name="procedure"/>, which callbacks register on: the first
     /// registration subscribes, by a request that opens a subscription — paced, with a window — and
-    /// the last one taken away unsubscribes. The same procedure asked for again gives the same
-    /// notification; asked for differently, it is an <see cref="InvalidOperationException"/>, after
-    /// its router's check: one out of its range or off its form (spec 16.10) is an
-    /// <see cref="ArgumentException"/> first.
+    /// the last one taken away unsubscribes. The same procedure asked for again, at the same window
+    /// or at none twice, gives the same notification; asked for differently, or at another window, it
+    /// is an <see cref="InvalidOperationException"/>, after its router's check: one out of its range
+    /// or off its form (spec 16.10) is an <see cref="ArgumentException"/> first, and one against its
+    /// call as its router holds it.
     /// </summary>
     public INotification<TRequest, TNotification> GetNotification<TRequest, TResponse, TNotification>(
         Procedure procedure,
@@ -514,6 +530,14 @@ public sealed class ServiceManager
                 {
                     throw new InvalidOperationException(
                         $"{procedure.ServiceId}/{procedure.ProcedureId} is already a notification, asked for otherwise");
+                }
+
+                // ! a window is the subscription's, unpaced and paced two of them: a second caller's
+                // kept in silence would pace it at the first's
+                if (same.Window != dependencies.Window)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedure.ServiceId}/{procedure.ProcedureId} is already a notification with {WindowOf(same.Window)}, not {WindowOf(dependencies.Window)}");
                 }
 
                 return same;
@@ -554,7 +578,7 @@ public sealed class ServiceManager
     /// <see cref="FailureException"/>; a result that does not decode, one of
     /// <see cref="ProtocolCode.PayloadUndecodable"/>.
     /// </summary>
-    public Func<TRequest, Requester<TResponse>> GetRequest<TRequest, TResponse>(
+    public Func<TRequest, BoundCall<TResponse>> GetRequest<TRequest, TResponse>(
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
@@ -566,7 +590,7 @@ public sealed class ServiceManager
     /// options. A requester as <see cref="GetRequest{TRequest, TResponse}"/> gives one; one
     /// unanswered in time closes its connection when its options, or the manager's defaults, say so.
     /// </summary>
-    public Func<TRequest, Requester<TResponse>> GetCommand<TRequest, TResponse>(
+    public Func<TRequest, BoundCall<TResponse>> GetCommand<TRequest, TResponse>(
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
@@ -636,6 +660,12 @@ public sealed class ServiceManager
         };
     }
 
+    // a window, in a refusal's sentence
+    private static string WindowOf(int? window)
+    {
+        return window is { } given ? $"window {given}" : "no window";
+    }
+
     // the failure a failed call carries, for a trace: its code, its scope and its detail; none when
     // it carries none
     private static Failure? TracedFailureOf(Exception reason)
@@ -703,7 +733,7 @@ public sealed class ServiceManager
     }
 
     // a requester: given a payload, then options, one call
-    private Func<TRequest, Requester<TResponse>> RequesterOf<TRequest, TResponse>(
+    private Func<TRequest, BoundCall<TResponse>> RequesterOf<TRequest, TResponse>(
         Procedure procedure,
         (RequestDependencies<TRequest, TResponse> Dependencies, DebugType Type) made)
     {
@@ -948,11 +978,11 @@ public sealed class ServiceManager
         {
             var exclude = options?.Exclude;
             var filter = options?.Filter;
-            Func<string, SessionIdentifier?, bool>? filtered = exclude is null && filter is null
+            Func<Subscriber, bool>? filtered = exclude is null && filter is null
                 ? null
-                : (connectionHandle, identifier) =>
+                : (subscriber) =>
                 {
-                    return connectionHandle != exclude && (filter is null || filter(connectionHandle, identifier));
+                    return subscriber.ConnectionHandle != exclude && (filter is null || filter(subscriber));
                 };
 
             // * one check a notification sent while nobody listens: no clock read, no step
@@ -964,6 +994,8 @@ public sealed class ServiceManager
             {
                 manager.Trace(Procedure, step);
             }
+
+            var request = new NotifyRequest { Filter = filtered, Key = options?.Key, Procedure = Procedure.Address };
 
             // * a value that does not write goes to none of its subscriptions: handed to the router in
             // its payload's place, which counts it failed for each and reports it (spec 17.2, item 6)
@@ -983,7 +1015,7 @@ public sealed class ServiceManager
             // start it was sent with: notifying never fails its caller
             try
             {
-                await manager._router.Notify(encoded, new NotifyRequest(Procedure.Address, filtered, options?.Key) { Unwritten = failure });
+                await (failure is null ? manager._router.Notify(encoded, request) : manager._router.Notify(failure, request));
             }
             catch (Exception reason)
             {

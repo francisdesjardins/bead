@@ -38,7 +38,7 @@ public sealed record HttpServerOptions
 /// </code>
 /// </example>
 /// <typeparam name="TData">What a session keeps.</typeparam>
-public sealed class HttpServer<TData> : IAsyncDisposable
+public sealed class HttpServer<TData> : IBeadServer<TData>
 {
     private readonly Server<TData> _server;
 
@@ -95,6 +95,24 @@ public sealed class HttpServer<TData> : IAsyncDisposable
         get
         {
             return _server.RequireSession;
+        }
+    }
+
+    /// <summary>A relay's admission by default, as <see cref="Server{TData}.RequireSessionOrCredential"/> says.</summary>
+    public BeforeRequest RequireSessionOrCredential
+    {
+        get
+        {
+            return _server.RequireSessionOrCredential;
+        }
+    }
+
+    // its transport as every server's, beside its own type, which the application starts
+    IServerTransport IBeadServer<TData>.Transport
+    {
+        get
+        {
+            return Transport;
         }
     }
 

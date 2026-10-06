@@ -30,7 +30,7 @@ public sealed partial class RouterClientTests
 
     // helpers
 
-    private static Func<JsonElement, Requester<JsonElement>> RequesterOf(ServiceManager services, string procedureName)
+    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(ServiceManager services, string procedureName)
     {
         return services.GetRequest(
             InteropService.ProcedureOf(procedureName),
@@ -838,7 +838,11 @@ public sealed partial class RouterClientTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return router.Notify(ReadOnlyMemory<byte>.Empty, new NotifyRequest(Service.Address, null, null)).WaitAsync(Patience, Cancelled);
+            return router.Notify(ReadOnlyMemory<byte>.Empty, new NotifyRequest { Procedure = Service.Address }).WaitAsync(Patience, Cancelled);
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return router.Notify(new FormatException("unwritten"), new NotifyRequest { Procedure = Service.Address }).WaitAsync(Patience, Cancelled);
         });
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
@@ -1416,6 +1420,11 @@ public sealed partial class RouterClientTests
         }
 
         public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task Notify(Exception unwritten, NotifyRequest request)
         {
             return Task.CompletedTask;
         }

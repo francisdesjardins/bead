@@ -2151,9 +2151,10 @@ public sealed class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// Registers a resolver; a procedure out of its range or off its form (spec 16.10), first, then a
-    /// second one for its procedure, a payload's limit below 1, or a procedure its router's registry
-    /// refuses to declare (spec/debugging.md 7.3), is an <see cref="ArgumentException"/>.
+    /// Registers a resolver; a procedure out of its range, off its form or against its kind (spec
+    /// 16.10), first, then a second one for its procedure, a payload's limit below 1, or a procedure
+    /// its router's registry refuses to declare (spec/debugging.md 7.3), is an
+    /// <see cref="ArgumentException"/>.
     /// </summary>
     public void RegisterResolver(IRequestResolver resolver)
     {
@@ -2161,7 +2162,8 @@ public sealed class RouterCore : IDisposable
 
         var procedure = resolver.Procedure;
 
-        Identity.Check(procedure, nameof(resolver));
+        // the call checked by the way it is declared: a resolver that notifies, or not, on this side
+        Identity.Check(procedure, (Identity.ResolverWayOf(_port.Side, resolver is INotificationResolver), nameof(resolver)));
 
         if (resolver.MaximumPayloadBytes is < 1)
         {

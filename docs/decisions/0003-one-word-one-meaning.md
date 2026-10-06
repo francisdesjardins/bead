@@ -16,12 +16,16 @@ lookup every time after.
 
 **A word means one thing, in the spec and in every implementation.** An _envelope_ is Bead's unit,
 never a _frame_, which is what WebSocket carries it in, nor a _message_, which is what a transport
-delimits. Its byte 1 is its _kind_; _type_ is left to media types and to each language's types. A
-_call_ is a request and its answer, an _answer_ is a result or a failure, and one _call id_ pairs a
-request, its answer, its cancel and its notifications. What a side _reports_ it tells its
-application, what it _answers_ goes back on the wire, and what it _drops in silence_ it does neither
-(spec, section 9.0). A _credit_ is what a receiver lets its sender send, counted in bytes for a
-transfer and in notifications for a paced subscription, and PACED says which.
+delimits. Its byte 1 is its _kind_. A procedure's kind, `procedureKind`, is how it is called,
+`request`, `notifies` or `command`, and is never its envelopes': every call opens with a `REQUEST`,
+a command's too. A kind that is not an envelope's is named with its owner where it sits in one
+structure beside an envelope's. _Type_ is left to media types, to each language's types, and to a
+debug event's step, `request`, `command` or `notification`, which types a call to a procedure that
+notifies a `request`. A _call_ is a request and its answer; an _answer_ is a result or a failure,
+and one _call id_ pairs a request, its answer, its cancel and its notifications. What a side
+_reports_ it tells its application, what it _answers_ goes back on the wire, and what it _drops in
+silence_ it does neither (spec, section 9.0). A _credit_ is what a receiver lets its sender send,
+counted in bytes for a transfer and in notifications for a paced subscription, and PACED says which.
 
 **No abbreviations.** A name is spelled out: `maximumEnvelopeBytes`, `transferInactivityTimeout`,
 `connectionHandle`, `MaximumAttempts`. A word a standard or a platform owns is that owner's, and is

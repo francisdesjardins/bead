@@ -259,8 +259,8 @@ public sealed class SubscriptionPlacesTests
         Assert.Equal([1u, 3u, 5u], Held(notifications));
 
         Assert.Equal([1u], CallIdsOf(places.Drop(First)));
-        Assert.Equal([3u, 5u], CallIdsOf(places.Drop(new SubscriptionPlace(First, grace with { }))));
-        Assert.Empty(places.Drop(new SubscriptionPlace(First, grace with { Id = "Grace" })));
+        Assert.Equal([3u, 5u], CallIdsOf(places.Drop(new Subscriber { ConnectionHandle = First, Identifier = grace with { } })));
+        Assert.Empty(places.Drop(new Subscriber { ConnectionHandle = First, Identifier = grace with { Id = "Grace" } }));
     }
 
     [Fact]

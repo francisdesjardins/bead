@@ -95,7 +95,9 @@ Every other comment stays plain, and doc comments (JSDoc, `///`) carry no tag.
 
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,
   indexers and lambdas, never an expression body; a block for every branch;
-- at most two parameters to a function;
+- at most two parameters to a function, then at most one options record, always last (`TOptions?
+options = null` when every member is optional, a `CancellationToken` inside it); a third
+  essential thing is a design to revisit, never a third parameter;
 - `TreatWarningsAsErrors`, the analyzers at `latest-recommended`, the code style enforced in the
   build, a doc comment on every public member;
 - `_camelCase` private fields; PascalCase constants and static readonly fields;
@@ -106,7 +108,7 @@ Every other comment stays plain, and doc comments (JSDoc, `///`) carry no tag.
 
 - oxlint and oxfmt as configured there, and `yarn check` passes;
 - the author's style: section comments, `I`-prefixed interfaces, block-bodied arrow functions, at
-  most two parameters, frozen objects over `enum`;
+  most two parameters then at most one options object, always last, frozen objects over `enum`;
 - one test file per module, named after it, in a `__tests__/` folder beside it
   (`src/transport/create-promise.ts` → `src/transport/__tests__/create-promise.test.ts`).
 

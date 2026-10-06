@@ -66,7 +66,7 @@ public sealed class NotificationManagerTests
         });
 
         Assert.Equal(1u, notifications.SubscriptionOf(ProcedureOf(10, 1), First));
-        Assert.Equal(3u, notifications.SubscriptionOf(ProcedureOf(10, 1), new SubscriptionPlace(First, grace with { })));
+        Assert.Equal(3u, notifications.SubscriptionOf(ProcedureOf(10, 1), new Subscriber { ConnectionHandle = First, Identifier = grace with { } }));
         Assert.Equal([(First, 1u), (First, 3u), (First, 5u), (First, 7u)], notifications.Candidates(ProcedureOf(10, 1)));
         Assert.Equal(grace, notifications.SubscriptionAt(3, First)!.Value.Session);
         Assert.Null(notifications.SubscriptionAt(1, First)!.Value.Session);

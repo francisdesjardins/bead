@@ -1,8 +1,8 @@
 // ── Identities ────────────────────────────────────────────────────────────────
 
-// Bead's identities, `spec/identities.json`, played against the TypeScript side: each name and each
-// id declared by each of the five ways the file lists, on a router of its own given no registry,
-// and each fold through `areOneName`. The C# side plays the same file.
+// Bead's identities, `spec/identities.json`, played against the TypeScript side: each name, each id
+// and each procedure's kind declared by each of the ways the file lists, on a router of its own
+// given no registry, and each fold through `areOneName`. The C# side plays the same file.
 
 // dependencies
 
@@ -14,6 +14,7 @@ import type { IRouterClientTransportLike } from '../../client/types';
 import { createRouterServer } from '../../server/router-server';
 import type { IRouterServerTransportLike } from '../../server/types';
 import { areOneName, IdentityRefusal } from '../identity';
+import type { ProcedureKind } from '../constants';
 import type { IProcedure, IRequestResolver } from '../types';
 
 // interfaces
@@ -45,6 +46,17 @@ interface IIdEntry extends IEntry {
   serviceRevision: unknown;
 }
 
+/**
+ * A procedure stating its kind, or none, declared at 1/1, revision 1, under `echo` unless the entry
+ * gives its service or its name; refused at the ways `refusedAt` lists, or at every way without it.
+ */
+interface IProcedureKindEntry extends IEntry {
+  procedureKind?: ProcedureKind;
+  procedureName?: string;
+  refusedAt?: string[];
+  serviceId?: number;
+}
+
 /** Two names, and whether they are one. */
 interface IFoldEntry extends IEntry {
   names: [string, string];
@@ -64,6 +76,7 @@ const IDENTITIES = JSON.parse(
   folds: IFoldEntry[];
   ids: IIdEntry[];
   names: INameEntry[];
+  procedureKinds: IProcedureKindEntry[];
   ways: string[];
 };
 
@@ -142,7 +155,7 @@ const thrownBy = async (way: Way, procedure: IProcedure): Promise<unknown> => {
   return undefined;
 };
 
-// the five ways a side declares, by the file's ids
+// the ways a side declares, by the file's ids
 const WAYS: Readonly<Record<string, Way>> = Object.freeze({
   'client-notification': async (procedure: IProcedure) => {
     using router = createRouterClient(clientTransport());
@@ -171,6 +184,20 @@ const WAYS: Readonly<Record<string, Way>> = Object.freeze({
 
     return Promise.resolve(router.declareRequester(procedure));
   },
+  'server-notification-resolver': (procedure: IProcedure) => {
+    using router = createRouterServer(serverTransport());
+
+    // a resolver that notifies, as a router tells one: its `notify` a function
+    router.registerResolver(
+      Object.assign(resolverOf(procedure), {
+        notify: () => {
+          return Promise.resolve();
+        },
+      })
+    );
+
+    return Promise.resolve();
+  },
   'server-resolver': (procedure: IProcedure) => {
     using router = createRouterServer(serverTransport());
 
@@ -180,20 +207,31 @@ const WAYS: Readonly<Record<string, Way>> = Object.freeze({
   },
 });
 
-/** Declares `procedure` each way the file lists, and holds each to `entry`'s outcome. */
-const expectEachWay = async (entry: IEntry, procedure: IProcedure): Promise<void> => {
+/**
+ * Declares `procedure` each way the file lists, and holds each to `entry`'s outcome: refused at the
+ * ways its `refusedAt` lists, or at every way without one, and taken at every other.
+ */
+const expectEachWay = async (
+  entry: IEntry & Pick<IProcedureKindEntry, 'refusedAt'>,
+  procedure: IProcedure
+): Promise<void> => {
   for (const id of IDENTITIES.ways) {
     const way = WAYS[id] as Way;
     const thrown = await thrownBy(way, procedure);
+    const isRefused = entry.refusedAt === undefined || entry.refusedAt.includes(id);
 
-    expect(reasonOf(thrown), `${id}: ${String(thrown)}`).toBe(entry.refused);
+    expect(reasonOf(thrown), `${id}: ${String(thrown)}`).toBe(
+      isRefused ? entry.refused : undefined
+    );
   }
 };
 
 // definition
 
 test.describe('the identities', () => {
-  test('its table plays the five ways the file lists, and no other', () => {
+  test.describe.configure({ retries: 0 });
+
+  test('its table plays the ways the file lists, and no other', () => {
     expect(Object.keys(WAYS).toSorted()).toEqual(IDENTITIES.ways.toSorted());
   });
 
@@ -220,6 +258,20 @@ test.describe('the identities', () => {
         procedureName: entry.procedureName ?? 'echo',
         serviceId: entry.serviceId as number,
         serviceRevision: entry.serviceRevision as number,
+      });
+    });
+  }
+
+  for (const entry of IDENTITIES.procedureKinds) {
+    test(`procedureKinds: ${entry.name}`, async () => {
+      test.skip(isExcused(entry), 'a row of the matrix excuses this side');
+
+      await expectEachWay(entry, {
+        procedureId: 1,
+        procedureName: entry.procedureName ?? 'echo',
+        serviceId: entry.serviceId ?? 1,
+        serviceRevision: 1,
+        ...(entry.procedureKind === undefined ? {} : { procedureKind: entry.procedureKind }),
       });
     });
   }

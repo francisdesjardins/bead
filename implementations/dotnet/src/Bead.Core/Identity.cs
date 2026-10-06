@@ -2,11 +2,33 @@ using System.Globalization;
 
 namespace Bead;
 
+/// <summary>The ways a procedure is declared to a router, each taking the kinds spec 16.11 gives it.</summary>
+internal enum DeclarationWay
+{
+    /// <summary>A resolver registered on a client's router: it takes a command.</summary>
+    ClientResolver,
+
+    /// <summary>A resolver registered on a server's router that notifies nothing: it takes a request.</summary>
+    ServerResolver,
+
+    /// <summary>A resolver registered on a server's router that notifies: it takes a request that notifies.</summary>
+    ServerNotificationResolver,
+
+    /// <summary>A requester made on a client's router: it takes a request, and a request that notifies.</summary>
+    ClientRequester,
+
+    /// <summary>A requester made on a server's router: it takes a command.</summary>
+    ServerRequester,
+
+    /// <summary>A notification registered on a client's router: it takes a request that notifies.</summary>
+    ClientNotification,
+}
+
 /// <summary>
 /// What a side refuses as a procedure is declared to it (spec 16.10): a service id, a procedure id
-/// or a revision out of its range, then a name off its form; and which two names are one (16.6).
-/// One check of the procedure alone, which holds nothing: each router runs it first, before any
-/// reason of its own and before its registry's.
+/// or a revision out of its range, then a name off its form, then a kind the way it is declared does
+/// not take; and which two names are one (16.6). One check of the procedure alone, which holds
+/// nothing: each router runs it first, before any reason of its own and before its registry's.
 /// </summary>
 internal static class Identity
 {
@@ -39,7 +61,43 @@ internal static class Identity
         return IsUpper(character) ? (char)(character + ('a' - 'A')) : character;
     }
 
+    // what a procedure's kind is, in a refusal's sentence
+    internal static string WordsOf(ProcedureKind procedureKind)
+    {
+        return procedureKind switch
+        {
+            ProcedureKind.Request => "a request",
+            ProcedureKind.Notifies => "a request that notifies",
+            _ => "a command",
+        };
+    }
+
+    // what a way is, and the kinds it takes (16.11)
+    private static (string Way, ProcedureKind[] Takes) WayOf(DeclarationWay way)
+    {
+        return way switch
+        {
+            DeclarationWay.ClientResolver => ("a resolver on a client's router", [ProcedureKind.Command]),
+            DeclarationWay.ServerResolver => ("a resolver on a server's router that notifies nothing", [ProcedureKind.Request]),
+            DeclarationWay.ServerNotificationResolver => ("a resolver on a server's router that notifies", [ProcedureKind.Notifies]),
+            DeclarationWay.ClientRequester => ("a requester on a client's router", [ProcedureKind.Request, ProcedureKind.Notifies]),
+            DeclarationWay.ServerRequester => ("a requester on a server's router", [ProcedureKind.Command]),
+            _ => ("a notification on a client's router", [ProcedureKind.Notifies]),
+        };
+    }
+
     // definition
+
+    /// <summary>The way a resolver is declared to a router of <paramref name="side"/>: one that notifies, or not.</summary>
+    public static DeclarationWay ResolverWayOf(RouterSide side, bool notifies)
+    {
+        if (side == RouterSide.Client)
+        {
+            return DeclarationWay.ClientResolver;
+        }
+
+        return notifies ? DeclarationWay.ServerNotificationResolver : DeclarationWay.ServerResolver;
+    }
 
     /// <summary>
     /// Whether <paramref name="name"/> is a procedure's name (16.4): a lower-case ASCII letter, then
@@ -121,6 +179,33 @@ internal static class Identity
                     CultureInfo.InvariantCulture,
                     $"\"{procedure.ProcedureName}\" at {procedure.ServiceId}/{procedure.ProcedureId} is off its form: a procedure's name is a lower-case ASCII letter, then up to 62 ASCII letters or digits (spec 16.4)"),
                 parameter);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a declaration of <paramref name="procedure"/> the way <paramref name="declaration"/>
+    /// names, as <see cref="Check(Procedure, string)"/> does, then for the third reason of 16.10:
+    /// against its kind, a kind the way does not take (16.11). A procedure that states no kind is
+    /// taken every way.
+    /// </summary>
+    public static void Check(Procedure procedure, (DeclarationWay Way, string Parameter) declaration)
+    {
+        Check(procedure, declaration.Parameter);
+
+        if (procedure.ProcedureKind is not { } procedureKind)
+        {
+            return;
+        }
+
+        var (way, takes) = WayOf(declaration.Way);
+
+        if (!takes.Contains(procedureKind))
+        {
+            throw new ArgumentException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"\"{procedure.ProcedureName}\" at {procedure.ServiceId}/{procedure.ProcedureId} is against its kind: {WordsOf(procedureKind)}, which {way} does not take; it takes {string.Join(", or ", takes.Select(WordsOf))} (spec 16.11)"),
+                declaration.Parameter);
         }
     }
 }

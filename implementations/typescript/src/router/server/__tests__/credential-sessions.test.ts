@@ -7,7 +7,7 @@ import { CredentialScheme } from '../../shared/constants';
 import type { ICallSession, SessionIdentifier } from '../../shared/types';
 import { createCredentialSessions } from '../credential-sessions';
 import { createNotificationManager } from '../notification-manager';
-import type { ISubscriber } from '../types';
+import type { ISubscriber } from '../../shared/types';
 
 // constants
 
@@ -28,7 +28,7 @@ const GRACE: SessionIdentifier = Object.freeze({
 /** Credential sessions over a manager of their own, on a test clock, each end they told recorded. */
 const createSessions = () => {
   const clock = createTestClock(NOW);
-  const ended: Required<ISubscriber>[] = [];
+  const ended: Required<ISubscriber<TransportServerConnectionHandle>>[] = [];
   const sessions = createCredentialSessions({
     clock,
     notifications: createNotificationManager(),

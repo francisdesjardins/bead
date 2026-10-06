@@ -215,6 +215,17 @@ public sealed class BeadHttpClientTests
     }
 
     [Fact]
+    public async Task Each_client_is_an_IClient()
+    {
+        await using var client = new BeadHttpClient();
+
+        var beadClient = Assert.IsAssignableFrom<IClient>(client);
+
+        Assert.Same(client.Router, beadClient.Router);
+        Assert.Same(client.Services, beadClient.Services);
+    }
+
+    [Fact]
     public async Task Builds_with_nothing_given_the_global_fetch_one_envelope_of_the_default_size_no_transfer()
     {
         await using var client = new BeadHttpClient();

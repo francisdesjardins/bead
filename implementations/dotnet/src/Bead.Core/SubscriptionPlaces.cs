@@ -38,7 +38,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     /// </summary>
     public List<(uint CallId, ProcedureAddress Procedure)> Drop(string connectionHandle)
     {
-        return Drop(new SubscriptionPlace(connectionHandle, null));
+        return Drop(new Subscriber { ConnectionHandle = connectionHandle });
     }
 
     /// <summary>
@@ -46,7 +46,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     /// established subscription it bounds, and each call waiting, which no longer waits. A call in
     /// flight is left to its own answer.
     /// </summary>
-    public List<(uint CallId, ProcedureAddress Procedure)> Drop(SubscriptionPlace place)
+    public List<(uint CallId, ProcedureAddress Procedure)> Drop(Subscriber place)
     {
         var connectionHandle = place.ConnectionHandle;
 
@@ -57,7 +57,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
         {
             foreach (var (holder, successor) in waiting.ToList())
             {
-                if (successor.Session?.Identifier == place.Session)
+                if (successor.Session?.Identifier == place.Identifier)
                 {
                     waiting.Remove(holder);
                     successors.Add(successor);
@@ -74,7 +74,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
         [
             .. notifications.Subscriptions(connectionHandle).Where((subscription) =>
             {
-                return subscription.Session == place.Session && !IsInFlight(new CallAddress(subscription.CallId, connectionHandle));
+                return subscription.Session == place.Identifier && !IsInFlight(new CallAddress(subscription.CallId, connectionHandle));
             }).Select((subscription) =>
             {
                 return (subscription.CallId, subscription.Procedure);
@@ -177,7 +177,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
             return null;
         }
 
-        var holder = answer.Notifies ? notifications.SubscriptionOf(answer.Procedure, call.Place) : null;
+        var holder = answer.Notifies ? notifications.SubscriptionOf(answer.Procedure, call.Subscriber) : null;
 
         // a notification's successful answer subscribes the connection under the request's call id,
         // before it goes out, so no notification sent once the requester has its answer can miss it
@@ -224,7 +224,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     /// </summary>
     public uint Subscribe(SubscribingCall call, ProcedureAddress procedure)
     {
-        if (notifications.SubscriptionOf(procedure, call.Place) is { } holder)
+        if (notifications.SubscriptionOf(procedure, call.Subscriber) is { } holder)
         {
             return holder;
         }
@@ -321,7 +321,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
 
         var call = new SubscribingCall(waiting.CallId, connectionHandle, waiting.Paced) { Session = waiting.Session };
 
-        if (notifications.SubscriptionOf(waiting.Procedure, call.Place) is null)
+        if (notifications.SubscriptionOf(waiting.Procedure, call.Subscriber) is null)
         {
             notifications.Register(waiting.Procedure, call);
         }

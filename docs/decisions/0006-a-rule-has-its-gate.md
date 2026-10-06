@@ -49,8 +49,9 @@ what the code weighs today.
 
 **A rule no tool can check is written as a preference**, with who holds it. Review holds these
 today: one word, one meaning ([0003](0003-one-word-one-meaning.md)), with the Tenth Man for every
-renaming ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)); the C# side's two
-parameters and its classes without a base
+renaming ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)); the parameter rule,
+its count on the C# side and on both sides what a third parameter may be, the one optional
+positional, and an event's values, with the C# side's classes without a base
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); git-flow's branch names and
 the CHANGELOG's entries; the spec's version and its companion's, each moved by the release that
 changes its document, and their `spec-v` and `debugging-v` tags
@@ -68,9 +69,10 @@ leaves the review's list for the table above.
 bytes, the built assemblies with their warnings. A count can be satisfied by editing a number; a
 vector cannot.
 
-**Two gates are still owed**: a report of the vectors each side's tests play, where `spec/check.py`
-sees the groups they name ([0004](0004-one-behaviour-in-every-language.md)), and a check of the C#
-side's parameters, which no analyzer of .NET's recommended set counts.
+**Three gates are still owed**: a report of the vectors each side's tests play, where
+`spec/check.py` sees the groups they name ([0004](0004-one-behaviour-in-every-language.md)); a
+check of the C# side's parameters, which no analyzer of .NET's recommended set counts; and the
+TypeScript side's check of what a third parameter may be, `bead/options-last`.
 
 **The hooks are a copy, not the gate.** `.githooks/` runs checks before each commit once a clone
 opts in, with `git config core.hooksPath .githooks`; CI runs them whatever a clone does.

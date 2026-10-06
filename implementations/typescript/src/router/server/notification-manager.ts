@@ -27,6 +27,7 @@ export { PACING_DEFAULTS } from './notification-pacing';
 export type {
   CallId,
   IProcedureAddress,
+  ISubscriber,
   ProcedureId,
   ServiceId,
   SessionIdentifier,
@@ -35,7 +36,6 @@ export type {
   INotificationManager,
   INotificationManagerOptions,
   IPacing,
-  ISubscriber,
   ISubscribingCall,
   ISubscription,
   NotificationCandidates,

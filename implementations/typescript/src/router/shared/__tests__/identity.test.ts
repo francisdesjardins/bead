@@ -1,7 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { createRouterClient } from '../../client/router-client';
-import { areOneName, checkDeclaration, IdentityRefusal, isProcedureName } from '../identity';
+import {
+  areOneName,
+  checkDeclaration,
+  checkProcedureKind,
+  IdentityRefusal,
+  isProcedureName,
+} from '../identity';
 import { createMetricsRegistry } from '../metrics-registry';
 import type { IProcedure } from '../types';
 
@@ -176,5 +182,19 @@ test.describe('areOneName', () => {
     );
     expect(areOneName('a@', 'a`')).toBe(false);
     expect(areOneName('ab', 'abc')).toBe(false);
+  });
+});
+
+test.describe('checkProcedureKind', () => {
+  test('refuses a kind its way does not take, against its kind, and takes a procedure that states none', () => {
+    expect(() => {
+      checkProcedureKind({ ...echo, procedureKind: 'request' }, 'server-requester');
+    }).toThrow(/^echo is a request; a server's router makes commands: against its kind$/);
+
+    for (const way of ['client-requester', 'server-resolver', 'client-notification'] as const) {
+      expect(() => {
+        checkProcedureKind(echo, way);
+      }).not.toThrow();
+    }
   });
 });

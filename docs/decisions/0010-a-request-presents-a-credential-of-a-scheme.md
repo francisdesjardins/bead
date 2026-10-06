@@ -7,8 +7,8 @@
 
 A call reaches sides that never drew its session. A relay passes it to a destination behind it; an
 HTTP façade takes it from a client whose `Authorization` field holds its credential; a broker hands
-it to whichever server takes its procedure; a node of a federation runs it on a token it verifies
-alone. Each of them has to know from the header whether the call presents a credential and of what
+it to whichever server takes its procedure; a server that never issued its token runs it on a token it
+verifies alone. Each of them has to know from the header whether the call presents a credential and of what
 kind, since admission reads the header and never the payload (spec, section 9.2, step 5), and a
 relay passes the payload on undecoded (section 14.2).
 

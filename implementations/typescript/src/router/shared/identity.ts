@@ -1,12 +1,19 @@
 // ── Identity ──────────────────────────────────────────────────────────────────
 
 // What a side holds a procedure's identity to as it is declared, spec section 16: its ids and its
-// revision in their ranges, its name in its form, and when two names are one.
+// revision in their ranges, its name in its form, its kind one its way takes, and when two names
+// are one.
 
 // dependencies
 
 import { ProgrammerError } from '../../transport/shared/errors';
+import { ProcedureKind } from './constants';
 import type { IProcedure } from './types';
+
+// types
+
+/** A way a side declares a procedure, by `spec/identities.json`'s id. */
+export type DeclarationWay = keyof typeof WAYS;
 
 // constants
 
@@ -14,6 +21,39 @@ import type { IProcedure } from './types';
 export const IdentityRefusal = Object.freeze({
   OUT_OF_ITS_RANGE: 'out of its range',
   OFF_ITS_FORM: 'off its form',
+  AGAINST_ITS_KIND: 'against its kind',
+} as const);
+
+/**
+ * The kinds each way a side declares a procedure takes (spec 16.11), by `spec/identities.json`'s
+ * ids, and what the way does, for a refusal's words.
+ */
+const WAYS = Object.freeze({
+  'client-notification': {
+    does: "a client's notification is of a request that notifies",
+    takes: [ProcedureKind.NOTIFIES],
+  },
+  'client-requester': {
+    does: "a client's router makes requests",
+    takes: [ProcedureKind.REQUEST, ProcedureKind.NOTIFIES],
+  },
+  'client-resolver': { does: "a client's router answers commands", takes: [ProcedureKind.COMMAND] },
+  'server-notification-resolver': {
+    does: "a server's resolver that notifies answers a request that notifies",
+    takes: [ProcedureKind.NOTIFIES],
+  },
+  'server-requester': { does: "a server's router makes commands", takes: [ProcedureKind.COMMAND] },
+  'server-resolver': {
+    does: "a server's resolver that notifies nothing answers a plain request",
+    takes: [ProcedureKind.REQUEST],
+  },
+} as const);
+
+// how a refusal names a procedure's kind
+const KIND_WORDS = Object.freeze({
+  [ProcedureKind.COMMAND]: 'a command',
+  [ProcedureKind.NOTIFIES]: 'a request that notifies',
+  [ProcedureKind.REQUEST]: 'a request',
 } as const);
 
 // the bounds of 16.2: an id on its 2 bytes, 0 the protocol's (16.3); a revision from 1 to 2³¹ − 1
@@ -125,4 +165,30 @@ export const checkDeclaration = (procedure: IProcedure): void => {
       `a procedure's name is a lower-case ASCII letter, then 62 ASCII letters and digits at most, not ${JSON.stringify(procedureName)}: ${IdentityRefusal.OFF_ITS_FORM}`
     );
   }
+};
+
+/**
+ * Refuses a declaration of `procedure` by `way` whose kind that way does not take (spec 16.11), with
+ * a {@link ProgrammerError} whose message ends with `against its kind`: a requester on a client's
+ * router takes a request, and one that notifies; on a server's, a command; a resolver on a server's,
+ * a request where it notifies nothing and one that notifies where it notifies; on a client's, a
+ * command; a notification on a client's, a request that notifies. A procedure that states no kind
+ * is taken every way. Run after {@link checkDeclaration}, before any reason of the router's own.
+ */
+export const checkProcedureKind = (procedure: IProcedure, way: DeclarationWay): void => {
+  const { procedureKind, procedureName } = procedure;
+  const { does, takes } = WAYS[way];
+
+  if (procedureKind === undefined || (takes as readonly ProcedureKind[]).includes(procedureKind)) {
+    return;
+  }
+
+  // a caller without types may state a kind no table names
+  const words =
+    (KIND_WORDS as Readonly<Record<string, string>>)[procedureKind] ??
+    `kind ${procedureKind as string}`;
+
+  throw new ProgrammerError(
+    `${procedureName} is ${words}; ${does}: ${IdentityRefusal.AGAINST_ITS_KIND}`
+  );
 };

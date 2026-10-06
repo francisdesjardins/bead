@@ -62,9 +62,10 @@ jobs:
       - run: python spec/check.py
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
-  # The TypeScript side's own gate: types, lint, format, comment budget, doc examples, then its
-  # tests. The interop against the C# server runs in the .NET job, the only one with both runtimes.
-  # On the current line and on the floor `engines.node` declares, so the floor holds by a run.
+  # The TypeScript side's own gate: types, lint, format, comment budget, doc examples, the generated
+  # `Probe` held to its generator, then its tests. The interop against the C# server runs in the .NET
+  # job, the only one with both runtimes. On the current line and on the floor `engines.node`
+  # declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04

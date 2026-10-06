@@ -90,14 +90,14 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         return document.RootElement.Clone();
     }
 
-    private static Func<JsonElement, Requester<JsonElement>> RequesterOf(Connected client, (Procedure Procedure, IRequestSerializerClient<JsonElement, JsonElement>? Serializer) asked)
+    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(Connected client, (Procedure Procedure, IRequestSerializerClient<JsonElement, JsonElement>? Serializer) asked)
     {
         return client.Services.GetRequest(
             asked.Procedure,
             new RequestDependencies<JsonElement, JsonElement> { Serializer = asked.Serializer ?? InteropService.JsonAsked });
     }
 
-    private static Func<JsonElement, Requester<JsonElement>> RequesterOf(Connected client, string procedureName)
+    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(Connected client, string procedureName)
     {
         return RequesterOf(client, (InteropService.ProcedureOf(procedureName), null));
     }
@@ -233,7 +233,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         await using var client = await ConnectedOver(transport);
 
-        async Task<FailureException> FailureOf(Requester<JsonElement> requester)
+        async Task<FailureException> FailureOf(BoundCall<JsonElement> requester)
         {
             return await Assert.ThrowsAsync<FailureException>(() =>
             {
@@ -392,7 +392,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         await using var client = await ConnectedOver(transport);
 
-        async Task<ushort> CodeOf(Requester<JsonElement> requester)
+        async Task<ushort> CodeOf(BoundCall<JsonElement> requester)
         {
             return (await Assert.ThrowsAsync<FailureException>(() =>
             {

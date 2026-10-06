@@ -1,0 +1,75 @@
+import { expect, test } from '@playwright/test';
+import { FailureScope } from '../../router/shared/constants';
+import { FailureError } from '../../router/shared/errors';
+import { ProgrammerError } from '../../transport/shared/errors';
+import { failuresOf } from '../failures';
+
+// helpers
+
+/** An application failure received from procedure 1 of `serviceId`, of `code`. */
+const receivedOf = (code: number, serviceId: number): FailureError => {
+  return new FailureError(
+    { code, scope: FailureScope.APPLICATION },
+    { procedureAddress: { procedureId: 1, serviceId } }
+  );
+};
+
+// definition
+
+test.describe('failuresOf', () => {
+  test('makes a failure of a name, its code and its detail', () => {
+    const catalogue = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 7 });
+
+    expect(catalogue.of('TOO_LOUD', 'quieter')).toEqual({
+      code: 2,
+      detail: 'quieter',
+      failureName: 'TOO_LOUD',
+    });
+    expect(catalogue.of('NOBODY_TO_GREET')).toEqual({
+      code: 1,
+      detail: '',
+      failureName: 'NOBODY_TO_GREET',
+    });
+    expect(Object.isFrozen(catalogue.of('TOO_LOUD'))).toBe(true);
+    expect(catalogue.codes).toEqual({ NOBODY_TO_GREET: 1, TOO_LOUD: 2 });
+    // past the types, a name the catalogue lacks
+    expect(() => {
+      return catalogue.of('TOSTRING' as never);
+    }).toThrow(ProgrammerError);
+    expect(() => {
+      return catalogue.of('toString' as never);
+    }).toThrow(ProgrammerError);
+  });
+
+  test('refuses a code outside 1 to 65535, and two names of one code', () => {
+    for (const code of [0, 65_536, -1, 1.5, Number.NaN]) {
+      expect(() => {
+        return failuresOf({ codes: { WRONG: code }, serviceId: 7 });
+      }, String(code)).toThrow(ProgrammerError);
+    }
+
+    expect(() => {
+      return failuresOf({ codes: { FIRST: 3, SECOND: 3 }, serviceId: 7 });
+    }).toThrow(ProgrammerError);
+    expect(failuresOf({ codes: { LAST: 65_535 }, serviceId: 7 }).codes.LAST).toBe(65_535);
+  });
+
+  test('tells a failure of its service by its name, and none of another service', () => {
+    const catalogue = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 7 });
+
+    expect(catalogue.is(receivedOf(1, 7), 'NOBODY_TO_GREET')).toBe(true);
+    expect(catalogue.is(receivedOf(1, 7), 'TOO_LOUD')).toBe(false);
+    expect(catalogue.is(receivedOf(1, 8), 'NOBODY_TO_GREET')).toBe(false);
+    // the protocol's code 1, ENVELOPE_MALFORMED, is no failure of a catalogue
+    expect(
+      catalogue.is(
+        new FailureError(
+          { code: 1, scope: FailureScope.PROTOCOL },
+          { procedureAddress: { procedureId: 1, serviceId: 7 } }
+        ),
+        'NOBODY_TO_GREET'
+      )
+    ).toBe(false);
+    expect(catalogue.is(new Error('code 1'), 'NOBODY_TO_GREET')).toBe(false);
+  });
+});

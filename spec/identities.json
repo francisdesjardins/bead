@@ -1,10 +1,11 @@
 {
   "$schema": "schemas/identities.schema.json",
   "$comment": [
-    "Bead's identities: what a router does as a procedure is declared to it (spec section 16, decision 0017), taken, or refused by the first reason of 16.10 that applies, out of its range before off its form, as it is declared and never on a call; a declaration refused declares nothing. And which two names are one (16.6).",
-    "ways are the five ways a side declares, each by an id its harness keys its table by: a resolver registered on a client's router and on a server's, a requester made on each, and a notification registered on a client's. A harness plays each entry of names and ids each way, each on a router of its own, given no metrics registry.",
+    "Bead's identities: what a router does as a procedure is declared to it (spec section 16, decisions 0017 and 0018), taken, or refused by the first reason of 16.10 that applies, out of its range before off its form, off its form before against its kind, as it is declared and never on a call; a declaration refused declares nothing. And which two names are one (16.6).",
+    "ways are the six ways a side declares, each by an id its harness keys its table by: a resolver registered on a client's router; one registered on a server's that notifies nothing, and one there that notifies; a requester made on each router; and a notification registered on a client's. A harness plays each entry of names, ids and procedureKinds each way, each on a router of its own, given no metrics registry.",
     "names: a procedure's name, procedureName, declared at service 1, procedure 1, revision 1. ids: a service id, a procedure id and a service revision, each any JSON value, as a value read from JSON may be, declared under the name echo, or under procedureName where the entry gives one.",
-    "refused, where given, is the reason the declaration is refused; absent, it is taken. The reason is derived, and held by the regeneration alone: the words of a refusal are each side's, and a side that reports a refusal by a code checks the reason against that code.",
+    "procedureKinds: a procedure naming its kind, procedureKind, request, notifies or command, or none where the entry gives no procedureKind, declared at service 1, procedure 1, revision 1, under the name echo, or at the serviceId or under the procedureName the entry gives.",
+    "refused, where given, is the reason the declaration is refused, at every way, or at the ways an entry of procedureKinds lists in refusedAt, every other way taking it; absent, it is taken. The reason is derived, and held by the regeneration alone: the words of a refusal are each side's, and a side that reports a refusal by a code checks the reason against that code.",
     "folds: two names, and one, whether they are one name by 16.6, each ASCII upper-case letter read as its lower-case one and nothing else changed; a harness plays them through the one helper every comparison of names on its side goes through.",
     "differs names the row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: an input that language cannot be given. A harness plays every entry but those a differs excuses its language from.",
     "clauses are the units of spec.md an entry checks: a clause, 16.4; a row of its table, counted from 1, 16.2.1."
@@ -13,6 +14,7 @@
   "ways": [
     "client-resolver",
     "server-resolver",
+    "server-notification-resolver",
     "client-requester",
     "server-requester",
     "client-notification"
@@ -790,6 +792,80 @@
         ""
       ],
       "one": true
+    }
+  ],
+  "procedureKinds": [
+    {
+      "name": "no kind",
+      "clauses": [
+        "16.11"
+      ]
+    },
+    {
+      "name": "request",
+      "clauses": [
+        "16.11",
+        "16.10.3"
+      ],
+      "procedureKind": "request",
+      "refused": "against its kind",
+      "refusedAt": [
+        "client-resolver",
+        "server-notification-resolver",
+        "server-requester",
+        "client-notification"
+      ]
+    },
+    {
+      "name": "notifies",
+      "clauses": [
+        "11.2",
+        "16.11",
+        "16.10.3"
+      ],
+      "procedureKind": "notifies",
+      "refused": "against its kind",
+      "refusedAt": [
+        "client-resolver",
+        "server-resolver",
+        "server-requester"
+      ]
+    },
+    {
+      "name": "command",
+      "clauses": [
+        "16.11",
+        "16.10.3"
+      ],
+      "procedureKind": "command",
+      "refused": "against its kind",
+      "refusedAt": [
+        "server-resolver",
+        "server-notification-resolver",
+        "client-requester",
+        "client-notification"
+      ]
+    },
+    {
+      "name": "command at service 0",
+      "clauses": [
+        "16.3",
+        "16.10",
+        "16.10.1"
+      ],
+      "procedureKind": "command",
+      "serviceId": 0,
+      "refused": "out of its range"
+    },
+    {
+      "name": "command under the name Echo",
+      "clauses": [
+        "16.10",
+        "16.10.2"
+      ],
+      "procedureKind": "command",
+      "procedureName": "Echo",
+      "refused": "off its form"
     }
   ]
 }
