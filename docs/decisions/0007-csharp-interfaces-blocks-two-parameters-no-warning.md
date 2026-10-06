@@ -1,4 +1,4 @@
-# 0007 — The C# side composes interfaces, writes every body as a block, takes two parameters, and builds without a warning
+# 0007 — The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning
 
 - **Status**: accepted
 - **Scope**: the C# side, `implementations/dotnet`
@@ -33,11 +33,23 @@ file-scoped namespace a file, `using` directives outside it with `System` first 
 private fields in `_camelCase`, constants and static readonly fields in PascalCase. `.editorconfig`
 states them, its rules at `warning`, and the build holds them (`EnforceCodeStyleInBuild`).
 
-**At most two parameters**, an options record being one of them, as the TypeScript side's
-`max-params` asks: a third thing to say goes in the record, where the call site names it. A
-parameter that is a union on the TypeScript side, as a debug filter given as it is, as its spec, or
-by a function that gives either, is an overload for each. A signature .NET imposes, an override's,
-takes what it takes, and a positional record is data, as an object is on the TypeScript side.
+**At most two parameters, then the options.** A function takes at most two parameters, and after
+them at most one options record, always last: `FindIn(haystack, needle, new FindOptions {
+FromIndex = 10 })`, as the TypeScript side writes `findIn(haystack, needle, { fromIndex: 10 })`.
+The count is Deno's, and Bead holds it for every function, not only the public ones. The options
+record is a sealed record of `init` properties, its name ending in `Options`; it is optional,
+`TOptions? options = null`, when every member is, and required when one is, as a connect's `Host`
+and `Port` are. An optional parameter goes in the options; one alone may stay positional where no
+second could come, as `Fail(failure, string detail = "")`. A third essential thing is a design to
+revisit — a record of the call, or a type that holds two of the things — and never a third
+positional parameter. A `CancellationToken` goes in the options record whenever the function
+takes one, as `RequestOptions.CancellationToken` does and the TypeScript side's `signal` is; it is
+positional only as one of the two essentials, as in `SessionOf(request, signal)`. An event carries
+at most two values, and a listener takes what its event carries. A record of more than two members
+is a record of `init` properties, built by name as an object is on the TypeScript side. A
+parameter that is a union on the TypeScript side, as a debug filter given as it is, as its spec,
+or by a function that gives either, is an overload for each. A signature .NET imposes, an
+override's or a platform interface's, takes what it takes.
 
 **Every warning is an error, and the analyzers run at `latest-recommended`.** `Directory.Build.props`
 holds every project to `net10.0`, the latest language version, nullable references, implicit usings,
@@ -111,11 +123,15 @@ test ran. CI's `dotnet` job runs both, then the interop
 
 ## Consequences
 
-- **The two-parameter rule has no gate in the build**: no analyzer of .NET's recommended set counts
-  parameters, so review holds it ([0006](0006-a-rule-has-its-gate.md)). Seven functions of `src/`
-  take three today: four private methods, a private class's constructor, an internal class's
-  constructor (`Notification`'s), and `FailureException.OfProtocol`, whose third, its detail, is
-  optional. Each is work to do.
+- **The parameter rule has no gate in the build**: no analyzer of .NET's recommended set counts
+  parameters, so review holds it ([0006](0006-a-rule-has-its-gate.md)), until a test over the
+  built assemblies holds the public surface without a flaw. Past the rule today, each work to do:
+  seven functions of `src/` take three — four private methods, a private class's constructor, an
+  internal class's constructor (`Notification`'s), and `FailureException.OfProtocol`, whose third,
+  its detail, is a positional optional; the transports' `Connect` and `Start` take their
+  `CancellationToken` after their options; the session manager's four events of a change carry
+  three values; and eighteen positional records take more than two members, `TransportServerClient`
+  five.
 - Nothing in the build forbids a base class either; review holds that too, and every class and
   record of `src/` and `interop/` is sealed or static.
 - An event a router raises, an error or a trace, runs on its scheduler, as a listener runs in

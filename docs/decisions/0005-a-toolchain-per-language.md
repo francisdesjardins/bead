@@ -54,8 +54,10 @@ toolchain, and a CI job of its own.
   The interop asks for both runtimes ([0004](0004-one-behaviour-in-every-language.md)), and so does
   CI's `dotnet` job.
 - The house style is stated once per language, in that language's own terms: the TypeScript side's
-  `curly`, `arrow-body-style` and `max-params` are oxlint rules, and their C# counterparts are
-  `.editorconfig` rules the build holds. Keeping the two alike is review's, not a tool's.
+  `curly` and `arrow-body-style` are oxlint rules whose C# counterparts are `.editorconfig` rules
+  the build holds; the parameter rule is `max-params` on one side and review's on the other
+  ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). Keeping the two alike is
+  review's, not a tool's.
 - The root's prose and scripts have no formatter of their own: CI holds `README.md`, `CHANGELOG.md`,
   `CLAUDE.md`, `docs/`, `spec/spec.md`, `spec/interop-service.json`, `spec/schemas/`, `tools/` and
   `.github/` to the
