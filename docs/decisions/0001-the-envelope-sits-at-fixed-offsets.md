@@ -106,11 +106,13 @@ is the transport's to know, not Bead's, which has no ping: over WebSocket, each 
 protocol's own PING control frame at an interval and drops a connection that leaves one unanswered
 (RFC 6455 §5.5.2), so a peer gone without a word ends in a close, as every loss does.
 
-**A transport carries each envelope whole.** Order and a single copy are what its connection gives,
-a WebSocket's both and HTTP's exchanges neither, and the router needs neither: a chunk and a credit
-are placed by their offset and their absolute end, a copy is dropped, and a cancel that overtakes
-its request is buried by the transport of the side that answers (below). A transport that keeps no
-connection draws one, as HTTP's does
+**A transport carries each envelope whole, and once.** Order is what its connection gives, a
+WebSocket's and HTTP's outbox's, and not HTTP's exchanges, and the router needs none: a chunk and a
+credit are placed by their offset and their absolute end, a copy of either is dropped, and a cancel
+that overtakes its request is buried by the transport of the side that answers (below). A request's
+copy the router cannot tell from a new request, so a transport hands each envelope on once, as
+HTTP's outbox hears nothing twice, or its section states what a copy is
+([spec 15.1](../../spec/spec.md)). A transport that keeps no connection draws one, as HTTP's does
 ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)).
 
 ### The cancel
@@ -156,3 +158,19 @@ several gigabytes needs a stream, a decision of its own.
 **The why is here, the rule is in [`spec/spec.md`](../../spec/spec.md)**, sections 1 to 10, 12 and
 15, and the bytes are in `spec/vectors.json`, which every implementation reads
 ([0004](0004-one-behaviour-in-every-language.md)).
+
+## The Tenth Man
+
+A transport's order and copies met the Tenth Man
+([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) with sections 15.1 and 15.9 of
+the spec, which [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md) points
+here for. Its objections, each with the answer that holds:
+
+### On a transport's order and copies
+
+| Objection                                                                                                                                                                                                            | Answer                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Its section states its order" unbinds the Web Worker and a router called in process, which have no section and are bound by "in order on each connection"                                                           | Accepted: order is the default on a connection, and a transport's section may lift it, stating what may overtake.                                                                                                                              |
+| 15.1 says nothing of copies, which a router needs for a request                                                                                                                                                      | Accepted: a single copy is the default too, a section stating otherwise and what a copy is. Every transport Bead ships keeps it: neither HTTP client sends a `POST` again, and HTTP's outbox hears nothing twice.                              |
+| Over HTTP, a failure that ends a subscription may come before its call's result, and both clients already decide alike, the call failing and the result reported `CALL_UNKNOWN`: the change should state the outcome | Accepted in part: 15.9 states that outcome, as HTTP's cost. Refused: a client that reserves the call id of a subscribing call a failure ends, which still fails the call and only silences the report, at the cost of both clients and a case. |
+| "What its server does of it" narrows "the side that answers": a client answers commands                                                                                                                              | Accepted: the text says the side that receives it, the one that answers for a cancel that overtakes, the requester for a copy of an answer.                                                                                                    |

@@ -12,7 +12,8 @@ behind it on leg B, each destination answering the same procedures. It passes a 
 undecoded, and reads the header alone ([0001](0001-the-envelope-sits-at-fixed-offsets.md)).
 
 A relay could also pass a request on to another relay, and so on: a request on its way further would
-need a count of the relays it crossed, as IP's TTL and HTTP's `Via` (RFC 9110 §7.6.3) have.
+need a count or a list of the relays it crossed, as IP's TTL counts the hops a packet crossed and
+HTTP's `Via` lists the intermediaries a message crossed (RFC 9110 §7.6.3).
 
 ## Decision
 

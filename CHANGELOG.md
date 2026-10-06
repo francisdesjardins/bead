@@ -209,6 +209,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file and the entry, the `_Identities:` and `_Codecs:` lines naming files of `spec/`, and each
   side's tests reading both. The `spec` job regenerates them.
 
+- Decision 0021: a topic-based publish/subscribe broker is one more transport, and Bead is never a
+  network of its own. It routes nothing past one relay and shares no session's state between
+  servers; a broker's transport is one core in each implementation and one adapter a broker, and
+  what it owes is decided with it.
 - The service layer (decision 0018), which generated code is a thin shell over, in each runtime:
   a procedure's typed descriptor, `requestOf` and `commandOf`, and `RequestProcedure<…>` and
   `CommandProcedure<…>` with their `ProcedureBindings`, holding its procedure, its admission rule,
@@ -266,6 +270,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its rules and names, under "Where Bead goes", the parts the records bind before the repository
   holds them; 0001's relay is decision 0019 and the connection HTTP draws decision 0020; the rule of
   a duration moves from 0011 to 0014; 0006 keeps its table as rule and job, with its gates owed;
+  0004 states the frame every file of entries keeps, and what each file holds besides stays its own
+  record's; the spec and its companion name, in their preambles, the record behind each section;
   each Tenth Man section keeps its rounds in order, each answer the one that holds; and the C# side
   has a README of its layout and its modules. A gate in CI's `commits` job,
   `tools/check-links.mjs`, holds every relative link of the repository's Markdown, and its anchor,
@@ -357,6 +363,13 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 
 - The Tenth Man meets every change to what every language's tests answer to: the spec, its
   conformance files, their shape and their tooling, and the gates the implementations share.
+- Spec 15.1: on a connection, a transport hands each envelope on once, in the order its side sent
+  it, unless its section says otherwise, stating what may overtake and what a copy is; 15.9: over
+  HTTP, a failure that ends a subscription may come before its call's result, which the client then
+  reports as `CALL_UNKNOWN`. Every transport and both sides keep it as they are. Debugging 3.4: a
+  latency bench measures, and gates nothing.
+- The Tenth Man's objections are kept in the repository, in the record whose decision a change makes
+  or changes, or whose Scope holds what it changes; 0007 holds the parameter rule's.
 - The conversations' steps are named by who acts, `send` and `expect` where they said `in` and
   `out`; an expected failure gives the relays it crossed, and an expected command its flags, which
   both sides now compare.

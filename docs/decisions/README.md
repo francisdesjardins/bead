@@ -18,9 +18,11 @@ unless it misleads.
 ## Where Bead goes
 
 Bead is typed two-way RPC with client-paced notifications, transfers under credit and sessions,
-alike in a tab, a Web Worker, a server and over a topic-based pub/sub broker used as a transport,
-never a network of its own, and proven byte for byte by the conformance files and the interop. The
-records bind, in the present, parts the repository does not hold:
+alike in a tab, a Web Worker, a server and over a topic-based publish/subscribe broker used as a
+transport, never a network of its own
+([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), and proven byte for byte by
+the conformance files and the interop. The records bind, in the present, parts the repository does
+not hold:
 
 - **the builder, `beadc`**, which generates a typed server and client in each language from a
   `.proto`: its name and its C#
@@ -35,11 +37,15 @@ records bind, in the present, parts the repository does not hold:
   credential it carries ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)) and the routes
   a service's name scopes
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
-- **a topic-based pub/sub broker's transport**: what stands for a connection there
+- **a topic-based publish/subscribe broker's transport**
+  ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), one core and one adapter a
+  broker: what stands for a connection there
   ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)), what carries
   `ELSEWHERE` ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), what silence is
-  ([0012](0012-a-listen-held-is-not-silence.md)), and a relay as its bridge to another transport
-  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
+  ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport
+  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), and a relay that carries
+  a subscription, open ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)),
+  which a page across a broker needs;
 - **a latency bench**, which measures a counted call against one not counted on each side
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
 - **a constrained C side**, which builds debugging by its switches
@@ -69,11 +75,12 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ### Transports and relays
 
-| #                                                                        | Decision                                                                         | Status   |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------- | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                             | A listen held is not silence, and a connection without a session is its server's | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)   | A relay terminates each leg between two transports, and routes nothing past it   | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md) | HTTP draws a connection by a token, and a listen holds it                        | accepted |
+| #                                                                        | Decision                                                                                             | Status   |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                             | A listen held is not silence, and a connection without a session is its server's                     | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)   | A relay terminates each leg between two transports, and routes nothing past it                       | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md) | HTTP draws a connection by a token, and a listen holds it                                            | accepted |
+| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)      | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own | accepted |
 
 ### Time
 
@@ -108,7 +115,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ## Writing one
 
-The next decision is 0021. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0022. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 
@@ -138,8 +145,11 @@ the other records. A part the repository does not hold is bound by constraint, i
 named under [Where Bead goes](#where-bead-goes); a gate that does not run is among
 [0006](0006-a-rule-has-its-gate.md)'s gates owed.
 
-A record that changes anything the languages share — the protocol, a name, a behaviour — has the
-Tenth Man's objections and their answers kept with it, or with the design the change makes
-([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)), and lands with the spec, the
-conformance files and every implementation it changes. Add it to the table above, under its theme,
-in the same change.
+A change of anything the languages share — the protocol, a name, a behaviour — keeps the Tenth
+Man's objections and their answers in the repository
+([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)): in the record it writes; in the
+one whose decision it changes, which gains the round; or, for a change of the spec, its files or
+their gates that changes no decision, in the record whose Scope holds what it changes. A change that
+changes several records keeps its round in the first it names, the others pointing to it. A record
+lands with the spec, the conformance files and every implementation it changes; add it to the table
+above, under its theme, in the same change.

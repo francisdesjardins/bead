@@ -6,8 +6,13 @@ MUST NOT, SHOULD and MAY are to be read as in [RFC 2119](https://www.rfc-editor.
 
 This document is the companion of [`spec.md`](spec.md), which states the wire: what it states never
 goes on the wire. Each section names the conformance file that checks it. The why of each rule is in
-the decisions: [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md) for
-the whole of it.
+the decisions:
+
+- [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md): the whole of it;
+- [0016](../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md): the
+  payloads it writes (4.3, 10.1);
+- [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
+  names it reads (1.2, 6.10, 7.3, 8.3).
 
 **Version: 0.1.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves as `spec.md` moves
@@ -64,8 +69,7 @@ notification sent and one heard read none while nobody listens, and a call three
 on a router, a counted call reads two more than an uncounted one. Where its platform counts what a
 thread allocates, a counted call's synchronous steps allocate not a byte more than an uncounted
 one's, and what a call allocates while nobody listens is pinned; where it does not, the side holds
-that part by inspection, a row of the support matrix. A latency bench measures a counted call
-against one not counted.
+that part by inspection, a row of the support matrix.
 
 3.5. A side whose platform builds that way has two build switches: one leaves out the trace and the
 filter, the other the registry, each alone or both. Built with the registry and without the trace, a

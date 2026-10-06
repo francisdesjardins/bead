@@ -7,10 +7,11 @@
 
 A call reaches sides that never drew its session. A relay passes it to a destination behind it;
 HTTP/JSON transcoding takes it from a client whose `Authorization` field holds its credential; a
-broker hands it to whichever server takes its procedure; a server that never issued its token runs
-it on a token it verifies alone. Each of them has to know from the header whether the call presents
-a credential and of what kind, since admission reads the header and never the payload (spec, section
-9.2, step 5), and a relay passes the payload on undecoded (section 14.2).
+broker hands it to a server that takes its procedure
+([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)); a server that never issued
+its token runs it on a token it verifies alone. Each of them has to know from the header whether the
+call presents a credential and of what kind, since admission reads the header and never the payload
+(spec, section 9.2, step 5), and a relay passes the payload on undecoded (section 14.2).
 
 Six shapes were weighed:
 
@@ -274,14 +275,15 @@ none; a `POST /bead` with more than one `Authorization` field is refused 400, `m
 field is no list to combine (RFC 9110 §5.3); and a relay writes the value to leg B as it came. A
 WebSocket and a Web Worker carry none, nor does what a listen brings back over HTTP, a server's
 command among it, and a request that presents `ELSEWHERE` on them is refused `SESSION_REQUIRED`. On
-a broker, `ELSEWHERE` is the case it is made for: a client authenticates to the broker, the server
-never sees that client's connection, and each message reaches it on the broker's word. What carries
-that word, the authentication of the connection its client publishes on or a property of the
-message, is open, and is decided with the broker's transport. A relay that publishes for many
-requesters carries each one's credential with that requester's message, never in its own
-connection's authentication, which is the relay's. A connection the server itself terminates — a
-WebSocket's upgrade — holds one credential for every call on it: it opens that connection's session
-when it connects, by the decision that brings it, and never stands for `ELSEWHERE`.
+a broker ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), `ELSEWHERE` is the
+case it is made for: a client authenticates to the broker, the server never sees that client's
+connection, and each message reaches it on the broker's word. What carries that word, the
+authentication of the connection its client publishes on or a property of the message, is open, and
+is decided with the broker's transport. A relay that publishes for many requesters carries each
+one's credential with that requester's message, never in its own connection's authentication, which
+is the relay's. A connection the server itself terminates — a WebSocket's upgrade — holds one
+credential for every call on it: it opens that connection's session when it connects, by the
+decision that brings it, and never stands for `ELSEWHERE`.
 
 **A bearer credential crosses only TLS off the machine.** A side presents a `JWT`, and carries an
 `ELSEWHERE`, only over TLS — `wss`, `https` — or within the machine: the loopback, a Web Worker, a

@@ -50,8 +50,16 @@ conformance files, their shape and their tooling, and the gates the implementati
 mechanics, a shard or a runner's pin, are not among them. When the others agree, one reviewer is
 bound to disagree, in this repository's workflows an agent at xhigh effort: it argues that the
 consensus is wrong. Each of its objections is answered, accepted or refused with its reason, before
-the user decides. Not ten opinions: as many as the change needs, plus the one that dissents. The
-objections and their answers are kept with the record or the design the change makes.
+the user decides. Not ten opinions: as many as the change needs, plus the one that dissents.
+
+**The objections and their answers are kept in the repository, in a record**, under its
+`## The Tenth Man`: the record the change writes; or the one whose decision it changes, which gains
+the round; or, for a change of the spec, its files or their gates that changes no decision, the
+record whose Scope holds what it changes. A change that changes several records keeps its round in
+the first it names, and the others point to it. A change that moves, trims or re-voices a record and
+keeps every decision is no change this rule holds, and keeps no round. A design's objections enter
+the repository with its record, and a decision the repository holds keeps no round in a file git
+does not keep.
 
 ## Consequences
 
@@ -68,3 +76,30 @@ objections and their answers are kept with the record or the design the change m
 - A change that reaches across the languages takes one round of dissent more than any other change,
   and the dissent is written down: a decision that survives it is one the next reader need not argue
   again.
+- A reader finds a decision's rounds in its record, or through its record's pointer to the record
+  that holds a round several share. A record without `## The Tenth Man` meets one at the next change
+  of its decision.
+
+## The Tenth Man
+
+How a record is kept and voiced met the Tenth Man twice: when the records were realigned, and when
+this record said where a round lives. Its objections, each with the answer that holds:
+
+### On the records' realignment
+
+| Objection                                                                         | Answer                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The realignment's own rule puts it under the Tenth Man                            | Accepted in part: each step that changes a decision meets the Tenth Man of its own, and a record without the section meets it at the next change of its decision. Refused: a step that only moves, trims or re-voices a record, keeping every decision, takes no round.                                                                                                                                           |
+| Dropping "yet" and "until" deletes where Bead goes                                | Accepted: open work is stated as open, in the present, and an edit never turns it into a refusal.                                                                                                                                                                                                                                                                                                                 |
+| "To come" is "yet" with another word                                              | Accepted in part: a sentence that binds a part the repository does not hold is the constraint on whatever will hold it, in the present; a gate that does not run is among [0006](0006-a-rule-has-its-gate.md)'s gates owed; and the decisions' README names, under "Where Bead goes", the parts the records bind before the repository holds them. Refused: that a part not built cannot be named in the present. |
+| One option for the Tenth Man's sections cannot keep rounds that answer each other | Accepted: rounds stay in their order, each under a plain heading; a row a later row replaced is dropped, and the later row kept in its words; a round that is the reason a choice does not come back stays whole.                                                                                                                                                                                                 |
+| Splitting this record is weighed by links that break anyway                       | Accepted: every link to this record names its file, and a released tag ships it, so it is neither split nor renamed; it gains two sub-headings, and the sentence that binds a part the repository does not hold.                                                                                                                                                                                                  |
+
+### On where the objections live
+
+| Objection                                                                                                                                                                      | Answer                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "With the record or the design" leaves rounds in files git does not keep: the parameter rule's and the realignment's have no other home, so the rule is false the day it lands | Accepted: the parameter rule's round enters [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) in this change; the realignment's rows that settle a decision go with that decision's round, its editorial rest keeping none. A design that is no decision yet, the builder's, keeps its round until its record lands. |
+| The builder's design workflow writes its round to a file of the repository that is no record                                                                                   | Accepted: it writes the design beside the builder's inputs, which the repository does not keep, and its round enters the repository with the builder's record.                                                                                                                                                                        |
+| No home for the round of a change that writes no record and changes none, and none for one that changes several                                                                | Accepted: the record whose Scope holds what the change changes takes the first; the first record a change names takes the second, the others pointing to it.                                                                                                                                                                          |
+| The rule is one no tool checks, and joins neither [0006](0006-a-rule-has-its-gate.md)'s list of what review holds nor its gates owed                                           | Accepted: review holds where a round is kept, and [0006](0006-a-rule-has-its-gate.md)'s list says so. No gate is owed: a round is prose, and no tool reads its home.                                                                                                                                                                  |

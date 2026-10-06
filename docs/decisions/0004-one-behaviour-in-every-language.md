@@ -30,17 +30,11 @@ place that takes a duration an application gives a side makes of every input;
 `spec/identities.json` holds what a router takes, or refuses, as a procedure is declared to it
 ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)); `spec/codecs.json`
 holds the bytes every side's codecs write of what they read and of what they are given, in `raw`,
-`text` and `json` ([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). Beside
-the wire, its
-companion [`spec/debugging.md`](../../spec/debugging.md) has two files of its own
-([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json` holds
+`text`, `json` and `proto` ([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)).
+Beside the wire, its companion [`spec/debugging.md`](../../spec/debugging.md) has two files of its
+own ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json` holds
 what a debug filter reads as and keeps, and `spec/metrics.json` what a registry writes and what each
-exit of a call counts. Every implementation's tests read them from `spec/`, never a copy: an entry
-one side does not read is one nobody checks. Nine generators write them,
-`spec/generators/make_vectors.py`, `make_conversations.py`, `make_transports.py`, `make_clocks.py`,
-`make_durations.py`, `make_debug_filters.py`, `make_metrics.py`, `make_codecs.py` and
-`make_identities.py`, and regenerating gives the same
-bytes: nothing drawn at random is in them.
+exit of a call counts.
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
 interop service over WebSocket and over HTTP, and each implementation's client calls every other's
@@ -198,6 +192,38 @@ of sections 1 to 15 no entry cites: it fails when that list and the files disagr
 uncited or one listed that an entry now cites. The companion's files cite its own units, which
 `spec/debugging-uncited.txt` lists alike.
 
+**Every file of entries keeps one frame.** Each file of `spec/` whose entries a side plays, which
+[the README](../../README.md)'s table names:
+
+- is written by its generator in `spec/generators/`, and regenerating it gives the same bytes:
+  nothing drawn at random is in it;
+- follows its schema in `spec/schemas/`, repeats the version of the document it belongs to, and
+  names each entry once within its group;
+- cites the units each of its cases checks: every entry that plays a case — a vector, a
+  conversation, a transport's case, a place, a name, an id, a fold, a procedure's kind, a payload, a
+  value, a filter, a source, an exposition, an exit — and none of the fixtures, inputs and responses
+  it plays them with;
+- is named, on a line of its own, by a section of its document whose clauses it plays, as section 15
+  names `spec/transports.json`, and a group of vectors is named by its name;
+- is read by every side's tests from `spec/`: no implementation commits a copy, and a build takes
+  the file of `spec/` afresh; an entry one side does not read is one nobody checks;
+- is played whole by every side, but what a row of the support matrix excuses: an entry crosses a
+  row by its `differs`, which names the row and the language the row excuses, the row naming the
+  entry back.
+
+The clock cases cite no unit, and no section names them: they hold every side's test clock to one
+meaning of `advance`, which [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)
+decides and the spec does not state. Two files of `spec/` hold no entries, are written by hand, and
+are read whole: the interop service, `spec/interop-service.json`, under its schema, which the
+conversations and the transports' cases play against; and `spec/codecs.proto`, the message the
+codecs' `proto` entries read and write, which section 17 names, every side's tests compile, and the
+codecs' generator reads. What else a file holds — its keys, the reasons its outcomes give, the ways
+a side takes an input, how a side plays it — is its own record's: the durations' one harness and one
+helper are [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s, the codecs'
+[0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)'s, the identities'
+[0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)'s, the debug filters' and
+the metrics' [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s.
+
 **The surface is one too.** A name on one side is the same name on every other, in its language's
 case, and any language that can carry the protocol whole mirrors the surface almost name for name;
 each language's own mapping of terms is its implementation's record, as
@@ -209,10 +235,7 @@ transports share, so no transport needs another's server in any language.
 
 **A difference between languages is a row of the support matrix**, `docs/support.md`, with the test
 that shows it, and it stays a row until it closes. Normalising is always the aim: a difference that
-can close is work to do, and one only a platform imposes says which platform, and why. A case that
-crosses a row says so, `differs`, naming the row and the language it excuses: `spec/check.py`
-checks that the row names that case, and each side's harness checks that it played every case but
-the ones excused for its language.
+can close is work to do, and one only a platform imposes says which platform, and why.
 
 **No implementation is the reference: the set evolves together**, wherever it can. Where one
 implementation does Y and another can do Y and Z, every implementation does Y: the second keeps to
@@ -251,20 +274,16 @@ both sides, the spec's word for the relays a failure crossed.
 failed test twice on CI, which would hide on the TypeScript side what fails the C# side's run.
 
 **The file gives a broker's conformance a vocabulary to start from**: named connections, a clock
-advanced, and, later, a client part. A broker's own part is decided with its transport, and this
-file commits it to nothing.
+advanced, and, later, a client part. A broker's own part is decided with its transport
+([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), and this file commits it to
+nothing.
 
-**The report of the vectors and conversations each side plays is still owed**
-([0006](0006-a-rule-has-its-gate.md)): the transports' harnesses check that they played every case,
-and `spec/check.py` sees only what the other files' tests name.
-
-**Every side's tests read every group of vectors, the conversations, and the transports' cases.**
-`spec/check.py`, in the spec job, reports group by group which sides' tests read it, and fails on a
-group or a file one side's tests never name, so a new group fails until every side reads it. It
-reads the tests' sources: it sees the groups a test names, not the vectors it plays. The same check
-holds the files' shape: each follows its schema in `spec/schemas/`, repeats the spec's version,
-names each entry once within its file, and each group of vectors is named by a section of the spec,
-as sections 14 and 15 name the files that check them.
+**`spec/check.py` holds the frame**, in the spec job, and reports group by group which sides' tests
+name each file and group, failing on one a side never names. It reads the tests' sources: it sees
+what a test names, not the entries it plays, so a report of what each side plays is a gate owed
+([0006](0006-a-rule-has-its-gate.md)). The transports' harnesses check, on both sides, that they
+played every case but those excused for their language; the other harnesses skip what is excused
+in their loops, and check nothing more.
 
 **The interop needs both runtimes in one place.** In CI, only the `dotnet` job has both: it installs
 the TypeScript side for its interop server, runs the C# tests, the C# client's interop among them,
@@ -290,9 +309,10 @@ sentence on a client's behaviour.
 
 ## The Tenth Man
 
-The conformance files' schemas, their version and their check met the Tenth Man
-([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). Its objections, each with its
-answer:
+The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
+in three rounds. Its objections, each with its answer:
+
+### On the files' schemas, their version and their check
 
 | Objection                                                                                                             | Answer                                                                                                                                                                                   |
 | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -307,7 +327,7 @@ answer:
 | Each vector and conversation should cite the clause it checks                                                         | Accepted with the transports' conformance: every entry cites its units, and a list holds the units none cites.                                                                           |
 | `specVersion` abbreviates ([0003](0003-one-word-one-meaning.md))                                                      | Refused: it is the spec's own word, as the folder, the `spec` job and the `spec-v` tags have it, and CloudEvents names its own `specversion`.                                            |
 
-The transports' conformance met the Tenth Man too. Its objections, each with its answer:
+### On the transports' conformance
 
 | Objection                                                                                                                                             | Answer                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -331,3 +351,15 @@ The transports' conformance met the Tenth Man too. Its objections, each with its
 | Two files would speak two vocabularies                                                                                                                | Accepted: one vocabulary, named by who acts, and the conversations are written again to it.                                                                                                                                                                                                    |
 | Values captured by a free pattern match differently in each language                                                                                  | Accepted: the schema names a closed set of shapes, each in ASCII classes.                                                                                                                                                                                                                      |
 | The revision leaves 0006's table and the matrix's table of files as they are                                                                          | Accepted: both change in this revision, and the spec's sections 14 and 15 name their files.                                                                                                                                                                                                    |
+
+### On the frame of every file
+
+| Objection                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A frame stated for every file holds for none: `differs`, `reason` and `ways` each live in a few files, in shapes of their own, and the one harness and one helper hold for the durations alone          | Accepted: the paragraph states only what holds for every file of entries; what else a file holds, the durations' one harness and one helper among it, stays its own record's.                                                                                |
+| "Each section it checks names it" is false of `spec.md`: the conversations, the transports' cases, the durations, the identities and the vectors are named by fewer sections than they cite             | Accepted: a file is named by a section of its document whose clauses it plays, which every file keeps; the stronger form holds of the companion alone.                                                                                                       |
+| "Excuses an entry only by its `differs`" overrides what a profile and a row of the matrix excuse, and a constrained C side could not conform                                                            | Accepted in part: the bullet takes [0006](0006-a-rule-has-its-gate.md)'s words, played whole but what a row of the matrix excuses, a `differs` being how an entry crosses one. Refused: a clause on a profile's parts, which comes with the C side's record. |
+| The rewording drops two limits, that `spec/check.py` sees what a test names and not what it plays, and that the transports' harnesses alone check they played every case; and the C# build reads a copy | Accepted: both limits are stated under **`spec/check.py` holds the frame**, the weaker one as weaker; no implementation commits a copy, and a build takes the file of `spec/` afresh.                                                                        |
+| Changing `spec/check.py` in an editorial change reverses the round that kept `spec/` out of it; and the gap is wider, a line's label not tied to its file                                               | Accepted: `spec/check.py` does not change; the check that every file of entries is named by a line of its document, the line's label its file's, joins 0006's gates owed.                                                                                    |
+| "Cites, entry by entry" is false beyond the clock cases: the transports' responses, the durations' inputs, the debug filters' fixtures and the identities' ways cite nothing                            | Accepted: every entry that plays a case cites its units, and the fixtures, inputs and responses it plays them with cite none.                                                                                                                                |
+| `spec/codecs.proto` is written by hand, under no schema, read by every side's tests, and in neither the frame nor its exceptions; and a list of nine files is one registry more                         | Accepted: it stands beside the interop service as a file written by hand and read whole; the paragraph names the files of entries by the README's table, and lists none.                                                                                     |
