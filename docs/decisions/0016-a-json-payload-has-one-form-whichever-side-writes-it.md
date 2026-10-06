@@ -1,99 +1,75 @@
 # 0016 — A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language
 
 - **Status**: accepted
-- **Scope**: spec section 17, and the lines of its preamble and of sections 6.1 and 9.5 that point
-  to it; the companion's 4.3 and 10.1 (`spec/debugging.md`); `spec/codecs.json`, its schema, its
-  generator, `spec/check.py` and `spec/uncited.txt`; eight conversations of
-  `spec/conversations.json`; `spec/interop-service.json`'s comment; both runtimes' payload codecs,
-  internal until the builder makes them public, and the interop's serializers, which use them; both
-  service managers, where a value does not write; their harnesses and twin tests; the support
-  matrix; [0004](0004-one-behaviour-in-every-language.md)'s and
-  [0006](0006-a-rule-has-its-gate.md)'s lists; the spec's version and the companion's
-  ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md))
+- **Scope**: spec section 17, and the lines that point to it; debugging 4.3 and 10.1;
+  `spec/codecs.json`, its gate, and eight conversations of `spec/conversations.json`; both runtimes'
+  payload codecs, public
+  ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
+  and the interop's serializers, which use them; both service managers, where a value does not
+  write; the support matrix
 
 ## Context
 
-The builder gives a procedure's payloads one of three native encodings — `raw`, `text` and `json`,
-bound by Bead's payload types `bead.Raw`, `bead.Text` and `bead.Json` — and generated code in every
-language reads and writes them through its runtime's codec, which the builder makes public. Spec
-section 17 states those payloads, with `spec/codecs.json` beside it, as the builder's design places
-them. No codec of a runtime exists yet: each side's interop service holds its own, its platform's.
+The builder gives a procedure's payloads one of the encodings `raw`, `text` and `json`, and the code
+it generates in every language reads and writes them through its runtime's codecs
+([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
+Spec section 17 states those payloads, with `spec/codecs.json` beside it.
 
-- The TypeScript side decodes with a `TextDecoder` of the defaults and `JSON.parse`, and encodes
-  with `JSON.stringify` and a `TextEncoder` (`implementations/typescript/interop/offer.ts`).
-- The C# side decodes with `JsonDocument.Parse` of the defaults, and encodes with
-  `JsonSerializer.SerializeToUtf8Bytes`
-  (`implementations/dotnet/interop/Bead.Interop/InteropService.cs`).
+**What each platform's default reader and writer do.** Probed on Node 26.5.0 (V8 14.6) and .NET
+10.0.12, `JSON.parse` with `JSON.stringify`, and `JsonDocument.Parse` with `JsonSerializer`, part on
+every row below. RFC 7493 does not refuse a byte order mark: RFC 8259 §8.1 forbids a writer to add
+one, and lets a parser ignore one.
 
-Twin tests pin what each writes back of what it reads, `JSON_ROWS`
-(`implementations/typescript/src/client/__tests__/interop.test.ts`) and `JsonRows`
-(`implementations/dotnet/tests/Bead.Core.Tests/InteropServiceTests.cs`), and the matrix holds the
-difference as an open row, "The interop service's JSON payloads" (`docs/support.md`). Probed on Node
-26.5.0 (V8 14.6) and .NET 10.0.12, the two sides part on every row below; the first two and the
-ninth are the twin tests' own bytes. RFC 7493 does not refuse a byte order mark: RFC 8259 §8.1
-forbids a writer to add one, and lets a parser ignore one.
+| Bytes read                                                             | `JSON.parse`, then `JSON.stringify`                                     | `JsonDocument.Parse`, then `JsonSerializer`              |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------- |
+| `22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22`, a string outside ASCII | as read                                                                 | `"Jos\u00E9 a\u002Bb \u003Cx\u003E"`                     |
+| `"\u00e9\/"`                                                           | `22 C3 A9 2F 22`, the character in UTF-8                                | `"\u00E9/"`                                              |
+| `1.0`, `1E2`, `-0`, `1e21`                                             | `1`, `100`, `0`, `1e+21`                                                | as read                                                  |
+| `12345678901234567890`                                                 | `12345678901234567000`                                                  | as read                                                  |
+| `1E400`                                                                | `null`                                                                  | as read                                                  |
+| `{"a":1,"a":2}`                                                        | `{"a":2}`                                                               | as read                                                  |
+| `{"b":1,"1":2,"0":3}`                                                  | `{"0":3,"1":2,"b":1}`                                                   | as read                                                  |
+| `"\ud800"`, a surrogate alone                                          | as read                                                                 | nothing: `JsonSerializer` throws `JsonException`         |
+| `22 FF 22`, a byte that is not UTF-8                                   | `22 EF BF BD 22`, U+FFFD in UTF-8                                       | `"\uFFFD"`                                               |
+| `EF BB BF 31`, a byte order mark                                       | `1`                                                                     | refused                                                  |
+| 65 arrays nested                                                       | as read: `JSON.parse` and `JSON.stringify` take 1,000,000 under Node 26 | refused: `JsonDocumentOptions.MaxDepth` is 64 by default |
 
-| Bytes read                                                             | The TypeScript side writes back                                         | The C# side writes back                                                                                          |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22`, a string outside ASCII | as read                                                                 | `"Jos\u00E9 a\u002Bb \u003Cx\u003E"`                                                                             |
-| `"\u00e9\/"`                                                           | `22 C3 A9 2F 22`, the character in UTF-8                                | `"\u00E9/"`                                                                                                      |
-| `1.0`, `1E2`, `-0`, `1e21`                                             | `1`, `100`, `0`, `1e+21`                                                | as read                                                                                                          |
-| `12345678901234567890`                                                 | `12345678901234567000`                                                  | as read                                                                                                          |
-| `1E400`                                                                | `null`                                                                  | as read                                                                                                          |
-| `{"a":1,"a":2}`                                                        | `{"a":2}`                                                               | as read                                                                                                          |
-| `{"b":1,"1":2,"0":3}`                                                  | `{"0":3,"1":2,"b":1}`                                                   | as read                                                                                                          |
-| `"\ud800"`, a surrogate alone                                          | as read                                                                 | nothing: its writer throws `JsonException`, and its request is answered `PROCEDURE_FAILED` (`ServiceManager.cs`) |
-| `22 FF 22`, a byte that is not UTF-8                                   | `22 EF BF BD 22`, U+FFFD in UTF-8                                       | `"\uFFFD"`                                                                                                       |
-| `EF BB BF 31`, a byte order mark                                       | `1`                                                                     | refused, `PAYLOAD_UNDECODABLE`                                                                                   |
-| 65 arrays nested                                                       | as read: `JSON.parse` and `JSON.stringify` take 1,000,000 under Node 26 | refused, `PAYLOAD_UNDECODABLE`: `JsonDocumentOptions.MaxDepth` is 64 by default                                  |
+And of a value JSON has no form for, given to its writer: `JSON.stringify` writes `NaN` as `null`,
+drops a member whose value is `undefined`, and writes `undefined` as an empty payload, 0 bytes,
+which no JSON reader takes (`JSON.stringify(undefined)` is `undefined`, and `TextEncoder` encodes it
+as `""`). `JsonSerializer` takes a `JsonElement`, which holds no `NaN` and no infinity, but can hold
+what no reader takes: a `default(JsonElement)`, of kind `Undefined`, on which `JsonSerializer`
+throws `InvalidOperationException`; and an object naming a member twice, which `JsonDocument.Parse`
+and `JsonElement.Parse` build with their defaults and `JsonSerializer` writes back.
 
-And of a value JSON has no form for, given to its writer: the TypeScript side writes `NaN` as
-`null`, drops a member whose value is `undefined`, and writes `undefined` as an empty payload, 0
-bytes, which no JSON reader takes (`JSON.stringify(undefined)` is `undefined`, and `TextEncoder`
-encodes it as `""`). The C# side's writer takes a `JsonElement`, which holds no `NaN` and no
-infinity, but can hold what no reader takes: a `default(JsonElement)`, of kind `Undefined`, on which
-`JsonSerializer` throws `InvalidOperationException`; and an object naming a member twice, which
-`JsonDocument.Parse` and `JsonElement.Parse` build with their defaults and `JsonSerializer` writes
-back.
+Four inputs reach another outcome, not only other bytes: a byte order mark, a surrogate alone, 65
+arrays nested, and `1E400`.
 
-The 142 conversations pass because every JSON payload in them is ASCII, and every one a server
-answers is already in the form both sides would write: a scan of `spec/conversations.json`,
-`spec/transports.json` and `spec/metrics.json` finds no answer holding an object of two members, and
-no byte outside ASCII in a payload but the `FF` sent to be refused; read and written as this record
-states, no answer a server sends changes its bytes. Four inputs reach another outcome, not only
-other bytes: a byte order mark, which one side answers and the other refuses; a surrogate alone,
-which one side echoes and the other answers `PROCEDURE_FAILED`; 65 arrays nested, which one side
-echoes and the other refuses; and `1E400`, which the TypeScript side answers `null`.
-
-Bead's rules ask one behaviour of every language, with no implementation for the reference, and a
-difference a row of the matrix until it closes ([0004](0004-one-behaviour-in-every-language.md)).
-Here the difference must close before the builder makes a codec public and generates clients that
-send it: a third language would otherwise copy one of two forms, and every generated client would
-carry today's.
+Bead asks one behaviour of every language ([0004](0004-one-behaviour-in-every-language.md)): the
+codecs agree before the builder generates clients that send their bytes, or a third language copies
+one of two forms.
 
 What had to be settled, and the ways weighed for each:
 
 **The order of an object's members.** Four ways:
 
-- **Each platform's own**, as today: free, and two forms of one value, a third with a C side.
-- **In the order the value holds them**, as the builder's design first had it: the author's order
-  kept on the wire. But an ECMAScript object holds a name that is an array index — a canonical
-  decimal from 0 to 2³² − 2 — before every other, in ascending numeric order (ECMA-262,
-  OrdinaryOwnPropertyKeys): the TypeScript side reads `{"b":1,"1":2,"0":3}` and holds
-  `{"0":3,"1":2,"b":1}`, `"4294967294"` moved and `"4294967295"`, `"-1"` and `"01"` not. This way
-  holds on the sides whose objects keep the order they are given, and fails on the TypeScript side
-  for ever: a row of the matrix no work closes.
+- **Each platform's own**: free, and two forms of one value, a third with a C side.
+- **In the order the value holds them**: the author's order kept on the wire. But an ECMAScript
+  object holds a name that is an array index — a canonical decimal from 0 to 2³² − 2 — before every
+  other, in ascending numeric order (ECMA-262, OrdinaryOwnPropertyKeys): the TypeScript side reads
+  `{"b":1,"1":2,"0":3}` and holds `{"0":3,"1":2,"b":1}`, `"4294967294"` moved and `"4294967295"`,
+  `"-1"` and `"01"` not. This way holds on the sides whose objects keep the order they are given,
+  and fails on the TypeScript side for ever: a row of the matrix no work closes.
 - **In ECMA-262's order of an object's names**, the order `JSON.stringify` writes
   (`SerializeJSONObject` takes `EnumerableOwnProperties`, whose order `OrdinaryOwnPropertyKeys`
   defines): the array-index names first, ascending, then every other name in the order it was given.
-  It is the standard RFC 8785 itself takes its strings and numbers from (RFC 8785 §3.2.2), and the
-  way closest to the builder's design as first taken, which it keeps for every name that is not an
-  array index. The TypeScript writer is a walk that refuses what JSON has no value for, then
-  `JSON.stringify`: 3.0 to 4.2 ms on a payload of 770,886 bytes, 9,000 objects of five members,
-  against 1.3 to 1.7 for `JSON.stringify` alone. The C# side and the generator move each object's
-  array-index names ahead, a stable partition. What it gives up: one form for one value whatever
-  order it was built in — `{a, b}` built by one side and `{b, a}` by the other are two forms; and
-  RFC 8785's conformance, to anyone who checks it.
+  It is the standard RFC 8785 itself takes its strings and numbers from (RFC 8785 §3.2.2), and keeps
+  the author's order for every name that is not an array index. The TypeScript writer is a walk that
+  refuses what JSON has no value for, then `JSON.stringify`: 3.0 to 4.2 ms on a payload of 770,886
+  bytes, 9,000 objects of five members, against 1.3 to 1.7 for `JSON.stringify` alone. The C# side
+  and the generator move each object's array-index names ahead, a stable partition. What it gives
+  up: one form for one value whatever order it was built in — `{a, b}` built by one side and
+  `{b, a}` by the other are two forms; and RFC 8785's conformance, to anyone who checks it.
 - **RFC 8785 whole, the JSON Canonicalization Scheme**: each object's members sorted by their names'
   UTF-16 code units (RFC 8785 §3.2.3). One value has one form, built in whatever order; the scheme
   is a standard with test data (its Appendix B) and implementations in many languages, which a third
@@ -102,7 +78,7 @@ What had to be settled, and the ways weighed for each:
   carries no meaning; and `JSON.stringify` on the TypeScript writer, since every ordinary object
   holds its array-index names first again: the writer writes such an object by hand, and is 7.7 to
   12.5 ms on the payload as tuned (below), against 3.0 to 4.2 for the third way.
-- **Chosen: RFC 8785 whole**, the user's choice, a change to the builder's design as first taken.
+- **Chosen: RFC 8785 whole.**
 
 **A string.** RFC 8785 §3.2.2.2 writes a string as ECMAScript's `JSON.stringify` writes a
 well-formed one: each character as it is, but `"` and `\`, five control characters as short escapes,
@@ -123,8 +99,8 @@ and the escape writes what every reader refuses (RFC 7493 §2.1).
 **A number.** RFC 8785 §3.2.2.3 writes a number as ECMAScript's Number::toString writes its double.
 .NET's `Utf8JsonWriter` writes `1E+21`, `1E-07` and `-0` where ECMAScript writes `1e+21`, `1e-7` and
 `0`, so the C# side lays out the shortest digits `double.ToString("R")` gives as ECMAScript does:
-the two agree on 2,009,225 doubles (`es-dotnet.cs`). A number that is not finite — `NaN`, an
-infinity — is refused, as RFC 8785 §3.2.2.3's note requires, where `JSON.stringify` writes `null`.
+the two agree on 2,009,225 doubles. A number that is not finite — `NaN`, an infinity — is refused,
+as RFC 8785 §3.2.2.3's note requires, where `JSON.stringify` writes `null`.
 
 Reading a number's text into its double is the other half, and the platforms part on it.
 `JSON.parse`, Python's `float` and .NET's `double.Parse` read each of 299,886 decimal texts at and
@@ -142,24 +118,23 @@ reader refuses besides what is not JSON. Each item, with what each platform does
 
 - **Bytes that are not UTF-8** (RFC 7493 §2.1, RFC 8259 §8.1): `TextDecoder` refuses them with
   `fatal: true`; .NET's reader takes a byte that is not UTF-8 within a string and writes it back as
-  `\uFFFD`, so `Utf8.IsValid` runs first, as the C# JWT verifier already does
-  (`implementations/dotnet/src/Bead.Core/JwtVerifier.cs`).
+  `\uFFFD`, so `Utf8.IsValid` runs first, as each side's JWT verifier does (13.8).
 - **A byte order mark**: RFC 8259 §8.1 lets a parser ignore one. Ignored, it is what `TextDecoder`'s
   default and `JsonDocument.Parse(Stream)` do; refused, what
   `JsonDocument.Parse(ReadOnlyMemory<byte>)` does — its documentation: "Because the input is
   considered to be text, a UTF-8 Byte-Order-Mark (BOM) must not be present" — and what spec 13.8,
   step 1, does with a token's parts. **Chosen: refused**, as 13.8 refuses it: a writer never adds
   one, and a reader that skips one reads two forms of one value. `TextDecoder` keeps it with
-  `ignoreBOM: true` (`implementations/typescript/src/router/shared/jwt-verifier.ts`).
+  `ignoreBOM: true` (`implementations/typescript/src/router/shared/payloads.ts`).
 - **A name given twice** (RFC 7493 §2.3): `JSON.parse` keeps its last value, with no check to turn
   on; `JsonDocument` keeps both unless `JsonDocumentOptions.AllowDuplicateProperties` is `false`, an
   option .NET 10 brings, documented: "If set to `false`, JsonException is thrown when a duplicate
-  property name is encountered". Both verifiers check it already: `namesOnce` (`jwt-verifier.ts`)
-  and `AllowDuplicateProperties = false` (`JwtVerifier.cs`).
+  property name is encountered". Both verifiers check it: `namesOnce` (`payloads.ts`) and
+  `AllowDuplicateProperties = false` (`JwtVerifier.cs`).
 - **A surrogate alone**, which only an escape writes (RFC 7493 §2.1): `JSON.parse` takes `"\ud800"`;
   `JsonDocument.Parse` takes it and `GetString` throws `InvalidOperationException`; with
   `AllowDuplicateProperties = false`, a name holding one throws `InvalidOperationException` from the
-  parse itself, not `JsonException`, which the JWT verifier catches already (`JwtVerifier.cs`).
+  parse itself, not `JsonException`, which the JWT verifier catches (`JwtVerifier.cs`).
 - **A noncharacter**, U+FFFF and the 65 others: RFC 7493 §2.1 says a string MUST NOT hold one ;
   Unicode's Corrigendum #9 (2013) says one may be interchanged, and the RFC came after it. Neither
   platform's reader refuses one, nor spec 13.8's, nor a `text` payload (17.4) — but `JSON.parse`
@@ -167,18 +142,18 @@ reader refuses besides what is not JSON. Each item, with what each platform does
   here. Refusing one costs the TypeScript reader a test of each string and name against
   `/\p{Noncharacter_Code_Point}/u`, which Node 26 supports: 2.2 to 4.2 ms on the payload as a walk
   of its own, less within the walk that runs already; and the C# side a comparison of each UTF-16
-  unit within the loop its writer runs already. **Chosen: taken**, the user's choice, so that a
-  string is any sequence of Unicode scalar values in every encoding Bead states, `text` and 13.8's
-  claims as `json`; a departure from RFC 7493 the spec names, and the title says.
+  unit within the loop its writer runs already. **Chosen: taken**, so that a string is any sequence
+  of Unicode scalar values in every encoding Bead states, `text` and 13.8's claims as `json`; a
+  departure from RFC 7493 the spec names, and the title says.
 - **How deep**: RFC 8259 §9 lets a parser limit nesting. `JSON.parse` sets no limit, and a peer then
   chooses how deep a reader goes: 16 MiB of nested arrays, the default `maximumPayloadBytes`, take
   it 1.1 s and 487 MB of heap. `JsonDocumentOptions.MaxDepth` is 64 by default ("the default (that
   is, 0) indicating a maximum depth of 64"), and refuses the 65th level as it reads;
   `Utf8JsonWriter`'s own bound, 1,000, refuses to write past it even when the reader was told more;
-  a C side parses on a stack it sizes as it is built. **Chosen: 64**, the user's choice, the bound
-  the C# side holds today, refused before anything deeper is built: the TypeScript reader counts the
-  depth over the decoded text before `JSON.parse`, its strings skipped and every loop bounded by the
-  text's length, and refuses the 16 MiB in 2.6 to 3.1 ms, with no heap taken .
+  a C side parses on a stack it sizes as it is built. **Chosen: 64**, the bound .NET's reader holds
+  by default, refused before anything deeper is built: the TypeScript reader counts the depth over
+  the decoded text before `JSON.parse`, its strings skipped and every loop bounded by the text's
+  length, and refuses the 16 MiB in 2.6 to 3.1 ms, with no heap taken .
 - **A number past a double**: RFC 7493 §2.2 says a sender SHOULD NOT write one. `JSON.parse` reads
   `1E400` as `Infinity`, which `JSON.stringify` then writes `null`; `JsonDocument` keeps its text,
   and `GetDouble` gives `Infinity`. **Refused**: no double holds it.
@@ -188,7 +163,7 @@ reader refuses besides what is not JSON. Each item, with what each platform does
   to the nearest double, chosen**, as RFC 8785 §3.1 and `JSON.parse` do, RFC 7493 §2.2's strings
   carrying what needs more.
 - **A value that is not an object or an array at the top**: RFC 7493 §4.1 says protocol designers
-  SHOULD NOT use one. Bead's payloads are `null`, a string or a number at the top today
+  SHOULD NOT use one. Bead's payloads are `null`, a string or a number at the top
   (`spec/conversations.json`'s `6E 75 6C 6C` and `22 78 22`). **Taken**: a payload's shape is its
   procedure's to choose, not its codec's.
 
@@ -199,30 +174,25 @@ reader gives 0 — as the interop's own resolvers call them. The element may be 
 cheaper, and the C# side then does Y and Z where the TypeScript side does Y, which the rule of
 parity refuses; or as the value of its canonical form, which costs the C# reader its canonical write
 and, when the bytes read are not canonical already, a second parse. **Chosen: the canonical
-form's**, the user's choice. The `JsonElement`'s exact digits are no argument against
-`google.protobuf.Value` in the builder's design any more: the writer rounds them on the wire anyway.
+form's.** The `JsonElement`'s exact digits are then no argument against `google.protobuf.Value`: the
+writer rounds them on the wire anyway.
 
 **What a language holds that JSON has no value for.** `JSON.stringify` converts: `undefined` dropped
 in an object, `null` in an array, an empty payload alone; `NaN` as `null`; a `Date` through its
 `toJSON`; a `Map` as `{}`. Kept, the TypeScript writer writes what no C# `JsonElement` can hold, and
-an empty payload no reader takes. **Chosen: refused**, the user's choice: the writer takes JSON data
-— `null`, `true`, `false`, a finite number, a well-formed string, an array without holes, an object
-of the plain kind — as the generated `JsonValue` type has it. On the C# side, an `Undefined` element
-and an object naming a member twice are refused alike.
+an empty payload no reader takes. **Chosen: refused**: the writer takes JSON data — `null`, `true`,
+`false`, a finite number, a well-formed string, an array without holes, an object of the plain kind
+— as the `JsonValue` type has it. On the C# side, an `Undefined` element and an object naming a
+member twice are refused alike.
 
-**A value that does not write.** Today, on both sides, a notification whose value does not write is
-caught where it is sent and told to the trace, neither reported nor counted ("notifying never fails
-its caller"); and a request's trace tells its `tx` step and its deprecation goes before its value is
-written, with no `rx` after, against `spec/debugging.md` 4.2. These paths are rare today; refusing
-`NaN`, a `Date`, a member `undefined` and a surrogate alone makes them ordinary. For a notification:
-the throw handed to the code that notifies, which breaks the rule both sides keep that notifying
-never fails its caller; or **reported, as its router reports a notification that does not go, and
-counted `failed` for each subscription it was for, chosen**, as a notification too large for one
-envelope is (`spec/debugging.md` 10.1). For a request: its failure told as its `rx`; or **its value
-written before its trace and its deprecation, chosen**, so that a call whose value does not write is
-no call made: nothing traced, nothing deprecated, nothing counted, as a request whose payload does
-not decode is not traced (debugging 4.3). Both settle the companion, whose minor moves: the user's
-choice.
+**A value that does not write.** Refusing `NaN`, a `Date`, a member `undefined` and a surrogate
+alone makes it ordinary. For a notification: the throw handed to the code that notifies, which
+breaks the rule both sides keep that notifying never fails its caller; or **reported, as its router
+reports a notification that does not go, and counted `failed` for each subscription it was for,
+chosen**, as a notification too large for one envelope is (`spec/debugging.md` 10.1). For a request:
+its failure told as its `rx`; or **its value written before its trace and its deprecation, chosen**,
+so that a call whose value does not write is no call made: nothing traced, nothing deprecated,
+nothing counted, as a request whose payload does not decode is not traced (debugging 4.3).
 
 **`text` and `raw`.** A `text` payload that is not UTF-8 can be read as spec 7.3 reads a detail, its
 bytes U+FFFD, or refused; **refused**, since a payload is data. A leading U+FEFF can be stripped, as
@@ -232,21 +202,19 @@ and as spec 7.3 keeps a detail's; **kept**: `text` takes any string, and a strin
 one. A `text` writer refuses a surrogate alone, as `json`'s does. `raw` is its bytes, and settles
 nothing.
 
-**Where the codecs live before the builder makes them public.** In the interop's serializers alone,
-where the builder would then move them, and `codecs.json`'s `text` and `raw` rows would have no
-codec to play; or in each runtime, internal, outside the TypeScript package's `exports` and behind
-the C# side's `internal`, which `Bead.Interop` and the tests already see (`Bead.Core.csproj`'s
-`InternalsVisibleTo`), the interop's serializers delegating to them. **Chosen: the runtimes**, the
-user's choice: the code is written once, where it stays, and the builder's round names its public
-surface.
+**Where the codecs live.** In the interop's serializers alone, where `codecs.json`'s `text` and
+`raw` rows would have no codec to play; or in each runtime, the interop's serializers delegating to
+them. **Chosen: the runtimes**: the code is written once, where it stays, and
+[0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)
+makes it public.
 
-**Where it is stated.** Spec section 17, as the builder's design places it. Not the companion,
-`spec/debugging.md`, whose reason is that what it states never crosses the wire (0013): a payload
-does. The preamble's sentence "a side conforms to the wire by sections 1 to 15" stays, as the
-builder's design has it: a relay reads no payload (14.2), and a side may offer `raw` alone. The
-sentence goes on, as [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md) has
-it too: a side conforms to what it declares by section 16, and to what its codecs write and read by
-section 17, for each encoding it offers.
+**Where it is stated.** Spec section 17. Not the companion, `spec/debugging.md`, whose reason is
+that what it states never crosses the wire (0013): a payload does. The preamble's sentence "a side
+conforms to the wire by sections 1 to 15" stays: a relay reads no payload (14.2), and a side may
+offer `raw` alone. The sentence goes on, as
+[0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md) has it too: a side
+conforms to what it declares by section 16, and to what its codecs write and read by section 17, for
+each encoding it offers.
 
 ## Decision
 
@@ -307,65 +275,18 @@ refuses bytes that are not UTF-8, and a `text` writer a string holding a surroga
 | RFC 7493 §2.2 | a sender SHOULD NOT write a number past a double                                  | a reader refuses one that rounds past the largest double, and rounds digits past its precision | no double holds the first; the second is what every JSON reader of doubles does                                                         |
 | RFC 8785      | —                                                                                 | none: its form is written whole                                                                | —                                                                                                                                       |
 
-**One file pins it: `spec/codecs.json`.** JSON (RFC 8259) under its schema, JSON Schema 2020-12, no
-key twice, the spec's version repeated, written whole by `spec/generators/make_codecs.py` from
-Python tables, with the standard library alone ([0005](0005-a-toolchain-per-language.md)). Two
-groups:
-
-- `payloads`: bytes read, in an encoding, and either the bytes written back of what was read, or
-  `refused` and its reason;
-- `values`: a value given to a writer, in a form a file can hold — a JSON value, a text, bytes, a
-  double by its 64 bits, a number by its text, or a named form no JSON text holds: `loneSurrogate`,
-  `loneSurrogateName`, `nameTwice`, `undefined`, `nested` and its depth — and either the bytes
-  written, or `refused` and its reason.
-
-```json
-{
-  "$schema": "schemas/codecs.schema.json",
-  "$comment": ["…its vocabulary, a sentence a field…"],
-  "specVersion": "0.1.0",
-  "payloads": [
-    {
-      "name": "a string outside ASCII, written as it is",
-      "encoding": "json",
-      "clauses": ["17.7.3", "17.7.7"],
-      "bytes": "22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22",
-      "written": "22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22"
-    },
-    {
-      "name": "a byte order mark",
-      "encoding": "json",
-      "clauses": ["17.5.2"],
-      "bytes": "EF BB BF 31",
-      "refused": "a byte order mark"
-    }
-  ],
-  "values": [
-    {
-      "name": "an object naming a member twice",
-      "encoding": "json",
-      "clauses": ["17.7"],
-      "value": { "form": "nameTwice" },
-      "refused": "a name twice",
-      "differs": [{ "row": "A value a side's type cannot hold", "language": "TypeScript" }]
-    },
-    {
-      "name": "NaN",
-      "encoding": "json",
-      "clauses": ["17.7"],
-      "value": { "double": "7fffffffffffffff" },
-      "refused": "not a finite number",
-      "differs": [{ "row": "A value a side's type cannot hold", "language": "C#" }]
-    }
-  ]
-}
-```
+**One file pins it: `spec/codecs.json`**, written whole by `spec/generators/make_codecs.py` from
+Python tables, with the standard library alone ([0005](0005-a-toolchain-per-language.md)), its
+schema saying its shape. Two groups: `payloads`, bytes read in an encoding, and either the bytes
+written back of what was read, or `refused` and its reason; and `values`, a value given to a writer,
+in a form a file can hold, a named form among them for what no JSON text holds, and either the bytes
+written, or `refused` and its reason.
 
 **A reason is derived, and held by the regeneration alone**, as a duration's is
-([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)): `not UTF-8`, `a byte order
-mark`, `not JSON`, `a name twice`, `a surrogate alone`, `a number past a double`, `nested past 64`,
-`not a finite number`, `no JSON value`. No harness reads it: a refusal answers `PAYLOAD_UNDECODABLE`
-whatever the reason, and its words are each side's.
+([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)): `not UTF-8`,
+`a byte order mark`, `not JSON`, `a name twice`, `a surrogate alone`, `a number past a double`,
+`nested past 64`, `not a finite number`, `no JSON value`. No harness reads it: a refusal answers
+`PAYLOAD_UNDECODABLE` whatever the reason, and its words are each side's.
 
 **Each side plays the file in one harness.** For a payload, its reader reads the bytes, and the
 harness checks the refusal, or that its writer writes back the bytes given and that the value read
@@ -383,53 +304,36 @@ row: "A value a side's type cannot hold". The C# side cannot be given `NaN` or a
 `JsonElement` holds as a number; the TypeScript side cannot be given an object naming a member
 twice, which no JavaScript object holds.
 
-**Eight conversations play it over the wire**, each a request to `echo`: a payload outside ASCII
-echoed as it came; a payload echoed in its canonical form; and each answered `PAYLOAD_UNDECODABLE`,
-a byte order mark, a name given twice, a byte that is not UTF-8, a surrogate alone, 65 arrays nested
-and `1E400` — each an input on which the two sides reach another outcome today, and which
-`codecs.json` cannot hold: it checks that a row is refused, never which code a server answers, nor
-that the refusal comes at the read and not at the write.
+**Eight conversations play it over the wire**, each a request to `echo`: what `codecs.json` cannot
+hold, which code a server answers and that the refusal comes at the read and not at the write.
 
-**Each runtime holds the codecs, internal until the builder makes them public.** The TypeScript
-side's in `src/router/shared/payloads.ts`, outside `package.json`'s `exports`; the C# side's in
-`Bead.Core/Payloads.cs`, `internal`. The interop's serializers delegate to them. The builder makes
-them public under the names its round settles, and adds the `proto` encoding's rows.
+**Each runtime holds the codecs**, public under the names
+[0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)
+gives them: the TypeScript side's in `src/router/shared/payloads.ts`, the C# side's in
+`Bead.Core/Payloads.cs`. The interop's serializers delegate to them.
 
-**The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)). `spec/check.py` holds:
-
-- the file under its schema, the spec's version, no two rows of one name in a group;
-- every row citing units of section 17 that `spec/spec.md` has, counted against `spec/uncited.txt`;
-- a `differs` naming a row of `docs/support.md` that names `spec/codecs.json` and the row's name;
-- a `_Codecs:` line naming a file of `spec/`, as `_Conversations:` lines do;
-- each side's tests naming `codecs.json`, so a harness gone fails;
-- its summary counting the payloads and the values.
-
-Its schema says the rest: an encoding of `raw`, `text` or `json`; `written` or `refused`, one of
-them; a `raw` row never refused; a reason of its encoding's.
+**The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/check.py` holds the file, as
+its header says.
 
 ## Consequences
 
-**Bytes change, on both sides.** The C# side writes every character outside ASCII as it is, `+`,
-`<`, `>`, `&`, `'` and `"` as JSON writes them, and its numbers in ECMAScript's form. The TypeScript
-side refuses a name given twice, a byte order mark, bytes that are not UTF-8, a surrogate alone, a
-number past a double and a payload nested deeper than 64, all of which it reads today, and writes
-members sorted. A peer that relied on either side's leniency is refused. No existing entry of a
-conformance file moves its bytes, the scan above: `conversations.json` gains eight, and the rest
-stays.
+**A peer that relies on a platform's leniency is refused**: a byte order mark, a name twice, bytes
+that are not UTF-8, a surrogate alone, a number past a double, nesting past 64. A C# peer writes
+outside ASCII as it is, and its numbers in ECMAScript's form.
 
 **The author's order of members does not reach the wire.** A `curl`, a log of bytes and the DevTools
 panel's Wire view read `{"id":…,"type":…}` where the code wrote `{type, id}`; the trace of the side
 that sends keeps the value it was given, in its order (debugging 4.1, `tx`). RFC 8259 §4 says an
 object is unordered; a reader that leans on the order was wrong already.
 
-**An integer past 2⁵³ − 1 is no longer exact on any side**, the C# side's resolvers among them. An
-application that needs one sends a string.
+**An integer past 2⁵³ − 1 is exact on no side**, the C# side's resolvers among them. An application
+that needs one sends a string.
 
-**Reading and writing JSON cost more.** On the payload of 770,886 bytes, prototypes, not tuned, each
-a range over three runs of one noisy machine, the C# side in Release and warmed past the JIT's
-tiers:
+**Reading and writing JSON cost more**, measured on the prototypes the decision weighed, not tuned,
+on a payload of 770,886 bytes, each a range over three runs of one noisy machine, the C# side in
+Release and warmed past the JIT's tiers:
 
-| Side              | Today                                                | As decided                                        | Times      | The parts                                                                                                                                                                                                   |
+| Side              | Platform's default                                   | The prototype                                     | Times      | The parts                                                                                                                                                                                                   |
 | ----------------- | ---------------------------------------------------- | ------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | TypeScript, read  | 2.9 to 4.5 ms: `TextDecoder` and `JSON.parse`        | 10.6 to 19.2 ms                                   | 2.6 to 4.3 | the depth before the parse, 1.8 to 3.1; the names given twice after it, a `Set` an object, 5.2 to 9.3; a walk for surrogates alone, numbers past a double and `-0`                                          |
 | TypeScript, write | 1.3 to 1.7 ms: `JSON.stringify` and `TextEncoder`    | 7.8 to 12.5 ms                                    | 6 to 7.5   | one pass that refuses and copies each object sorted into one of a `null` prototype, then `JSON.stringify`; by hand when a name is an array index. ECMA-262's order would cost 3.0 to 4.2 ms, 2.2 to 3 times |
@@ -437,10 +341,10 @@ tiers:
 | C#, write         | 4.3 to 5.3 ms: `JsonSerializer.SerializeToUtf8Bytes` | 8.2 to 12.3 ms                                    | 1.6 to 2.8 | a sort per object, each string and number by hand                                                                                                                                                           |
 
 `raw` and `text` pay nothing more than a check of UTF-8. The TypeScript reader's scan for names
-given twice is where the builder's round tunes first: counting names against the parsed value's
-members, and holding them only when the counts part, leaves a `Set` out of every object that names
-each member once. The C# writer writes into an `ArrayBufferWriter<byte>`, where its prototype built
-a string before its bytes.
+given twice is where tuning starts: counting names against the parsed value's members, and holding
+them only when the counts part, leaves a `Set` out of every object that names each member once. The
+C# writer writes into an `ArrayBufferWriter<byte>`, where its prototype built a string before its
+bytes.
 
 **A canonical form can be about five times its payload.** `1e20`, 4 bytes, is written
 `100000000000000000000`, 21. A C# reader given 16 MiB of `[9e20,9e20,…]` writes about 74 MB of
@@ -468,35 +372,26 @@ as .NET's does not; and names compared by UTF-16 code units, which a C side with
 converts, or compares in UTF-8 where no name holds a character past U+FFFF together with one from
 U+E000 to U+FFFF (RFC 8785 §3.2.3's note).
 
-**The matrix changes.** "The interop service's JSON payloads" closes. "A value a side's type cannot
-hold" joins as a platform row. The features gain "Payloads: `raw`, `text` and `json`", and the
-conformance files `spec/codecs.json`.
+**A value a side's type cannot hold** is a platform row of the matrix.
 
-**Both versions move.** The spec's minor, with the release that carries it: a file added that every
-implementation's tests read, and expectations changed
-([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)). The companion's minor too:
-4.3 and 10.1 change what both sides tell and count of a value that does not write, an expectation
-changed. The layout, `0xA1`, does not: no envelope changes.
-
-**The twin tests give way to the file.** `JSON_ROWS` and `JsonRows` leave both sides in the change
-whose harness plays each of their ten rows from `spec/codecs.json`, as 0004 retires an assertion.
+**Versions move as [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) says**, in
+the release that carries them; the layout, `0xA1`, does not: no envelope changes.
 
 ## The Tenth Man
 
-The draft met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)), and
-the user chose where it asked, each way as the revised draft recommended: RFC 8785 whole, a
-noncharacter taken, 64 deep, the canonical form's value, what JSON has no value for refused, the
-codecs in the runtimes, sections 16 and 17 in one release of the spec, and a value that does not
-write settled alike. Its objections, each with its answer:
+The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)),
+and the user chose where it asked: RFC 8785 whole, a noncharacter taken, 64 deep, the canonical
+form's value, what JSON has no value for refused, the codecs in the runtimes, sections 16 and 17 in
+one release of the spec, and a value that does not write settled alike. Its objections, each with
+the answer that holds:
 
 | Objection                                                                                                                                                                                                                                                        | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The record says the C# side writes back what the TypeScript side does, and four rows lost their escapes: the file tool that wrote the draft decodes a `\u` escape, so rows 2, 5, 6 and 40 no longer test one, two of them the same bytes as their neighbours     | Accepted: the Context table states again the C# side's escaped answers, as its twin test pins them; the file's rows are written by its generator, every escape built from `chr(92)`, and each `json` row is held to the bytes and the outcome the platforms' probes give; 17.8's example sends `\u00e9`, as its conversation does                                                                                                                                                                     |
 | The C# reader takes a number from `TryGetDouble`, which reads a tie of 768 digits to the odd neighbour, so 17.6's "a tie to the even" is false on the C# side, and the two million doubles tested writing alone                                                  | Accepted: the C# side reads a number with `double.Parse` of its raw UTF-8, `// !` saying why, the finite test after it; that overload reads all 299,886 midpoint texts as Python and `JSON.parse` do; two payload rows hold the tie and the digit past it, and a value row the tie given as its digits, for the C# writer; the Context says what tested reading                                                                                                                                       |
 | A `JsonElement` can be `default`, of kind `Undefined`, or name a member twice, which the planned writer writes, against 17.2; the C# side is excused from the `undefined` row it can play                                                                        | Accepted: the C# writer refuses an `Undefined` element, `no JSON value`, and a name twice, two equal names side by side once sorted; the `undefined` row is played by C# as `default(JsonElement)`, with no `differs`; a value row "an object naming a member twice" excuses the TypeScript side; the platform row states what each side cannot be given; C# plays every value row but two, TypeScript every one but one                                                                              |
 | The TypeScript reader runs `JSON.parse` before the scan that refuses past 64, so a peer still chooses how deep it goes, up to 16 MiB; and the scan loops for ever on a string never closed                                                                       | Accepted: the depth is counted over the decoded text before `JSON.parse`, strings skipped, every loop bounded by the text's length; 16 MiB of nested arrays is refused in 2.6 to 3.1 ms with no heap taken, and a string never closed is refused as not JSON; a twin test on each side refuses the 16 MiB within a second                                                                                                                                                                             |
-| 17.2.4 says a notification's value that does not write fails the code that notifies, and a request's fails before anything goes; on both sides the first is dropped, neither reported nor counted, and the second is traced and deprecated before the encode     | Accepted: both sides settle one behaviour, the user's choice: a request's value written before its trace and its deprecation, so no call is made and nothing is traced (debugging 4.3 says so); a notification's reported as its router reports one that does not go, and counted `failed` for each subscription it was for (10.1 gains the case); the companion's minor moves; twin tests on both sides                                                                                              |
-| Three outcomes that change on the wire have no conversation: a surrogate alone, 65 arrays nested and `1E400`; `codecs.json` cannot hold which code a server answers, nor that the refusal comes at the read                                                      | Accepted: three echo conversations, each answered `PAYLOAD_UNDECODABLE`, 150 in all. The TypeScript interop's comment on `Infinity` once parsed goes; the C# one stays, since it speaks of −1, .NET's never, which this record leaves as it is                                                                                                                                                                                                                                                        |
+| 17.2.4 says a notification's value that does not write fails the code that notifies, and a request's fails before anything goes; on both sides the first is dropped, neither reported nor counted, and the second is traced and deprecated before the encode     | Accepted: both sides settle one behaviour, chosen in the Context: a request's value written before its trace and its deprecation, so no call is made and nothing is traced (debugging 4.3 says so); a notification's reported as its router reports one that does not go, and counted `failed` for each subscription it was for (10.1 has the case); twin tests on both sides                                                                                                                         |
+| Three outcomes that change on the wire have no conversation: a surrogate alone, 65 arrays nested and `1E400`; `codecs.json` cannot hold which code a server answers, nor that the refusal comes at the read                                                      | Accepted: three echo conversations, each answered `PAYLOAD_UNDECODABLE`; the interop's comments say what its codec does                                                                                                                                                                                                                                                                                                                                                                               |
 | "Three to four times" is false for the TypeScript side, and the price of sorted members on the TypeScript writer goes unstated: a sorted object cannot be handed to `JSON.stringify`                                                                             | Accepted: each side's ratio as measured, by its parts; the tuned writer the objection names was measured and held byte-equal to the hand writer, `__proto__` and array-index names among the rows: 7.8 to 12.5 ms, against 3.0 to 4.2 for ECMA-262's order and 1.3 to 1.7 for `JSON.stringify` alone. The Context states it                                                                                                                                                                           |
 | The third way of ordering members is dismissed as no standard, yet ECMA-262's order is the standard RFC 8785 copies for strings and numbers, the closest way to the builder's design as first taken and the cheapest; what it gives up is a goal the draft added | Accepted in part: the third way is described as ECMA-262's order, its cost measured on each side, and what each way gives up stated in the Context. The recommendation stays RFC 8785 whole, and the user takes it: one value one form, built in whatever order, is what "canonical" means and what a third language takes ready-made, where ECMA-262's order has every language copy one engine's rule for its objects                                                                               |
 | `JsonElement.DeepEquals` tells neither `1.0` from `1` nor `-0` from `0`, so the C# harness barely holds the canonical form's value                                                                                                                               | Accepted: the C# harness also holds the handed-on element's `GetRawText()` to the bytes its writer writes of it, which an element read as it came fails                                                                                                                                                                                                                                                                                                                                               |
