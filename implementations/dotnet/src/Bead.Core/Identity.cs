@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Bead;
 
-/// <summary>The ways a procedure is declared to a router, each taking the calls spec 16.11 gives it.</summary>
+/// <summary>The ways a procedure is declared to a router, each taking the kinds spec 16.11 gives it.</summary>
 internal enum DeclarationWay
 {
     /// <summary>A resolver registered on a client's router: it takes a command.</summary>
@@ -26,7 +26,7 @@ internal enum DeclarationWay
 
 /// <summary>
 /// What a side refuses as a procedure is declared to it (spec 16.10): a service id, a procedure id
-/// or a revision out of its range, then a name off its form, then a call the way it is declared does
+/// or a revision out of its range, then a name off its form, then a kind the way it is declared does
 /// not take; and which two names are one (16.6). One check of the procedure alone, which holds
 /// nothing: each router runs it first, before any reason of its own and before its registry's.
 /// </summary>
@@ -61,28 +61,28 @@ internal static class Identity
         return IsUpper(character) ? (char)(character + ('a' - 'A')) : character;
     }
 
-    // what a call is, in a refusal's sentence
-    internal static string CallOf(ProcedureCall call)
+    // what a procedure's kind is, in a refusal's sentence
+    internal static string WordsOf(ProcedureKind procedureKind)
     {
-        return call switch
+        return procedureKind switch
         {
-            ProcedureCall.Request => "a request",
-            ProcedureCall.Notifies => "a request that notifies",
+            ProcedureKind.Request => "a request",
+            ProcedureKind.Notifies => "a request that notifies",
             _ => "a command",
         };
     }
 
-    // what a way is, and the calls it takes (16.11)
-    private static (string Way, ProcedureCall[] Takes) WayOf(DeclarationWay way)
+    // what a way is, and the kinds it takes (16.11)
+    private static (string Way, ProcedureKind[] Takes) WayOf(DeclarationWay way)
     {
         return way switch
         {
-            DeclarationWay.ClientResolver => ("a resolver on a client's router", [ProcedureCall.Command]),
-            DeclarationWay.ServerResolver => ("a resolver on a server's router that notifies nothing", [ProcedureCall.Request]),
-            DeclarationWay.ServerNotificationResolver => ("a resolver on a server's router that notifies", [ProcedureCall.Notifies]),
-            DeclarationWay.ClientRequester => ("a requester on a client's router", [ProcedureCall.Request, ProcedureCall.Notifies]),
-            DeclarationWay.ServerRequester => ("a requester on a server's router", [ProcedureCall.Command]),
-            _ => ("a notification on a client's router", [ProcedureCall.Notifies]),
+            DeclarationWay.ClientResolver => ("a resolver on a client's router", [ProcedureKind.Command]),
+            DeclarationWay.ServerResolver => ("a resolver on a server's router that notifies nothing", [ProcedureKind.Request]),
+            DeclarationWay.ServerNotificationResolver => ("a resolver on a server's router that notifies", [ProcedureKind.Notifies]),
+            DeclarationWay.ClientRequester => ("a requester on a client's router", [ProcedureKind.Request, ProcedureKind.Notifies]),
+            DeclarationWay.ServerRequester => ("a requester on a server's router", [ProcedureKind.Command]),
+            _ => ("a notification on a client's router", [ProcedureKind.Notifies]),
         };
     }
 
@@ -185,26 +185,26 @@ internal static class Identity
     /// <summary>
     /// Refuses a declaration of <paramref name="procedure"/> the way <paramref name="declaration"/>
     /// names, as <see cref="Check(Procedure, string)"/> does, then for the third reason of 16.10:
-    /// against its call, a call the way does not take (16.11). A procedure that states no call is
+    /// against its kind, a kind the way does not take (16.11). A procedure that states no kind is
     /// taken every way.
     /// </summary>
     public static void Check(Procedure procedure, (DeclarationWay Way, string Parameter) declaration)
     {
         Check(procedure, declaration.Parameter);
 
-        if (procedure.Call is not { } call)
+        if (procedure.ProcedureKind is not { } procedureKind)
         {
             return;
         }
 
         var (way, takes) = WayOf(declaration.Way);
 
-        if (!takes.Contains(call))
+        if (!takes.Contains(procedureKind))
         {
             throw new ArgumentException(
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"\"{procedure.ProcedureName}\" at {procedure.ServiceId}/{procedure.ProcedureId} is against its call: {CallOf(call)}, which {way} does not take; it takes {string.Join(", or ", takes.Select(CallOf))} (spec 16.11)"),
+                    $"\"{procedure.ProcedureName}\" at {procedure.ServiceId}/{procedure.ProcedureId} is against its kind: {WordsOf(procedureKind)}, which {way} does not take; it takes {string.Join(", or ", takes.Select(WordsOf))} (spec 16.11)"),
                 declaration.Parameter);
         }
     }

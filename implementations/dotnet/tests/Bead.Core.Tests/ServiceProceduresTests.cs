@@ -28,32 +28,32 @@ public sealed class ServiceProceduresTests
     // definition
 
     [Fact]
-    public void Sets_a_request_s_call_a_notifying_request_s_and_a_command_s()
+    public void Sets_a_request_s_kind_a_notifying_request_s_and_a_command_s()
     {
-        Assert.Equal(ProcedureCall.Request, new RequestProcedure<GreeterProcedures, string, string, NoFailure>(Echo, Bindings).Procedure.Call);
-        Assert.Equal(ProcedureCall.Notifies, new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(Echo, NotifyingBindings).Procedure.Call);
-        Assert.Equal(ProcedureCall.Command, new CommandProcedure<GreeterProcedures, string, string, NoFailure>(Echo, Bindings).Procedure.Call);
+        Assert.Equal(ProcedureKind.Request, new RequestProcedure<GreeterProcedures, string, string, NoFailure>(Echo, Bindings).Procedure.ProcedureKind);
+        Assert.Equal(ProcedureKind.Notifies, new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(Echo, NotifyingBindings).Procedure.ProcedureKind);
+        Assert.Equal(ProcedureKind.Command, new CommandProcedure<GreeterProcedures, string, string, NoFailure>(Echo, Bindings).Procedure.ProcedureKind);
 
-        // a procedure that states its call already keeps it, and every other member
+        // a procedure that states its kind already keeps it, and every other member
         Assert.Equal(
-            Echo with { Call = ProcedureCall.Command },
-            new CommandProcedure<GreeterProcedures, string, string, NoFailure>(Echo with { Call = ProcedureCall.Command }, Bindings).Procedure);
+            Echo with { ProcedureKind = ProcedureKind.Command },
+            new CommandProcedure<GreeterProcedures, string, string, NoFailure>(Echo with { ProcedureKind = ProcedureKind.Command }, Bindings).Procedure);
     }
 
     [Fact]
-    public void Refuses_a_procedure_that_states_another_call()
+    public void Refuses_a_procedure_that_states_another_kind()
     {
         Assert.Contains("is a command, where its descriptor describes a request", Assert.Throws<ArgumentException>(() =>
         {
-            return new RequestProcedure<GreeterProcedures, string, string, NoFailure>(Echo with { Call = ProcedureCall.Command }, Bindings);
+            return new RequestProcedure<GreeterProcedures, string, string, NoFailure>(Echo with { ProcedureKind = ProcedureKind.Command }, Bindings);
         }).Message, StringComparison.Ordinal);
         Assert.Throws<ArgumentException>(() =>
         {
-            return new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(Echo with { Call = ProcedureCall.Request }, NotifyingBindings);
+            return new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(Echo with { ProcedureKind = ProcedureKind.Request }, NotifyingBindings);
         });
         Assert.Throws<ArgumentException>(() =>
         {
-            return new CommandProcedure<GreeterProcedures, string, string, NoFailure>(Echo with { Call = ProcedureCall.Notifies }, Bindings);
+            return new CommandProcedure<GreeterProcedures, string, string, NoFailure>(Echo with { ProcedureKind = ProcedureKind.Notifies }, Bindings);
         });
     }
 

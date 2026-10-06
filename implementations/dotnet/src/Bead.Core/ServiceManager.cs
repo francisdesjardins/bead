@@ -13,7 +13,7 @@ public interface IRouterLike
     TimeProvider Clock { get; }
 
     /// <summary>
-    /// Registers a resolver; one out of its range, off its form or against its call (spec 16.10), or a
+    /// Registers a resolver; one out of its range, off its form or against its kind (spec 16.10), or a
     /// second one for its procedure, is an <see cref="ArgumentException"/>.
     /// </summary>
     void RegisterResolver(IRequestResolver resolver);
@@ -27,7 +27,7 @@ public interface IRouterLike
     /// <summary>
     /// Declares a requester of <paramref name="procedure"/> to the router's registry, as the
     /// requester is made (spec/debugging.md 7.2), and gives the series each of its calls carries as
-    /// <see cref="RouterRequest.Series"/>; one out of its range, off its form or against its call
+    /// <see cref="RouterRequest.Series"/>; one out of its range, off its form or against its kind
     /// (spec 16.10), first, or one the registry refuses, is an <see cref="ArgumentException"/>. A
     /// router given no registry gives none.
     /// </summary>

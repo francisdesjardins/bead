@@ -390,7 +390,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
     /// <summary>
     /// Holds a notification for its procedure, declared to its registry as the side that hears
-    /// (spec/debugging.md 7.2): one out of its range, off its form or against its call (spec 16.10),
+    /// (spec/debugging.md 7.2): one out of its range, off its form or against its kind (spec 16.10),
     /// first, is an <see cref="ArgumentException"/>; a second for the same procedure an
     /// <see cref="InvalidOperationException"/>; and one its registry refuses an
     /// <see cref="ArgumentException"/>.

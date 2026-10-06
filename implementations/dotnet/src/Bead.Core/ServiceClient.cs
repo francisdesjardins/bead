@@ -66,7 +66,7 @@ public sealed class ServiceClient<TService>
 
         var notifying = _procedures.Values.Where((procedure) =>
         {
-            return procedure.Procedure.Call == ProcedureCall.Notifies;
+            return procedure.Procedure.ProcedureKind == ProcedureKind.Notifies;
         }).ToDictionary(
             (procedure) =>
             {
@@ -93,7 +93,7 @@ public sealed class ServiceClient<TService>
 
             _requesters[address] = described.RequesterOn(_services, options.Validates);
 
-            if (procedure.Procedure.Call == ProcedureCall.Notifies)
+            if (procedure.Procedure.ProcedureKind == ProcedureKind.Notifies)
             {
                 _notifications[address] = described.NotificationOn(
                     _services,

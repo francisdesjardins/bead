@@ -4,7 +4,7 @@ namespace Bead.Tests;
 
 /// <summary>
 /// Bead's identities, <c>spec/identities.json</c>, played whole (decisions 0017 and 0018): each
-/// entry of <c>names</c>, <c>ids</c> and <c>calls</c> declared each of the six ways a side declares,
+/// entry of <c>names</c>, <c>ids</c> and <c>procedureKinds</c> declared each of the six ways a side declares,
 /// on routers of its own given no metrics registry, taken, or refused for the reason it names at the
 /// ways it names, which the refusal's sentence holds, the router then taking a declaration as if it
 /// had not been made; and each pair of <c>folds</c> through <see cref="Identity.AreOneName"/>, which
@@ -178,15 +178,15 @@ public sealed class IdentitiesTests
         return isRefusedHere ? refused.GetString() : null;
     }
 
-    // a call as the file names it
-    private static ProcedureCall CallOf(string call)
+    // a procedure's kind as the file names it
+    private static ProcedureKind KindOf(string procedureKind)
     {
-        return call switch
+        return procedureKind switch
         {
-            "request" => ProcedureCall.Request,
-            "notifies" => ProcedureCall.Notifies,
-            "command" => ProcedureCall.Command,
-            _ => throw new ArgumentException($"no call {call}", nameof(call)),
+            "request" => ProcedureKind.Request,
+            "notifies" => ProcedureKind.Notifies,
+            "command" => ProcedureKind.Command,
+            _ => throw new ArgumentException($"no kind {procedureKind}", nameof(procedureKind)),
         };
     }
 
@@ -201,8 +201,8 @@ public sealed class IdentitiesTests
     /// <summary>The names of every entry of <c>folds</c>.</summary>
     public static TheoryData<string> Folds { get; } = PlayedOf("folds");
 
-    /// <summary>The names of every entry of <c>calls</c>.</summary>
-    public static TheoryData<string> Calls { get; } = PlayedOf("calls");
+    /// <summary>The names of every entry of <c>procedureKinds</c>.</summary>
+    public static TheoryData<string> ProcedureKinds { get; } = PlayedOf("procedureKinds");
 
     [Theory]
     [MemberData(nameof(Names))]
@@ -231,13 +231,13 @@ public sealed class IdentitiesTests
     }
 
     [Theory]
-    [MemberData(nameof(Calls))]
-    public Task Declares_each_call_each_way_taken_or_refused_against_its_call_at_the_ways_that_do_not_take_it_after_its_range_and_its_form(string name)
+    [MemberData(nameof(ProcedureKinds))]
+    public Task Declares_each_procedure_kind_each_way_taken_or_refused_against_its_kind_at_the_ways_that_do_not_take_it_after_its_range_and_its_form(string name)
     {
-        var entry = EntryOf(("calls", name));
+        var entry = EntryOf(("procedureKinds", name));
         var procedure = Echo with
         {
-            Call = entry.TryGetProperty("call", out var call) ? CallOf(call.GetString()!) : null,
+            ProcedureKind = entry.TryGetProperty("procedureKind", out var procedureKind) ? KindOf(procedureKind.GetString()!) : null,
             ProcedureName = entry.TryGetProperty("procedureName", out var procedureName) ? procedureName.GetString()! : Echo.ProcedureName,
             ServiceId = entry.TryGetProperty("serviceId", out var serviceId) ? serviceId.GetUInt16() : Echo.ServiceId,
         };
@@ -291,7 +291,7 @@ public sealed class IdentitiesTests
         Assert.Equal(17, excused.Count);
         Assert.DoesNotContain(Root.GetProperty("names").EnumerateArray(), IsExcused);
         Assert.DoesNotContain(Root.GetProperty("folds").EnumerateArray(), IsExcused);
-        Assert.DoesNotContain(Root.GetProperty("calls").EnumerateArray(), IsExcused);
+        Assert.DoesNotContain(Root.GetProperty("procedureKinds").EnumerateArray(), IsExcused);
         Assert.Contains("revision -1", Ids.Select((row) =>
         {
             return row.Data;

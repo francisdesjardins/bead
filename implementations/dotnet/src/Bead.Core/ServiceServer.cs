@@ -389,7 +389,7 @@ internal static class ServiceLayer
     /// <summary>Whether a descriptor is a command's.</summary>
     public static bool IsCommand<TService>(IServiceProcedure<TService> procedure)
     {
-        return procedure.Procedure.Call == ProcedureCall.Command;
+        return procedure.Procedure.ProcedureKind == ProcedureKind.Command;
     }
 }
 

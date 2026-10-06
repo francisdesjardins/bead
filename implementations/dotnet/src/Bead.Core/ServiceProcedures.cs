@@ -67,11 +67,11 @@ public sealed record AdmissionHook
     public string Detail { get; init; } = "";
 }
 
-/// <summary>A procedure of the service whose type tag is <typeparamref name="TService"/>, whatever its call.</summary>
+/// <summary>A procedure of the service whose type tag is <typeparamref name="TService"/>, whatever its kind.</summary>
 /// <typeparam name="TService">The service's type tag: a descriptor of another service is another type.</typeparam>
 public interface IServiceProcedure<TService>
 {
-    /// <summary>The procedure, its call set.</summary>
+    /// <summary>The procedure, its kind set.</summary>
     Procedure Procedure { get; }
 
     /// <summary>Who may call it.</summary>
@@ -125,8 +125,8 @@ public sealed record ProcedureBindings<TRequest, TResult, TNotification>
 
 /// <summary>
 /// A request of the service <typeparamref name="TService"/>, which notifies nothing: its procedure,
-/// its call set to <see cref="ProcedureCall.Request"/>, and its bindings. A descriptor is no
-/// declaration: its identity and its call are checked as it is declared (spec 16.10).
+/// its kind set to <see cref="ProcedureKind.Request"/>, and its bindings. A descriptor is no
+/// declaration: its identity and its kind are checked as it is declared (spec 16.10).
 /// </summary>
 /// <typeparam name="TService">The service's type tag.</typeparam>
 /// <typeparam name="TRequest">What a request carries.</typeparam>
@@ -136,7 +136,7 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TFailure> : IS
     where TFailure : IApplicationFailure
 {
     /// <summary>
-    /// A descriptor of <paramref name="procedure"/>: one that states a call other than a request, or
+    /// A descriptor of <paramref name="procedure"/>: one that states a kind other than a request, or
     /// a binding missing, is an <see cref="ArgumentException"/>.
     /// </summary>
     public RequestProcedure(Procedure procedure, ProcedureBindings<TRequest, TResult> bindings)
@@ -146,7 +146,7 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TFailure> : IS
         ArgumentNullException.ThrowIfNull(bindings.Request, nameof(bindings));
         ArgumentNullException.ThrowIfNull(bindings.Result, nameof(bindings));
 
-        Procedure = Descriptors.CallSet(procedure, ProcedureCall.Request);
+        Procedure = Descriptors.KindSet(procedure, ProcedureKind.Request);
         Bindings = bindings;
     }
 
@@ -179,8 +179,8 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TFailure> : IS
 }
 
 /// <summary>
-/// A request of the service <typeparamref name="TService"/> that notifies: its procedure, its call
-/// set to <see cref="ProcedureCall.Notifies"/>, and its bindings. A request to it may open no
+/// A request of the service <typeparamref name="TService"/> that notifies: its procedure, its kind
+/// set to <see cref="ProcedureKind.Notifies"/>, and its bindings. A request to it may open no
 /// subscription (spec 11.2).
 /// </summary>
 /// <typeparam name="TService">The service's type tag.</typeparam>
@@ -192,7 +192,7 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TNotification,
     where TFailure : IApplicationFailure
 {
     /// <summary>
-    /// A descriptor of <paramref name="procedure"/>: one that states a call other than a request that
+    /// A descriptor of <paramref name="procedure"/>: one that states a kind other than a request that
     /// notifies, or a binding missing, is an <see cref="ArgumentException"/>.
     /// </summary>
     public RequestProcedure(Procedure procedure, ProcedureBindings<TRequest, TResult, TNotification> bindings)
@@ -203,7 +203,7 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TNotification,
         ArgumentNullException.ThrowIfNull(bindings.Result, nameof(bindings));
         ArgumentNullException.ThrowIfNull(bindings.Notification, nameof(bindings));
 
-        Procedure = Descriptors.CallSet(procedure, ProcedureCall.Notifies);
+        Procedure = Descriptors.KindSet(procedure, ProcedureKind.Notifies);
         Bindings = bindings;
     }
 
@@ -243,7 +243,7 @@ public sealed class RequestProcedure<TService, TRequest, TResult, TNotification,
 
 /// <summary>
 /// A command of the service <typeparamref name="TService"/>, a request its server makes of a
-/// client: its procedure, its call set to <see cref="ProcedureCall.Command"/>, and its bindings. A
+/// client: its procedure, its kind set to <see cref="ProcedureKind.Command"/>, and its bindings. A
 /// command never notifies.
 /// </summary>
 /// <typeparam name="TService">The service's type tag.</typeparam>
@@ -254,7 +254,7 @@ public sealed class CommandProcedure<TService, TRequest, TResult, TFailure> : IS
     where TFailure : IApplicationFailure
 {
     /// <summary>
-    /// A descriptor of <paramref name="procedure"/>: one that states a call other than a command, or
+    /// A descriptor of <paramref name="procedure"/>: one that states a kind other than a command, or
     /// a binding missing, is an <see cref="ArgumentException"/>.
     /// </summary>
     public CommandProcedure(Procedure procedure, ProcedureBindings<TRequest, TResult> bindings)
@@ -264,7 +264,7 @@ public sealed class CommandProcedure<TService, TRequest, TResult, TFailure> : IS
         ArgumentNullException.ThrowIfNull(bindings.Request, nameof(bindings));
         ArgumentNullException.ThrowIfNull(bindings.Result, nameof(bindings));
 
-        Procedure = Descriptors.CallSet(procedure, ProcedureCall.Command);
+        Procedure = Descriptors.KindSet(procedure, ProcedureKind.Command);
         Bindings = bindings;
     }
 
@@ -317,21 +317,21 @@ internal interface IDescribedProcedure
 internal static class Descriptors
 {
     /// <summary>
-    /// <paramref name="procedure"/>, its call set to <paramref name="call"/>: one that states another
-    /// is an <see cref="ArgumentException"/>.
+    /// <paramref name="procedure"/>, its kind set to <paramref name="procedureKind"/>: one that
+    /// states another is an <see cref="ArgumentException"/>.
     /// </summary>
-    public static Procedure CallSet(Procedure procedure, ProcedureCall call)
+    public static Procedure KindSet(Procedure procedure, ProcedureKind procedureKind)
     {
         ArgumentNullException.ThrowIfNull(procedure);
 
-        if (procedure.Call is { } stated && stated != call)
+        if (procedure.ProcedureKind is { } stated && stated != procedureKind)
         {
             throw new ArgumentException(
-                $"{procedure.ProcedureName} is {Identity.CallOf(stated)}, where its descriptor describes {Identity.CallOf(call)}",
+                $"{procedure.ProcedureName} is {Identity.WordsOf(stated)}, where its descriptor describes {Identity.WordsOf(procedureKind)}",
                 nameof(procedure));
         }
 
-        return procedure with { Call = call };
+        return procedure with { ProcedureKind = procedureKind };
     }
 }
 

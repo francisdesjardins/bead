@@ -2151,7 +2151,7 @@ public sealed class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// Registers a resolver; a procedure out of its range, off its form or against its call (spec
+    /// Registers a resolver; a procedure out of its range, off its form or against its kind (spec
     /// 16.10), first, then a second one for its procedure, a payload's limit below 1, or a procedure
     /// its router's registry refuses to declare (spec/debugging.md 7.3), is an
     /// <see cref="ArgumentException"/>.
