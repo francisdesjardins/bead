@@ -271,7 +271,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds them; 0001's relay is decision 0019 and the connection HTTP draws decision 0020; the rule of
   a duration moves from 0011 to 0014; 0006 keeps its table as rule and job, with its gates owed;
   0004 states the frame every file of entries keeps, and what each file holds besides stays its own
-  record's;
+  record's; the spec and its companion name, in their preambles, the record behind each section;
   each Tenth Man section keeps its rounds in order, each answer the one that holds; and the C# side
   has a README of its layout and its modules. A gate in CI's `commits` job,
   `tools/check-links.mjs`, holds every relative link of the repository's Markdown, and its anchor,

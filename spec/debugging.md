@@ -6,8 +6,13 @@ MUST NOT, SHOULD and MAY are to be read as in [RFC 2119](https://www.rfc-editor.
 
 This document is the companion of [`spec.md`](spec.md), which states the wire: what it states never
 goes on the wire. Each section names the conformance file that checks it. The why of each rule is in
-the decisions: [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md) for
-the whole of it.
+the decisions:
+
+- [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md): the whole of it;
+- [0016](../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md): the
+  payloads it writes (4.3, 10.1);
+- [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
+  names it reads (1.2, 6.10, 7.3, 8.3).
 
 **Version: 0.1.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves as `spec.md` moves

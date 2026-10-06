@@ -7,8 +7,31 @@ are to be read as in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
 Each section names the groups of [`vectors.json`](vectors.json) that check it. An implementation
 conforms to the wire when it reads every vector as given, refuses each refusal with its code, and
 writes every `headers` and `envelopes` vector back to its bytes. The why of each rule is in the
-decisions: [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md) for the
-envelope, [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.md) for pacing.
+decisions:
+
+- [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md): the envelope, its calls, its
+  transfers, its cancel, and what a transport owes;
+- [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.md): pacing, section 11;
+- [0010](../docs/decisions/0010-a-request-presents-a-credential-of-a-scheme.md): a credential and
+  its session, section 13;
+- [0011](../docs/decisions/0011-every-side-takes-its-time-from-a-clock-it-is-given.md): the clock a
+  side runs on;
+- [0012](../docs/decisions/0012-a-listen-held-is-not-silence.md): a connection's timeouts, sections
+  13 and 15;
+- [0014](../docs/decisions/0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md): a
+  duration, section 1.4;
+- [0016](../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md): payloads,
+  section 17;
+- [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md):
+  identities, section 16;
+- [0018](../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md):
+  a procedure's kind, section 16, and the `proto` encoding, section 17;
+- [0019](../docs/decisions/0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md): relays,
+  section 14;
+- [0020](../docs/decisions/0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md): HTTP,
+  section 15;
+- [0021](../docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md): a broker,
+  section 15.
 
 **Version: 0.1.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
