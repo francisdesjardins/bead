@@ -150,7 +150,8 @@ The package is `@francisdesjardins/bead`, private for now; its `exports` point a
 
 In `implementations/dotnet`. The .NET 10 SDK, as `global.json` pins it; tests run on
 Microsoft.Testing.Platform. Every warning is an error, the recommended analyzers are on, and every
-public member has its doc comment.
+public member has its doc comment. Its [README](implementations/dotnet/README.md) describes its
+layout and its modules.
 
 ```sh
 cd implementations/dotnet
@@ -241,8 +242,10 @@ there only until it closes.
 - `node tools/check-commits.mjs <range>`: every commit subject in the range is a Conventional
   Commit; merges are left out. With `--message <file>`, the message git is about to record, which
   must also be UTF-8 without a byte order mark.
+- `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
+  or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
 
-It also runs before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
+The first also runs before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
 `commit-msg` holds the subject to Conventional Commits, merges aside. Both hooks also run the
 checks a clone keeps for itself in `.claude/local/`, when it has them.
 
@@ -252,8 +255,9 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 runner image, `ubuntu-26.04`: `spec` (regenerate, then diff, then `spec/check.py`), `typescript` on
 Node 26 and on the floor, 24 (install, check, test, the demo's static build, and the root's files
 under the same formatter), `dotnet` (format, test, and the interop both ways with
-`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects). `ci-ok` needs them all and is the only
-required check.
+`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects, then the links). `ci-ok` needs them all, so
+one check stands for every job; branch protection, which would make it the one check a branch
+requires, waits on GitHub Pro or a public repository.
 
 ## Contributing
 
