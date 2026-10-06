@@ -1,0 +1,1258 @@
+# 0018 — A service's procedures are typed descriptors, served and called through one layer in each runtime
+
+- **Status**: accepted
+- **Scope**: both runtimes' public surface: a procedure's call, checked by each router as it is
+  declared; the payload codecs made public; the admission vocabulary; the failure catalogue; the
+  typed descriptors, and their room for a validator; the service layer that serves and calls them;
+  the notify filter's argument; a notification asked for again at another window; the bound call
+  and its guard; the C# side's server and client interfaces, and its routers' `Notify`; the
+  TypeScript side's `./service` entry; the constant of the contract with generated code. Spec
+  section 16, whose 16.10 gains a reason and whose 16.11 says what each way of declaring takes, with
+  `spec/identities.json`, its schema and its generator; spec section 17's `proto` encoding, with
+  `spec/codecs.proto`, `spec/codecs.json`'s `proto` rows, its schema, its generator, `spec/check.py`
+  and `spec/uncited.txt`; both sides' test toolchains, which gain each side's stock protobuf library
+  and generator; the support matrix; [0003](0003-one-word-one-meaning.md)'s sentence on _type_; the
+  builder's design; the CHANGELOG
+
+## Context
+
+The builder generates, from a `.proto` or a manifest, data and types for each service: its
+procedures as typed descriptors, its failures, a server class where only resolvers are written, and
+a client class that matches it. Its design, which is not in the repository, keeps behaviour once in
+each runtime, in a generic layer the generated classes are thin shells over, as Connect-ES's
+`createClient(Service, transport)` types a client from a descriptor. The runtimes hold none of that
+layer yet, and eight things it needs are missing or differ between the sides:
+
+- **A procedure says nothing of how it is called.** `IProcedure` holds its ids, name, revision,
+  limit and deprecation (`router/shared/types.ts`), and so does `Procedure`
+  (`Bead.Core/RouterTypes.cs`). A command's requester can be made for a request, and a subscription
+  asked of a procedure that never notifies: nothing refuses either. Bead says what a call is by the
+  router's side: "a client's router makes requests and answers commands, a server's the reverse"
+  (`spec/debugging.md` 8.2), as the metrics registry types it. The service manager's accessor names
+  only pick the trace's type, and both routers declare a requester alike.
+- **The codecs of section 17 are internal.** `PAYLOAD_CODECS` and `IPayloadCodec` live outside the
+  package's `exports` (`router/shared/payloads.ts`), and `Payloads` is `internal`
+  (`Bead.Core/Payloads.cs`), as [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)
+  left them "until the builder names them". No codec reads a protobuf message, and no conformance
+  file pins what a side answers to one that does not decode.
+- **Admission is a function and a refusal, written by hand at each resolver.** The interop builds
+  its `nobody` admission inline on both sides (`interop/offer.ts`,
+  `Bead.Interop/InteropService.cs`); generated code needs names for none, a session, and a hook
+  given by name.
+- **A failure is a bare code.** A resolver answers `{ code: 7, detail }` or
+  `Failure.OfApplication(7, …)`, and nothing narrows a resolver to the codes its procedure may
+  answer. Reading one differs: the TypeScript side's `FailureError` has `isApplication` and
+  `isProtocol` (`router/shared/errors.ts`), and the C# side's `FailureException` has neither.
+- **The notify filter takes two arguments**, `(connectionHandle, identifier)`, in four places on
+  the TypeScript side and three on the C# side. A filter that comes to need the call's server or its
+  session's data can then only take a third parameter. The C# side already holds that pair as the
+  internal `SubscriptionPlace` (`Bead.Core/NotificationManager.cs`).
+- **A notification asked for again at another window is given the first one, its window kept in
+  silence.** The window is a dependency, not a part of the procedure; `differenceOf` compares the
+  limit, the name, the revision and the deprecation (`router/shared/service-manager.ts`), and the C#
+  side compares the `Procedure` records (`Bead.Core/ServiceManager.cs`). Neither compares the
+  window.
+- **The C# servers and clients share members but no type.** `Server<TData>`,
+  `WebSocketServer<TData>` and `HttpServer<TData>` each hold a router, services, sessions and
+  `RequireSession`, so the interop hands a tuple of the three where it needs a server. The two
+  transport servers lack `RequireSessionOrCredential`, which `Server<TData>` has, and the TypeScript
+  side's `IServer` has.
+- **The C# router's `notify` takes another shape than the TypeScript one's.** The TypeScript
+  `IRouterLike.notify` takes `Uint8Array` or `Error`, the reason a value did not write in its
+  payload's place; the C# `NotifyRequest`, a positional record of three members, carries it beside
+  the payload as `Unwritten`, an open row of the support matrix waiting on the parameter rule.
+  [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) now says a record of more than
+  two members is a record of `init` properties, and maps a union onto overloads.
+
+Probed on 2026-10-05: protobuf-es 2.16.0 and Google.Protobuf 3.36.2 agree on every outcome a
+protobuf payload's reader meets first — a premature end, a string that is not UTF-8, an unknown
+field, an empty payload — and on a message field set to the empty message, written `1A 00` on both.
+They part on a string's leading U+FEFF, on a field they know arriving at another wire type, and on
+where they count nesting from: protobuf-es counts the top message, Google.Protobuf the nested ones
+alone; each takes its bound as an option, and with one set explicitly both take 100 messages below
+the top and refuse 101. An optional `then` that no promise's `then` matches, on the bound call's
+type, makes `await procedure(request)` a compile error under TypeScript 7.0.2 (TS1320), where it
+otherwise compiles and sends nothing. A C# failure class given as a descriptor's type argument is
+inferred in `On`'s lambda, and a failure of another procedure, another service's descriptor, a
+result of another type and a subscription from a plain request's callback each fail to compile.
+
+### The options weighed
+
+Each item of the builder's round, in its order.
+
+**1. A procedure's call.**
+
+- A third value of the trace's `type`, `notification`: a request to a procedure that notifies may
+  open no subscription (spec 11.2), and the trace and the metrics count the subscribing call as a
+  `request` (`spec/debugging.md` 4.1, 8.2).
+- On the service layer's descriptors alone, `IProcedure` untouched: a hand-written procedure is never
+  checked.
+- Two optional members, `type` (`request`, `command`) and `notifies` (a boolean): three states each,
+  nine together, one of them, a command that notifies, refused at run time; and the word `type`,
+  which the trace gives a step, not a procedure: its `type` takes `notification`
+  (`spec/debugging.md` 4.1; `DebugType` on both sides), and a notification sent for a procedure of
+  type `request` is traced `notification`.
+- **One optional member, `call`: `request`, `notifies` or `command`. Chosen**, the user's choice: it
+  mirrors the builder's `oneof call { Notifies notifies; Command command; }`, chosen there because it
+  makes a command that notifies impossible to write, plus the value an unset `oneof` means, a plain
+  request, since on a hand-written procedure an absent member checks nothing. No state needs a
+  refusal, and the word is the options' own; the manifest takes it too.
+
+Where it is checked:
+
+- **The service manager, by the accessor's name**: `getRequest` on a server's manager, for a
+  procedure of call `request`, passes, yet its call goes to a client, and the registry counts it a
+  command. The accessor does not say the side; the router does.
+- **Each router, at its declaration, by the way it is declared. Chosen.** A router knows its side,
+  and whether a resolver notifies before it registers it: `typeof resolver.notify === 'function'`,
+  `resolver is INotificationResolver`. A notification is registered on a client's router alone. The
+  ways are `spec/identities.json`'s own, six of them: `client-resolver`, `server-resolver`,
+  `server-notification-resolver`, `client-requester`, `server-requester`, `client-notification`. A
+  resolver that notifies is a way of its own, since a server's router takes another call of it than
+  of a plain one. The manager adds no reason of its own, and 0017's paragraph "The service manager
+  checks first where it refuses first" stands as it is: it checks the procedure's identity, once.
+
+What each way takes, the procedure's `call` given:
+
+| Way                            | Takes                 | Refuses                                                                         |
+| ------------------------------ | --------------------- | ------------------------------------------------------------------------------- |
+| `client-requester`             | `request`, `notifies` | `command`                                                                       |
+| `server-requester`             | `command`             | `request`, `notifies`                                                           |
+| `server-resolver`              | `request`             | `notifies`: its subscribing calls would be answered and hear nothing; `command` |
+| `server-notification-resolver` | `notifies`            | `request`, `command`                                                            |
+| `client-resolver`              | `command`             | `request`, `notifies`                                                           |
+| `client-notification`          | `notifies`            | `request`, `command`                                                            |
+
+A request to a procedure that notifies, by a `client-requester`, is taken: it opens no subscription
+(spec 11.2).
+
+Where it is stated: each router's own, with twin tests; or **a third reason of spec 16.10's table,
+`against its call`, after `out of its range` and `off its form`, with `spec/identities.json` gaining
+a group of declarations played per way, as [0006](0006-a-rule-has-its-gate.md) asks a rule's gate
+and as 0017 pinned there refusals no peer sees. Chosen**, the user's choice: a third language takes
+the rule from the file, where twin tests hold two sides alone, and the spec's minor moves in this
+round already, for `proto`. Section 16.11 says what each way takes. A side built without the trace
+and the metrics, which never refuses `off its form`, still refuses `against its call`, which needs
+no name.
+
+_Conformance:_ 16.10, 16.11 and `spec/identities.json`'s `calls`, six declarations each played
+the six ways. _Matrix:_ the feature row "The identity rules" counts the call.
+
+**2. The codecs made public.**
+
+The name. The plan says `Codec<T>`, the builder's sketch `TEXT_CODEC`. But _codec_ names the
+envelope's already (`Bead.Core/EnvelopeCodec.cs`; the matrix's "The envelope codec and its
+refusals"), and what is public here reads and writes a payload. **Chosen: the names 0016 gave them
+inside, made public**: `IPayloadCodec`, `PAYLOAD_CODECS.raw`, `.text`, `.json` on the TypeScript
+side; `IPayloadCodec<T>` and `PayloadCodecs.Raw`, `.Text`, `.Json` on the C# side. The keys are the
+manifest's `encoding` values; the global `JSON` is never shadowed.
+
+What a `json` value is on the TypeScript side: `unknown` both ways; `JsonValue` both ways; or
+**`JsonValue` read and `unknown` written, chosen**. `JsonValue` written is neither sound nor
+complete against 17.7: it takes `NaN`, an infinity and a string holding a surrogate alone, which
+17.7 refuses, and refuses a value typed by an interface, which 17.7 writes (TS2322 under TypeScript
+7.0.2 and the repository's `tsconfig.base.json`) — the very shape the house style writes. The
+writer's refusals stay 17.7's, at run time, as `spec/codecs.json` pins them. Read, `JsonValue` says
+what a reader hands on, and narrows nothing anybody wrote.
+
+A protobuf message. Four ways:
+
+- The runtime depends on each language's protobuf library, as Connect-ES does (`@connectrpc/connect`
+  2.2.0 has `@bufbuild/protobuf` `^2.7.0` for a peer dependency): every user of `raw`, `text` or
+  `json` alone carries a library it never calls, and the constrained profile of a third language has
+  none to carry.
+- An optional module of its own, a `./protobuf` entry with a peer dependency and a C# project
+  referencing Google.Protobuf: one more package on each side to version with the stock library's
+  releases, and the C# name `Bead.Protobuf` is the builder's options' namespace already.
+- A codec per message written whole in the generated file: the template repeats what each language
+  does with a codec.
+- **The runtime takes two functions and makes the codec; generated code passes its stock library's.
+  Chosen**: what gRPC's C# runtime does. `Grpc.Core.Api` 2.84.0 depends on no protobuf library, its
+  `Marshallers.Create<T>(Func<T, byte[]> serializer, Func<byte[], T> deserializer)` makes a
+  marshaller of two functions, and the code Grpc.Tools 2.84.0 generates passes each message's
+  `Parser` to it. One function on each side, `payloadCodecOf` and `PayloadCodecs.Of`.
+
+Nothing more is needed of the runtime for `proto`: what does not decode throws, and the service
+manager answers any throw from a decoder `PAYLOAD_UNDECODABLE` already.
+
+What section 17 says of `proto`. A restatement of protobuf's binary format gets it wrong three
+times: "a writer writes no field at its default" is false of every field of explicit presence,
+which protobuf writes at its default ("Explicitly set values are always serialized, including
+default values", protobuf.dev, "Application Note: Field Presence"; a singular message field has
+explicit presence in proto3); "a field it knows, at a wire type not its own, as a field it does not
+know" contradicts protobuf's packed fields ("Protocol buffer parsers must be able to parse repeated
+fields that were compiled as `packed` as if they were not packed, and vice versa", protobuf.dev,
+"Encoding"); and an order of unknown fields written back pins what protobuf calls an implementation
+detail ("Do not assume the byte output of a serialized message is stable", the same page).
+**Chosen, the user's choice: section 17 names protobuf's format, and states only what is Bead's:**
+
+- what does not decode is answered as any payload that does not read (17.2);
+- an empty payload is the message with no field set, where an empty `json` payload is refused;
+- a reader refuses a message nested more than 100 deep below the top one, a bound each side sets
+  explicitly in its library;
+- a string's leading U+FEFF is a character of it, as 17.4.2 keeps a `text` payload's.
+
+The bound is Bead's, not a library's default: protobuf's C++ reads 100 by default
+(`src/google/protobuf/io/coded_stream.h`, "Sets the maximum recursion depth. The default is 100."),
+protobuf-go 10,000 (`DefaultRecursionLimit = 10000`, `encoding/protowire`), and the two stock
+libraries count from different places. Its reason is 0016's for 64 in `json`: a peer never chooses
+how deep a reader goes. Its number is protobuf's C++ default, which a protobuf user meets first,
+counted below the top message, as Google.Protobuf counts. Each side sets it in the code that calls
+its library, as the C# side sets `MaxDepth` for `json` rather than leaning on .NET's default, the
+user's choice over leaving the C# side on its library's default with the rows for its gate:
+protobuf-es takes `fromBinary(schema, bytes, { recursionLimit: 101 })`, since it counts the top
+message; Google.Protobuf takes `CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101)` over
+the payload framed as a message field holds one, after its length, and reads it with
+`ReadMessage`, which counts the top message too. Read so, the library refuses a message that ends
+before its bytes do, a stray end group among them, as its parse of bytes does and its parse of a
+stream does not; and an empty payload reads as the message with no field set, where a size limit of
+its length, 0, would be refused. Probed: both then take 100 below the top and refuse 101.
+
+The leading U+FEFF is Bead's rule, with 17.4.2's reason, RFC 3629 §6: protobuf says a string holds
+UTF-8 text, and U+FEFF is a character of it. protobuf-es strips it: its strict decoder is `new
+TextDecoder("utf-8", { fatal: true })`, whose `ignoreBOM` is false (WHATWG Encoding), and the only
+lever is `configureTextEncoding`, global to the library's copy and deprecated. The TypeScript side's
+row is a `differs`, crossing an open row of the matrix.
+
+Where Bead has no reason of its own, it states no rule, and the matrix holds what each library does,
+each side's test pinning its own:
+
+- **A field the reader knows, arriving at a wire type not its own.** Google.Protobuf keeps it as an
+  unknown field; protobuf-es reads it as its declared type, refusing two of three probes and taking
+  `12 00` as the number 0. protobuf's guide says nothing of it beyond packed fields, and neither
+  library is wrong by protobuf's conformance suite: protobuf-es says it is "100% conformant against
+  the official Protobuf test suite".
+- **A string no string holds, given to a writer**: a surrogate alone. Both stock libraries write
+  U+FFFD in its place; protobuf-go's `proto.Marshal` refuses it, "string field contains invalid
+  UTF-8" (golang/protobuf issue 1228); protobuf's guide says "A string must always contain UTF-8
+  encoded or 7-bit ASCII text" (protobuf.dev, "Language Guide (proto 3)"). A writer of `proto`
+  refuses it or repairs it, as its library does: the runtime reads no field of the message it is
+  given, and 0016's refusal in `text` and `json` is a rule Bead can keep there because its own codec
+  writes every character.
+
+What a side conforms to, for `proto`: its target's generated code over its stock library, at the
+version its tests lock. A consumer whose messages are its own build's decodes with its own library's
+version, which the generated file's header names the oldest of.
+
+_Conformance:_ section 17 gains 17.9; `spec/codecs.json` its `proto` rows, its schema an encoding,
+two reasons and the fields read; its generator a reader of `Probe` written with the standard library
+from protobuf's Encoding guide ([0005](0005-a-toolchain-per-language.md)); `spec/check.py` their
+checks. _Matrix:_ the feature "Payloads" counts `proto`; an open row, "A string's leading U+FEFF in a
+proto payload"; two platform rows, "A proto field at a wire type not its own" and "A proto string no
+string holds, given to a writer".
+
+**3. The admission vocabulary.**
+
+- An `IBeforeRequest`, as the router takes one: a function and a refusal, which generated code would
+  build per hook, and whose refusal must be an entry of the router's own table.
+- **A rule, `none`, `session` or a hook by name, and a hook as data, `{ admits, detail }`, from which
+  the service layer builds the `beforeRequest` once, as the service is offered, its refusal the
+  router's own `ACCESS_DENIED` with the hook's detail. Chosen.** `session` is the side's
+  `requireSession`, on a server; a command's `session`, on a client, is the same function with its
+  router's own `SESSION_REQUIRED`, since a client's router resolves a command's credential to a
+  session as a server does: the same rule on both ends of a call, the user's choice over refusing
+  `session` to a command.
+
+A hook decides alone, on the call's header and its session, present or not, synchronously
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). Its refusal is `ACCESS_DENIED`: a
+hook's refusal is never `SESSION_REQUIRED`, as the interop's `denied` conversation pins it for a
+call in no session. A client side is given no hooks, so a command admitted by a hook is refused as
+its resolver is registered there.
+
+_Conformance:_ none moves; `denied` and `whoami` pin a hook's refusal and a session's already.
+_Matrix:_ the feature row "The service layer".
+
+**4. The failure catalogue.**
+
+- Codes as numbers, the list a comment: nothing narrows, and the client tests a code.
+- **A catalogue per service, `failuresOf` and `FailureCatalogue`, its names and codes, which makes a
+  failure of a name with its detail and tells one received; each procedure narrowed at compile time
+  to the names it lists. Chosen**: a peer hears nothing new.
+
+The narrowing takes each language's own means. On the TypeScript side, the failure's name is a
+literal type its procedure's descriptor carries; a cast still reaches a code the procedure does not
+list, which is sent as written and reported. On the C# side, a failure class per procedure that
+lists any, its constructor private and its values its static members, given as the descriptor's type
+argument, and `NoFailure`, which has no value, for one that lists none: the class is the procedure's
+list, and no value outside it exists to send (CS1503 for another procedure's failure and for one
+where none is listed). So the C# side holds no second list of the same failures, and checks nothing
+at run time: the difference is a platform row of the matrix, as "A value a side's type cannot hold"
+is. A refusal of admission is answered through an overload of its own, `AdmissionFailure` on the C#
+side, so the application codes stay narrowed.
+
+The C# side gains `IsApplication` and `IsProtocol` on `FailureException`, the TypeScript side's
+`isApplication` and `isProtocol`: a difference closed, which no row held.
+
+_Conformance:_ none; an unlisted code is sent as written. _Matrix:_ the feature row "The service
+layer"; a platform row, "A failure its procedure does not list, answered".
+
+**5. The typed descriptors.**
+
+- A table of plain procedures and a codec map beside it: a callback's type then comes from two
+  places, which a template keeps in step.
+- **One object per procedure: its procedure, its admission rule, its failures, and its codecs.
+  Chosen**, `requestOf` and `commandOf` on the TypeScript side, as Connect-ES's descriptors are data;
+  on the C# side, sealed classes whose type arguments carry the service's tag, the payloads and the
+  failure class: `RequestProcedure<TService, TRequest, TResult, TFailure>`, its twin of one more
+  argument for a procedure that notifies, and `CommandProcedure<…>`.
+
+The C# descriptor is built by its public constructor, never a static `Of`: the analyzers at
+`latest-recommended` refuse a static member on a generic type (CA1000), and 0007 holds them.
+
+_Conformance:_ none. _Matrix:_ the feature row "The service layer".
+
+**6. The service layer.**
+
+- A class per service in each language, written by the generator whole: behaviour in templates, in
+  two languages.
+- **One generic layer per runtime, which the generated classes are thin shells over. Chosen.**
+
+Its name. The builder's design wrote `createAPIServer`, `ApiServer<TApi, TData>` and their peers.
+But 0003 says "No abbreviations. A name is spelled out", and lists the words a standard or a
+platform owns, `HTTP`, `id`, `ws`: no standard owns _API_, and no name under `implementations/*/src`
+holds one. And the layer serves one service: it takes one service's procedures, and the builder
+keeps one class per service, leaving the word for a per-package aggregate. **Chosen, the user's
+choice: the word is _service_**: `createServiceServer`, `createServiceClient`,
+`ServiceServer<TService, TData>`, `ServiceClient<TService>`, and their peers. A `GreeterServer` is
+then the server side of a service, a `ServiceServer<GreeterProcedures>` with the service's name;
+the word _server_ is the role, as gRPC-Go's `GreeterServer` is registered on a `grpc.Server`. The
+other way: _API_ the service, 0003 gaining it as a word Bead owns, and the aggregate taking another
+name.
+
+What the server side does: `on` registers a resolver, before or after `offer`; `offer` binds every
+resolver, now and later, to one Bead server, once; `command` gives a requester of each command, made
+as the service is offered; `notify` notifies each procedure's subscribers;
+`proceduresWithoutResolver` lists what no `on` answered, which the router answers
+`PROCEDURE_UNKNOWN` (spec 9.2, step 4). What the client side does: a requester of each procedure its
+server answers and a notification of each that notifies, made as the client side is built, at the
+windows its caller gives, unpaced by default
+([0002](0002-a-subscription-goes-at-its-clients-pace.md)); and `on`, for the commands it answers.
+Each requester and resolver is declared once
+([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)).
+
+The calls stay curried, as the runtime makes them, with a guard on the bound call:
+`await procedure(request)`, its options' call forgotten, is TS1320 on the TypeScript side, and on
+the C# side awaiting a delegate never compiles (CS1061). The guard sits on the bound call alone, not
+on the procedure, the user's choice: on the procedure it refuses an async function that hands a
+procedure on (TS1058), which is no mistake. What it costs still, and what it leaves, are stated
+under the decision.
+
+_Conformance:_ none; every peer-visible behaviour of the layer is a conversation already: a hook's
+refusal (`denied`), a procedure without a resolver (`PROCEDURE_UNKNOWN`), a payload that does not
+decode (`PAYLOAD_UNDECODABLE`). _Matrix:_ the feature row "The service layer".
+
+**7. The notify filter's argument.**
+
+- Two arguments, a third the day a filter needs the call's server: a change of every filter
+  written.
+- One argument at the options, two at the router: two shapes of one filter.
+- **One argument everywhere, `ISubscriber` and `Subscriber`: the subscription's connection and the
+  identifier of the session holding it. Chosen**, so that a server, or a session's data, joins the
+  object later without breaking a filter. `ISubscriber` is the TypeScript side's word for that very
+  pair already, made generic over the handle and moved to the shared types.
+
+On the C# side, `Subscriber` is a `readonly record struct` of `init` properties, with no positional
+parameters, as `NotifyOptions` is a record of `init` properties. A positional record would break, at
+the day a member joins it, every filter that deconstructs it (CS8129, CS8130), matches it by
+position (CS8129) or constructs one (CS7036); with `init` properties, the same filters compile once
+a third member joins. `Subscriber` replaces the internal `SubscriptionPlace`, its `Session` named
+`Identifier`: one name for one pair, as 0003 asks.
+
+The C# router's `Notify` moves with it: `NotifyRequest` becomes a sealed record of `init`
+properties, `Procedure`, `Filter` and `Key`, and `IRouterLike.Notify` two overloads, one of a
+payload and one of the reason a value did not write, the TypeScript union's two arms as 0007 maps a
+union. `Unwritten` goes, and the two sides hand an unwritten notification to their router alike.
+
+_Conformance:_ none; a filter is the server's own. _Matrix:_ the open row "How a notification's
+value that does not write reaches its router" closes.
+
+**8. A notification asked for again at another window.**
+
+- Kept in silence: a second caller's window is dropped.
+- **Refused, as another name, revision, deprecation or limit is (0017's table). Chosen.** Unpaced and
+  paced are two windows: none against 1 is refused too. It is the service manager's one reason of its
+  own, which 0017's paragraph names already: the window joins "asked for again otherwise".
+
+_Conformance:_ none; a window asked for goes on the wire as PACED. _Matrix:_ none.
+
+**9. A server's and a client's interfaces on the C# side, and the TypeScript side's entry.**
+
+- **A server's interface and `IClient`, implemented by composition (0007). Chosen.** The server's
+  holds what the TypeScript side's `IServer` holds: its transport, router, services and sessions,
+  `RequireSession` and `RequireSessionOrCredential`, its gauges and its health, and its disposal.
+  The two transport servers gain `RequireSessionOrCredential`, and give their transport to the
+  interface as an `IServerTransport` by an explicit implementation. `IClient` holds what every client
+  shares: its router, its services, `Disconnect`, `Reconnect` and its disposal; `Connect` stays each
+  client's own, since each takes its transport's options record, where the TypeScript side's
+  `IClient` reads them from its transport's type.
+
+  Its name. `IServer<TData>` maps name for name onto the TypeScript side's `IServer`, but ASP.NET
+  Core's `Microsoft.AspNetCore.Hosting.Server.IServer` is imported and called in the very projects
+  whose servers implement it: C# tells the two apart by arity, and a project referencing both builds
+  clean, so the cost is a reader's, not the compiler's. 0003 says a name a platform holds "is not
+  available to Bead", with `BeadHttpClient` its case;
+  [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) kept `HealthStatus` beside
+  ASP.NET's, and qualified every type the builder generates as `global::Bead.` instead. That was a
+  name already in the tree; this one is new. **Chosen, the user's choice: `IBeadServer<TData>`**,
+  after `BeadHttpClient`, as 0003 has it for a new name. `IClient` collides with no platform name and
+  stays.
+
+- **`./service`, one entry of `package.json`'s `exports`, which a generated file imports alone.
+  Chosen**, its name following item 6's word: the service layer, the descriptors, the catalogue, the
+  payload codecs and the constant of item 10.
+
+_Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's shape, not a behaviour.
+
+**10. The constant of the contract with generated code.**
+
+- A version string the generated code compares at load: a mismatch found at a call's run.
+- A constant per release, as connect-go's `IsAtLeastVersion1_13_0`: its name waits on a release
+  number git-flow gives only as the release branch opens, so it would be renamed there should the
+  number move; and the C# name needs CA1707 overruled.
+- **A counter of the contract between generated code and the runtime, from 1, moved only when
+  generated code needs something the runtime did not have. Chosen**, as gRPC-Go's
+  `SupportPackageIsVersion9`: "The SupportPackageIsVersion variables are referenced from generated
+  protocol buffer files to ensure compatibility with the gRPC version used. The latest support
+  package version is 9. Older versions are kept for compatibility" (pkg.go.dev,
+  `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_1` on the TypeScript side, and
+  `GeneratedCode.SupportsVersion1` on the C# side, with no underscore, so CA1707 stands. A runtime
+  too old for a file lacks the constant, and the file fails its type-check (TS2724) and its load (a
+  `SyntaxError` at link time), or its build (CS0117). It names no release, so nothing is renamed in a
+  release branch, and the product's version, 0008's third axis, stays out of the runtime's names.
+
+_Conformance:_ none. _Matrix:_ none.
+
+**11. Room for a validator.**
+
+- Nothing now: the step that validates a request against its message's rules opens the layer again.
+- **An optional `validate` member of a typed descriptor, empty here. Chosen**, the user's choice: the
+  side that answers calls it after the decode and before the resolver, the side that requests before
+  the encode when its options say so; nothing validates until a later step fills it, and a
+  violation's shape is that step's. That step fills a slot rather than reopening the layer.
+
+_Conformance:_ none. _Matrix:_ the feature row "The service layer".
+
+## Decision
+
+**A procedure says how it is called.** `IProcedure` and `Procedure` gain one optional member:
+
+```ts
+/** How a procedure is called: a request, a request that may also notify (spec 11.2), or a command a server makes of a client. */
+export const ProcedureCall = Object.freeze({
+  COMMAND: 'command',
+  NOTIFIES: 'notifies',
+  REQUEST: 'request',
+} as const);
+export type ProcedureCall = (typeof ProcedureCall)[keyof typeof ProcedureCall];
+
+export interface IProcedure extends IProcedureAddress {
+  // … its ids, name, revision, limit and deprecation
+  /** How it is called; not given, nothing checks it. Never a debug event's `type`, which is a step's. */
+  call?: ProcedureCall | undefined;
+}
+```
+
+```csharp
+/// <summary>How a procedure is called: a request, a request that may also notify (spec 11.2), or a command a server makes of a client.</summary>
+public enum ProcedureCall
+{
+    /// <summary>A request a client makes of its server.</summary>
+    Request,
+
+    /// <summary>A request whose call may open a subscription to its notifications.</summary>
+    Notifies,
+
+    /// <summary>A request a server makes of a client.</summary>
+    Command,
+}
+
+public sealed record Procedure
+{
+    // … its ids, name, revision, limit and deprecation
+    /// <summary>How it is called; none checks nothing.</summary>
+    public ProcedureCall? Call { get; init; }
+}
+```
+
+Each router checks it as a procedure is declared, by the way it is declared (spec 16.11, the table
+of item 1), after its identity and before any reason of the router's own or its registry's: a
+declaration refused declares nothing. A resolver is checked before it is registered and declared to
+the registry; a requester before `declareRequester` hands it on; a notification before it is
+registered. The refusal is the router's, as 16.10's are on each side: a `ProgrammerError`, an
+`ArgumentException`, its sentence naming the procedure, its call and what the way takes, the
+TypeScript one ending with `against its call`. The service manager checks a procedure's identity
+alone, first; the call is the routers', so a notification of a procedure whose call is `request` is
+refused as it is registered with its router. `procedureOf` carries `call`, and a notification asked
+for again with another `call` is asked for otherwise. A debug event never lays the procedure's
+`call` out beside its `type`.
+
+On the TypeScript side, a procedure the runtime makes callable — a resolver, a requester, a
+notification — is a function, and inherits `Function.prototype.call`: the runtime reads a
+procedure's call as its own member alone, `procedureCallOf` in `router/shared/identity.ts`, never
+`procedure.call` bare.
+
+**The payload codecs are public, and a protobuf message's codec is made from two functions.**
+
+```ts
+/** How one encoding reads a payload and writes a value: what does not read, or write, throws. */
+export interface IPayloadCodec<Value, Given = Value> {
+  readonly decode: (bytes: Uint8Array) => Value;
+  readonly encode: (value: Given) => Uint8Array;
+}
+
+/** A JSON value, as spec 17 reads one. */
+export type JsonValue =
+  boolean | number | string | null | readonly JsonValue[] | { readonly [name: string]: JsonValue };
+
+/** The codecs of spec 17 by the manifest's encoding: a reader's refusal a SyntaxError, a writer's a TypeError. */
+export const PAYLOAD_CODECS: Readonly<{
+  json: IPayloadCodec<JsonValue, unknown>;
+  raw: IPayloadCodec<Uint8Array>;
+  text: IPayloadCodec<string>;
+}>;
+
+/**
+ * A codec of `codec`'s two functions, frozen: a protobuf message's, from its stock library's
+ * binary reader and writer. One that is not a function is a ProgrammerError.
+ */
+export const payloadCodecOf: <Value, Given = Value>(
+  codec: IPayloadCodec<Value, Given>
+) => IPayloadCodec<Value, Given>;
+```
+
+```csharp
+/// <summary>How one encoding reads a payload and writes a value; what does not, throws.</summary>
+public interface IPayloadCodec<T>
+{
+    /// <summary>The value a payload holds.</summary>
+    T Decode(ReadOnlyMemory<byte> payload);
+
+    /// <summary>The payload of a value.</summary>
+    ReadOnlyMemory<byte> Encode(T value);
+}
+
+/// <summary>The codecs of spec 17, by the manifest's encoding; a refusal a FormatException.</summary>
+public static class PayloadCodecs
+{
+    public static IPayloadCodec<ReadOnlyMemory<byte>> Raw { get; }
+    public static IPayloadCodec<string> Text { get; }
+    public static IPayloadCodec<JsonElement> Json { get; }
+
+    /// <summary>A codec of two functions: a protobuf message's, from its stock library's.</summary>
+    public static IPayloadCodec<T> Of<T>(Func<ReadOnlyMemory<byte>, T> decode, Func<T, ReadOnlyMemory<byte>> encode);
+}
+```
+
+What generated code writes of a `proto` binding, the stock library's functions passed with Bead's
+bound, as each side's tests play `spec/codecs.json`'s rows:
+
+```ts
+request: payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequestSchema>>({
+  decode: (bytes) => {
+    // ! protobuf-es counts the top message: 101 is spec 17.9's 100 below it
+    return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
+  },
+  encode: (given) => {
+    return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given));
+  },
+}),
+```
+
+```csharp
+global::Bead.PayloadCodecs.Of(
+    (bytes) =>
+    {
+        // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
+        // read as a message field holds one, after its length, and the top message counts: 101 is
+        // 100 below it
+        var framed = new byte[global::Google.Protobuf.CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
+
+        using (var output = new global::Google.Protobuf.CodedOutputStream(framed))
+        {
+            output.WriteLength(bytes.Length);
+        }
+
+        bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
+
+        using var stream = new global::System.IO.MemoryStream(framed, writable: false);
+        using var input = global::Google.Protobuf.CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
+        var message = new SayHelloRequest();
+
+        input.ReadMessage(message);
+
+        return message;
+    },
+    (SayHelloRequest message) =>
+    {
+        return message.ToByteArray();
+    })
+```
+
+**Section 17 states a fourth encoding, `proto`**, and its first sentence counts four:
+
+> 17.9. `proto`: the payload is a protobuf message in protobuf's binary wire format, its message
+> the one the procedure's definition names. What that format takes, refuses and writes is
+> protobuf's, as its [Encoding](https://protobuf.dev/programming-guides/encoding/) guide and its
+> [Language Guide](https://protobuf.dev/programming-guides/proto3/) state it; this section restates
+> none of it, and a side reads and writes through its stock protobuf library and the code its
+> generator writes for the message. What is Bead's:
+>
+> 1. Bytes that are no encoding of the message do not read (section 17.2).
+> 2. An empty payload is the message with no field set.
+> 3. A reader MUST refuse a message nested more than 100 deep below the top one, and sets that bound
+>    in its library rather than leaving it to the library's default.
+> 4. A string's leading U+FEFF is a character of it (section 17.4.2).
+>
+> Where two stock libraries part on what protobuf states no rule of, the support matrix says what
+> each does.
+
+**`spec/codecs.json` holds `proto` rows, played through each side's stock library.** The fixed
+message is `spec/codecs.proto`:
+
+```proto
+syntax = "proto3";
+
+package bead.codecs.v1;
+
+message Probe {
+  string text = 1;
+  uint32 number = 2;
+  Probe child = 3;
+}
+```
+
+A `proto` payload row pins an outcome: taken, with the fields read (`read`: its `text` as UTF-16
+code units, its `number`, and how many messages nest below the top through `child`), or refused,
+with its reason. A `proto` value row pins written bytes only where protobuf fixes them, one field at
+a time. The schema's `encoding` takes `proto`; its reasons `not its message` (17.9.1) and `nested
+past 100` (17.9.3), derived by the regeneration alone, as 0016's are. `make_codecs.py` reads each
+row's bytes with a reader of `Probe` written with the standard library from protobuf's Encoding
+guide, and Bead's 17.9.2 to 17.9.4. The rows:
+
+| Row                                      | Bytes                                | Outcome                        | `differs`  |
+| ---------------------------------------- | ------------------------------------ | ------------------------------ | ---------- |
+| an empty payload                         | none                                 | taken: no field set            |            |
+| a string and a number                    | `0A 01 61 10 07`                     | taken: `a`, 7                  |            |
+| a length past the bytes                  | `0A 05 61 62`                        | refused: not its message       |            |
+| a varint cut short                       | `10 80`                              | refused: not its message       |            |
+| a tag alone                              | `0A`                                 | refused: not its message       |            |
+| a string that is not UTF-8               | `0A 01 FF`                           | refused: not its message       |            |
+| an overlong form in a string             | `0A 02 C0 AF`                        | refused: not its message       |            |
+| a surrogate in UTF-8                     | `0A 03 ED A0 80`                     | refused: not its message       |            |
+| a string's leading U+FEFF                | `0A 04 EF BB BF 61`                  | taken: U+FEFF `a`              | TypeScript |
+| U+FEFF after a string's first character  | `0A 04 61 EF BB BF`                  | taken: `a` U+FEFF              |            |
+| a noncharacter, U+FFFF                   | `0A 03 EF BF BF`                     | taken: U+FFFF                  |            |
+| U+0000                                   | `0A 01 00`                           | taken: U+0000                  |            |
+| an unknown field after the known         | `0A 01 61 78 07`                     | taken: `a`                     |            |
+| an unknown field before the known        | `78 07 0A 01 61`                     | taken: `a`                     |            |
+| an unknown field of each wire type       | `21 01 … 08 2A 01 7A 35 01 02 03 04` | taken: no field set            |            |
+| a number given at its default            | `10 00`                              | taken: 0                       |            |
+| a scalar given twice                     | `10 01 10 02`                        | taken: 2                       |            |
+| a message given twice                    | `1A 02 1A 00 1A 02 10 01`            | taken: merged, 2 below the top |            |
+| a message field set to the empty message | `1A 00`                              | taken: a child, no field set   |            |
+| field number 0                           | `00 01`                              | refused: not its message       |            |
+| a varint of 10 bytes                     | `10 FF FF FF FF FF FF FF FF FF 01`   | taken: 4294967295              |            |
+| a varint of 11 bytes                     | `10 80 … 80 01`                      | refused: not its message       |            |
+| an end group no group opened             | `24`                                 | refused: not its message       |            |
+| an unknown group, closed                 | `23 24`                              | taken: no field set            |            |
+| an unknown group never closed            | `23`                                 | refused: not its message       |            |
+| 99 messages below the top                | `1A E6 01 …`                         | taken: 99 below                |            |
+| 100 messages below the top               | `1A E9 01 …`                         | taken: 100 below               |            |
+| 101 messages below the top               | `1A EC 01 …`                         | refused: nested past 100       |            |
+
+A message given twice is merged, so its row gives the child of the first copy a child of its own:
+a reader that merges reads 2 below the top, and one that keeps the last copy reads 1. Six values,
+each one field or none: `text` `a`, written `0A 01 61`; `number` 7, written `10 07`; `number` 0,
+written as nothing; no field set, written as nothing; `child` set to the empty message, written
+`1A 00`; `text` U+FEFF `a`, written `0A 04 EF BB BF 61`.
+
+What leaves the file for the matrix, each side's test pinning its own library: a known field at the
+varint, length-delimited and fixed32 wire types (`08 61`, `12 00`, `15 01 02 03 04`), and a string
+holding a surrogate alone given to a writer.
+
+Each side's tests generate `Probe` with their stock generator: the TypeScript side with
+protoc-gen-es run by buf, both from npm (`@bufbuild/protobuf`, `@bufbuild/protoc-gen-es`,
+`@bufbuild/buf`, development dependencies alone), its output, `codecs_pb.ts`, committed and checked
+for drift by `yarn check`; the C# side with Grpc.Tools' `<Protobuf Include>` in the test project,
+beside Google.Protobuf, generated at each build. Each plays the rows through `payloadCodecOf` and
+`PayloadCodecs.Of` over the same calls generated code writes, the bound included. The runtimes' own
+dependencies do not change.
+
+**A rule says who may call a procedure, and a hook is data.**
+
+```ts
+/** Who may call a procedure: every call, a call with a session, or a hook the server is given by name. */
+export type AdmissionRule<Hook extends string = string> =
+  'none' | 'session' | { readonly hook: Hook };
+
+/** A hook: whether a call may reach its resolver, on its header and its call's session, present or not. */
+export interface IAdmissionHook<Handle extends string = ConnectionHandle> {
+  /** Synchronous; only `true` admits. One that throws answers PROCEDURE_FAILED, and is reported. */
+  readonly admits: (request: IAdmissionRequest<Handle>) => boolean;
+  /** The detail of the ACCESS_DENIED a call it refuses is answered with; none says nothing. */
+  readonly detail?: string | undefined;
+}
+```
+
+```csharp
+/// <summary>Who may call a procedure: every call, a call with a session, or a hook given by name.</summary>
+public sealed record AdmissionRule
+{
+    public static AdmissionRule None { get; }
+    public static AdmissionRule Session { get; }
+    public static AdmissionRule Hook(string name);
+
+    /// <summary>The hook's name, for a hook's rule; none for the others.</summary>
+    public string? HookName { get; }
+}
+
+/// <summary>A hook: whether a call may reach its resolver, on its header and its call's session.</summary>
+public sealed record AdmissionHook
+{
+    public required Func<AdmissionRequest, bool> Admits { get; init; }
+    public string Detail { get; init; } = "";
+}
+```
+
+As the service is offered, `none` gives no `beforeRequest`; `session` the side's `requireSession`;
+and a hook a `beforeRequest` of its `admits` whose refusal is the router's own `ACCESS_DENIED`, with
+the hook's detail, built once. A hook a procedure names that the options lack, and a hook the options
+give that no procedure names, are refused as the service layer is built: a `ProgrammerError`, an
+`ArgumentException`.
+
+**A service's failures are a catalogue, and each procedure answers the ones it lists.**
+
+```ts
+/** A failure of a catalogue, by its name: its code, and why. */
+export interface IListedFailure<Name extends string = string> extends IApplicationFailure {
+  readonly detail: string;
+  readonly failureName: Name;
+}
+
+/** A service's failures, by name: their codes, a failure made of one, and a failure received told as one. */
+export interface IFailureCatalogue<Name extends string> {
+  readonly codes: Readonly<Record<Name, number>>;
+  readonly serviceId: ServiceId;
+  /** Whether `error` is the application failure `name`, received from a procedure of its service. */
+  is: (error: unknown, name: Name) => error is FailureError;
+  of: <Given extends Name>(name: Given, detail?: string) => IListedFailure<Given>;
+}
+
+/** A catalogue; a code outside 1 to 65,535, or two names of one code, is a ProgrammerError. */
+export const failuresOf: <const Name extends string>(catalogue: {
+  codes: Readonly<Record<Name, number>>;
+  serviceId: ServiceId;
+}) => IFailureCatalogue<Name>;
+```
+
+```csharp
+/// <summary>A procedure's own failure, of its service's catalogue: its code.</summary>
+public interface IApplicationFailure
+{
+    /// <summary>Its code, from 1 to 65,535 (spec 9.5).</summary>
+    ushort Code { get; }
+}
+
+/// <summary>The failure of a procedure that lists none: it has no value.</summary>
+public sealed class NoFailure : IApplicationFailure { /* a private constructor, and no instance */ }
+
+/// <summary>A refusal of admission a resolver answers: ACCESS_DENIED or SESSION_REQUIRED, and why.</summary>
+public sealed record AdmissionFailure
+{
+    public static AdmissionFailure AccessDenied(string detail = "");
+    public static AdmissionFailure SessionRequired(string detail = "");
+}
+
+/// <summary>A service's catalogue: whether a failure received is one of it.</summary>
+public sealed class FailureCatalogue
+{
+    public FailureCatalogue(ushort serviceId);
+    public ushort ServiceId { get; }
+
+    /// <summary>Whether the exception is that application failure, from a procedure of this service.</summary>
+    public bool Is(FailureException exception, IApplicationFailure failure);
+}
+
+// FailureException gains the TypeScript side's two
+public bool IsApplication();
+public bool IsApplication(ushort code);
+public bool IsApplication(IReadOnlyCollection<ushort> codes);
+public bool IsProtocol(ProtocolCode code, RouterSide? side = null);
+public bool IsProtocol(IReadOnlyCollection<ProtocolCode> codes, RouterSide? side = null);
+```
+
+A resolver of the service layer answers a result, a failure its procedure lists, or a refusal of
+admission. On the TypeScript side, a failure of the catalogue its procedure does not list, which only
+a cast reaches, is sent as written, and its server reports a `ProgrammerError` through its router's
+error event, with the call's connection: the caller hears what it would hear without the layer. On
+the C# side, the procedure's failure class is its list, and no other value reaches `Fail`.
+
+**A procedure's descriptor is one object, with room for a validator.**
+
+```ts
+/** What every descriptor holds. */
+export interface IDescriptorInit {
+  readonly admission: AdmissionRule;
+  readonly failures: Readonly<Record<string, number>>;
+  readonly procedure: IProcedure;
+  readonly request: IPayloadCodec<unknown, never>;
+  readonly result: IPayloadCodec<unknown, never>;
+  /** Throws on a request its rules refuse; none validates nothing. */
+  readonly validate?: ((request: unknown) => void) | undefined;
+}
+
+/** A request's descriptor, `notification` given for a procedure that notifies: its procedure's call set. */
+export const requestOf: <const Init extends IRequestInit>(init: Init) => RequestDescriptor<Init>;
+
+/** A command's descriptor: a command never notifies. */
+export const commandOf: <const Init extends IDescriptorInit>(init: Init) => CommandDescriptor<Init>;
+```
+
+```csharp
+/// <summary>A procedure of the service whose type tag is TService, whatever its call.</summary>
+public interface IServiceProcedure<TService>
+{
+    Procedure Procedure { get; }
+    AdmissionRule Admission { get; }
+}
+
+public sealed class RequestProcedure<TService, TRequest, TResult, TFailure> : IServiceProcedure<TService>
+    where TFailure : IApplicationFailure
+{
+    public RequestProcedure(Procedure procedure, ProcedureBindings<TRequest, TResult> bindings);
+}
+
+public sealed class RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> : IServiceProcedure<TService>
+    where TFailure : IApplicationFailure
+{
+    public RequestProcedure(Procedure procedure, ProcedureBindings<TRequest, TResult, TNotification> bindings);
+}
+
+public sealed class CommandProcedure<TService, TRequest, TResult, TFailure> : IServiceProcedure<TService>
+    where TFailure : IApplicationFailure
+{
+    public CommandProcedure(Procedure procedure, ProcedureBindings<TRequest, TResult> bindings);
+}
+
+/// <summary>A procedure's admission and its payloads' codecs: the manifest's bindings.</summary>
+public sealed record ProcedureBindings<TRequest, TResult>
+{
+    public required AdmissionRule Admission { get; init; }
+    public required IPayloadCodec<TRequest> Request { get; init; }
+    public required IPayloadCodec<TResult> Result { get; init; }
+    public Action<TRequest>? Validate { get; init; }
+}
+
+// and ProcedureBindings<TRequest, TResult, TNotification>, with a required Notification
+```
+
+A descriptor sets its procedure's `call`: `request` or `notifies` by `requestOf` and the request
+classes, as `notification` is given or not, and `command` by `commandOf` and `CommandProcedure`; a
+procedure that states another is refused as the descriptor is made, and so is a codec missing. A
+descriptor is no declaration: its identity and its call are checked as it is declared (spec 16.10),
+by `on`, `offer`, or the client side's building.
+
+`validate` is empty until a later step fills it. The side that answers calls it on the decoded
+request, before the resolver: a server's resolvers, and a client's command resolvers; one that
+throws is answered `PROCEDURE_FAILED` and reported. The side that requests calls it before the
+encode on the client alone, when its options say so, `validates` and `Validates`, and a throw fails
+the call before anything goes; a server's commands never validate, since nothing gives them that
+option.
+
+**One layer serves and calls a service, in each runtime.**
+
+```ts
+/** The server side of a service, offered on one Bead server. */
+export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
+  /** A requester of each command, made as the service is offered; one called before is a ProgrammerError. */
+  readonly command: {
+    readonly [Name in CommandName<S>]: IRequest<
+      GivenOf<S[Name]['request']>,
+      ValueOf<S[Name]['result']>,
+      TransportServerConnectionHandle
+    >;
+  };
+  /** Notifies each procedure's subscribers; before the service is offered, it sends nothing and resolves. */
+  readonly notify: {
+    readonly [Name in NotifyingName<S>]: (
+      notification: GivenOf<S[Name]['notification']>,
+      options?: INotifyOptions<TransportServerConnectionHandle>
+    ) => Promise<void>;
+  };
+  /** Offers every resolver, now and later, on `server`; a second offer is a ProgrammerError. */
+  offer: (server: IServer<IServerTransportLike, Data>) => void;
+  /** Registers a procedure's resolver, before or after `offer`; twice for one procedure is a ProgrammerError. */
+  on: <Name extends AnsweredName<S>>(
+    name: Name,
+    callback: ServiceResolverCallback<S[Name]>
+  ) => void;
+  /** The procedures a client calls that no `on` answers: the router answers them PROCEDURE_UNKNOWN. */
+  proceduresWithoutResolver: () => readonly IProcedure[];
+}
+
+export const createServiceServer: <const S extends ServiceProcedures, Data = unknown>(
+  procedures: S,
+  ...options: ServiceServerOptions<S>
+) => IServiceServer<S, Data>;
+
+/** The client side of a service, over one Bead client. */
+export interface IServiceClient<S extends ServiceProcedures> {
+  /** The notification of each procedure that notifies, at the window its caller gave, or none. */
+  readonly notifications: {
+    readonly [Name in NotifyingName<S>]: INotification<
+      GivenOf<S[Name]['request']>,
+      ValueOf<S[Name]['notification']>
+    >;
+  };
+  /** A requester of each procedure its server answers, made as the client side is built. */
+  readonly request: {
+    readonly [Name in AnsweredName<S>]: IRequest<
+      GivenOf<S[Name]['request']>,
+      ValueOf<S[Name]['result']>,
+      RouterClientConnectionHandle
+    >;
+  };
+  /** Registers the resolver of a command it answers; twice for one command is a ProgrammerError. */
+  on: <Name extends CommandName<S>>(name: Name, callback: ServiceResolverCallback<S[Name]>) => void;
+}
+
+export const createServiceClient: <const S extends ServiceProcedures>(
+  procedures: S,
+  options: {
+    client: IClient;
+    validates?: boolean;
+    windows?: { readonly [Name in NotifyingName<S>]?: number };
+  }
+) => IServiceClient<S>;
+```
+
+`ServiceServerOptions<S>` is an optional options object for a service whose procedures name no
+hook, and a required one, its `admissions` required, for one that names any, so
+`createServiceServer(procedures)` holds for the first.
+
+```csharp
+/// <summary>The server side of the service whose type tag is TService, offered on one Bead server.</summary>
+public sealed class ServiceServer<TService, TData>
+{
+    public ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures, ServiceServerOptions? options = null);
+
+    public void On<TRequest, TResult, TFailure>(
+        RequestProcedure<TService, TRequest, TResult, TFailure> procedure,
+        ServiceResolverCallback<TRequest, TResult, TFailure> callback)
+        where TFailure : IApplicationFailure;
+
+    public void On<TRequest, TResult, TNotification, TFailure>(
+        RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> procedure,
+        ServiceNotificationResolverCallback<TRequest, TResult, TFailure> callback)
+        where TFailure : IApplicationFailure;
+
+    public void Offer(IBeadServer<TData> server);
+
+    public Func<TRequest, BoundCall<TResult>> CommandOf<TRequest, TResult, TFailure>(
+        CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
+        where TFailure : IApplicationFailure;
+
+    public Func<TNotification, NotifyOptions?, Task> NotifierOf<TRequest, TResult, TNotification, TFailure>(
+        RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> procedure)
+        where TFailure : IApplicationFailure;
+
+    public IReadOnlyList<Procedure> ProceduresWithoutResolver();
+}
+
+/// <summary>What a server side is given: its hooks, by the names its procedures give them.</summary>
+public sealed record ServiceServerOptions
+{
+    public IReadOnlyDictionary<string, AdmissionHook> Admissions { get; init; }
+}
+
+/// <summary>The client side of the service whose type tag is TService, over one Bead client.</summary>
+public sealed class ServiceClient<TService>
+{
+    public ServiceClient(IReadOnlyList<IServiceProcedure<TService>> procedures, ServiceClientOptions options);
+
+    public Func<TRequest, BoundCall<TResult>> RequesterOf<TRequest, TResult, TFailure>(
+        RequestProcedure<TService, TRequest, TResult, TFailure> procedure)
+        where TFailure : IApplicationFailure;
+
+    // and RequesterOf for a procedure that notifies: its requester opens no subscription
+    public INotification<TRequest, TNotification> NotificationOf<TRequest, TResult, TNotification, TFailure>(
+        RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> procedure)
+        where TFailure : IApplicationFailure;
+
+    public void On<TRequest, TResult, TFailure>(
+        CommandProcedure<TService, TRequest, TResult, TFailure> procedure,
+        ServiceResolverCallback<TRequest, TResult, TFailure> callback)
+        where TFailure : IApplicationFailure;
+}
+
+/// <summary>What a client side is given: its Bead client, a window for each procedure that notifies, and whether it validates.</summary>
+public sealed record ServiceClientOptions
+{
+    public required IClient Client { get; init; }
+    public IReadOnlyDictionary<string, int> Windows { get; init; }
+    public bool Validates { get; init; }
+}
+
+/// <summary>How a resolver of the service layer answers: a result, a failure its procedure lists, or a refusal.</summary>
+public interface IServiceResponse<TResult, TFailure> where TFailure : IApplicationFailure
+{
+    Task Answer(TResult result);
+    Task Fail(TFailure failure, string detail = "");
+    Task Fail(AdmissionFailure refusal);
+}
+
+// IServiceNotificationResponse<TResult, TFailure> adds Task<uint> RegisterNotification();
+// ServiceResolverCallback<TRequest, TResult, TFailure> and ServiceNotificationResolverCallback<…> are the delegates
+```
+
+`Data` is the server's own: a server side offered on a server of `string` sessions is made with
+`string`, as the interop's is, since the server's `sessions` is read and written through it. The
+TypeScript side's response is the runtime's, narrowed: `response(result)`, or `response(null,
+failure)` with `failure` an `IListedFailure` of a name its procedure lists or an `AdmissionFailure`;
+a procedure that notifies adds `registerNotification()`. `IServiceResponse` and `IRegistrar` are
+type aliases despite their `I`, since a conditional type is no interface and the lint refuses an
+empty one. The C# side's `ProceduresWithoutResolver` is a method, as `Gauges` is.
+
+What the layer refuses, as it is built or used:
+
+| Mistake                                                                                            | TypeScript                                      | C#                                                                 |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------ |
+| `on` twice for one procedure, offered or not                                                       | `ProgrammerError`                               | `ArgumentException`, as the router's second resolver               |
+| `on` of a name the service lacks, or of a command on the server side, a request on the client side | compile error; `ProgrammerError` past the types | compile error                                                      |
+| `on` of a command admitted by a hook, on the client side                                           | `ProgrammerError`                               | `ArgumentException`                                                |
+| `offer` twice                                                                                      | `ProgrammerError`                               | `InvalidOperationException`                                        |
+| a command's requester called before `offer`                                                        | `ProgrammerError`                               | `InvalidOperationException`                                        |
+| a hook a procedure names, missing from the options; one the options give that no procedure names   | compile error for a literal; `ProgrammerError`  | `ArgumentException`                                                |
+| a window for a procedure that does not notify                                                      | compile error for a literal; `ProgrammerError`  | `ArgumentException`                                                |
+| a window that is not a whole number above 0                                                        | `ProgrammerError`, the notification's           | `ArgumentException`, the notification's                            |
+| a second client side over one Bead client, at another window                                       | `ProgrammerError`, item 8's                     | `InvalidOperationException`, item 8's                              |
+| an unlisted failure code answered                                                                  | sent as written; `ProgrammerError` reported     | no counterpart: the failure class holds its procedure's list alone |
+
+**A call bound to its payload is a bound call, and it carries the guard.** The runtime's procedure
+takes its payload and gives a function of the call's options; that function is named, on both sides,
+and the guard sits on it alone:
+
+```ts
+/** A call bound to its payload: called with its options, it goes. */
+export interface IBoundCall<Result, Options extends unknown[] = RequestOptionsParameters> {
+  (...options: Options): Promise<Result>;
+  /** Never set: awaiting the bound call, its options' call forgotten, is TS1320. */
+  readonly then?: (guard: never) => never;
+}
+
+export interface IRequest<
+  RequestPayload,
+  ResponsePayload,
+  Handle extends string = ConnectionHandle,
+> extends IProcedure {
+  (requestPayload: RequestPayload): IBoundCall<ResponsePayload, RequestOptionsParameters<Handle>>;
+}
+
+// INotification's call gives IRegistrar: an IBoundCall<INotificationRegistration, [options?: …]>
+```
+
+On the C# side, the delegate `Requester<TResponse>` becomes `BoundCall<TResponse>`, and `Registrar`
+stays, since it names neither a registration nor a request; `IRegistrar` is its TypeScript twin. The
+spec's _requester_ is the party that makes a request ("as a requester is made, through the router's
+`declareRequester`", `spec/debugging.md`), which `Requester<TResponse>` gives a second meaning; the
+bound call is named after the call it makes, the user's choice, though the object makes a call
+rather than being one.
+
+What the guard catches, under TypeScript 7.0.2: `await procedure(request)` and `await
+Promise.resolve(procedure(request))` (TS1320); a bound call awaited inside `Promise.all` whose result
+is returned (TS1058). What it leaves: `Promise.all` awaited for its effect alone, and `await
+procedure` with no payload given, both caught by oxlint's type-aware `await-thenable` where a project
+runs it. What it costs: an async function that returns a bound call, as a factory that waits for its
+client's connection would, is TS1058; it returns the procedure, or its caller binds the payload.
+
+**A notify filter takes one argument.**
+
+```ts
+/** Who holds a subscription: a connection, in a session of its own — a credential's, named by its identifier; its connection's, none. */
+export interface ISubscriber<Handle extends string = ConnectionHandle> {
+  readonly connectionHandle: Handle;
+  readonly identifier?: SessionIdentifier | undefined;
+}
+
+export interface INotifyOptions<Handle extends string = ConnectionHandle> {
+  exclude?: Handle | undefined;
+  filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined;
+  key?: NotificationKey | undefined;
+}
+```
+
+```csharp
+/// <summary>Who holds a subscription: a connection, and the identifier of the session holding it; none for its connection's.</summary>
+public readonly record struct Subscriber
+{
+    /// <summary>Its connection.</summary>
+    public required string ConnectionHandle { get; init; }
+
+    /// <summary>Its credential's session's identifier; none for its connection's session.</summary>
+    public SessionIdentifier? Identifier { get; init; }
+}
+
+// NotifyOptions.Filter and NotifyRequest.Filter: Func<Subscriber, bool>?
+
+/// <summary>What a router's notify is given beside its payload: the procedure, and whom it goes to.</summary>
+public sealed record NotifyRequest
+{
+    public required ProcedureAddress Procedure { get; init; }
+    public Func<Subscriber, bool>? Filter { get; init; }
+    public object? Key { get; init; }
+}
+
+// IRouterLike
+Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request);
+Task Notify(Exception unwritten, NotifyRequest request);
+```
+
+The router's `notify` takes the same filter, so one shape exists; the C# side's notification manager
+holds `Subscriber` where it held `SubscriptionPlace`. The TypeScript side's `notify(payload:
+Uint8Array | Error, { filter?, key?, procedure })` keeps its shape, and the C# side's two overloads
+are its union's two arms.
+
+**A notification asked for again at another window is refused**, after the procedure's identity,
+as another name, revision, deprecation or limit is: a `ProgrammerError` naming both windows (`… is
+already a notification with window 4, not 1`), and on the C# side an `InvalidOperationException`,
+as "asked for otherwise" is. The same window, or none twice, gives the same notification.
+
+**The C# side has a server's interface and `IClient`.**
+
+```csharp
+/// <summary>A server of Bead: its layers, its sessions, its admissions, and what it holds.</summary>
+public interface IBeadServer<TData> : IAsyncDisposable
+{
+    IServerTransport Transport { get; }
+    RouterServer Router { get; }
+    ServiceManager Services { get; }
+    SessionManager<TData> Sessions { get; }
+    BeforeRequest RequireSession { get; }
+    BeforeRequest RequireSessionOrCredential { get; }
+    Task<ServerGauges> Gauges();
+    Task<Health> Health();
+}
+
+/// <summary>A client of Bead: its layers, and what every client's transport does but connect.</summary>
+public interface IClient : IAsyncDisposable
+{
+    RouterClient Router { get; }
+    ServiceManager Services { get; }
+    Task Disconnect(TransportDisconnectOptions? options = null);
+    Task Reconnect(TransportReconnectOptions? options = null);
+}
+```
+
+`Server<TData>`, `WebSocketServer<TData>` and `HttpServer<TData>` implement the first, the last two
+gaining `RequireSessionOrCredential` and giving their transport by an explicit implementation;
+`WebSocketClient` and `BeadHttpClient` the second. Both live in `Bead.Core`.
+
+**The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
+`package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
+`failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureCall`,
+`GENERATED_CODE_SUPPORTS_VERSION_1`, `FailureError`, `ProgrammerError`, and their types. A generated
+file imports nothing else of Bead's.
+
+**Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_1` in `./service`,
+`true`; `GeneratedCode.SupportsVersion1`, a `const bool` on a static class in `Bead.Core`. A generated
+file names the highest it needs: `void GENERATED_CODE_SUPPORTS_VERSION_1;`, and in C# a private
+constant of it. The counter moves only when generated code needs something the runtime did not have;
+an older constant is kept within a major.
+
+**Where it lives.** The TypeScript side: `src/service/` — `service.ts` the entry,
+`service-server.ts`, `service-client.ts`, `descriptors.ts`, `failures.ts`, `generated-code.ts`, a
+test file each in `src/service/__tests__/`; the codecs stay in `router/shared/payloads.ts`, with
+`payloadCodecOf` beside them; `ProcedureCall` in `router/shared/constants.ts`; `ISubscriber`,
+`IBoundCall` and `IRegistrar` in `router/shared/types.ts`; `checkCall` and `procedureCallOf` in
+`router/shared/identity.ts`, run by each router. The C# side, in `Bead.Core`: `ServiceServer.cs`,
+`ServiceClient.cs`, `ServiceProcedures.cs` (the descriptors, `ProcedureBindings`, `AdmissionRule`,
+`AdmissionHook`), `FailureCatalogue.cs` (with `IApplicationFailure`, `NoFailure`,
+`AdmissionFailure`), `PayloadCodecs.cs` (public, over the internal `Payloads`), `GeneratedCode.cs`,
+`IBeadServer.cs`, `IClient.cs`; `ProcedureCall` in `RouterTypes.cs`, `Subscriber` and
+`NotifyRequest` beside `NotifyOptions`, the call's check in `Identity.cs`, run by the core and each
+router.
+
+**The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/identities.json`'s group of
+calls, played the six ways on both sides; the twin tests of the feature row "The service layer";
+`spec/check.py` over the `proto` rows, their `differs` and their schema; `yarn check` and `dotnet
+format`/`dotnet test` over the new code; the generated `Probe` checked for drift by `yarn check`.
+
+## Consequences
+
+**Nothing a peer receives changes.** No envelope, no code, no conversation moves; the interop's
+answers are the same bytes. What changes is what a side refuses as it is built: a procedure
+declared against its call, a notification asked for again at another window.
+
+**Four changes break an application's code, at 0.x**, each in the CHANGELOG under "Changed": a
+notify filter takes one argument, on both sides; a notification asked for again at another window
+throws, on both sides; the C# delegate `Requester<TResponse>` is `BoundCall<TResponse>`; and the C#
+`NotifyRequest` is a record of `init` properties, `Unwritten` gone for a second `IRouterLike.Notify`.
+The interop moves its two filters, its C# requesters' type, and its C# `Offer`, which takes any
+`IBeadServer<string>`. The `json` codec's types change nothing public, since the codecs were
+internal.
+
+**On the TypeScript side, `call` shares its name with `Function.prototype.call`.** A procedure the
+runtime hands out is a function, so `procedure.call` read bare is the platform's method, never
+`undefined`, while its type says `ProcedureCall | undefined`. The runtime reads it through
+`procedureCallOf`, and `{ ...procedure }` never carries it; code of an application's that reads a
+callable procedure's `call` must do the same. The C# side has no such clash.
+
+**The tests of both sides depend on a protobuf library**, each its platform's stock one, as a
+development dependency: the TypeScript side's lockfile gains `@bufbuild/protobuf`,
+`@bufbuild/protoc-gen-es` and `@bufbuild/buf`, which carries a binary per platform and runs under
+the repository's Yarn with its build scripts disabled, and `yarn check` runs it; the C# test project
+gains Google.Protobuf and Grpc.Tools, which carries protoc. A user of `raw`, `text` or `json`
+carries neither.
+
+**A `proto` row tests a library's locked version through Bead's generated calls.** A library
+upgrade that changes a pinned outcome fails the rows with nothing of Bead's changed, and is then
+read: a library that moved against protobuf, or a row that pinned more than protobuf says. The rows
+pin no whole message's bytes, so a library's order of fields is never one of them.
+
+**A C# read of a `proto` payload costs a copy** of its bytes after their length, and a stream
+around them, for the bound to be Bead's rather than the library's.
+
+**A third language** plays the `proto` rows through its own stock library and its target's calls,
+sets the bound in its library, and finds its own outcome for the two platform rows; it plays the
+`calls` group the six ways.
+
+**Rows of the matrix.** The feature "Payloads" counts `proto`; "The identity rules" counts the
+call; "The service layer" joins, its twin tests named; an open row, "A string's leading U+FEFF in a
+proto payload", holds the one `differs`; three platform rows join: "A proto field at a wire type not
+its own", "A proto string no string holds, given to a writer", and "A failure its procedure does not
+list, answered"; and the open row "How a notification's value that does not write reaches its
+router" closes.
+
+**0003** gains a sentence: a debug event's `type` is a step's, `request`, `command` or
+`notification`; a _call_ is a request and its answer, and a procedure's `call` says which calls it
+takes. **The builder's design** follows: the manifest's procedure takes `call`, `request`,
+`notifies` or `command`, its `notification` binding present exactly when `call` is `notifies`; the
+generic layer's names, the `proto` binding's bound and the version guard take this record's.
+
+**Versions** ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the spec's
+minor, an encoding, a reason of 16.10 and rows every side's tests read, in the release that carries
+0016 and 0017 if it has not been cut; the layout and the companion, nothing; the product, a minor.
+
+## The Tenth Man
+
+The draft met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)), at
+xhigh effort, on every name of the surface, the `proto` rows and their schema, the filter's shape,
+the window's refusal and the procedure's call. Each claim was verified before its answer; the user
+chose where it asked, each way as the revised draft recommended, and added room for a validator. Its
+objections, each with its answer:
+
+| Objection                                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The draft's section on `proto` restates protobuf's binary format and gets it wrong three times: a field of explicit presence is written at its default, a packed field arrives at another wire type and is still the field, and the order of fields written is an implementation detail | Accepted: verified on protobuf.dev ("Explicitly set values are always serialized, including default values"; "parse repeated fields that were compiled as `packed` as if they were not packed, and vice versa"; "Do not assume the byte output of a serialized message is stable") and on both libraries (`1A 00` written as read). 17.9 names protobuf's format and restates none of it; it states four things of Bead's. A row pins taken or refused, and the fields read; a value row pins bytes one field at a time. `1A 00` joins the rows and the values                                                                                                                                                                                                                        |
+| The draft turns two behaviours of Google.Protobuf into Bead's MUSTs, the nesting count and a known field at another wire type, excuses protobuf-es by `differs`, and tests a library version Bead does not ship; its probe ran under npm, not the repository's Yarn                     | Accepted: the bound is Bead's, 0016's reason, 100 below the top, set explicitly on both sides — `recursionLimit: 101`, and `CreateWithLimits(…, 101)` over the payload framed as a field, both probed to take 100 and refuse 101; protobuf's C++ default read at its source, protobuf-go's 10,000 noted. A known field at another wire type is no rule of Bead's: a platform row, each side's test pinning its library. The leading U+FEFF stays Bead's, 17.4.2's reason, its `differs` crossing an open row that says protobuf-es strips it, its only lever global and deprecated. What a side conforms to for `proto` is its target's calls over its locked library, said in the Consequences. buf from npm ran under Yarn 4.18.1, node-modules linker, and generated the same file |
+| The draft's clause on a writer makes the writer's U+FFFD a MUST, false of protobuf-go, which refuses, and a third behaviour beside 0016's refusal                                                                                                                                       | Accepted: the clause goes. A writer refuses or repairs as its library does; a platform row says both stock libraries write U+FFFD, each side's test pinning it, no bytes in the file. Verified: golang/protobuf issue 1228; "A string must always contain UTF-8 encoded or 7-bit ASCII text" (protobuf.dev, proto 3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| The service manager checks the type by the accessor's name, yet Bead types a call by the router's side, so `getRequest` on a server passes; the check belongs where 0017 put identity, at the router; "no peer sees it" is no reason against a file                                     | Accepted: verified in `spec/debugging.md` 8.2, the metrics registry and both routers' `declareRequester`. Each router checks the call at its declaration, by the ways of `spec/identities.json`, before registering anything; the manager adds no reason, and 0017's paragraph stands. The reason joins 16.10 and the file, the user's choice                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| "The procedure's type is the trace's type" is false: the trace's `type` takes `notification` and types a step; two optional members bring back a state the builder's `oneof` made impossible, then refuse it at run time                                                                | Accepted: verified in `spec/debugging.md` 4.1, `DebugType` on both sides, the service manager's trace of a notification, and `IDebugEvent` laid out flat. One optional member, `call`, `request`, `notifies` or `command`: the `oneof`'s two members and the plain request it means unset, since an absent member on a hand-written procedure checks nothing. No state is refused. The manifest follows                                                                                                                                                                                                                                                                                                                                                                               |
+| `createAPIServer`, `ApiServer<TApi, TData>` and their peers bring an abbreviation into Bead's names, for a layer that serves one service, and take the word the builder leaves to a per-package aggregate                                                                               | Accepted: verified, no name under `implementations/*/src` holds _API_, and 0003 lists the words it owns. The layer is named after a service — `createServiceServer`, `ServiceServer<TService, TData>`, `IServiceProcedure<TService>`, `./service` — the user's choice against _API_ with 0003 amended                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| The C# `Subscriber`, a positional record struct, breaks every filter that deconstructs it, matches it by position or constructs it the day a member joins, which is item 7's only reason; and `SubscriptionPlace` stays beside it                                                       | Accepted: the probe gives CS8129, CS8130 and CS7036; a `readonly record struct` of `init` properties builds clean under the repository's gates with a third member against the same filters. `Subscriber` replaces the internal `SubscriptionPlace`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `JsonValue` both ways is neither sound nor complete against 17.7, refuses an interface-typed value the house style writes, and its break is of nothing public                                                                                                                           | Accepted: re-run, the type takes `NaN`, an infinity and a lone surrogate and refuses an interface-typed value (TS2322). `JsonValue` read, `unknown` written; 17.7's refusals stay at run time. The Consequences drop the break, and the interop's casts are not moved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| A constant per release binds a public name to a number git-flow gives at the release branch, needs CA1707 overruled, and gives the product's version a name the runtime holds; 0008 refused "nothing is published"                                                                      | Accepted: a counter of the contract with generated code, as gRPC-Go's `SupportPackageIsVersion9` (its doc read on pkg.go.dev): `GENERATED_CODE_SUPPORTS_VERSION_1`, `GeneratedCode.SupportsVersion1`, CA1707 standing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| The guard on `IRequest` refuses an async function that hands a requester on, a legitimate pattern the draft does not count                                                                                                                                                              | Accepted: reproduced (TS1058). The guard sits on the bound call alone, which still makes the forgotten call TS1320. What it leaves and costs is stated: `await procedure` goes to oxlint's `await-thenable`, and an async function returning a bound call is still TS1058                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `IBoundRequest` and `IBoundRegistration` each give a word a second meaning; "requester" already names the outer object; the C# renames are breaks the Consequences omit                                                                                                                 | Accepted in part: verified in the shared types, the C# `Registrar`, 0003 and `spec/debugging.md`. The bound call is named after the call it makes, `IBoundCall` and `BoundCall<TResponse>`, the C# rename a break in "Changed", the user's choice; `Registrar` already names neither a registration nor a request, so it stays, and the TypeScript side gains `IRegistrar`. Refused in part: _bound call_ is no exact fit either, since the object makes a call rather than being one; the record says so, and no name found fits better                                                                                                                                                                                                                                              |
+| The run-time report of an unlisted code guards a TypeScript cast, which the C# types make unreachable; `Failures` restates the class's members; the difference is a matrix row, not a twin test                                                                                         | Accepted: `ProcedureBindings` holds no `Failures`, and `IServiceProcedure` no `FailureCodes`, which nothing would read; the C# side checks nothing; a platform row names the TypeScript test `sends an unlisted code as written, and reports it`, as "A value a side's type cannot hold" does for a value                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `IServer<TData>` takes ASP.NET Core's name in the very projects that call it, against 0003, with 0008's `HealthStatus` for precedent                                                                                                                                                    | Accepted in part: the collision verified, arity keeping the compiler right and the reader not; `IBeadServer<TData>`, the user's choice, as 0003 has it for a new name. Refused, the precedent as stated: 0008 kept `HealthStatus` and qualified the builder's output with `global::Bead.`, "Nothing else is renamed"; it is a precedent for keeping a name already in the tree, which weighs for `IServer<TData>`, not against it                                                                                                                                                                                                                                                                                                                                                     |

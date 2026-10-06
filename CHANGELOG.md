@@ -185,8 +185,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one; one name an address and one revision a service where a side counts; ids and names for life
   within a service, and a revision counting its contract's releases, as SHOULDs `beadc breaking`
   holds. `spec/identities.json`, its schema and its generator, `make_identities.py`, pin what a
-  router refuses with no memory: 31 names and 28 ids and revisions, each declared the five ways a
-  side declares, and 8 folds. Both sides play it, `identities.test.ts` and `IdentitiesTests`, the C#
+  router refuses with no memory: 31 names and 28 ids and revisions, each declared every way a side
+  declares, and 8 folds. Both sides play it, `identities.test.ts` and `IdentitiesTests`, the C#
   side excused from the 17 inputs no `ushort` or `int` holds, a platform row of the support matrix,
   "An id or a revision no C# type holds". `common.schema.json` gains the ids, the revision and the
   name, which `interop-service.schema.json` takes.
@@ -197,17 +197,66 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   language. `spec/codecs.json`, its schema and its generator, `make_codecs.py`, pin 69 payloads read
   and 38 values written, RFC 8785's Appendix B among them: the bytes written back, or refused and
   why. Both sides play it, `codecs.test.ts` and `CodecsTests`, through each runtime's codecs,
-  internal until the builder makes them public: `router/shared/payloads.ts`, outside the package's
-  `exports`, and `Bead.Core`'s `Payloads`, which the interop's serializers delegate to. A platform
-  row of the support matrix, "A value a side's type cannot hold", excuses the TypeScript side from
-  an object naming a member twice and the C# side from `NaN` and `Infinity`. Eight conversations
-  play it over the wire, a payload echoed in its own characters, one echoed in its canonical form,
-  and six answered `PAYLOAD_UNDECODABLE`: 150 conversations. The interop gains a case each way, a
-  value outside ASCII, its members in another order, echoed equal.
+  `router/shared/payloads.ts` and `Bead.Core`'s `Payloads`, which the interop's serializers delegate
+  to, and which the service layer makes public. A platform row of the support matrix, "A value a
+  side's type cannot hold", excuses the TypeScript side from an object naming a member twice and the
+  C# side from `NaN` and `Infinity`. Eight conversations play it over the wire, a payload echoed in
+  its own characters, one echoed in its canonical form, and six answered `PAYLOAD_UNDECODABLE`: 150
+  conversations. The interop gains a case each way, a value outside ASCII, its members in another
+  order, echoed equal.
 - `spec/check.py` holds both new files: each under its schema, a name once in its group, every unit
   an entry cites one of the spec's, a `differs` naming a row of the support matrix that names the
   file and the entry, the `_Identities:` and `_Codecs:` lines naming files of `spec/`, and each
   side's tests reading both. The `spec` job regenerates them.
+
+- The service layer (decision 0018), which generated code is a thin shell over, in each runtime:
+  a procedure's typed descriptor, `requestOf` and `commandOf`, and `RequestProcedure<…>` and
+  `CommandProcedure<…>` with their `ProcedureBindings`, holding its procedure, its admission rule,
+  its failures and its payloads' codecs; the server side of a service, `createServiceServer` and
+  `ServiceServer<TService, TData>`, whose `on` registers a resolver before or after `offer`, which
+  binds every resolver to one Bead server, once, with `command`, `notify` and
+  `proceduresWithoutResolver`, and `CommandOf`, `NotifierOf` and `ProceduresWithoutResolver`; the
+  client side, `createServiceClient` and `ServiceClient<TService>`, a requester of each procedure
+  its server answers and a notification of each that notifies, made as it is built at the windows
+  its caller gives, and `on` for the commands it answers. An admission rule is `none`, `session` or
+  a hook by name, `AdmissionRule`, and a hook is data, `{ admits, detail }` and `AdmissionHook`,
+  refused `ACCESS_DENIED` with its detail; a hook named and not given, or given and not named, is
+  refused as the layer is built. A service's failures are a catalogue, `failuresOf` and
+  `FailureCatalogue`, and a resolver answers the ones its procedure lists: on the C# side a failure
+  class per procedure, `NoFailure` for one that lists none, `AdmissionFailure` for a refusal; on the
+  TypeScript side a code no procedure lists, which only a cast reaches, is sent as written and
+  reported. A descriptor's `validate`, `Validate`, which throws on a request its rules refuse, is
+  called before the resolver, and before the encode on a client whose options say `validates`,
+  `Validates`. The TypeScript
+  side's entry `@francisdesjardins/bead/service` exports it all, which a generated file imports
+  alone; the constant of the contract with generated code is `GENERATED_CODE_SUPPORTS_VERSION_1`
+  and `GeneratedCode.SupportsVersion1`.
+- A procedure's call, `call` and `Call`, `ProcedureCall`'s `request`, `notifies` or `command`, which
+  each router checks as the procedure is declared, by the way it is declared, after its identity:
+  spec 16.10's third reason, `against its call`, and 16.11, what each way takes. A procedure that
+  states none is taken every way. `spec/identities.json` gains a sixth way, a server's resolver that
+  notifies, and a group of 6 calls, which both sides play each way.
+- The payload codecs, public: `IPayloadCodec`, `PAYLOAD_CODECS` and `payloadCodecOf` on the
+  TypeScript side, a `json` value read as `JsonValue` and written as `unknown`; `IPayloadCodec<T>`
+  and `PayloadCodecs`, with `Raw`, `Text`, `Json` and `Of`, on the C# side. `payloadCodecOf` and
+  `PayloadCodecs.Of` make a codec of two functions, a protobuf message's from its stock library's.
+- Spec section 17.9, `proto`: a protobuf message in protobuf's binary wire format, read and written
+  through each side's stock library, Bead stating four things of its own: what does not decode does
+  not read, an empty payload is the message with no field set, a reader refuses a message nested
+  more than 100 deep below the top one and sets that bound in its library, and a string's leading
+  U+FEFF is a character of it. `spec/codecs.proto` holds the fixed message, `Probe`;
+  `spec/codecs.json` gains 28 `proto` payloads, with the fields each reads, and 6 values, its schema
+  the reasons `not its message` and `nested past 100`; and `spec/check.py` holds every `.proto` of
+  `spec/` named by the spec, and every encoding section 17 states played. The TypeScript side
+  generates `Probe` with protoc-gen-es run by buf, its output committed and held to its generator by
+  `yarn check`; the C# test project with Grpc.Tools, beside Google.Protobuf. The support matrix
+  gains an open row, a string's leading U+FEFF, which protobuf-es strips, and three platform rows: a
+  proto field at a wire type not its own, a proto string no string holds given to a writer, and a
+  failure its procedure does not list.
+- On the C# side, `IBeadServer<TData>`, which `Server<TData>`, `WebSocketServer<TData>` and
+  `HttpServer<TData>` implement, the last two gaining `RequireSessionOrCredential`, and `IClient`,
+  which `WebSocketClient` and `BeadHttpClient` implement; and `FailureException`'s `IsApplication`
+  and `IsProtocol`, the TypeScript side's `isApplication` and `isProtocol`.
 
 ### Changed
 
@@ -230,7 +279,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Session`, reaches the admission and the resolver, and `requireSession`, `RequireSession`, tests
   it, never the connection's. A client presents `OPAQUE`, the session it learned, on a call that asks
   for it among its options, `credential`, `Credential`, and never by default. A notification's
-  filter is given the session a subscription is held in, `filter(handle, identifier)`; on the
+  filter is given the session a subscription is held in, its subscriber's `identifier`; on the
   TypeScript side `sessionOf` takes its request and its signal apart, and on the C# side
   `Credential.Elsewhere` is a method, `JwtKey` and `JwtAlgorithm` are public, and
   `DropSubscriptions` ends the subscriptions of a connection's own session alone.
@@ -372,11 +421,29 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 - A value that does not write, on both sides (`spec/debugging.md` 4.3 and 10.1): a request's fails
   its call before anything goes, written before its trace and its deprecation, so nothing is traced,
   deprecated or counted; a notification's goes to none of its subscriptions, counted `failed` for
-  each and reported once by its router, and notifying fails no caller. The TypeScript side's
-  `IRouterLike.notify` takes `Uint8Array | Error`, the reason in its payload's place, and the C#
-  side's `NotifyRequest` gains `Unwritten`.
+  each and reported once by its router, and notifying fails no caller. A router's notify takes the
+  reason in its payload's place: the TypeScript side's `IRouterLike.notify` takes
+  `Uint8Array | Error`, and the C# side's `IRouterLike.Notify` has an overload of an `Exception`.
 - `spec/debugging.md` 1.2, 6.10 and 8.3 name sections 16 and 17: no procedure is named `_OTHER`, and
   every procedure's name is a pattern a debug filter reads.
+
+- A notify filter takes one argument, the subscriber: `ISubscriber`, its `connectionHandle` and
+  its session's `identifier`, and `Subscriber`, a record of `init` properties, which replaces the
+  C# side's internal `SubscriptionPlace` (decision 0018). On the TypeScript side `ISubscriber` moves
+  to the shared types, generic over its handle, `string` by default, and the `service-manager`
+  entry exports it with `ProcedureCall`, `IBoundCall`, `IRegistrar` and `SessionIdentifier`.
+- A notification asked for again at another window, or with none against one, is refused on both
+  sides, a `ProgrammerError` and an `InvalidOperationException`, where the second window was dropped
+  in silence.
+- A call bound to its payload is a bound call: the C# delegate `Requester<TResponse>` is
+  `BoundCall<TResponse>`, and on the TypeScript side `IRequest` gives an `IBoundCall` and
+  `INotification` an `IRegistrar`, each with a `then` no promise matches, so awaiting one with its
+  options' call forgotten does not compile.
+- The C# side's `NotifyRequest` is a record of `init` properties, `Procedure`, `Filter` and `Key`,
+  and `IRouterLike.Notify` has two overloads, of a payload and of the `Exception` a value that did
+  not write gives, where `NotifyRequest` was positional: one shape on both sides, the TypeScript
+  union's two arms.
+- The C# interop service's `Offer` takes any `IBeadServer<string>`.
 
 ### Removed
 
