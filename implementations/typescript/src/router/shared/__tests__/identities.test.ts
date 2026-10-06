@@ -193,6 +193,8 @@ const expectEachWay = async (entry: IEntry, procedure: IProcedure): Promise<void
 // definition
 
 test.describe('the identities', () => {
+  test.describe.configure({ retries: 0 });
+
   test('its table plays the five ways the file lists, and no other', () => {
     expect(Object.keys(WAYS).toSorted()).toEqual(IDENTITIES.ways.toSorted());
   });

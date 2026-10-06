@@ -147,6 +147,8 @@ const thrownBy = (act: () => unknown): unknown => {
 // definition
 
 test.describe('the codecs', () => {
+  test.describe.configure({ retries: 0 });
+
   test('plays every entry of the file but the one a row of the matrix excuses this side from', () => {
     expect(
       [...CODECS.payloads, ...CODECS.values]
