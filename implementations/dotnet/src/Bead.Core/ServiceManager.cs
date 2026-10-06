@@ -21,7 +21,13 @@ public interface IRouterLike
     /// <summary>Answers a request, while its call is open.</summary>
     Task Respond(RouterAnswer response, AnswerTarget target);
 
-    /// <summary>Sends a request, and settles with its result.</summary>
+    /// <summary>
+    /// Sends a request, and settles with its result. <see cref="RouterRequest.OnCallId"/> hears the
+    /// call's id once the router drew it, before the request goes; a call refused before it draws
+    /// one is never heard, and a router that never calls it leaves every step of its calls unnamed.
+    /// It fails by the task it gives, never by a throw: the manager tells the call's tx step only
+    /// once it returned, so a router that throws loses that step.
+    /// </summary>
     Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request);
 
     /// <summary>
@@ -361,6 +367,22 @@ public enum DebugType
 /// <summary>What one step of a call tells whoever hears a manager's <c>Debug</c>.</summary>
 public sealed record DebugEvent
 {
+    /// <summary>
+    /// The call id its call's envelopes carry: a call made's, once its router drew it; a request
+    /// received's, its header's. None for a call refused before its id was drawn, and none for a
+    /// notification, sent or heard. A request's id on its span, as OpenTelemetry's
+    /// <c>jsonrpc.request.id</c> carries it; it names its call on its connection while the call is
+    /// open, and its router may draw it again once the call ended.
+    /// </summary>
+    public uint? CallId { get; init; }
+
+    /// <summary>
+    /// The connection its call is on, as its envelopes name it:
+    /// <see cref="RouterClient.ServerConnectionHandle"/> on a client. None where
+    /// <see cref="CallId"/> is none.
+    /// </summary>
+    public string? ConnectionHandle { get; init; }
+
     /// <summary>Whether it went out or came in.</summary>
     public required DebugDirection Direction { get; init; }
 
@@ -700,6 +722,8 @@ public sealed class ServiceManager
 
         var debugEvent = new DebugEvent
         {
+            CallId = step.CallId,
+            ConnectionHandle = ConnectionOf(step),
             Direction = step.Direction,
             Duration = step.IsAnswered ? WholeMillisecondsOf(_clock.GetElapsedTime(step.Started.Timestamp)) : null,
             Options = step.Options,
@@ -724,6 +748,18 @@ public sealed class ServiceManager
                 _router.Report(reason, step.ConnectionHandle);
             }
         }
+    }
+
+    // the connection a step's call is on, as its envelopes name it: a client's one peer, the server,
+    // whatever its options said; none for a step that names no call
+    private string? ConnectionOf(DebugStep step)
+    {
+        if (step.CallId is null)
+        {
+            return null;
+        }
+
+        return _router.Side == RouterSide.Client ? RouterClient.ServerConnectionHandle : step.ConnectionHandle;
     }
 
     // a time in whole milliseconds, a fraction dropped
@@ -840,42 +876,38 @@ public sealed class ServiceManager
         var options = OptionsOf(given);
         var encoded = serializer.Encode(payload);
 
-        // * one check a call while nobody listens: no clock read, no step, no copy of its options;
-        // a credential stays out of what a side tells, and the trace carries none
-        var step = IsDebugging
-            ? new DebugStep(DebugDirection.Tx, type)
+        // * one check a call while nobody listens: no clock read, no step, no copy of its options,
+        // nothing to hear its call id; a credential stays out of what a side tells, and the trace
+        // carries none
+        var traced = IsDebugging
+            ? new TracedCall(this, (procedure, new DebugStep(DebugDirection.Tx, type)
             {
                 ConnectionHandle = options.ConnectionHandle,
                 Options = options with { Credential = null },
                 Started = StartedNow(),
                 Tx = payload,
-            }
+            }))
             : null;
-
-        // what the call fails with once it went out is told as its answer, when its start was
-        void Failed(Exception reason)
-        {
-            if (step is not null)
-            {
-                Trace(procedure, step with { Direction = DebugDirection.Rx, Error = reason, IsAnswered = true, Rx = TracedFailureOf(reason) });
-            }
-        }
-
-        if (step is not null)
-        {
-            Trace(procedure, step);
-        }
 
         if (procedure.Deprecation is not null)
         {
             Deprecated?.Invoke(procedure);
         }
 
+        var requested = _router.Request(
+            encoded,
+            new RouterRequest(procedure, options)
+            {
+                OnCallId = traced is null ? null : traced.OnCallId,
+                Series = series,
+                Subscribes = subscribes,
+            });
         RouterResult result;
 
         try
         {
-            result = await _router.Request(encoded, new RouterRequest(procedure, options) { Series = series, Subscribes = subscribes });
+            // one awaiter either way: the request itself, or the request once its tx step was told
+            result = await (traced is null ? requested : traced.Told(requested));
         }
         catch (Exception reason)
         {
@@ -885,7 +917,7 @@ public sealed class ServiceManager
                 _closeConnection?.Invoke(connectionHandle);
             }
 
-            Failed(reason);
+            traced?.Failed(reason);
 
             throw;
         }
@@ -898,15 +930,12 @@ public sealed class ServiceManager
         }
         catch (FailureException reason)
         {
-            Failed(reason);
+            traced?.Failed(reason);
 
             throw;
         }
 
-        if (step is not null)
-        {
-            Trace(procedure, step with { Direction = DebugDirection.Rx, IsAnswered = true, Rx = response });
-        }
+        traced?.Answered(response);
 
         return (result.Header.CallId, response);
     }
@@ -914,6 +943,9 @@ public sealed class ServiceManager
     // one step of a call, as Trace tells it, and the connection a listener's error is reported with
     private sealed record DebugStep(DebugDirection Direction, DebugType Type)
     {
+        // the call id its envelopes carry, once drawn; none for a step that names no call
+        public uint? CallId { get; init; }
+
         public string? ConnectionHandle { get; init; }
 
         public Exception? Error { get; init; }
@@ -928,6 +960,56 @@ public sealed class ServiceManager
         public required Started Started { get; init; }
 
         public object? Tx { get; init; }
+    }
+
+    // a call made while someone listens, and made only then: it hears its call id as its router
+    // draws it, and tells its tx step from the manager's own flow once it holds the id, or once the
+    // request failed before one was drawn; its rx step names the same id
+    private sealed class TracedCall(ServiceManager manager, (Procedure Procedure, DebugStep Step) call)
+    {
+        // ! continuations run asynchronously: what awaits the id, and the tx step's listeners with
+        // it, never runs inside OnCallId, on its router's scheduler, where one that blocks holds
+        // every connection of that router. Bead's routers draw it in a task of their scheduler,
+        // where the runtime inlines no await; over a router that draws it under no scheduler of its
+        // own, this alone keeps them off
+        private readonly TaskCompletionSource<uint> _drawn = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // the call id its steps name, once its tx step was told; none for a call refused before
+        // its router drew one
+        private uint? _callId;
+
+        // hears the call id on the router's scheduler: it records it, and tells nothing there
+        public void OnCallId(uint callId)
+        {
+            _drawn.TrySetResult(callId);
+        }
+
+        // * the tx step, told once the first of the id and the request's end came, with the id or
+        // with none; then the request's outcome, which its rx step follows
+        public async Task<RouterResult> Told(Task<RouterResult> requested)
+        {
+            await Task.WhenAny(_drawn.Task, requested);
+
+            // drawn before the request goes, so before it ends: whichever came first, it is held
+            _callId = _drawn.Task.IsCompletedSuccessfully ? await _drawn.Task : null;
+            manager.Trace(call.Procedure, call.Step with { CallId = _callId });
+
+            return await requested;
+        }
+
+        // its answer, decoded
+        public void Answered(object? response)
+        {
+            manager.Trace(call.Procedure, call.Step with { CallId = _callId, Direction = DebugDirection.Rx, IsAnswered = true, Rx = response });
+        }
+
+        // what the call failed with once it started, told as its answer
+        public void Failed(Exception reason)
+        {
+            manager.Trace(
+                call.Procedure,
+                call.Step with { CallId = _callId, Direction = DebugDirection.Rx, Error = reason, IsAnswered = true, Rx = TracedFailureOf(reason) });
+        }
     }
 
     // when a call started: its instant on the wall clock, and the monotonic reading its duration counts from
@@ -1103,7 +1185,13 @@ public sealed class ServiceManager
 
             if (started is { } at)
             {
-                manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { ConnectionHandle = props.ConnectionHandle, Rx = payload, Started = at });
+                manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type)
+                {
+                    CallId = props.Header.CallId,
+                    ConnectionHandle = props.ConnectionHandle,
+                    Rx = payload,
+                    Started = at,
+                });
             }
 
             var response = new Response(this, (target, payload, started));
@@ -1244,6 +1332,7 @@ public sealed class ServiceManager
                 {
                     resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type)
                     {
+                        CallId = Target.Header.CallId,
                         ConnectionHandle = Target.ConnectionHandle,
                         IsAnswered = true,
                         Rx = answering.Request,

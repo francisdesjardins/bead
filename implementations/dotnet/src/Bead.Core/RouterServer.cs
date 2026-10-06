@@ -306,8 +306,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     /// <summary>
     /// A request of the router's own — a command — to the connection its options name, on an even
-    /// call id. One that names none is an <see cref="ArgumentException"/>, refused before it starts;
-    /// one that names a connection not open, a <see cref="DisconnectException"/>, as it starts.
+    /// call id. One that names none fails with an <see cref="ArgumentException"/>, refused before it
+    /// starts; one that names a connection not open, with a <see cref="DisconnectException"/>, as it
+    /// starts. Each fails by the task it gives, as <see cref="IRouterLike.Request"/> says.
     /// </summary>
     public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
     {
@@ -315,17 +316,22 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
         if (request.Subscribes is not null)
         {
-            throw new InvalidOperationException("a server does not subscribe to notifications; it sends them");
+            return Task.FromException<RouterResult>(
+                new InvalidOperationException("a server does not subscribe to notifications; it sends them"));
         }
 
-        var connectionHandle = request.Options.ConnectionHandle
-            ?? throw new ArgumentException("a server request names the connection it goes to", nameof(request));
+        if (request.Options.ConnectionHandle is not { } connectionHandle)
+        {
+            return Task.FromException<RouterResult>(
+                new ArgumentException("a server request names the connection it goes to", nameof(request)));
+        }
 
         return _core.Request(
             payload,
             new CoreRequest
             {
                 ConnectionHandle = connectionHandle,
+                OnCallId = request.OnCallId,
                 OnSent = request.OnSent,
                 Options = request.Options,
                 Procedure = request.Procedure,

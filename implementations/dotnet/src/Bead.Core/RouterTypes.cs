@@ -320,6 +320,13 @@ public sealed record RouterRequest(Procedure Procedure, ResolvedRequestOptions O
     public INotificationLike? Subscribes { get; init; }
 
     /// <summary>
+    /// What hears the call id before the request goes out, as <see cref="CoreRequest.OnCallId"/>
+    /// does: once the router drew it, on its scheduler; a call refused before it draws one is never
+    /// heard.
+    /// </summary>
+    public Action<uint>? OnCallId { get; init; }
+
+    /// <summary>
     /// Hears the request handed to the transport, then — should the transport refuse it — that it
     /// did not go out.
     /// </summary>

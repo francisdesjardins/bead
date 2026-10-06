@@ -526,6 +526,34 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
+    public async Task Tells_a_command_made_with_the_call_id_its_router_drew_on_its_connection()
+    {
+        Start();
+
+        var command = Services.GetCommand(Echo, new RequestDependencies<string, string> { Serializer = Text });
+        var steps = new List<(DebugDirection Direction, DebugType Type, uint? CallId, string? ConnectionHandle)>();
+
+        Services.Debug += (_, told) =>
+        {
+            lock (steps)
+            {
+                steps.Add((told.Direction, told.Type, told.CallId, told.ConnectionHandle));
+            }
+        };
+        _transport.Open(First);
+        _transport.Open(Second);
+
+        var running = command("run")(new RequestOptions { ConnectionHandle = Second, Timeout = TimeSpan.FromSeconds(1) });
+
+        Deliver(Second, ResultOf(2, "done"));
+
+        Assert.Equal("done", await running.WaitAsync(Patience, Cancelled));
+        Assert.Equal<(DebugDirection, DebugType, uint?, string?)>(
+            [(DebugDirection.Tx, DebugType.Command, 2, Second), (DebugDirection.Rx, DebugType.Command, 2, Second)],
+            steps);
+    }
+
+    [Fact]
     public async Task Commands_go_to_the_connection_their_options_name_on_even_call_ids_and_resolve_with_that_connection_s_result_alone()
     {
         Start(new RouterServerOptions
