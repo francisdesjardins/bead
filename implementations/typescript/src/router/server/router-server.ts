@@ -14,7 +14,7 @@ import { presentedCredentialOf, uncarriedOf } from '../shared/call-session';
 import { CredentialScheme, EnvelopeKind, SERVER_FAILURES } from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { DisconnectError, FailureError } from '../shared/errors';
-import { checkCall, checkDeclaration } from '../shared/identity';
+import { checkDeclaration, checkProcedureKind } from '../shared/identity';
 import type { INotifyingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
@@ -618,7 +618,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
 
     declareRequester: (procedure) => {
       checkDeclaration(procedure);
-      checkCall(procedure, 'server-requester');
+      checkProcedureKind(procedure, 'server-requester');
 
       return metrics?.declareRequester(procedure);
     },
@@ -712,10 +712,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       return relay.register(target, destinationOptions);
     },
     registerResolver: (resolver) => {
-      // * spec 16.10: its identity, then its call — a resolver that notifies, as the core tells
+      // * spec 16.10: its identity, then its kind — a resolver that notifies, as the core tells
       // one, answers a request that notifies — before the core's reasons and its registry's
       checkDeclaration(resolver);
-      checkCall(
+      checkProcedureKind(
         resolver,
         typeof (resolver as { notify?: unknown }).notify === 'function'
           ? 'server-notification-resolver'

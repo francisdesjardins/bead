@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ProcedureCall } from '../../router/shared/constants';
+import { ProcedureKind } from '../../router/shared/constants';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { commandOf, requestOf } from '../descriptors';
@@ -19,40 +19,46 @@ const sayHello = {
 // definition
 
 test.describe('the descriptors', () => {
-  test("sets a request's call, a notifying request's and a command's", () => {
+  test("sets a request's kind, a notifying request's and a command's", () => {
     const request = requestOf(sayHello);
     const notifying = requestOf({ ...sayHello, notification: text });
     const command = commandOf(sayHello);
 
     expect(
       [request, notifying, command].map(({ procedure }) => {
-        return procedure.call;
+        return procedure.procedureKind;
       })
-    ).toEqual([ProcedureCall.REQUEST, ProcedureCall.NOTIFIES, ProcedureCall.COMMAND]);
+    ).toEqual([ProcedureKind.REQUEST, ProcedureKind.NOTIFIES, ProcedureKind.COMMAND]);
     expect(Object.isFrozen(request)).toBe(true);
     expect(Object.isFrozen(request.procedure)).toBe(true);
     // * the procedure given stays as it was: the descriptor holds a copy
-    expect(Object.hasOwn(sayHello.procedure, 'call')).toBe(false);
-    // the same call stated, it is taken
+    expect(Object.hasOwn(sayHello.procedure, 'procedureKind')).toBe(false);
+    // the same kind stated, it is taken
     expect(
-      commandOf({ ...sayHello, procedure: { ...sayHello.procedure, call: 'command' } }).procedure
-        .call
-    ).toBe(ProcedureCall.COMMAND);
+      commandOf({ ...sayHello, procedure: { ...sayHello.procedure, procedureKind: 'command' } })
+        .procedure.procedureKind
+    ).toBe(ProcedureKind.COMMAND);
   });
 
-  test('refuses a procedure that states another call', () => {
+  test('refuses a procedure that states another kind', () => {
     expect(() => {
-      return requestOf({ ...sayHello, procedure: { ...sayHello.procedure, call: 'command' } });
+      return requestOf({
+        ...sayHello,
+        procedure: { ...sayHello.procedure, procedureKind: 'command' },
+      });
     }).toThrow(ProgrammerError);
     expect(() => {
       return requestOf({
         ...sayHello,
         notification: text,
-        procedure: { ...sayHello.procedure, call: 'request' },
+        procedure: { ...sayHello.procedure, procedureKind: 'request' },
       });
     }).toThrow(ProgrammerError);
     expect(() => {
-      return commandOf({ ...sayHello, procedure: { ...sayHello.procedure, call: 'notifies' } });
+      return commandOf({
+        ...sayHello,
+        procedure: { ...sayHello.procedure, procedureKind: 'notifies' },
+      });
     }).toThrow(ProgrammerError);
   });
 

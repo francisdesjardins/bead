@@ -16,7 +16,7 @@ import type {
   EnvelopeKind,
   FAILURE_KEYS,
   FailureScope,
-  ProcedureCall,
+  ProcedureKind,
   ProtocolCode,
 } from './constants';
 import type { IJwtKey, Jwk, JwtAlgorithm } from './jwt-verifier';
@@ -1326,11 +1326,6 @@ export interface IResponse<Payload, Failure extends ResolverFailure> {
 /** One procedure of one service, which names what is made for it. */
 export interface IProcedure extends IProcedureAddress {
   /**
-   * How it is called (spec 16.11), which each router holds its declaration to; none given, nothing
-   * checks it. Never a debug event's `type`, which is a step's.
-   */
-  call?: ProcedureCall | undefined;
-  /**
    * Present when the procedure is on its way out: a requester emits `deprecated` at each call, and
    * `message` says what to use instead, when it says.
    */
@@ -1341,6 +1336,12 @@ export interface IProcedure extends IProcedureAddress {
    * router's alone when not given.
    */
   maximumPayloadBytes?: number | undefined;
+  /**
+   * Its kind, how it is called (spec 16.11), which each router holds its declaration to; none given,
+   * nothing checks it. Never an envelope's kind, which is `REQUEST` for every call, nor a debug
+   * event's `type`, which is a step's.
+   */
+  procedureKind?: ProcedureKind | undefined;
   /**
    * Its name, which labels what a side traces and counts and never travels: a lower-case ASCII
    * letter, then 62 ASCII letters and digits at most (spec 16.4); two names equal once their ASCII
@@ -1405,7 +1406,7 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
    * A procedure whose answer is a subscription. One request goes out however many callbacks
    * register at once; once registered, a callback joins without a request. The same procedure
    * gives the same notification, since the router holds one per procedure; asking for it off spec
-   * section 16, checked first, or under another call, name, revision, deprecation, payload limit or
+   * section 16, checked first, or under another kind, name, revision, deprecation, payload limit or
    * window — unpaced and paced are two — is a {@link ProgrammerError}. A registration cancelled or
    * timed out once its request went out cancels its call, so the other end holds no subscription for
    * it. The serializer of the first ask is the one kept: one procedure's payloads are one

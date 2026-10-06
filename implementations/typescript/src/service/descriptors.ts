@@ -6,8 +6,7 @@
 
 // dependencies
 
-import { ProcedureCall } from '../router/shared/constants';
-import { procedureCallOf } from '../router/shared/identity';
+import { ProcedureKind } from '../router/shared/constants';
 import type { IPayloadCodec } from '../router/shared/payloads';
 import type { ConnectionHandle, IAdmissionRequest, IProcedure } from '../router/shared/types';
 import { ProgrammerError } from '../transport/shared/errors';
@@ -49,9 +48,9 @@ export interface IRequestInit extends IDescriptorInit {
   readonly notification?: IPayloadCodec<unknown, never> | undefined;
 }
 
-/** A descriptor of any call, as the service layer takes one: its procedure's call set. */
+/** A descriptor of any kind, as the service layer takes one: its procedure's kind set. */
 export interface IServiceDescriptor extends IRequestInit {
-  readonly procedure: IProcedure & { readonly call: ProcedureCall };
+  readonly procedure: IProcedure & { readonly procedureKind: ProcedureKind };
 }
 
 // types
@@ -65,49 +64,51 @@ export type AdmissionRule<Hook extends string = string> =
   | 'session'
   | { readonly hook: Hook };
 
-/** A command's descriptor: its procedure's call `command`, and never a notification. */
+/** A command's descriptor: its procedure's kind `command`, and never a notification. */
 export type CommandDescriptor<Init extends IDescriptorInit = IDescriptorInit> = Init & {
   readonly notification?: undefined;
-  readonly procedure: { readonly call: typeof ProcedureCall.COMMAND };
+  readonly procedure: { readonly procedureKind: typeof ProcedureKind.COMMAND };
 };
 
-/** A request's descriptor: its procedure's call `notifies` where a notification is given. */
+/** A request's descriptor: its procedure's kind `notifies` where a notification is given. */
 export type RequestDescriptor<Init extends IRequestInit = IRequestInit> = Init & {
-  readonly procedure: { readonly call: RequestCallOf<Init> };
+  readonly procedure: { readonly procedureKind: RequestKindOf<Init> };
 };
 
 /** A service's procedures, by name: what the service layer is made of. */
 export type ServiceProcedures = Readonly<Record<string, IServiceDescriptor>>;
 
-/** The call a request's descriptor sets. */
-type RequestCallOf<Init> = Init extends { readonly notification: IPayloadCodec<unknown, never> }
-  ? typeof ProcedureCall.NOTIFIES
-  : typeof ProcedureCall.REQUEST;
+/** The kind a request's descriptor sets. */
+type RequestKindOf<Init> = Init extends { readonly notification: IPayloadCodec<unknown, never> }
+  ? typeof ProcedureKind.NOTIFIES
+  : typeof ProcedureKind.REQUEST;
 
-/** The call a descriptor's procedure states. */
-type CallOf<Descriptor> = Descriptor extends { readonly procedure: { readonly call: infer Call } }
-  ? Call
+/** The kind a descriptor's procedure states. */
+type ProcedureKindOf<Descriptor> = Descriptor extends {
+  readonly procedure: { readonly procedureKind: infer Kind };
+}
+  ? Kind
   : never;
 
-/** The names of a service's procedures whose call is one of `Call`. */
-type NameOfCall<S extends ServiceProcedures, Call extends ProcedureCall> = {
-  [Name in keyof S]: [CallOf<S[Name]>] extends [Call] ? Name : never;
+/** The names of a service's procedures whose kind is one of `Kind`. */
+type NameOfKind<S extends ServiceProcedures, Kind extends ProcedureKind> = {
+  [Name in keyof S]: [ProcedureKindOf<S[Name]>] extends [Kind] ? Name : never;
 }[keyof S] &
   string;
 
 /** The procedures a server answers and a client requests: its requests, never its commands. */
-export type AnsweredName<S extends ServiceProcedures> = NameOfCall<
+export type AnsweredName<S extends ServiceProcedures> = NameOfKind<
   S,
-  typeof ProcedureCall.NOTIFIES | typeof ProcedureCall.REQUEST
+  typeof ProcedureKind.NOTIFIES | typeof ProcedureKind.REQUEST
 >;
 
 /** The procedures a server asks a client to run. */
-export type CommandName<S extends ServiceProcedures> = NameOfCall<S, typeof ProcedureCall.COMMAND>;
+export type CommandName<S extends ServiceProcedures> = NameOfKind<S, typeof ProcedureKind.COMMAND>;
 
 /** The procedures that notify. */
-export type NotifyingName<S extends ServiceProcedures> = NameOfCall<
+export type NotifyingName<S extends ServiceProcedures> = NameOfKind<
   S,
-  typeof ProcedureCall.NOTIFIES
+  typeof ProcedureKind.NOTIFIES
 >;
 
 /** The hooks a service's procedures name. */
@@ -149,10 +150,10 @@ const isAdmissionRule = (admission: unknown): boolean => {
 };
 
 /**
- * `init`, frozen, its procedure's call set to `call`: a procedure that states another, a codec
- * missing, a rule no rule, or a `validate` that is no function, is a {@link ProgrammerError}.
+ * `init`, frozen, its procedure's kind set to `procedureKind`: a procedure that states another, a
+ * codec missing, a rule no rule, or a `validate` that is no function, is a {@link ProgrammerError}.
  */
-const describe = <Init extends IRequestInit>(init: Init, call: ProcedureCall): Init => {
+const describe = <Init extends IRequestInit>(init: Init, procedureKind: ProcedureKind): Init => {
   const { admission, procedure, validate } = init;
 
   // a caller without types may give anything
@@ -161,14 +162,14 @@ const describe = <Init extends IRequestInit>(init: Init, call: ProcedureCall): I
   }
 
   const name = procedure.procedureName;
-  const stated = procedureCallOf(procedure);
+  const stated = procedure.procedureKind;
   const members =
-    call === ProcedureCall.NOTIFIES
+    procedureKind === ProcedureKind.NOTIFIES
       ? (['request', 'result', 'notification'] as const)
       : (['request', 'result'] as const);
 
-  if (stated !== undefined && stated !== call) {
-    throw new ProgrammerError(`${name} is called ${stated}, not ${call}`);
+  if (stated !== undefined && stated !== procedureKind) {
+    throw new ProgrammerError(`${name} is of kind ${stated}, not ${procedureKind}`);
   }
 
   for (const member of members) {
@@ -177,7 +178,7 @@ const describe = <Init extends IRequestInit>(init: Init, call: ProcedureCall): I
     }
   }
 
-  if (call === ProcedureCall.COMMAND && init.notification !== undefined) {
+  if (procedureKind === ProcedureKind.COMMAND && init.notification !== undefined) {
     throw new ProgrammerError(`${name} is a command, and a command never notifies`);
   }
 
@@ -189,15 +190,15 @@ const describe = <Init extends IRequestInit>(init: Init, call: ProcedureCall): I
     throw new ProgrammerError(`${name}'s validate is a function`);
   }
 
-  return Object.freeze({ ...init, procedure: Object.freeze({ ...procedure, call }) });
+  return Object.freeze({ ...init, procedure: Object.freeze({ ...procedure, procedureKind }) });
 };
 
 // definition
 
 /**
- * A request's descriptor, frozen, its procedure's call set: `notifies` when `notification` is
- * given, `request` otherwise. A procedure that states another call, or a codec missing, is a
- * {@link ProgrammerError}. A descriptor declares nothing: its identity and its call are checked as
+ * A request's descriptor, frozen, its procedure's kind set: `notifies` when `notification` is
+ * given, `request` otherwise. A procedure that states another kind, or a codec missing, is a
+ * {@link ProgrammerError}. A descriptor declares nothing: its identity and its kind are checked as
  * the service layer declares it (spec 16.10).
  *
  * @example
@@ -212,17 +213,17 @@ const describe = <Init extends IRequestInit>(init: Init, call: ProcedureCall): I
  * });
  */
 export const requestOf = <const Init extends IRequestInit>(init: Init): RequestDescriptor<Init> => {
-  const call =
+  const procedureKind =
     (init as IRequestInit).notification === undefined
-      ? ProcedureCall.REQUEST
-      : ProcedureCall.NOTIFIES;
+      ? ProcedureKind.REQUEST
+      : ProcedureKind.NOTIFIES;
 
-  return describe(init, call) as RequestDescriptor<Init>;
+  return describe(init, procedureKind) as RequestDescriptor<Init>;
 };
 
 /**
- * A command's descriptor, frozen, its procedure's call set to `command`: a procedure that states
- * another call, a codec missing, or a notification given, is a {@link ProgrammerError}.
+ * A command's descriptor, frozen, its procedure's kind set to `command`: a procedure that states
+ * another kind, a codec missing, or a notification given, is a {@link ProgrammerError}.
  *
  * @example
  * import { commandOf, PAYLOAD_CODECS } from '@francisdesjardins/bead/service';
@@ -238,5 +239,5 @@ export const requestOf = <const Init extends IRequestInit>(init: Init): RequestD
 export const commandOf = <const Init extends IDescriptorInit>(
   init: Init
 ): CommandDescriptor<Init> => {
-  return describe(init, ProcedureCall.COMMAND) as CommandDescriptor<Init>;
+  return describe(init, ProcedureKind.COMMAND) as CommandDescriptor<Init>;
 };

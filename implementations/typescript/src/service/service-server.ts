@@ -6,7 +6,7 @@
 // dependencies
 
 import type { IServer, IServerTransportLike } from '../server/types';
-import { FailureScope, ProcedureCall } from '../router/shared/constants';
+import { FailureScope, ProcedureKind } from '../router/shared/constants';
 import type {
   AdmissionFailure,
   CallId,
@@ -86,7 +86,7 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
  * refusal of admission — the runtime's response, narrowed; one that notifies may subscribe first.
  */
 export type IServiceResponse<Descriptor extends IServiceDescriptor> = Descriptor extends {
-  readonly procedure: { readonly call: typeof ProcedureCall.NOTIFIES };
+  readonly procedure: { readonly procedureKind: typeof ProcedureKind.NOTIFIES };
 }
   ? INotificationResponse<GivenOf<Descriptor['result']>, ServiceFailureOf<Descriptor>>
   : IResponse<GivenOf<Descriptor['result']>, ServiceFailureOf<Descriptor>>;
@@ -240,7 +240,7 @@ export const validated = (
  * The server side of a service, over its procedures' descriptors: `on` registers a resolver, before
  * or after `offer`; `offer` binds every resolver, now and later, to one Bead server, and makes each
  * command's requester there; `notify` notifies a procedure's subscribers. Each requester and
- * resolver is declared once, as it is made, and the router checks each against its call (spec
+ * resolver is declared once, as it is made, and the router checks each against its kind (spec
  * 16.10). A hook a procedure names that the options lack, or one they give that no procedure names,
  * is a {@link ProgrammerError}. `Data` is the server's sessions'.
  *
@@ -326,7 +326,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
     };
     const dependencies = beforeRequest === undefined ? {} : { beforeRequest };
 
-    if (procedure.call === ProcedureCall.NOTIFIES) {
+    if (procedure.procedureKind === ProcedureKind.NOTIFIES) {
       const { notification } = descriptor;
 
       notifiers.set(
@@ -352,7 +352,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
   const command = Object.fromEntries(
     Object.entries(procedures)
       .filter(([, { procedure }]) => {
-        return procedure.call === ProcedureCall.COMMAND;
+        return procedure.procedureKind === ProcedureKind.COMMAND;
       })
       .map(([name, { procedure }]) => {
         const requester = (payload: unknown) => {
@@ -381,7 +381,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
   const notify = Object.fromEntries(
     Object.entries(procedures)
       .filter(([, { procedure }]) => {
-        return procedure.call === ProcedureCall.NOTIFIES;
+        return procedure.procedureKind === ProcedureKind.NOTIFIES;
       })
       .map(([name]) => {
         return [
@@ -409,7 +409,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
       offered = server;
 
       for (const [name, { procedure, request, result }] of Object.entries(procedures)) {
-        if (procedure.call === ProcedureCall.COMMAND) {
+        if (procedure.procedureKind === ProcedureKind.COMMAND) {
           commands.set(
             name,
             server.services.getCommand(procedure, {
@@ -427,9 +427,9 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
       }
     },
     on: (name: string, callback: AnyCallback) => {
-      const call = descriptorOf(name)?.procedure.call;
+      const procedureKind = descriptorOf(name)?.procedure.procedureKind;
 
-      if (call !== ProcedureCall.REQUEST && call !== ProcedureCall.NOTIFIES) {
+      if (procedureKind !== ProcedureKind.REQUEST && procedureKind !== ProcedureKind.NOTIFIES) {
         throw new ProgrammerError(`${name} is no procedure this service's server answers`);
       }
 
@@ -447,7 +447,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
       return Object.freeze(
         Object.entries(procedures)
           .filter(([name, { procedure }]) => {
-            return procedure.call !== ProcedureCall.COMMAND && !callbacks.has(name);
+            return procedure.procedureKind !== ProcedureKind.COMMAND && !callbacks.has(name);
           })
           .map(([, { procedure }]) => {
             return procedure;

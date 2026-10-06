@@ -36,7 +36,7 @@ export type {
 } from './service-server';
 export { PAYLOAD_CODECS, payloadCodecOf } from '../router/shared/payloads';
 export type { IPayloadCodec, JsonValue } from '../router/shared/payloads';
-export { ProcedureCall } from '../router/shared/constants';
+export { ProcedureKind } from '../router/shared/constants';
 export { FailureError } from '../router/shared/errors';
 export { ProgrammerError } from '../transport/shared/errors';
 export type {

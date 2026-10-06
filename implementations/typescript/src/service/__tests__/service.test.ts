@@ -17,7 +17,7 @@ test.describe('the service entry', () => {
       'FailureError',
       'GENERATED_CODE_SUPPORTS_VERSION_1',
       'PAYLOAD_CODECS',
-      'ProcedureCall',
+      'ProcedureKind',
       'ProgrammerError',
       'commandOf',
       'createServiceClient',

@@ -10,7 +10,7 @@ import { noop } from '../../transport/shared/noop';
 import { admissionOf, isAdmissionFailure } from './admission';
 import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT, FailureScope } from './constants';
 import { FailureError } from './errors';
-import { checkDeclaration, procedureCallOf } from './identity';
+import { checkDeclaration } from './identity';
 import { createNotification } from './notification';
 import { createProcedureMap } from './procedure-map';
 import type {
@@ -93,8 +93,8 @@ export const REQUEST_DEFAULTS = Object.freeze({
  * `undefined` when they are the same ask.
  */
 const differenceOf = (known: IProcedure, asked: IProcedure): string | undefined => {
-  if (procedureCallOf(known) !== procedureCallOf(asked)) {
-    return `call ${String(procedureCallOf(known))}, not ${String(procedureCallOf(asked))}`;
+  if (known.procedureKind !== asked.procedureKind) {
+    return `kind ${String(known.procedureKind)}, not ${String(asked.procedureKind)}`;
   }
 
   for (const field of ['maximumPayloadBytes', 'procedureName', 'serviceRevision'] as const) {
@@ -195,7 +195,7 @@ const filterOf = <Handle extends string>(
 };
 
 /**
- * The procedure alone, without whatever else the object carries: its call and its limit, when it
+ * The procedure alone, without whatever else the object carries: its kind and its limit, when it
  * has them, and a copy of its deprecation.
  */
 const procedureOf = (given: IProcedure): IProcedure => {
@@ -203,17 +203,17 @@ const procedureOf = (given: IProcedure): IProcedure => {
     deprecation,
     maximumPayloadBytes,
     procedureId,
+    procedureKind,
     procedureName,
     serviceId,
     serviceRevision,
   } = given;
-  const call = procedureCallOf(given);
   const procedure = {
     procedureId,
     procedureName,
     serviceId,
     serviceRevision,
-    ...(call === undefined ? {} : { call }),
+    ...(procedureKind === undefined ? {} : { procedureKind }),
     ...(maximumPayloadBytes === undefined ? {} : { maximumPayloadBytes }),
   };
 
@@ -482,7 +482,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         );
       }
 
-      // the same procedure, call, name, revision, deprecation, payload limit and window: the same
+      // the same procedure, kind, name, revision, deprecation, payload limit and window: the same
       // payloads
       return known.notification as INotification<RequestPayload, NotificationPayload>;
     }
@@ -830,7 +830,7 @@ export {
   DEPRECATED_EVENT,
   DROPPED_EVENT,
   FailureScope,
-  ProcedureCall,
+  ProcedureKind,
   ProtocolCode,
   SERVER_FAILURES,
 } from './constants';

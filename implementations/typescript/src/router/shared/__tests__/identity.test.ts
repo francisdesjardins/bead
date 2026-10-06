@@ -3,11 +3,10 @@ import { ProgrammerError } from '../../../transport/shared/errors';
 import { createRouterClient } from '../../client/router-client';
 import {
   areOneName,
-  checkCall,
   checkDeclaration,
+  checkProcedureKind,
   IdentityRefusal,
   isProcedureName,
-  procedureCallOf,
 } from '../identity';
 import { createMetricsRegistry } from '../metrics-registry';
 import type { IProcedure } from '../types';
@@ -186,28 +185,16 @@ test.describe('areOneName', () => {
   });
 });
 
-test.describe('checkCall', () => {
-  test('refuses a call its way does not take, against its call, and takes a procedure that states none', () => {
+test.describe('checkProcedureKind', () => {
+  test('refuses a kind its way does not take, against its kind, and takes a procedure that states none', () => {
     expect(() => {
-      checkCall({ ...echo, call: 'request' }, 'server-requester');
-    }).toThrow(/^echo is a request; a server's router makes commands: against its call$/);
+      checkProcedureKind({ ...echo, procedureKind: 'request' }, 'server-requester');
+    }).toThrow(/^echo is a request; a server's router makes commands: against its kind$/);
 
     for (const way of ['client-requester', 'server-resolver', 'client-notification'] as const) {
       expect(() => {
-        checkCall(echo, way);
+        checkProcedureKind(echo, way);
       }).not.toThrow();
     }
-  });
-
-  test("reads a procedure's call as its own member, never a function's inherited call", () => {
-    const callable = Object.assign(() => {
-      return undefined;
-    }, echo);
-
-    expect(procedureCallOf(callable)).toBeUndefined();
-    expect(procedureCallOf(Object.assign(callable, { call: 'command' as const }))).toBe('command');
-    expect(() => {
-      checkCall(callable, 'client-resolver');
-    }).not.toThrow();
   });
 });

@@ -8,7 +8,7 @@
 
 import type { IClient } from '../client/types';
 import type { RouterClientConnectionHandle } from '../router/client/types';
-import { ProcedureCall } from '../router/shared/constants';
+import { ProcedureKind } from '../router/shared/constants';
 import type {
   IBeforeRequest,
   IAdmissionRequest,
@@ -113,7 +113,8 @@ export const createServiceClient = <const S extends ServiceProcedures>(
   const callbacks = new Set<string>();
   const notifying = (name: string): boolean => {
     return (
-      Object.hasOwn(procedures, name) && procedures[name]?.procedure.call === ProcedureCall.NOTIFIES
+      Object.hasOwn(procedures, name) &&
+      procedures[name]?.procedure.procedureKind === ProcedureKind.NOTIFIES
     );
   };
 
@@ -143,7 +144,7 @@ export const createServiceClient = <const S extends ServiceProcedures>(
   for (const [name, descriptor] of Object.entries(procedures)) {
     const { notification, procedure, result } = descriptor;
 
-    if (procedure.call === ProcedureCall.COMMAND) {
+    if (procedure.procedureKind === ProcedureKind.COMMAND) {
       continue;
     }
 
@@ -154,7 +155,7 @@ export const createServiceClient = <const S extends ServiceProcedures>(
 
     request[name] = services.getRequest(procedure, { serializer });
 
-    if (procedure.call === ProcedureCall.NOTIFIES) {
+    if (procedure.procedureKind === ProcedureKind.NOTIFIES) {
       const window = windows[name];
 
       notifications[name] = services.getNotification(procedure, {
@@ -174,7 +175,7 @@ export const createServiceClient = <const S extends ServiceProcedures>(
     on: (name: string, callback: AnyCallback) => {
       const descriptor = Object.hasOwn(procedures, name) ? procedures[name] : undefined;
 
-      if (descriptor?.procedure.call !== ProcedureCall.COMMAND) {
+      if (descriptor?.procedure.procedureKind !== ProcedureKind.COMMAND) {
         throw new ProgrammerError(`${name} is no command this service's client answers`);
       }
 

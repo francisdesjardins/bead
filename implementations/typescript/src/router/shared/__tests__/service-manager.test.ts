@@ -34,6 +34,7 @@ import {
   type IServiceManager,
   type ISubscriber,
   type NotificationKey,
+  type ProcedureKind,
   type RouterAnswer,
   type RouterSide,
 } from '../service-manager';
@@ -297,6 +298,77 @@ test.describe('resolveRequestOptions', () => {
 });
 
 test.describe('createServiceManager', () => {
+  test.describe('what it makes callable', () => {
+    test("a requester, a resolver and a notification carry their procedure's members as their own, and keep a function's call, apply and bind", async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const stating = (procedureId: number, procedureKind: ProcedureKind) => {
+        return {
+          ...echo,
+          deprecation: { message: 'soon' },
+          maximumPayloadBytes: 64,
+          procedureId,
+          procedureKind,
+        } satisfies Required<IProcedure>;
+      };
+      const asked = stating(71, 'request');
+      const answered = stating(72, 'request');
+      const notifying = stating(73, 'notifies');
+      const request = manager.getRequest(asked, { serializer });
+
+      manager.getRequestResolver(answered, { serializer: serverSerializer })(() => {
+        return Promise.resolve();
+      });
+
+      // the one resolver registered: the one just made
+      const resolver = calls.registerResolver[0] as IRequestResolver;
+      const notification = manager.getNotification(notifying, { serializer });
+
+      for (const [callable, procedure] of [
+        [request, asked],
+        [resolver, answered],
+        [notification, notifying],
+      ] as const) {
+        for (const [member, value] of Object.entries(procedure)) {
+          expect(Object.hasOwn(callable, member), member).toBe(true);
+          expect(Reflect.get(callable, member), member).toEqual(value);
+        }
+
+        expect(callable.call).toBe(Function.prototype.call);
+        expect(callable.apply).toBe(Function.prototype.apply);
+        expect(callable.bind).toBe(Function.prototype.bind);
+      }
+
+      // * each one still called through them
+      await expect(request.call(undefined, { text: 'call' })()).resolves.toEqual({ text: 'call' });
+      await expect(request.apply(undefined, [{ text: 'apply' }])()).resolves.toEqual({
+        text: 'apply',
+      });
+      await expect(request.bind(undefined, { text: 'bind' })()()).resolves.toEqual({
+        text: 'bind',
+      });
+    });
+
+    test("no member of a procedure is one a bare function has, so the runtime's merge shadows none", () => {
+      const procedure: Required<IProcedure> = {
+        deprecation: { message: 'soon' },
+        maximumPayloadBytes: 64,
+        procedureId: 1,
+        procedureKind: 'command',
+        procedureName: 'echo',
+        serviceId: 2,
+        serviceRevision: 3,
+      };
+      const bare = () => {
+        return undefined;
+      };
+
+      for (const member of Object.keys(procedure)) {
+        expect(member in bare, member).toBe(false);
+      }
+    });
+  });
+
   test.describe('getRequest', () => {
     test('is named after its procedure and carries it', () => {
       const manager = createServiceManager(createFakeRouter().router);
@@ -304,10 +376,13 @@ test.describe('createServiceManager', () => {
 
       expect(request.name).toBe('echo');
       expect({ ...request }).toEqual(echo);
-      // * its call too, when the procedure states one: its own member, never Function's
+      // * its kind too, when the procedure states one
       expect({
-        ...manager.getRequest({ ...echo, call: 'request', procedureId: 72 }, { serializer }),
-      }).toEqual({ ...echo, call: 'request', procedureId: 72 });
+        ...manager.getRequest(
+          { ...echo, procedureId: 72, procedureKind: 'request' },
+          { serializer }
+        ),
+      }).toEqual({ ...echo, procedureId: 72, procedureKind: 'request' });
     });
 
     test('gives a bound call no promise is, so awaiting it with its options forgotten does not compile', async () => {
@@ -2205,13 +2280,13 @@ test.describe('createServiceManager', () => {
       expect(heard).toEqual(['first news', 'second news']);
     });
 
-    test('the same procedure under another call, name, revision, deprecation or limit is a programmer error', () => {
+    test('the same procedure under another kind, name, revision, deprecation or limit is a programmer error', () => {
       const manager = createServiceManager(createFakeRouter().router);
 
       manager.getNotification(echo, { serializer });
 
       for (const asked of [
-        { ...echo, call: 'notifies' as const },
+        { ...echo, procedureKind: 'notifies' as const },
         { ...echo, procedureName: 'echo2' },
         { ...echo, serviceRevision: 4 },
         { ...echo, deprecation: {} },

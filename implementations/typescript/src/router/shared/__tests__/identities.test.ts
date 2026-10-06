@@ -1,8 +1,8 @@
 // ── Identities ────────────────────────────────────────────────────────────────
 
 // Bead's identities, `spec/identities.json`, played against the TypeScript side: each name, each id
-// and each call declared by each of the ways the file lists, on a router of its own given no
-// registry, and each fold through `areOneName`. The C# side plays the same file.
+// and each procedure's kind declared by each of the ways the file lists, on a router of its own
+// given no registry, and each fold through `areOneName`. The C# side plays the same file.
 
 // dependencies
 
@@ -14,7 +14,7 @@ import type { IRouterClientTransportLike } from '../../client/types';
 import { createRouterServer } from '../../server/router-server';
 import type { IRouterServerTransportLike } from '../../server/types';
 import { areOneName, IdentityRefusal } from '../identity';
-import type { ProcedureCall } from '../constants';
+import type { ProcedureKind } from '../constants';
 import type { IProcedure, IRequestResolver } from '../types';
 
 // interfaces
@@ -47,11 +47,11 @@ interface IIdEntry extends IEntry {
 }
 
 /**
- * A procedure stating its call, or none, declared at 1/1, revision 1, under `echo` unless the entry
+ * A procedure stating its kind, or none, declared at 1/1, revision 1, under `echo` unless the entry
  * gives its service or its name; refused at the ways `refusedAt` lists, or at every way without it.
  */
-interface ICallEntry extends IEntry {
-  call?: ProcedureCall;
+interface IProcedureKindEntry extends IEntry {
+  procedureKind?: ProcedureKind;
   procedureName?: string;
   refusedAt?: string[];
   serviceId?: number;
@@ -73,10 +73,10 @@ type Way = (procedure: IProcedure) => Promise<unknown>;
 const IDENTITIES = JSON.parse(
   readFileSync(new URL('../../../../../../spec/identities.json', import.meta.url), 'utf8')
 ) as {
-  calls: ICallEntry[];
   folds: IFoldEntry[];
   ids: IIdEntry[];
   names: INameEntry[];
+  procedureKinds: IProcedureKindEntry[];
   ways: string[];
 };
 
@@ -212,7 +212,7 @@ const WAYS: Readonly<Record<string, Way>> = Object.freeze({
  * ways its `refusedAt` lists, or at every way without one, and taken at every other.
  */
 const expectEachWay = async (
-  entry: IEntry & Pick<ICallEntry, 'refusedAt'>,
+  entry: IEntry & Pick<IProcedureKindEntry, 'refusedAt'>,
   procedure: IProcedure
 ): Promise<void> => {
   for (const id of IDENTITIES.ways) {
@@ -262,8 +262,8 @@ test.describe('the identities', () => {
     });
   }
 
-  for (const entry of IDENTITIES.calls) {
-    test(`calls: ${entry.name}`, async () => {
+  for (const entry of IDENTITIES.procedureKinds) {
+    test(`procedureKinds: ${entry.name}`, async () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
       await expectEachWay(entry, {
@@ -271,7 +271,7 @@ test.describe('the identities', () => {
         procedureName: entry.procedureName ?? 'echo',
         serviceId: entry.serviceId ?? 1,
         serviceRevision: 1,
-        ...(entry.call === undefined ? {} : { call: entry.call }),
+        ...(entry.procedureKind === undefined ? {} : { procedureKind: entry.procedureKind }),
       });
     });
   }
