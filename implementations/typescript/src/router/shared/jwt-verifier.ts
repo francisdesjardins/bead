@@ -53,8 +53,8 @@ export type JwtVerdict =
 // constants
 
 /**
- * The algorithms a `JWT`'s key verifies with: ES256 (RFC 7518 §3.4), for keys a federation shares
- * by their public half; HS256 (RFC 7518 §3.2), for one trust domain.
+ * The algorithms a `JWT`'s key verifies with: ES256 (RFC 7518 §3.4), for keys the services that
+ * trust one issuer share by their public half; HS256 (RFC 7518 §3.2), for one trust domain.
  */
 export const JwtAlgorithm = Object.freeze({
   ES256: 'ES256',
