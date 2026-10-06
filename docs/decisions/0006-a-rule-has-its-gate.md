@@ -21,25 +21,25 @@ that one check stands for them all. Branch protection, which makes `ci-ok` the o
 requires, waits on GitHub Pro or a public repository. Each rule, and the job that holds it, whose
 comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 
-| Rule                                                                                                               | Job                                              |
-| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| The conformance files are what their generators write                                                              | `spec`                                           |
-| The conformance files keep their shape, and every side reads them                                                  | `spec`                                           |
-| No configuration holds a published test key                                                                        | `spec`                                           |
-| Every implementation reads the wire alike, as the conformance files state it, but what a row of the matrix excuses | `typescript`, `dotnet`                           |
-| Every implementation refuses a declaration off section 16                                                          | `typescript`, `dotnet`                           |
-| Every implementation traces, filters and counts alike                                                              | `typescript`, `dotnet`                           |
-| Debugging costs nothing while off: it reads no clock                                                               | `typescript`, `dotnet`                           |
-| Debugging costs nothing while off: it allocates nothing                                                            | `dotnet`; on the TypeScript side, review (below) |
-| Every side takes its time from the clock it is given                                                               | `typescript`, `dotnet`                           |
-| A side holds a duration as section 1.4 states, at every place that takes one                                       | `typescript`, `dotnet`                           |
-| Each side's client speaks to the other's server                                                                    | `dotnet`, the interop both ways                  |
-| The TypeScript side's types, lint, format and comments                                                             | `typescript`                                     |
-| The C# side's layout, code style, analyzers and doc comments                                                       | `dotnet`                                         |
-| A lockfile changes only on purpose                                                                                 | `spec`, `typescript`, `dotnet`                   |
-| The root's files keep the house format                                                                             | `typescript`                                     |
-| A commit subject is a Conventional Commit                                                                          | `commits`                                        |
-| Every relative link of the repository's Markdown, and its anchor, resolves                                         | `commits`                                        |
+| Rule                                                                                                                | Job                                              |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| The conformance files are what their generators write                                                               | `spec`                                           |
+| The conformance files keep their frame ([0004](0004-one-behaviour-in-every-language.md)), and every side reads them | `spec`                                           |
+| No configuration holds a published test key                                                                         | `spec`                                           |
+| Every implementation reads the wire alike, as the conformance files state it, but what a row of the matrix excuses  | `typescript`, `dotnet`                           |
+| Every implementation refuses a declaration off section 16                                                           | `typescript`, `dotnet`                           |
+| Every implementation traces, filters and counts alike                                                               | `typescript`, `dotnet`                           |
+| Debugging costs nothing while off: it reads no clock                                                                | `typescript`, `dotnet`                           |
+| Debugging costs nothing while off: it allocates nothing                                                             | `dotnet`; on the TypeScript side, review (below) |
+| Every side takes its time from the clock it is given                                                                | `typescript`, `dotnet`                           |
+| A side holds a duration as section 1.4 states, at every place that takes one                                        | `typescript`, `dotnet`                           |
+| Each side's client speaks to the other's server                                                                     | `dotnet`, the interop both ways                  |
+| The TypeScript side's types, lint, format and comments                                                              | `typescript`                                     |
+| The C# side's layout, code style, analyzers and doc comments                                                        | `dotnet`                                         |
+| A lockfile changes only on purpose                                                                                  | `spec`, `typescript`, `dotnet`                   |
+| The root's files keep the house format                                                                              | `typescript`                                     |
+| A commit subject is a Conventional Commit                                                                           | `commits`                                        |
+| Every relative link of the repository's Markdown, and its anchor, resolves                                          | `commits`                                        |
 
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
@@ -80,6 +80,9 @@ vector cannot.
 
 - a report of the vectors and conversations each side's tests play, where `spec/check.py` sees the
   groups and files they name ([0004](0004-one-behaviour-in-every-language.md));
+- a check that every file of entries but the vectors, which their groups name, is named by a line
+  of its document, and that the line's label is its file's, as the companion's are
+  ([0004](0004-one-behaviour-in-every-language.md));
 - a check of the C# side's parameters, which no analyzer of .NET's recommended set counts
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
 - the TypeScript side's check of what a third parameter may be, `bead/options-last`;

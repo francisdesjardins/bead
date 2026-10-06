@@ -299,7 +299,8 @@ writer writes the value built from its form, and the harness checks the bytes or
 harness plays every row but those a `differs` excuses its language from, and fails otherwise.
 
 **A difference crosses its row.** A `differs` names a row of `docs/support.md` that names
-`spec/codecs.json` and the row's name between backticks, as `spec/check.py` checks. One platform
+`spec/codecs.json` and the row's name between backticks, as in every file of entries
+([0004](0004-one-behaviour-in-every-language.md)), and as `spec/check.py` checks. One platform
 row: "A value a side's type cannot hold". The C# side cannot be given `NaN` or an infinity, which no
 `JsonElement` holds as a number; the TypeScript side cannot be given an object naming a member
 twice, which no JavaScript object holds.
@@ -312,8 +313,8 @@ hold, which code a server answers and that the refusal comes at the read and not
 gives them: the TypeScript side's in `src/router/shared/payloads.ts`, the C# side's in
 `Bead.Core/Payloads.cs`. The interop's serializers delegate to them.
 
-**The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/check.py` holds the file, as
-its header says.
+**The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/check.py` holds the file in
+the frame of every file of entries ([0004](0004-one-behaviour-in-every-language.md)), as its header says.
 
 ## Consequences
 

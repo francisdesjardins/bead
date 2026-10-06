@@ -266,6 +266,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its rules and names, under "Where Bead goes", the parts the records bind before the repository
   holds them; 0001's relay is decision 0019 and the connection HTTP draws decision 0020; the rule of
   a duration moves from 0011 to 0014; 0006 keeps its table as rule and job, with its gates owed;
+  0004 states the frame every file of entries keeps, and what each file holds besides stays its own
+  record's;
   each Tenth Man section keeps its rounds in order, each answer the one that holds; and the C# side
   has a README of its layout and its modules. A gate in CI's `commits` job,
   `tools/check-links.mjs`, holds every relative link of the repository's Markdown, and its anchor,

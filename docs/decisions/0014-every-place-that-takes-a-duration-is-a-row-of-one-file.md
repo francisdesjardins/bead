@@ -135,7 +135,7 @@ truncated onto the ceiling, and held; and −1 ms is `Timeout.InfiniteTimeSpan`,
 taken, the default where never is held as one, and refused as never where never is refused.
 
 **A difference crosses its row, where it crosses.** A `differs` names a row of `docs/support.md` and
-the language the row excuses, at three levels:
+the language the row excuses, as in every file of entries ([0004](0004-one-behaviour-in-every-language.md)), at three levels:
 
 - on an input the language cannot be given at all: NaN, `"1000"` and `true` are no value a
   `TimeSpan` holds, and cross "A duration that is not a number", a platform row;
