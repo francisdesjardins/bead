@@ -215,6 +215,7 @@ const drawCalls = (): void => {
         timeOf(record.startedAt + (record.direction === 'rx' ? (record.duration ?? 0) : 0)),
         arrowOf(record.direction),
         record.type,
+        record.callId === undefined ? '' : `#${String(record.callId)}`,
         record.procedureName,
         record.duration === undefined ? '' : `${numbers.format(record.duration)} ms`,
         outcomeOf(record),
@@ -226,7 +227,10 @@ const drawCalls = (): void => {
         })
       );
       row.dataset['direction'] = record.direction;
-      row.title = `service ${String(record.serviceId)}, procedure ${String(record.procedureId)}`;
+      row.title = [
+        `service ${String(record.serviceId)}, procedure ${String(record.procedureId)}`,
+        ...(record.connectionHandle === undefined ? [] : [`on ${record.connectionHandle}`]),
+      ].join(', ');
 
       if (record.error !== undefined) {
         row.classList.add('failed');
@@ -266,6 +270,8 @@ const drawDetail = (): void => {
       `${record.procedureName} (service ${String(record.serviceId)}, revision ${String(record.serviceRevision)}, procedure ${String(record.procedureId)})`,
     ],
     ['Type', `${record.type}, ${record.direction === 'tx' ? 'out' : 'in'}`],
+    ['Call', record.callId === undefined ? undefined : `#${String(record.callId)}`],
+    ['Connection', record.connectionHandle],
     ['Started', new Date(record.startedAt).toISOString()],
     [
       'Duration',

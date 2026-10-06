@@ -33,10 +33,12 @@ const EVENT: IDebugEvent = Object.freeze({
 // definition
 
 test.describe('callRecordOf', () => {
-  test('makes a call’s step plain: its credential by its scheme alone, its payloads previewed, no signal', () => {
+  test('makes a call’s step plain: its call, its credential by its scheme alone, its payloads previewed, no signal', () => {
     const record = callRecordOf(4, [null, EVENT]);
 
     expect(record).toEqual({
+      callId: 9,
+      connectionHandle: 'server',
       credentialScheme: CredentialScheme.JWT,
       direction: 'rx',
       duration: 12,
@@ -61,6 +63,17 @@ test.describe('callRecordOf', () => {
         })
       )
     );
+  });
+
+  test('keeps no call, and no connection, for a step that names none', () => {
+    const record = callRecordOf(1, [
+      null,
+      { ...EVENT, callId: undefined, connectionHandle: undefined, type: 'notification' },
+    ]);
+
+    expect(record).toMatchObject({ callId: undefined, connectionHandle: undefined });
+    expect(JSON.parse(JSON.stringify(record))).not.toHaveProperty('callId');
+    expect(JSON.parse(JSON.stringify(record))).not.toHaveProperty('connectionHandle');
   });
 
   test('makes a failure plain by its name, its message, its code, its scope and its detail', () => {

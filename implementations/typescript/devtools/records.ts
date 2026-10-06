@@ -74,6 +74,8 @@ export const callRecordOf = (
   const timeout = options?.timeout;
 
   return {
+    callId: event.callId,
+    connectionHandle: event.connectionHandle,
     credentialScheme: typeof scheme === 'number' ? scheme : undefined,
     direction: event.direction,
     duration: event.duration,
