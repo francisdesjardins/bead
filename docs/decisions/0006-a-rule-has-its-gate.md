@@ -64,8 +64,8 @@ for every difference between languages ([0004](0004-one-behaviour-in-every-langu
 call allocates for debugging on the TypeScript side, which no test reads
 ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)); the two house styles kept alike
 ([0005](0005-a-toolchain-per-language.md)); a comment's tags, as the README's "Contributing" gives
-them; and the voice of what the repository says outside the TypeScript sources
-([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+them; the voice of what the repository says outside the TypeScript sources, and where a change's
+round of the Tenth Man is kept ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 
 ## Consequences
 

@@ -138,8 +138,11 @@ the other records. A part the repository does not hold is bound by constraint, i
 named under [Where Bead goes](#where-bead-goes); a gate that does not run is among
 [0006](0006-a-rule-has-its-gate.md)'s gates owed.
 
-A record that changes anything the languages share — the protocol, a name, a behaviour — has the
-Tenth Man's objections and their answers kept with it, or with the design the change makes
-([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)), and lands with the spec, the
-conformance files and every implementation it changes. Add it to the table above, under its theme,
-in the same change.
+A change of anything the languages share — the protocol, a name, a behaviour — keeps the Tenth
+Man's objections and their answers in the repository
+([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)): in the record it writes; in the
+one whose decision it changes, which gains the round; or, for a change of the spec, its files or
+their gates that changes no decision, in the record whose Scope holds what it changes. A change that
+changes several records keeps its round in the first it names, the others pointing to it. A record
+lands with the spec, the conformance files and every implementation it changes; add it to the table
+above, under its theme, in the same change.

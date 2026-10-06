@@ -13,7 +13,7 @@ export const meta = {
 
 // args: { repo, out }
 const REPO = (args && args.repo) || 'D:/workspace/francisdesjardins/2025/bead';
-const OUT = (args && args.out) || `${REPO}/docs/builder/design.md`;
+const OUT = (args && args.out) || `${REPO}/.claude/local/builder/design.md`;
 
 const CONTEXT = `
 You are designing the API builder of Bead, a binary wire protocol with a normative spec (spec/spec.md), conformance files (spec/vectors.json, spec/conversations.json, spec/transports.json, spec/clocks.json, spec/durations.json, spec/interop-service.json; and, beside the wire's spec, spec/debugging.md with spec/debug-filters.json and spec/metrics.json), and two implementations at behavioural parity: implementations/typescript and implementations/dotnet. The repository is ${REPO}.
@@ -114,6 +114,7 @@ const written = await agent(
    - "Objections and answers": each objection, the answer, and its status;
    - "Decisions for the user": what only the user can decide, each with a recommendation;
    - "Out of scope for v0.1".
+   Its "Objections and answers" enter the repository with the builder's record, under its "## The Tenth Man" (decision 0009).
 Write the document in English. Then return a short summary in French for the user: the design in ten lines, the objections accepted and refused, and the decisions awaiting them.
 
 THE DESIGN:\n${synthesis}\n\nTHE TENTH MAN:\n${tenthMan}`,

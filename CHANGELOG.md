@@ -359,6 +359,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 
 - The Tenth Man meets every change to what every language's tests answer to: the spec, its
   conformance files, their shape and their tooling, and the gates the implementations share.
+- The Tenth Man's objections are kept in the repository, in the record whose decision a change makes
+  or changes, or whose Scope holds what it changes; 0007 holds the parameter rule's.
 - The conversations' steps are named by who acts, `send` and `expect` where they said `in` and
   `out`; an expected failure gives the relays it crossed, and an expected command its flags, which
   both sides now compare.
