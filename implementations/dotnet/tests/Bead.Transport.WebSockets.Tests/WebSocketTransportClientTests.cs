@@ -256,19 +256,34 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Holds_one_ready_state_at_a_time_from_uninitialized_to_closed()
     {
+        using var listener = new Listener(IPAddress.Loopback);
+
         Assert.Equal(ReadyState.Uninitialized, _client.ReadyState);
 
-        var connecting = _client.Connect(Target, Cancelled);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
 
+        // the listener holds the handshake, so nothing on another thread moves the state meanwhile
         Assert.Equal(ReadyState.Connecting, _client.ReadyState);
-        await connecting.WaitAsync(Patience, Cancelled);
-        Assert.Equal(ReadyState.Open, _client.ReadyState);
 
-        var closing = _client.CloseConnection();
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Open, _client.ReadyState);
 
-        Assert.Equal(ReadyState.Closing, _client.ReadyState);
-        await closing.WaitAsync(Patience, Cancelled);
-        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+            // the server's end reads nothing yet, so the close waits for its answer
+            var closing = _client.CloseConnection();
+
+            Assert.Equal(ReadyState.Closing, _client.ReadyState);
+
+            var received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(WebSocketMessageType.Close, received.MessageType);
+            await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        }
     }
 
     [Fact]
