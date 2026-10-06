@@ -9,7 +9,7 @@
     "$comment": { "$ref": "common.schema.json#/$defs/comment" },
     "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
     "payloads": {
-      "description": "Bytes read, in an encoding, and the bytes written back of what was read, or the reason they are refused for.",
+      "description": "Bytes read, in an encoding, and the bytes written back of what was read, or for proto what was read, or the reason they are refused for.",
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/payload" }
@@ -23,14 +23,14 @@
   },
   "$defs": {
     "encoding": {
-      "description": "An encoding of spec section 17: raw (17.3), text (17.4) or json (17.5 to 17.8).",
-      "enum": ["raw", "text", "json"]
+      "description": "An encoding of spec section 17: raw (17.3), text (17.4), json (17.5 to 17.8) or proto (17.9).",
+      "enum": ["raw", "text", "json", "proto"]
     },
     "payload": {
-      "description": "Bytes read, in an encoding: written, the bytes its writer writes back of the value its reader read; or refused, the reason its reader refuses them for.",
+      "description": "Bytes read, in an encoding: written, the bytes its writer writes back of the value its reader read; read, of a proto payload, what its reader read of them; or refused, the reason its reader refuses them for.",
       "type": "object",
       "required": ["name", "encoding", "clauses", "bytes"],
-      "oneOf": [{ "required": ["written"] }, { "required": ["refused"] }],
+      "oneOf": [{ "required": ["written"] }, { "required": ["read"] }, { "required": ["refused"] }],
       "additionalProperties": false,
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
@@ -38,21 +38,26 @@
         "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
         "bytes": { "$ref": "common.schema.json#/$defs/bytes" },
         "written": { "$ref": "common.schema.json#/$defs/bytes" },
+        "read": { "$ref": "#/$defs/read" },
         "refused": { "$ref": "#/$defs/reason" },
         "differs": { "$ref": "common.schema.json#/$defs/differs" }
       },
       "allOf": [
         {
           "if": { "properties": { "encoding": { "const": "raw" } } },
-          "then": { "not": { "required": ["refused"] } }
+          "then": { "required": ["written"] }
         },
         {
           "if": { "properties": { "encoding": { "const": "text" } } },
-          "then": { "properties": { "refused": { "const": "not UTF-8" } } }
+          "then": {
+            "not": { "required": ["read"] },
+            "properties": { "refused": { "const": "not UTF-8" } }
+          }
         },
         {
           "if": { "properties": { "encoding": { "const": "json" } } },
           "then": {
+            "not": { "required": ["read"] },
             "properties": {
               "refused": {
                 "enum": [
@@ -67,8 +72,36 @@
               }
             }
           }
+        },
+        {
+          "if": { "properties": { "encoding": { "const": "proto" } } },
+          "then": {
+            "not": { "required": ["written"] },
+            "properties": { "refused": { "enum": ["not its message", "nested past 100"] } }
+          }
         }
       ]
+    },
+    "read": {
+      "description": "What a proto reader read of the top Probe of spec/codecs.proto: its text, its number, and how many messages nest below it through child. protobuf fixes no message's bytes whole, so a row pins these alone.",
+      "type": "object",
+      "required": ["text", "number", "nested"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "$ref": "#/$defs/codeUnits" },
+        "number": { "$ref": "common.schema.json#/$defs/u32" },
+        "nested": {
+          "description": "How many messages nest below the top one through child: 0 where child is not set, 100 at most (spec 17.9.3).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "codeUnits": {
+      "description": "A string's UTF-16 code units in hexadecimal, four capital digits each, a space between: none for the empty string.",
+      "type": "string",
+      "pattern": "^(?:[0-9A-F]{4}(?: [0-9A-F]{4})*)?$"
     },
     "value": {
       "description": "A value given to a writer, in an encoding: written, the bytes it writes; or refused, the reason it refuses the value for.",
@@ -108,6 +141,13 @@
           }
         },
         {
+          "if": { "properties": { "encoding": { "const": "proto" } } },
+          "then": {
+            "not": { "required": ["refused"] },
+            "properties": { "value": { "required": ["probe"] } }
+          }
+        },
+        {
           "if": { "properties": { "encoding": { "const": "json" } } },
           "then": {
             "properties": {
@@ -135,7 +175,7 @@
       ]
     },
     "given": {
-      "description": "A value in one of seven forms: a JSON value; a double by its 64 bits; a number by its text; a text; bytes; a form no JSON text holds; or arrays nested that deep.",
+      "description": "A value in one of eight forms: a JSON value; a double by its 64 bits; a number by its text; a text; bytes; a form no JSON text holds; arrays nested that deep; or a Probe of spec/codecs.proto.",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
@@ -163,6 +203,22 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 1000
+        },
+        "probe": { "$ref": "#/$defs/probe" }
+      }
+    },
+    "probe": {
+      "description": "A Probe of spec/codecs.proto given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: its text, its number, or its child set to the empty message.",
+      "type": "object",
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "text": { "$ref": "#/$defs/codeUnits" },
+        "number": { "$ref": "common.schema.json#/$defs/u32" },
+        "child": {
+          "description": "The empty message: child set, no field of it set.",
+          "type": "object",
+          "maxProperties": 0
         }
       }
     },
@@ -177,7 +233,9 @@
         "a number past a double",
         "nested past 64",
         "not a finite number",
-        "no JSON value"
+        "no JSON value",
+        "not its message",
+        "nested past 100"
       ]
     }
   }

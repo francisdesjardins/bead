@@ -2,17 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bead's identities, spec/identities.json",
   "type": "object",
-  "required": ["$comment", "specVersion", "ways", "names", "ids", "folds"],
+  "required": ["$comment", "specVersion", "ways", "names", "ids", "folds", "calls"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "const": "schemas/identities.schema.json" },
     "$comment": { "$ref": "common.schema.json#/$defs/comment" },
     "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
     "ways": {
-      "description": "The five ways a side declares, each by an id its harness keys its table by: a resolver registered on a client's router and on a server's, a requester made on each, and a notification registered on a client's.",
+      "description": "The six ways a side declares, each by an id its harness keys its table by: a resolver registered on a client's router; one registered on a server's that notifies nothing, and one there that notifies; a requester made on each router; and a notification registered on a client's.",
       "const": [
         "client-resolver",
         "server-resolver",
+        "server-notification-resolver",
         "client-requester",
         "server-requester",
         "client-notification"
@@ -35,12 +36,18 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/fold" }
+    },
+    "calls": {
+      "description": "A procedure naming its call, or none, declared each way, and the ways that take it (spec 16.11).",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/call" }
     }
   },
   "$defs": {
     "refused": {
       "description": "The first reason of spec 16.10 that applies, derived and held by the regeneration alone; absent, the declaration is taken.",
-      "enum": ["out of its range", "off its form"]
+      "enum": ["out of its range", "off its form", "against its call"]
     },
     "name": {
       "type": "object",
@@ -99,6 +106,47 @@
           "description": "Whether the two are one name: equal once each ASCII upper-case letter is read as its lower-case one, and nothing else changed.",
           "type": "boolean"
         }
+      }
+    },
+    "call": {
+      "type": "object",
+      "required": ["name", "clauses"],
+      "additionalProperties": false,
+      "dependentRequired": { "refusedAt": ["refused"] },
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "call": {
+          "description": "How the procedure is called (spec 16.11); absent, it names no call.",
+          "enum": ["request", "notifies", "command"]
+        },
+        "serviceId": {
+          "description": "The service id declared, where it is not 1.",
+          "type": "integer"
+        },
+        "procedureName": {
+          "description": "The procedure's name declared, where it is not echo.",
+          "type": "string"
+        },
+        "refused": { "$ref": "#/$defs/refused" },
+        "refusedAt": {
+          "description": "The ways that refuse it, where others take it; absent, refused applies at every way.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "client-resolver",
+              "server-resolver",
+              "server-notification-resolver",
+              "client-requester",
+              "server-requester",
+              "client-notification"
+            ]
+          }
+        },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
       }
     }
   }

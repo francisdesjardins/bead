@@ -1,0 +1,13 @@
+// The fixed message the proto rows of spec/codecs.json read and write, as each side's stock
+// generator writes its code.
+syntax = "proto3";
+
+package bead.codecs.v1;
+
+// A string, a number and a message of its own kind: what a proto row reads, refuses, or writes,
+// and how deep it nests.
+message Probe {
+  string text = 1;
+  uint32 number = 2;
+  Probe child = 3;
+}
