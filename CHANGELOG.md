@@ -209,6 +209,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file and the entry, the `_Identities:` and `_Codecs:` lines naming files of `spec/`, and each
   side's tests reading both. The `spec` job regenerates them.
 
+- Decision 0021: a topic-based publish/subscribe broker is one more transport, and Bead is never a
+  network of its own. It routes nothing past one relay and shares no session's state between
+  servers; a broker's transport is one core in each implementation and one adapter a broker, and
+  what it owes is decided with it.
 - The service layer (decision 0018), which generated code is a thin shell over, in each runtime:
   a procedure's typed descriptor, `requestOf` and `commandOf`, and `RequestProcedure<…>` and
   `CommandProcedure<…>` with their `ProcedureBindings`, holding its procedure, its admission rule,

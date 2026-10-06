@@ -274,8 +274,9 @@ both sides, the spec's word for the relays a failure crossed.
 failed test twice on CI, which would hide on the TypeScript side what fails the C# side's run.
 
 **The file gives a broker's conformance a vocabulary to start from**: named connections, a clock
-advanced, and, later, a client part. A broker's own part is decided with its transport, and this
-file commits it to nothing.
+advanced, and, later, a client part. A broker's own part is decided with its transport
+([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), and this file commits it to
+nothing.
 
 **`spec/check.py` holds the frame**, in the spec job, and reports group by group which sides' tests
 name each file and group, failing on one a side never names. It reads the tests' sources: it sees
