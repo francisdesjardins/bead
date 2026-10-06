@@ -17,6 +17,7 @@ import {
   REQUEST_DEFAULTS,
   resolveRequestOptions,
   SERVER_FAILURES,
+  type CallId,
   type IBeforeRequest,
   type IDebugEvent,
   type INotificationLike,
@@ -100,9 +101,9 @@ const answerOf = (payload: Uint8Array): IRouterResult => {
 };
 
 /**
- * A router that records every call, answers each request with `answer`, and holds notifications;
- * it raises the failures of its `side`, a server's unless given, subscribes a request under its own
- * call id, and runs on `clock`, the platform's unless given.
+ * A router that records every call, draws call 7 for each request and answers it with `answer`, and
+ * holds notifications; it raises the failures of its `side`, a server's unless given, subscribes a
+ * request under its own call id, and runs on `clock`, the platform's unless given.
  */
 const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_CLOCK) => {
   const keyOf = ({ procedureId, serviceId }: IProcedureAddress) => {
@@ -126,6 +127,7 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
     request: [] as {
       payload: IText;
       request: {
+        onCallId?: ((callId: CallId) => void) | undefined;
         options: IResolvedRequestOptions;
         procedure: IProcedure;
         series?: IProcedureSeries | undefined;
@@ -141,6 +143,8 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
   const control = {
     /** What a requester's declaration gives; none, as a router given no registry. */
     series: undefined as IProcedureSeries | undefined,
+    /** The id each request draws, heard through its `onCallId`; none, a router that draws none. */
+    callId: 7 as CallId | undefined,
     /** What a request resolves to; an echo of its payload unless replaced. */
     answer: (payload: Uint8Array): Promise<IRouterResult> => {
       return Promise.resolve(answerOf(payload));
@@ -205,6 +209,10 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
     },
     request: (payload, request) => {
       calls.request.push({ payload: decode(payload) as IText, request });
+
+      if (control.callId !== undefined) {
+        request.onCallId?.(control.callId);
+      }
 
       return control.answer(payload);
     },
@@ -643,6 +651,102 @@ test.describe('createServiceManager', () => {
         serviceId: 2,
         serviceRevision: 3,
       });
+    });
+
+    test('tells a call made and its answer with the call id its router drew, and their connection', async () => {
+      const client = createFakeRouter('client');
+      const server = createFakeRouter('server');
+      const asking = createServiceManager(client.router);
+      const commanding = createServiceManager(
+        server.router as IRouterLike<TransportServerConnectionHandle>
+      );
+      const seen = recordDebug(asking);
+      const commanded = recordDebug(commanding);
+      // how many calls the router took as each step is told
+      const taken: number[] = [];
+
+      asking.on('debug', () => {
+        taken.push(client.calls.request.length);
+      });
+
+      await asking.getRequest(echo, { serializer })({ text: 'a' })();
+      await commanding.getCommand(echo, { serializer })({ text: 'b' })({ connectionHandle });
+
+      expect(
+        [...seen, ...commanded].map(({ info }) => {
+          return [info.direction, info.callId, info.connectionHandle];
+        })
+      ).toEqual([
+        ['tx', 7, 'server'],
+        ['rx', 7, 'server'],
+        ['tx', 7, connectionHandle],
+        ['rx', 7, connectionHandle],
+      ]);
+      // * the tx step comes once the router took the call, which drew its id
+      expect(taken).toEqual([1, 1]);
+    });
+
+    test('tells a call its router refuses before drawing an id with none, its tx step then its rx step', async () => {
+      const { control, router } = createFakeRouter('client');
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const refusal = new FailureError({ ...CLIENT_FAILURES.sessionRequired, origin: 'local' });
+
+      control.callId = undefined;
+      control.answer = () => {
+        return Promise.reject(refusal);
+      };
+
+      await expect(manager.getRequest(echo, { serializer })({ text: 'x' })()).rejects.toBe(refusal);
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, info.callId, info.connectionHandle, error];
+        })
+      ).toEqual([
+        ['tx', undefined, undefined, null],
+        ['rx', undefined, undefined, refusal],
+      ]);
+    });
+
+    test('tells a call made over a router that draws no id with none, its tx step then its rx step', async () => {
+      const { control, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+
+      control.callId = undefined;
+
+      await expect(manager.getRequest(echo, { serializer })({ text: 'x' })()).resolves.toEqual({
+        text: 'x',
+      });
+      expect(
+        seen.map(({ info }) => {
+          return [info.direction, info.callId, info.rx];
+        })
+      ).toEqual([
+        ['tx', undefined, undefined],
+        ['rx', undefined, { text: 'x' }],
+      ]);
+    });
+
+    test('raises deprecated before the call’s tx step', async () => {
+      const manager = createServiceManager(createFakeRouter().router);
+      const heard: string[] = [];
+
+      manager.on('deprecated', () => {
+        heard.push('deprecated');
+      });
+      manager.on('debug', (_error, { direction }) => {
+        heard.push(direction);
+      });
+
+      await manager.getRequest(
+        { ...echo, deprecation: { message: 'use echo2' } },
+        { serializer }
+      )({
+        text: 'a',
+      })();
+
+      expect(heard).toEqual(['deprecated', 'tx', 'rx']);
     });
 
     test("reads its router's clock: a call's start on the wall clock, its duration on the monotonic reading", async () => {
@@ -1334,7 +1438,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
-    test('tells debug the request it received and the answer it sent', async () => {
+    test('tells the request it received and the answer it sent with that request’s call id and connection', async () => {
       const manager = createServiceManager(createFakeRouter().router);
       const seen = recordDebug(manager);
 
@@ -1349,11 +1453,18 @@ test.describe('createServiceManager', () => {
 
       expect(
         seen.map(({ info }) => {
-          return [info.direction, info.rx, info.tx, info.duration === undefined];
+          return [
+            info.direction,
+            info.rx,
+            info.tx,
+            info.duration === undefined,
+            info.callId,
+            info.connectionHandle,
+          ];
         })
       ).toEqual([
-        ['rx', { text: 'hi' }, undefined, true],
-        ['tx', { text: 'hi' }, { text: 'hi!' }, false],
+        ['rx', { text: 'hi' }, undefined, true, header.callId, connectionHandle],
+        ['tx', { text: 'hi' }, { text: 'hi!' }, false, header.callId, connectionHandle],
       ]);
       expect(seen[1]?.info.duration).toBeLessThan(1_000);
     });
@@ -2359,24 +2470,42 @@ test.describe('createServiceManager', () => {
       }).toThrow(ProgrammerError);
     });
 
-    test('tells debug each notification it hears', async () => {
-      const { deliver, router } = createFakeRouter();
+    test('tells a notification sent or heard with no call id', async () => {
+      const { deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
+      const notifying = createServiceManager(createFakeRouter('server').router);
       const notification = manager.getNotification(echo, { serializer });
+      const resolver = notifying.getNotificationResolver(echo, { serializer: serverSerializer })(
+        () => {
+          return Promise.resolve();
+        }
+      );
 
       await notification({ text: 's' }, () => {
         return undefined;
       })();
 
       const seen = recordDebug(manager);
+      const sent = recordDebug(notifying);
 
       deliver(echo, { text: 'news' });
+      await resolver.notify({ text: 'more news' });
 
+      // * a notification names no call: no id, and no connection
       expect(
-        seen.map(({ info }) => {
-          return [info.direction, info.type, info.rx];
+        [...seen, ...sent].map(({ info }) => {
+          return [
+            info.direction,
+            info.type,
+            info.rx ?? info.tx,
+            info.callId,
+            info.connectionHandle,
+          ];
         })
-      ).toEqual([['rx', 'notification', { text: 'news' }]]);
+      ).toEqual([
+        ['rx', 'notification', { text: 'news' }, undefined, undefined],
+        ['tx', 'notification', { text: 'more news' }, undefined, undefined],
+      ]);
     });
 
     test('a notification that does not decode fails here, for the router to report', async () => {

@@ -482,6 +482,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         var core = new CoreRequest
         {
             ConnectionHandle = ServerConnectionHandle,
+            OnCallId = request.OnCallId,
             OnSent = request.OnSent,
             Options = options,
             Procedure = request.Procedure,
@@ -568,8 +569,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     // the call that subscribes, bound as its call id is drawn: before the request goes out, so a
-    // notification right behind its result is heard; one that did not take is unbound, whatever
-    // ended it; once answered, the window of a paced one opens
+    // notification right behind its result is heard, and before whoever hears the id is told it;
+    // one that did not take is unbound, whatever ended it; once answered, the window of a paced one
+    // opens
     private async Task<RouterResult> Subscribing(ReadOnlyMemory<byte> payload, (CoreRequest Request, INotificationLike Subscribes) call)
     {
         var (request, notification) = call;
@@ -602,6 +604,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                         };
                         _callIds[notification] = callId;
                         bound = callId;
+                        request.OnCallId?.Invoke(callId);
                     },
                 });
         }

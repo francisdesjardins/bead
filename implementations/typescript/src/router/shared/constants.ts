@@ -1,6 +1,6 @@
 // dependencies
 
-import type { IRouterFailures, IRouterLimits, RouterSide } from './types';
+import type { IRouterFailures, IRouterLimits, RouterSide, ServerConnectionHandle } from './types';
 
 // constants
 
@@ -151,6 +151,12 @@ export const CALL_ID_RANGES = Object.freeze({
   client: Object.freeze({ first: 1, last: 0xffffffff, step: 2 }),
   server: Object.freeze({ first: 2, last: 0xfffffffe, step: 2 }),
 } as const);
+
+/**
+ * The one peer a client has, as its router and its manager name the connection: every request
+ * reaching it comes from the server.
+ */
+export const SERVER_CONNECTION_HANDLE: ServerConnectionHandle = 'server';
 
 /** A session token's length, in bytes: 128 bits drawn from `crypto`. */
 export const SESSION_TOKEN_BYTES = 16;

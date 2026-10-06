@@ -53,6 +53,14 @@ public sealed class ServiceManagerTests
     // where a test's wall clock starts: a call traced at once starts there
     private static readonly DateTimeOffset Started = DateTimeOffset.FromUnixTimeMilliseconds(1_000);
 
+    // ! what a call made, a request answered, a notification sent and one heard allocate while
+    // nobody listens, in bytes: the allocation gate's pin, which sees a field, a copy or a closure
+    // added to a step's path. Measured on .NET 10.0.12, the runtime of the SDK global.json names,
+    // x64, in the Debug build `dotnet test` makes, on Windows and on Linux alike. A runtime that
+    // moves them is pinned anew, by hand: run the gate, take the bytes its failure prints, and name
+    // the runtime, and why each step moved, in the commit
+    private static readonly long[] AllocatedWhileNobodyListens = [1256, 984, 560, 768];
+
     // helpers
 
     private static CancellationToken Cancelled
@@ -443,6 +451,7 @@ public sealed class ServiceManagerTests
 
         var sent = new DebugEvent
         {
+            CallId = 7,
             Direction = DebugDirection.Tx,
             Options = new ResolvedRequestOptions { Timeout = TimeoutDefault },
             ProcedureId = 1,
@@ -466,6 +475,149 @@ public sealed class ServiceManagerTests
             {
                 return told.Error;
             }));
+    }
+
+    [Fact]
+    public async Task Tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_their_connection()
+    {
+        var client = new RecordingRouter(RouterSide.Client);
+        var server = new RecordingRouter();
+        var asking = new ServiceManager(client);
+        var commanding = new ServiceManager(server);
+        var seen = RecordDebug(asking);
+        var commanded = RecordDebug(commanding);
+
+        // how many calls the router took as each step is told
+        var taken = new List<int>();
+
+        asking.Debug += (_, _) =>
+        {
+            taken.Add(client.Requests.Count);
+        };
+
+        await asking.GetRequest(Echo, Asked)(new Text("a"))().WaitAsync(Patience, Cancelled);
+        await commanding.GetCommand(Echo, Asked)(new Text("b"))(new RequestOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, uint?, string?)>(
+            [
+                (DebugDirection.Tx, 7, RouterClient.ServerConnectionHandle),
+                (DebugDirection.Rx, 7, RouterClient.ServerConnectionHandle),
+                (DebugDirection.Tx, 7, Handle),
+                (DebugDirection.Rx, 7, Handle),
+            ],
+            seen.Concat(commanded).Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.CallId, told.Event.ConnectionHandle);
+            }));
+
+        // * the tx step comes once the router took the call, which drew its id
+        Assert.Equal([1, 1], taken);
+    }
+
+    [Fact]
+    public async Task Tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_step_then_its_rx_step()
+    {
+        var router = new RecordingRouter(RouterSide.Client) { CallId = null };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var refusal = new FailureException(
+            Failure.OfProtocol(ProtocolCode.SessionRequired),
+            new FailureException.Raised(FailureOrigin.Local, RouterSide.Client));
+
+        router.Answer = (_) =>
+        {
+            return Task.FromException<RouterResult>(refusal);
+        };
+
+        Assert.Same(refusal, await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled);
+        }));
+        Assert.Equal<(DebugDirection, uint?, string?, Exception?)>(
+            [(DebugDirection.Tx, null, null, null), (DebugDirection.Rx, null, null, refusal)],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.CallId, told.Event.ConnectionHandle, told.Error);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_a_call_made_over_a_router_that_draws_no_id_with_none_its_tx_step_then_its_rx_step()
+    {
+        var manager = new ServiceManager(new RecordingRouter { CallId = null });
+        var seen = RecordDebug(manager);
+
+        Assert.Equal(new Text("x"), await manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled));
+        Assert.Equal<(DebugDirection, uint?, object?)>(
+            [(DebugDirection.Tx, null, null), (DebugDirection.Rx, null, new Text("x"))],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.CallId, told.Event.Rx);
+            }));
+    }
+
+    [Fact]
+    public async Task Raises_deprecated_before_the_call_s_tx_step()
+    {
+        var manager = new ServiceManager(new RecordingRouter());
+        var heard = new List<string>();
+
+        manager.Deprecated += (_) =>
+        {
+            heard.Add("deprecated");
+        };
+        manager.Debug += (_, told) =>
+        {
+            heard.Add(told.Direction.ToString());
+        };
+
+        await manager.GetRequest(Echo with { Deprecation = new ProcedureDeprecation { Message = "use echo2" } }, Asked)(new Text("a"))()
+            .WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["deprecated", nameof(DebugDirection.Tx), nameof(DebugDirection.Rx)], heard);
+    }
+
+    // the C# side's alone, as its router client's test of the scheduler is: a router that hears a
+    // call's id on the thread pool, under no scheduler of its own, where the runtime would run an
+    // await inline, and the task source's continuations alone keep the tx step out of its OnCallId
+    [Fact]
+    public async Task Tells_a_call_s_tx_step_off_the_thread_its_router_hears_its_call_id_on()
+    {
+        var router = new RecordingRouter { CallId = null };
+        var manager = new ServiceManager(router);
+        var told = new List<(uint? CallId, bool IsAnswered)>();
+
+        using var answered = new ManualResetEventSlim();
+
+        // the id heard, then the answer given, by one work item: a listener run inside its OnCallId
+        // would wait for an answer that work item never gets to give
+        router.Answer = (payload) =>
+        {
+            var request = router.Requests[^1].Request;
+
+            return Task.Run(() =>
+            {
+                request.OnCallId?.Invoke(7);
+                answered.Set();
+
+                return ResultOf(payload);
+            });
+        };
+        manager.Debug += (_, step) =>
+        {
+            if (step.Direction == DebugDirection.Tx)
+            {
+                var isAnswered = answered.Wait(Patience);
+
+                lock (told)
+                {
+                    told.Add((step.CallId, isAnswered));
+                }
+            }
+        };
+
+        Assert.Equal(new Text("x"), await manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled));
+        Assert.Equal<(uint?, bool)>([(7, true)], told);
     }
 
     [Fact]
@@ -715,8 +867,9 @@ public sealed class ServiceManagerTests
         {
         };
 
-        // what each step allocates on this thread, the router answering at once, so nothing awaits:
-        // warmed up first, so nothing is allocated once and for all
+        // what each step allocates on this thread, the router drawing its call id and answering at
+        // once, so nothing awaits: the least of eight rounds, since what else runs on the thread only
+        // ever adds bytes, and the first rounds allocate what is allocated once and for all
         long[] AllocatedOf()
         {
             Func<Task>[] steps =
@@ -741,7 +894,7 @@ public sealed class ServiceManagerTests
 
             return [.. steps.Select((step) =>
             {
-                var allocated = 0L;
+                var allocated = long.MaxValue;
 
                 for (var round = 0; round < 8; round += 1)
                 {
@@ -753,7 +906,7 @@ public sealed class ServiceManagerTests
                     var before = GC.GetAllocatedBytesForCurrentThread();
                     var stepped = step();
 
-                    allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                    allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
                     Assert.True(stepped.IsCompletedSuccessfully);
                 }
 
@@ -764,6 +917,10 @@ public sealed class ServiceManagerTests
         await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
 
         var unheard = AllocatedOf();
+
+        // * each step's bytes while nobody listens, pinned: what the comparisons below let pass, a
+        // field or a closure that moves every side alike, shows here
+        Assert.Equal(AllocatedWhileNobodyListens, unheard);
 
         hearing.Debug += listener;
         notifying.Debug += listener;
@@ -1189,7 +1346,7 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public async Task Tells_debug_the_request_it_received_and_the_answer_it_sent()
+    public async Task Tells_the_request_it_received_and_the_answer_it_sent_with_that_request_s_call_id_and_connection()
     {
         var time = new FakeTimeProvider(Started);
         var manager = new ServiceManager(new RecordingRouter { Clock = time });
@@ -1205,6 +1362,8 @@ public sealed class ServiceManagerTests
 
         var received = new DebugEvent
         {
+            CallId = 7,
+            ConnectionHandle = Handle,
             Direction = DebugDirection.Rx,
             ProcedureId = 1,
             ProcedureName = "echo",
@@ -2051,23 +2210,31 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public async Task Tells_debug_each_notification_it_hears()
+    public async Task Tells_a_notification_sent_or_heard_with_no_call_id()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
+        var notifying = new ServiceManager(new RecordingRouter());
         var notification = manager.GetNotification(Echo, Notified());
+        var resolver = notifying.GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
 
         await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
 
         var seen = RecordDebug(manager);
+        var sent = RecordDebug(notifying);
 
         await router.Deliver(Echo.Address, new Text("news")).WaitAsync(Patience, Cancelled);
+        await resolver.Notify(new Text("more news")).WaitAsync(Patience, Cancelled);
 
-        Assert.Equal(
-            [(DebugDirection.Rx, DebugType.Notification, (object?)new Text("news"))],
-            seen.Select((told) =>
+        // * a notification names no call: no id, and no connection
+        Assert.Equal<(DebugDirection, DebugType, object?, uint?, string?)>(
+            [
+                (DebugDirection.Rx, DebugType.Notification, new Text("news"), null, null),
+                (DebugDirection.Tx, DebugType.Notification, new Text("more news"), null, null),
+            ],
+            seen.Concat(sent).Select((told) =>
             {
-                return (told.Event.Direction, told.Event.Type, told.Event.Rx);
+                return (told.Event.Direction, told.Event.Type, told.Event.Rx ?? told.Event.Tx, told.Event.CallId, told.Event.ConnectionHandle);
             }));
     }
 
@@ -2462,9 +2629,9 @@ public sealed class ServiceManagerTests
         }
     }
 
-    // a router that records every call, answers each request as a test scripts it — its own payload
-    // unless told otherwise — and holds notifications; it raises the failures of its side, a
-    // server's unless given, and subscribes a request under its own call id
+    // a router that records every call, draws call 7 for each request and answers it as a test
+    // scripts it — its own payload unless told otherwise — and holds notifications; it raises the
+    // failures of its side, a server's unless given, and subscribes a request under its own call id
     private sealed class RecordingRouter(RouterSide side = RouterSide.Server) : IRouterLike
     {
         private readonly Lock _gate = new();
@@ -2495,6 +2662,9 @@ public sealed class ServiceManagerTests
 
         // each notification unregistered, and whether the router was told to cancel its call
         public List<(string ProcedureName, bool Cancel)> UnregisteredNotifications { get; } = [];
+
+        // the call id each request draws, heard through its OnCallId; none, a router that draws none
+        public uint? CallId { get; set; } = 7;
 
         // what a request settles with
         public Func<ReadOnlyMemory<byte>, Task<RouterResult>> Answer { get; set; } = EchoOf;
@@ -2549,9 +2719,16 @@ public sealed class ServiceManagerTests
 
         public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
         {
+            ArgumentNullException.ThrowIfNull(request);
+
             lock (_gate)
             {
                 Requests.Add((Json.Decode(payload), request));
+            }
+
+            if (CallId is { } drawn)
+            {
+                request.OnCallId?.Invoke(drawn);
             }
 
             return Answer(payload);

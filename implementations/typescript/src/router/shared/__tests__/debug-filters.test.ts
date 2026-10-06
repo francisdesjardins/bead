@@ -104,6 +104,8 @@ const WRITTEN = /, not ("(?:[^"\\]|\\.)*")$/;
 /** The event a call's fixture stands for. */
 const callEventOf = ({ direction, procedureName, type }: ICallFixture): IDebugEvent => {
   return {
+    callId: undefined,
+    connectionHandle: undefined,
     direction,
     duration: undefined,
     options: undefined,

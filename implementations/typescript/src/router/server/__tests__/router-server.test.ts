@@ -750,6 +750,30 @@ test.describe('createRouterServer', () => {
   });
 
   test.describe('its own requests', () => {
+    test('tells a command made with the call id its router drew, on its connection', async () => {
+      const { deliver, open, transport } = createScriptedTransport();
+      using router = createRouterServer(transport);
+      const services = createServiceManager(router);
+      const command = services.getCommand(echo, { serializer: text });
+      const steps: unknown[] = [];
+
+      services.on('debug', (_error, { callId, connectionHandle, direction, type }) => {
+        steps.push([direction, type, callId, connectionHandle]);
+      });
+      open(first);
+      open(second);
+
+      const running = command('run')({ ...options, connectionHandle: second });
+
+      deliver(second, resultOf(2, text.encode('done')));
+
+      await expect(running).resolves.toBe('done');
+      expect(steps).toEqual([
+        ['tx', 'command', 2, second],
+        ['rx', 'command', 2, second],
+      ]);
+    });
+
     test('go to the connection their options name, on even call ids, and resolve with that connection’s result alone', async () => {
       const { deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport, {

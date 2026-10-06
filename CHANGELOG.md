@@ -128,15 +128,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the transports' file come from one module of the generators.
 - `spec/debugging.md`, the spec's companion (decision 0013), at version 0.1.0 of its own: what a
   side traces, filters and counts beside the wire, which a constrained profile may leave out and
-  still conform to the wire. It states the trace of calls and of envelopes; a listener's error,
-  which never changes a call; the cost while nobody listens, and two build switches; the debug
-  filter's grammar in ABNF, in ASCII alone, and its refusals by reason; and a registry of metrics,
-  its declarations, its ceiling, nine families under OpenTelemetry's RPC names, `bead` for `rpc`,
-  every series made at 0, the router's gates and every exit of a call, A66's buckets in whole
-  microseconds with each `le` OpenMetrics' canonical number, and its exposition's bytes in the
-  Prometheus text format 0.0.4. `spec/spec.md` says where it stands beside it, and decision 0008's
-  spec axis carries its version, which moves as the spec's does, a release whose companion moved
-  tagging `debugging-v` and that version.
+  still conform to the wire. It states the trace of calls and of envelopes, each step of a call
+  naming its call; a listener's error, which never changes a call; the cost while nobody listens,
+  and two build switches; the debug filter's grammar in ABNF, in ASCII alone, and its refusals by
+  reason; and a registry of metrics, its declarations, its ceiling, nine families under
+  OpenTelemetry's RPC names, `bead` for `rpc`, every series made at 0, the router's gates and every
+  exit of a call, A66's buckets in whole microseconds with each `le` OpenMetrics' canonical number,
+  and its exposition's bytes in the Prometheus text format 0.0.4. `spec/spec.md` says where it
+  stands beside it, and decision 0008's spec axis carries its version, which moves as the spec's
+  does, a release whose companion moved tagging `debugging-v` and that version.
 - `spec/debug-filters.json` and `spec/metrics.json`, their schemas and their generators, each
   repeating the companion's version as its `debuggingVersion`: 52 filters, what each reads as and
   keeps of fixed calls and envelopes, or its refusal's reason and what it names, and 5 filters given
@@ -166,10 +166,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   watches, and its registry's exposition, never the client or its credential — and attaches nothing
   until it is watched; `devtools: false` among a client's options refuses.
 - The DevTools extension, Chrome's first, in `implementations/typescript/devtools/` (decision
-  0015): `yarn devtools:build` builds it unpacked, and a Bead panel shows the calls and envelopes of
-  each client the page announced, filtered by client and by the package's own filter, what their
-  registries count, and, for a page with no hook, the HTTP transport's exchanges the Network panel
-  saw, read with the package's codec. `yarn test:devtools` tests it in Chromium, and CI runs it.
+  0015): `yarn devtools:build` builds it unpacked, and a Bead panel shows the calls, each by its
+  call id and its connection, and envelopes of each client the page announced, filtered by client
+  and by the package's own filter, what their registries count, and, for a page with no hook, the
+  HTTP transport's exchanges the Network panel saw, read with the package's codec.
+  `yarn test:devtools` tests it in Chromium, and CI runs it.
 - The demo's servers count into one registry, which `/metrics` serves beside `/health`, on this
   machine alone, and the `metrics` procedure over Bead, on every transport, the worker's server's
   own included; the page's client counts into one of its own. A Metrics panel shows both, a line a
@@ -267,6 +268,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   past `max-params`'s count, it judges what a third parameter may be, the elements of a rest tuple,
   a type's signatures and an event's values, and lists each exception of today with its reason;
   `yarn check` holds it to its cases.
+- Each step of the trace of calls names its call, `callId` and `connectionHandle`, on both sides
+  (decision 0013): a call made once its router drew its id; a call refused before, and a
+  notification, name none. A router's `request` takes an `onCallId`.
 
 ### Changed
 
@@ -496,6 +500,9 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   sides: each listener is called within a guard, what it throws is reported, and the call keeps its
   outcome, its answer and what goes on the wire. The twin tests that pinned the opposite are
   reversed, and one more answers a request as a listener throws on its `rx` step.
+- The C# side's server router fails a request of its own that names no connection, or that
+  subscribes, by the task it gives, as the TypeScript side's does by its promise, where it threw as
+  it was called.
 
 ## [0.1.0] - 2026-10-02
 

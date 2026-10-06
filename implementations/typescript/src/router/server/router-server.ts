@@ -507,7 +507,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   // a request of the router's own, to the connection its options name — the relay's leg B, too
   const request: IRouterServer<Transport>['request'] = (
     payload,
-    { onSent, options: requestOptions, procedure, series, subscribes }
+    { onCallId, onSent, options: requestOptions, procedure, series, subscribes }
   ) => {
     // ! a programmer's error first, before the call starts, so it is never counted
     if (subscribes !== undefined) {
@@ -569,6 +569,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     return core.request(payload, {
       connectionHandle: connectionHandle ?? named,
       credential,
+      onCallId,
       onSent,
       options: requestOptions,
       procedure,

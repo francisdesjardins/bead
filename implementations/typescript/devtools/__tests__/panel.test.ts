@@ -102,6 +102,8 @@ const latin1Of = (bytes: Uint8Array): string => {
 };
 
 const CALL = Object.freeze({
+  callId: 5,
+  connectionHandle: 'server',
   direction: 'rx',
   duration: 3,
   kind: 'call',
@@ -180,8 +182,11 @@ test.describe('the panel', () => {
 
     await page.fill('#filter', 'd(rx), -increment');
     await expect(page.locator('#calls tr')).toHaveCount(1);
+    await expect(page.locator('#calls tr')).toContainText('#5');
     await page.locator('#calls tr').click();
     await expect(page.locator('#detail')).toContainText('{"value": 1}');
+    await expect(page.locator('#detail')).toContainText('Call#5');
+    await expect(page.locator('#detail')).toContainText('Connectionserver');
 
     await page.fill('#filter', 'd(up)');
     await expect(page.locator('#filter-state')).not.toBeEmpty();

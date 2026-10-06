@@ -516,6 +516,11 @@ export interface IRouterServer<
     payload: Uint8Array,
     request: {
       /**
+       * Hears the call's id once the router drew it, before the request goes; a call refused before
+       * it draws one is never heard.
+       */
+      onCallId?: ((callId: CallId) => void) | undefined;
+      /**
        * Hears `true` as the request is handed to the transport, and `false` should the transport
        * refuse it: before `true`, or after `false`, nothing of it was tried.
        */

@@ -18,6 +18,13 @@ export interface ISourceRecord {
 
 /** One step of a call, as a source's `debug` told it, made plain. */
 export interface ICallRecord {
+  /**
+   * Its call's id, as its envelopes carry it; none for a call refused before it went, and for a
+   * notification.
+   */
+  callId?: number | undefined;
+  /** The connection its call is on, as its envelopes name it, `server` on a client; none without. */
+  connectionHandle?: string | undefined;
   /** How long the call took once it answered, in milliseconds; none before. */
   duration?: number | undefined;
   /** Its credential, by its scheme's number alone; none when it gave none of its own. */
