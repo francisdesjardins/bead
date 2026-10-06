@@ -1,16 +1,39 @@
 // ── Payloads ──────────────────────────────────────────────────────────────────
 
-// The codecs of spec section 17, `raw`, `text` and `json`: how a procedure's payload is read once it
-// is whole, and written, the same bytes from every side. Internal to the runtime, outside the
-// package's `exports`: what a serializer delegates to.
+// The codecs of spec section 17: `raw`, `text` and `json`, the same bytes from every side, and a
+// `proto` message's, made of its stock library's two functions. Public through `./service`, which
+// generated code imports: what a serializer delegates to.
+
+// dependencies
+
+import { ProgrammerError } from '../../transport/shared/errors';
 
 // interfaces
 
-/** How one encoding reads a payload and writes a value: what does not read, or write, throws. */
-export interface IPayloadCodec<Value> {
-  decode: (bytes: Uint8Array) => Value;
-  encode: (value: Value) => Uint8Array;
+/**
+ * How one encoding reads a payload and writes a value: what does not read, or write, throws. `Given`
+ * is what its writer takes, wider than what its reader gives where the encoding writes more than it
+ * reads — a protobuf message's initializer, any value a `json` writer judges at run time.
+ */
+export interface IPayloadCodec<Value, Given = Value> {
+  readonly decode: (bytes: Uint8Array) => Value;
+  readonly encode: (value: Given) => Uint8Array;
 }
+
+// types
+
+/**
+ * A JSON value, as a `json` reader gives one (spec 17.5): what it hands on, never what a writer is
+ * held to — spec 17.7 refuses at run time what this type takes, a number not finite or a surrogate
+ * alone, and writes what it refuses, a value an interface types.
+ */
+export type JsonValue =
+  | boolean
+  | number
+  | string
+  | null
+  | readonly JsonValue[]
+  | { readonly [name: string]: JsonValue };
 
 // constants
 
@@ -180,7 +203,7 @@ export const namesOnce = (text: string): boolean => {
  * The value of a `json` payload, read as spec 17.5 and 17.6 read one: its canonical form's, every
  * number a double, −0 as 0. What it refuses throws a `SyntaxError`.
  */
-const readJson = (bytes: Uint8Array): unknown => {
+const readJson = (bytes: Uint8Array): JsonValue => {
   let text: string;
 
   try {
@@ -212,7 +235,8 @@ const readJson = (bytes: Uint8Array): unknown => {
     throw new SyntaxError('the payload names a member twice');
   }
 
-  return value;
+  // * what JSON.parse gives, every leaf checked: a JSON value
+  return value as JsonValue;
 };
 
 /** What a value JSON has no value for is, for a refusal's words: its type, or its object's class. */
@@ -390,7 +414,7 @@ const passBytes = (bytes: Uint8Array): Uint8Array => {
  * canonical form. A reader's refusal is a `SyntaxError`, a writer's a `TypeError`.
  */
 export const PAYLOAD_CODECS: Readonly<{
-  json: IPayloadCodec<unknown>;
+  json: IPayloadCodec<JsonValue, unknown>;
   raw: IPayloadCodec<Uint8Array>;
   text: IPayloadCodec<string>;
 }> = Object.freeze({
@@ -398,3 +422,45 @@ export const PAYLOAD_CODECS: Readonly<{
   raw: Object.freeze({ decode: passBytes, encode: passBytes }),
   text: Object.freeze({ decode: readText, encode: writeText }),
 });
+
+/**
+ * A codec of `codec`'s two functions, frozen: a protobuf message's, from its stock library's binary
+ * reader and writer, as generated code passes them, the bound of spec 17.9.3 set in its reader. The
+ * runtime reads no field of the message; what does not read throws, and a request's payload is
+ * answered `PAYLOAD_UNDECODABLE` as any other's. One that is not a function is a
+ * {@link ProgrammerError}.
+ *
+ * @example
+ * import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+ * import { payloadCodecOf } from '@francisdesjardins/bead/service';
+ *
+ * const sayHelloRequest = payloadCodecOf({
+ *   decode: (bytes) => {
+ *     // ! protobuf-es counts the top message: 101 is spec 17.9's 100 below it
+ *     return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
+ *   },
+ *   encode: (given) => {
+ *     return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given));
+ *   },
+ * });
+ */
+export const payloadCodecOf = <Value, Given = Value>(
+  codec: IPayloadCodec<Value, Given>
+): IPayloadCodec<Value, Given> => {
+  // a caller without types may give anything
+  const given: unknown = codec;
+  const { decode, encode } = (typeof given === 'object' && given !== null ? given : {}) as Partial<
+    Record<'decode' | 'encode', unknown>
+  >;
+
+  if (typeof decode !== 'function' || typeof encode !== 'function') {
+    throw new ProgrammerError(
+      `a payload's codec is two functions, decode and encode, not ${typeof decode} and ${typeof encode}`
+    );
+  }
+
+  return Object.freeze({
+    decode: decode as IPayloadCodec<Value, Given>['decode'],
+    encode: encode as IPayloadCodec<Value, Given>['encode'],
+  });
+};

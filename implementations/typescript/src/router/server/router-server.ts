@@ -14,7 +14,7 @@ import { presentedCredentialOf, uncarriedOf } from '../shared/call-session';
 import { CredentialScheme, EnvelopeKind, SERVER_FAILURES } from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { DisconnectError, FailureError } from '../shared/errors';
-import { checkDeclaration } from '../shared/identity';
+import { checkCall, checkDeclaration } from '../shared/identity';
 import type { INotifyingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
@@ -618,6 +618,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
 
     declareRequester: (procedure) => {
       checkDeclaration(procedure);
+      checkCall(procedure, 'server-requester');
 
       return metrics?.declareRequester(procedure);
     },
@@ -660,7 +661,13 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       const targets = notifications
         .candidates({ procedureId, serviceId })
         .filter(({ connectionHandle, identifier }) => {
-          return filter === undefined || filter(connectionHandle, identifier);
+          // * its subscriber alone, as the filter's type has it: the subscription's call stays here
+          return (
+            filter === undefined ||
+            filter(
+              identifier === undefined ? { connectionHandle } : { connectionHandle, identifier }
+            )
+          );
         });
 
       // a value that does not write goes to none, never queued: each subscription it was for counts
@@ -705,6 +712,16 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       return relay.register(target, destinationOptions);
     },
     registerResolver: (resolver) => {
+      // * spec 16.10: its identity, then its call — a resolver that notifies, as the core tells
+      // one, answers a request that notifies — before the core's reasons and its registry's
+      checkDeclaration(resolver);
+      checkCall(
+        resolver,
+        typeof (resolver as { notify?: unknown }).notify === 'function'
+          ? 'server-notification-resolver'
+          : 'server-resolver'
+      );
+
       const notifying = core.registerResolver(resolver)?.notifying;
 
       if (notifying !== undefined) {

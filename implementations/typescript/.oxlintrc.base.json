@@ -286,6 +286,9 @@
     "**/test-results/**",
     "**/coverage/**",
     "**/*.d.ts",
+    // protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to its
+    // generator
+    "**/*_pb.ts",
     ".yarn/**"
   ]
 }

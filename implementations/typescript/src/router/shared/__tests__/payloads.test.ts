@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { namesOnce, PAYLOAD_CODECS } from '../payloads';
+import { ProgrammerError } from '../../../transport/shared/errors';
+import { namesOnce, PAYLOAD_CODECS, payloadCodecOf } from '../payloads';
 
 // helpers
 
@@ -194,6 +195,28 @@ test.describe('the raw codec', () => {
 
     expect(PAYLOAD_CODECS.raw.decode(bytes)).toBe(bytes);
     expect(PAYLOAD_CODECS.raw.encode(bytes)).toBe(bytes);
+  });
+});
+
+test.describe('payloadCodecOf', () => {
+  test('payloadCodecOf freezes a codec of two functions, and refuses one that is not', () => {
+    const decode = (bytes: Uint8Array): number => {
+      return bytes.length;
+    };
+    const encode = (value: number): Uint8Array => {
+      return new Uint8Array(value);
+    };
+    const codec = payloadCodecOf({ decode, encode });
+
+    expect(Object.isFrozen(codec)).toBe(true);
+    expect(codec.decode(new Uint8Array(3))).toBe(3);
+    expect(codec.encode(2)).toEqual(new Uint8Array(2));
+
+    for (const given of [undefined, null, {}, { decode }, { encode }, { decode, encode: 'x' }]) {
+      expect(() => {
+        return payloadCodecOf(given as never);
+      }, JSON.stringify(given)).toThrow(ProgrammerError);
+    }
   });
 });
 

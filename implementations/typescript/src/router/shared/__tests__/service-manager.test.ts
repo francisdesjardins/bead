@@ -6,7 +6,6 @@ import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { CancelError, TimeoutError } from '../../../transport/shared/errors';
 import { createSessionManager } from '../../server/session-manager';
 import { CredentialScheme, failureTableOf } from '../constants';
-import type { SessionIdentifier } from '../types';
 import {
   CLIENT_FAILURES,
   createServiceManager,
@@ -33,6 +32,7 @@ import {
   type IRouterResult,
   type IRouterLike,
   type IServiceManager,
+  type ISubscriber,
   type NotificationKey,
   type RouterAnswer,
   type RouterSide,
@@ -112,7 +112,7 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
     /** Each requester declared, by its procedure's name, as it was made. */
     declareRequester: [] as string[],
     notify: [] as {
-      filter: ((connectionHandle: string, identifier?: SessionIdentifier) => boolean) | undefined;
+      filter: ((subscriber: ISubscriber) => boolean) | undefined;
       key: NotificationKey | undefined;
       /** What it notifies, decoded; or why its value does not write, as the manager hands it. */
       payload: Error | IText;
@@ -304,6 +304,23 @@ test.describe('createServiceManager', () => {
 
       expect(request.name).toBe('echo');
       expect({ ...request }).toEqual(echo);
+      // * its call too, when the procedure states one: its own member, never Function's
+      expect({
+        ...manager.getRequest({ ...echo, call: 'request', procedureId: 72 }, { serializer }),
+      }).toEqual({ ...echo, call: 'request', procedureId: 72 });
+    });
+
+    test('gives a bound call no promise is, so awaiting it with its options forgotten does not compile', async () => {
+      const manager = createServiceManager(createFakeRouter().router);
+      const request = manager.getRequest(echo, { serializer });
+      const forgotten = async (): Promise<unknown> => {
+        // the very mistake the type refuses, which the lint's await-thenable sees too
+        // @ts-expect-error TS1320: the bound call awaited, its options' call forgotten, sends nothing
+        return await request({ text: 'hello' }); // oxlint-disable-line typescript/await-thenable, typescript/return-await
+      };
+
+      await expect(request({ text: 'hello' })()).resolves.toEqual({ text: 'hello' });
+      await expect(forgotten()).resolves.toBeInstanceOf(Function);
     });
 
     test('sends the encoded payload with the resolved options, and decodes the answer', async () => {
@@ -1552,8 +1569,8 @@ test.describe('createServiceManager', () => {
       await resolver.notify(
         { text: 'news' },
         {
-          filter: (handle) => {
-            return handle !== 'a';
+          filter: ({ connectionHandle }) => {
+            return connectionHandle !== 'a';
           },
         }
       );
@@ -1561,8 +1578,8 @@ test.describe('createServiceManager', () => {
         { text: 'news' },
         {
           exclude: 'c',
-          filter: (handle) => {
-            return handle !== 'a';
+          filter: ({ connectionHandle }) => {
+            return connectionHandle !== 'a';
           },
         }
       );
@@ -1571,14 +1588,14 @@ test.describe('createServiceManager', () => {
         calls.notify.map(({ filter }) => {
           return filter === undefined
             ? 'each'
-            : handles.filter((handle) => {
-                return filter(handle);
+            : handles.filter((connectionHandle) => {
+                return filter({ connectionHandle });
               });
         })
       ).toEqual(['each', ['a', 'c'], ['b', 'c'], ['b']]);
     });
 
-    test('hands the filter the identifier of the session holding each subscription, beside its connection', async () => {
+    test("hands the filter one subscriber, its connection and its session's identifier", async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
       const resolver = manager.getNotificationResolver(echo, { serializer: serverSerializer })(
@@ -1593,24 +1610,24 @@ test.describe('createServiceManager', () => {
         { text: 'news' },
         {
           exclude: 'b',
-          filter: (handle, identifier) => {
-            seen.push([handle, identifier]);
+          filter: (subscriber) => {
+            seen.push(subscriber);
 
-            return identifier !== undefined;
+            return subscriber.identifier !== undefined;
           },
         }
       );
 
       const [{ filter } = { filter: undefined }] = calls.notify;
 
-      expect([filter?.('a', grace), filter?.('a'), filter?.('b', grace)]).toEqual([
-        true,
-        false,
-        false,
-      ]);
+      expect([
+        filter?.({ connectionHandle: 'a', identifier: grace }),
+        filter?.({ connectionHandle: 'a' }),
+        filter?.({ connectionHandle: 'b', identifier: grace }),
+      ]).toEqual([true, false, false]);
       expect(seen).toEqual([
-        ['a', grace],
-        ['a', undefined],
+        { connectionHandle: 'a', identifier: grace },
+        { connectionHandle: 'a' },
       ]);
     });
 
@@ -2188,12 +2205,13 @@ test.describe('createServiceManager', () => {
       expect(heard).toEqual(['first news', 'second news']);
     });
 
-    test('the same procedure under another name, revision, deprecation or limit is a programmer error', () => {
+    test('the same procedure under another call, name, revision, deprecation or limit is a programmer error', () => {
       const manager = createServiceManager(createFakeRouter().router);
 
       manager.getNotification(echo, { serializer });
 
       for (const asked of [
+        { ...echo, call: 'notifies' as const },
         { ...echo, procedureName: 'echo2' },
         { ...echo, serviceRevision: 4 },
         { ...echo, deprecation: {} },
@@ -2219,6 +2237,27 @@ test.describe('createServiceManager', () => {
       expect(manager.getNotification(echo, { serializer: { ...serializer } })).toBe(
         manager.getNotification(echo, { serializer })
       );
+    });
+
+    test('refuses a notification asked for again at another window, none against one among them, and gives the same at the same', () => {
+      const manager = createServiceManager(createFakeRouter('client').router);
+      const paced = { ...echo, procedureId: 71 };
+      const notification = manager.getNotification(paced, { serializer, window: 4 });
+
+      expect(manager.getNotification(paced, { serializer, window: 4 })).toBe(notification);
+      expect(() => {
+        return manager.getNotification(paced, { serializer, window: 1 });
+      }).toThrow(/window 4, not 1/);
+      expect(() => {
+        return manager.getNotification(paced, { serializer });
+      }).toThrow(ProgrammerError);
+
+      const unpaced = manager.getNotification(echo, { serializer });
+
+      expect(manager.getNotification(echo, { serializer })).toBe(unpaced);
+      expect(() => {
+        return manager.getNotification(echo, { serializer, window: 1 });
+      }).toThrow(ProgrammerError);
     });
 
     test("refuses a procedure off section 16 before its own reason, a notification's asked for otherwise", () => {

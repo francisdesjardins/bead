@@ -29,6 +29,7 @@ import type {
   IRouterResult,
   IRouterLike,
   IRouterLimits,
+  ISubscriber,
   NotificationKey,
   ProcedureId,
   RedactedHeader,
@@ -87,7 +88,10 @@ export interface INotificationManager {
    * The call id a connection is subscribed to a procedure under, in a session of its own; `undefined`
    * when none.
    */
-  subscriptionOf(procedureAddress: IProcedureAddress, subscriber: ISubscriber): CallId | undefined;
+  subscriptionOf(
+    procedureAddress: IProcedureAddress,
+    subscriber: ISubscriber<TransportServerConnectionHandle>
+  ): CallId | undefined;
   /** Every subscription — `connectionHandle`'s alone, when given — as copies. */
   subscriptions(connectionHandle?: TransportServerConnectionHandle): ISubscription[];
   /**
@@ -104,26 +108,18 @@ export interface INotificationManagerOptions {
 }
 
 /**
- * Who holds a subscription: a connection, in a session of its own — a credential's, named by its
- * identifier; its connection's session, which a call presenting none runs in, none.
- */
-export interface ISubscriber {
-  connectionHandle: TransportServerConnectionHandle;
-  identifier?: SessionIdentifier | undefined;
-}
-
-/**
  * A call that subscribes: where it is, the session it holds the subscription in, and whether its
  * request asked to be paced.
  */
-export interface ISubscribingCall
-  extends ICallAddress<TransportServerConnectionHandle>, ISubscriber {
+export interface ISubscribingCall extends ICallAddress<TransportServerConnectionHandle> {
   /**
    * For a credential's session, its end as the call resolved it, in whole milliseconds since the
    * epoch, which the router times while the session holds a subscription; none for a session
    * without one.
    */
   end?: number | undefined;
+  /** A credential's session's identifier; none for its connection's session. */
+  identifier?: SessionIdentifier | undefined;
   paced?: boolean | undefined;
   /** The series its notifications count into, at the side that notifies; none counts nothing. */
   series?: INotifyingSeries | undefined;

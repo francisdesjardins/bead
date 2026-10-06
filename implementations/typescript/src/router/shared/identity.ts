@@ -1,12 +1,19 @@
 // ── Identity ──────────────────────────────────────────────────────────────────
 
 // What a side holds a procedure's identity to as it is declared, spec section 16: its ids and its
-// revision in their ranges, its name in its form, and when two names are one.
+// revision in their ranges, its name in its form, its call one its way takes, and when two names
+// are one.
 
 // dependencies
 
 import { ProgrammerError } from '../../transport/shared/errors';
+import { ProcedureCall } from './constants';
 import type { IProcedure } from './types';
+
+// types
+
+/** A way a side declares a procedure, by `spec/identities.json`'s id. */
+export type DeclarationWay = keyof typeof WAYS;
 
 // constants
 
@@ -14,6 +21,39 @@ import type { IProcedure } from './types';
 export const IdentityRefusal = Object.freeze({
   OUT_OF_ITS_RANGE: 'out of its range',
   OFF_ITS_FORM: 'off its form',
+  AGAINST_ITS_CALL: 'against its call',
+} as const);
+
+/**
+ * The calls each way a side declares a procedure takes (spec 16.11), by `spec/identities.json`'s
+ * ids, and what the way does, for a refusal's words.
+ */
+const WAYS = Object.freeze({
+  'client-notification': {
+    does: "a client's notification is of a request that notifies",
+    takes: [ProcedureCall.NOTIFIES],
+  },
+  'client-requester': {
+    does: "a client's router makes requests",
+    takes: [ProcedureCall.REQUEST, ProcedureCall.NOTIFIES],
+  },
+  'client-resolver': { does: "a client's router answers commands", takes: [ProcedureCall.COMMAND] },
+  'server-notification-resolver': {
+    does: "a server's resolver that notifies answers a request that notifies",
+    takes: [ProcedureCall.NOTIFIES],
+  },
+  'server-requester': { does: "a server's router makes commands", takes: [ProcedureCall.COMMAND] },
+  'server-resolver': {
+    does: "a server's resolver that notifies nothing answers a plain request",
+    takes: [ProcedureCall.REQUEST],
+  },
+} as const);
+
+// how a refusal names a procedure's call
+const CALL_WORDS = Object.freeze({
+  [ProcedureCall.COMMAND]: 'a command',
+  [ProcedureCall.NOTIFIES]: 'a request that notifies',
+  [ProcedureCall.REQUEST]: 'a request',
 } as const);
 
 // the bounds of 16.2: an id on its 2 bytes, 0 the protocol's (16.3); a revision from 1 to 2³¹ − 1
@@ -125,4 +165,38 @@ export const checkDeclaration = (procedure: IProcedure): void => {
       `a procedure's name is a lower-case ASCII letter, then 62 ASCII letters and digits at most, not ${JSON.stringify(procedureName)}: ${IdentityRefusal.OFF_ITS_FORM}`
     );
   }
+};
+
+/**
+ * `procedure`'s call, its own member alone: a procedure the runtime makes callable — a resolver, a
+ * requester, a notification — inherits `Function.prototype.call`, which states no call.
+ */
+export const procedureCallOf = (procedure: IProcedure): ProcedureCall | undefined => {
+  // ! never `procedure.call` read bare: on a function it is the platform's, never undefined
+  return Object.hasOwn(procedure, 'call') ? procedure.call : undefined;
+};
+
+/**
+ * Refuses a declaration of `procedure` by `way` whose call that way does not take (spec 16.11), with
+ * a {@link ProgrammerError} whose message ends with `against its call`: a requester on a client's
+ * router takes a request, and one that notifies; on a server's, a command; a resolver on a server's,
+ * a request where it notifies nothing and one that notifies where it notifies; on a client's, a
+ * command; a notification on a client's, a request that notifies. A procedure that states no call
+ * is taken every way. Run after {@link checkDeclaration}, before any reason of the router's own.
+ */
+export const checkCall = (procedure: IProcedure, way: DeclarationWay): void => {
+  const call = procedureCallOf(procedure);
+  const { procedureName } = procedure;
+  const { does, takes } = WAYS[way];
+
+  if (call === undefined || (takes as readonly ProcedureCall[]).includes(call)) {
+    return;
+  }
+
+  // a caller without types may state a call no table names
+  const words = (CALL_WORDS as Readonly<Record<string, string>>)[call] ?? `call ${call as string}`;
+
+  throw new ProgrammerError(
+    `${procedureName} is ${words}; ${does}: ${IdentityRefusal.AGAINST_ITS_CALL}`
+  );
 };

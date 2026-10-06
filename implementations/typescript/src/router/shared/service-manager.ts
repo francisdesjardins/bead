@@ -10,7 +10,7 @@ import { noop } from '../../transport/shared/noop';
 import { admissionOf, isAdmissionFailure } from './admission';
 import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT, FailureScope } from './constants';
 import { FailureError } from './errors';
-import { checkDeclaration } from './identity';
+import { checkDeclaration, procedureCallOf } from './identity';
 import { createNotification } from './notification';
 import { createProcedureMap } from './procedure-map';
 import type {
@@ -44,9 +44,9 @@ import type {
   NotificationResolverCallback,
   RequestResolverCallback,
   ResolverFailure,
+  ISubscriber,
   RouterAnswer,
   ServiceManagerEventMap,
-  SessionIdentifier,
 } from './types';
 
 // interfaces
@@ -93,6 +93,10 @@ export const REQUEST_DEFAULTS = Object.freeze({
  * `undefined` when they are the same ask.
  */
 const differenceOf = (known: IProcedure, asked: IProcedure): string | undefined => {
+  if (procedureCallOf(known) !== procedureCallOf(asked)) {
+    return `call ${String(procedureCallOf(known))}, not ${String(procedureCallOf(asked))}`;
+  }
+
   for (const field of ['maximumPayloadBytes', 'procedureName', 'serviceRevision'] as const) {
     if (known[field] !== asked[field]) {
       return `${field} ${String(known[field])}, not ${String(asked[field])}`;
@@ -178,37 +182,38 @@ export const resolveRequestOptions = (
  */
 const filterOf = <Handle extends string>(
   options?: INotifyOptions<Handle>
-): ((connectionHandle: Handle, identifier?: SessionIdentifier) => boolean) | undefined => {
+): ((subscriber: ISubscriber<Handle>) => boolean) | undefined => {
   const { exclude, filter } = options ?? {};
 
   if (exclude === undefined && filter === undefined) {
     return undefined;
   }
 
-  return (connectionHandle, identifier) => {
-    return (
-      connectionHandle !== exclude && (filter === undefined || filter(connectionHandle, identifier))
-    );
+  return (subscriber) => {
+    return subscriber.connectionHandle !== exclude && (filter === undefined || filter(subscriber));
   };
 };
 
 /**
- * The procedure alone, without whatever else the object carries: its limit, when it has one, and a
- * copy of its deprecation.
+ * The procedure alone, without whatever else the object carries: its call and its limit, when it
+ * has them, and a copy of its deprecation.
  */
-const procedureOf = ({
-  deprecation,
-  maximumPayloadBytes,
-  procedureId,
-  procedureName,
-  serviceId,
-  serviceRevision,
-}: IProcedure): IProcedure => {
+const procedureOf = (given: IProcedure): IProcedure => {
+  const {
+    deprecation,
+    maximumPayloadBytes,
+    procedureId,
+    procedureName,
+    serviceId,
+    serviceRevision,
+  } = given;
+  const call = procedureCallOf(given);
   const procedure = {
     procedureId,
     procedureName,
     serviceId,
     serviceRevision,
+    ...(call === undefined ? {} : { call }),
     ...(maximumPayloadBytes === undefined ? {} : { maximumPayloadBytes }),
   };
 
@@ -267,7 +272,11 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   const emitter = createEmitter<ServiceManagerEventMap>();
   // the notifications this manager made, one per procedure, kept for its life: asked for again,
   // the same one is given
-  const notifications = createProcedureMap<{ notification: unknown; procedure: IProcedure }>();
+  const notifications = createProcedureMap<{
+    notification: unknown;
+    procedure: IProcedure;
+    window: number | undefined;
+  }>();
 
   // whether anyone listens to `debug`: the one check a call makes while nobody does
   const isDebugging = (): boolean => {
@@ -460,7 +469,12 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
     // the router holds one notification per procedure, so a second one would never be triggered
     if (known !== undefined) {
-      const difference = differenceOf(known.procedure, procedure);
+      // * a window is the notification's, asked for once: unpaced and paced are two windows
+      const difference =
+        differenceOf(known.procedure, procedure) ??
+        (known.window === dependencies.window
+          ? undefined
+          : `window ${String(known.window)}, not ${String(dependencies.window)}`);
 
       if (difference !== undefined) {
         throw new ProgrammerError(
@@ -468,7 +482,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         );
       }
 
-      // the same procedure, name, revision, deprecation and payload limit: the same payloads
+      // the same procedure, call, name, revision, deprecation, payload limit and window: the same
+      // payloads
       return known.notification as INotification<RequestPayload, NotificationPayload>;
     }
 
@@ -501,6 +516,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     notifications.set(procedure, {
       notification,
       procedure: procedureOf(procedure),
+      window: dependencies.window,
     });
 
     return notification;
@@ -814,6 +830,7 @@ export {
   DEPRECATED_EVENT,
   DROPPED_EVENT,
   FailureScope,
+  ProcedureCall,
   ProtocolCode,
   SERVER_FAILURES,
 } from './constants';
@@ -847,6 +864,7 @@ export type {
   IAdmissionRequest,
   IApplicationFailure,
   IBeforeRequest,
+  IBoundCall,
   IDebugEvent,
   IDebugFilter,
   IFailure,
@@ -875,6 +893,7 @@ export type {
   IRequestResolverDependencies,
   IRequestResolverProps,
   IRequestSerializerClient,
+  IRegistrar,
   IRequestSerializerServer,
   IResolvedRequestOptions,
   IResponse,
@@ -884,6 +903,7 @@ export type {
   IRouterLike,
   IServiceManager,
   IServiceManagerOptions,
+  ISubscriber,
   NotificationKey,
   NotificationResolverCallback,
   ProcedureId,
@@ -901,5 +921,6 @@ export type {
   ServiceManagerOnDeprecatedCallback,
   ServiceManagerOnDroppedCallback,
   ServiceRevision,
+  SessionIdentifier,
   SessionToken,
 } from './types';

@@ -2,14 +2,14 @@
 
 // dependencies
 
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { type IClock, LONGEST_TIMER, type TimeoutId } from '../../transport/shared/clock';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { sessionKeyOf } from '../shared/call-session';
 import { CredentialScheme } from '../shared/constants';
-import type { CallId, ICallSession, SessionIdentifier } from '../shared/types';
-import type { INotificationManager, ISubscribingCall, ISubscriber } from './types';
+import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type { CallId, ICallSession, ISubscriber, SessionIdentifier } from '../shared/types';
+import type { INotificationManager, ISubscribingCall } from './types';
 
 // interfaces
 
@@ -96,7 +96,7 @@ export const createCredentialSessions = ({
   clock: IClock;
   notifications: INotificationManager;
   /** Ends what a credential's session bounds on its connection: it ended. */
-  onEnd: (subscriber: Required<ISubscriber>) => Promise<void>;
+  onEnd: (subscriber: Required<ISubscriber<TransportServerConnectionHandle>>) => Promise<void>;
 }): ICredentialSessions => {
   // by connection, then by the key the identifier gives
   const kept = new Map<TransportServerConnectionHandle, Map<string, IKept>>();

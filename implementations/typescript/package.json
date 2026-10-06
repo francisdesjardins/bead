@@ -20,6 +20,7 @@
     "./notification-manager": "./src/router/server/notification-manager.ts",
     "./router-client": "./src/router/client/router-client.ts",
     "./router-server": "./src/router/server/router-server.ts",
+    "./service": "./src/service/service.ts",
     "./service-manager": "./src/router/shared/service-manager.ts",
     "./session-manager": "./src/router/server/session-manager.ts",
     "./server": "./src/server/server.ts",
@@ -42,7 +43,7 @@
     "playground:build:file": "node demo/playground.ts",
     "docs:examples": "node tools/check-examples.mjs",
     "docs:examples:fix": "node tools/check-examples.mjs --fix",
-    "check": "yarn type-check && yarn lint --deny-warnings && yarn format:check && yarn comment-budget && yarn docs:examples",
+    "check": "yarn type-check && yarn lint --deny-warnings && yarn format:check && yarn comment-budget && yarn docs:examples && yarn protobuf:check",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint --type-aware",
@@ -52,9 +53,14 @@
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
     "test:devtools": "playwright test --config playwright.devtools.config.ts",
     "type-check": "node node_modules/typescript-7/bin/tsc --noEmit",
-    "verify:all": "yarn check && yarn test"
+    "verify:all": "yarn check && yarn test",
+    "protobuf:check": "node tools/check-protobuf.mjs",
+    "protobuf:generate": "node tools/check-protobuf.mjs --write"
   },
   "devDependencies": {
+    "@bufbuild/buf": "1.73.0",
+    "@bufbuild/protobuf": "2.16.0",
+    "@bufbuild/protoc-gen-es": "2.16.0",
     "@playwright/test": "1.63.0",
     "@sinonjs/fake-timers": "15.4.0",
     "@types/node": "^24.19.0",

@@ -69,6 +69,17 @@ export const CredentialScheme = Object.freeze({
   ELSEWHERE: 3,
 } as const);
 
+/**
+ * How a procedure is called (spec 16.11): a request a client makes of its server, such a request to
+ * a procedure that notifies, which may open a subscription to it, or a command a server makes of a
+ * client. Never a debug event's `type`, which is a step's.
+ */
+export const ProcedureCall = Object.freeze({
+  COMMAND: 'command',
+  NOTIFIES: 'notifies',
+  REQUEST: 'request',
+} as const);
+
 /** Whose code a failure's is: the protocol's, or the procedure's own. */
 export const FailureScope = Object.freeze({
   PROTOCOL: 0,
@@ -200,4 +211,5 @@ export type EnvelopeKind = (typeof EnvelopeKind)[keyof typeof EnvelopeKind];
 export type EnvelopeLayout = (typeof EnvelopeLayout)[keyof typeof EnvelopeLayout];
 export type FAILURE_KEYS = typeof FAILURE_KEYS;
 export type FailureScope = (typeof FailureScope)[keyof typeof FailureScope];
+export type ProcedureCall = (typeof ProcedureCall)[keyof typeof ProcedureCall];
 export type ProtocolCode = (typeof ProtocolCode)[keyof typeof ProtocolCode];

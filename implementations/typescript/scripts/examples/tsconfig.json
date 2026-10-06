@@ -47,6 +47,7 @@
       ],
       "@francisdesjardins/bead/router-client": ["../../src/router/client/router-client.ts"],
       "@francisdesjardins/bead/router-server": ["../../src/router/server/router-server.ts"],
+      "@francisdesjardins/bead/service": ["../../src/service/service.ts"],
       "@francisdesjardins/bead/service-manager": ["../../src/router/shared/service-manager.ts"],
       "@francisdesjardins/bead/session-manager": ["../../src/router/server/session-manager.ts"],
       "@francisdesjardins/bead/server": ["../../src/server/server.ts"],
