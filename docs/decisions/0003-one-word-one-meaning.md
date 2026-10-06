@@ -32,8 +32,9 @@ counted in bytes for a transfer and in notifications for a paced subscription, a
 not an abbreviation of ours: `HTTP`, `id`, `ws`, the scheme RFC 6455 gives WebSocket and the Node
 package named after it, whose own options keep their names (`maxPayload`).
 
-**A name that belongs to the platform, or to the application that uses Bead, is not available to
-Bead.** The C# side's HTTP client is `BeadHttpClient`, since .NET's is `HttpClient`. A word
+**A name that the platform gives every application of Bead's kind, or that the application using
+Bead declares, is not available to Bead.** The C# side's HTTP client is `BeadHttpClient`, since
+.NET's is `HttpClient`, which every application that speaks HTTP has in hand beside it. A word
 applications declare for themselves, as they name their procedures and services, would collide with
 Bead's in every one that declares it, for good and not by bad luck, so Bead takes none. Where a
 platform's rule would take a word away from the spec, the spec's word stays and the rule is
@@ -47,13 +48,17 @@ by reading the surface aloud, not by a tool, and no gate finds the next one
 ([0006](0006-a-rule-has-its-gate.md)). What holds it is review, and, for every renaming, the Tenth
 Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 
-**A better word is applied the day it is found**, with its call sites, on every side where it
-applies, in one commit ([0004](0004-one-behaviour-in-every-language.md)). Anything else leaves two
-vocabularies in the tree, and a reader who has to know which file speaks which.
+**A better word is applied on every side where it applies, with its call sites, in one commit**
+([0004](0004-one-behaviour-in-every-language.md)); until it is, the two words are an open row of the
+support matrix. Anything else leaves two vocabularies in the tree, and a reader who has to know
+which file speaks which.
 
 **A word on the wire costs more than a word in the code.** A flag's or a code's name is in the spec,
 the vectors and every implementation at once, so changing one is a change of the protocol, with the
-version that follows from it ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+version that follows from it
+([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-An abbreviation remains to remove on the TypeScript side: its reconnection option `maxAttempts`,
-where the C# side says `MaximumAttempts`, a difference between the sides besides.
+**A platform's name that only some applications meet costs a qualification where they do.** Bead's
+`HealthStatus` is ASP.NET's health checks' too: an application that uses both names one by its
+namespace (CS0104), the C# the builder generates qualifies every type as `global::Bead.`, and
+nothing is renamed for it ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
