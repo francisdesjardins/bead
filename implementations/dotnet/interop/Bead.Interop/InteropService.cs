@@ -81,7 +81,7 @@ public static class InteropService
 
     /// <summary>
     /// The names of the manifest's procedures, and whether each is a command a client offers: what
-    /// <see cref="Offer(Server{string})"/> and <see cref="OfferClient"/> register between them.
+    /// <see cref="Offer(IBeadServer{string})"/> and <see cref="OfferClient"/> register between them.
     /// </summary>
     public static IReadOnlyList<(string ProcedureName, bool IsOfferedByClient)> Procedures { get; } =
         [.. Manifest.GetProperty("procedures").EnumerateArray().Select((procedure) =>
@@ -314,7 +314,7 @@ public static class InteropService
     /// out. <c>endSession</c> ends a credential's session on every connection that keeps it, and
     /// nothing else; <c>endSessionsOf</c>, every credential's session of an issuer alike.
     /// </summary>
-    public static void Offer(Server<string> server)
+    public static void Offer(IBeadServer<string> server)
     {
         ArgumentNullException.ThrowIfNull(server);
 
@@ -322,7 +322,7 @@ public static class InteropService
     }
 
     /// <summary>
-    /// As <see cref="Offer(Server{string})"/>, on services, and sessions and the router whose relay
+    /// As <see cref="Offer(IBeadServer{string})"/>, on services, and sessions and the router whose relay
     /// takes the destinations, given apart.
     /// </summary>
     public static void Offer(ServiceManager services, (SessionManager<string> Sessions, BeforeRequest RequireSession, RouterServer Router) server)
@@ -411,9 +411,9 @@ public static class InteropService
                 request.Payload.GetProperty("value"),
                 new NotifyOptions
                 {
-                    Filter = (handle, identifier) =>
+                    Filter = (subscriber) =>
                     {
-                        return handle == connectionHandle && identifier == session;
+                        return subscriber.ConnectionHandle == connectionHandle && subscriber.Identifier == session;
                     },
                     Key = key,
                 });

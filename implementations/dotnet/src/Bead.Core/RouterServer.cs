@@ -181,7 +181,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     // the credentials' sessions kept, by connection and identifier, each while it bounds a
     // subscription: its end, and the one timer toward it
-    private readonly Dictionary<SubscriptionPlace, Kept> _kept = [];
+    private readonly Dictionary<Subscriber, Kept> _kept = [];
 
     // the requests that name a destination go on through it; none does until one is registered
     private readonly Relay _relay;
@@ -337,7 +337,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     public ProcedureSeries? DeclareRequester(Procedure procedure)
     {
         ArgumentNullException.ThrowIfNull(procedure);
-        Identity.Check(procedure, nameof(procedure));
+        Identity.Check(procedure, (DeclarationWay.ServerRequester, nameof(procedure)));
 
         return _metrics is { } metrics ? new ProcedureSeries(metrics.DeclareRequester(procedure)) : null;
     }
@@ -345,9 +345,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// <summary>
     /// Notifies each connection subscribed to a procedure, as its filter keeps them, in order: a
     /// paced subscription sends it, queues it, or ends past its bounds. Settles once each was sent or
-    /// queued; one that cannot go out is reported, and keeps none of the others from going. One whose
-    /// value did not write, <see cref="NotifyRequest.Unwritten"/>, goes to none: it is counted failed
-    /// for each subscription it was for, and reported once (spec 17.2, item 6).
+    /// queued; one that cannot go out is reported, and keeps none of the others from going.
     /// </summary>
     public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
     {
@@ -355,25 +353,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
         return _core.Loop.Run(() =>
         {
-            // who gets it is settled before any is sent
-            var targets = _notifications.Candidates(request.Procedure).Where((candidate) =>
-            {
-                return request.Filter is null
-                    || request.Filter(candidate.ConnectionHandle, _notifications.SubscriptionAt(candidate.CallId, candidate.ConnectionHandle)?.Session);
-            }).ToList();
-
-            if (request.Unwritten is { } unwritten)
-            {
-                foreach (var target in targets)
-                {
-                    _notifications.TargetOf(target.CallId, target.ConnectionHandle).Series?.Failed();
-                }
-
-                Error?.Invoke(unwritten, null);
-
-                return Task.CompletedTask;
-            }
-
+            var targets = TargetsOf(request);
             var sending = targets.Select((target) =>
             {
                 var call = new CallAddress(target.CallId, target.ConnectionHandle);
@@ -393,6 +373,29 @@ public sealed class RouterServer : IRouterLike, IDisposable
             }).ToList();
 
             return Task.WhenAll(sending);
+        });
+    }
+
+    /// <summary>
+    /// A notification whose value did not write goes to none of the subscriptions its filter keeps:
+    /// it is counted failed for each, and <paramref name="unwritten"/> reported once (spec 17.2,
+    /// item 6).
+    /// </summary>
+    public Task Notify(Exception unwritten, NotifyRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(unwritten);
+        ArgumentNullException.ThrowIfNull(request);
+
+        return _core.Loop.Run(() =>
+        {
+            foreach (var target in TargetsOf(request))
+            {
+                _notifications.TargetOf(target.CallId, target.ConnectionHandle).Series?.Failed();
+            }
+
+            Error?.Invoke(unwritten, null);
+
+            return Task.CompletedTask;
         });
     }
 
@@ -547,7 +550,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         {
             return Task.WhenAll(_kept.Keys.Where((place) =>
             {
-                return place.Session == identifier;
+                return place.Identifier == identifier;
             }).ToList().Select(EndKept).ToList());
         });
     }
@@ -571,7 +574,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         {
             return Task.WhenAll(_kept.Keys.Where((place) =>
             {
-                return place.Session is { Scheme: CredentialScheme.Jwt, Issuer: { } named } && string.Equals(named, issuer, StringComparison.Ordinal);
+                return place.Identifier is { Scheme: CredentialScheme.Jwt, Issuer: { } named } && string.Equals(named, issuer, StringComparison.Ordinal);
             }).ToList().Select(EndKept).ToList());
         });
     }
@@ -640,7 +643,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return;
         }
 
-        var place = call.Place;
+        var place = call.Subscriber;
 
         if (_kept.TryGetValue(place, out var kept))
         {
@@ -658,6 +661,19 @@ public sealed class RouterServer : IRouterLike, IDisposable
         Arm(place, kept);
     }
 
+    // the subscriptions a notification goes to, as its filter keeps them, settled before any is sent
+    private List<(string ConnectionHandle, uint CallId)> TargetsOf(NotifyRequest request)
+    {
+        return [.. _notifications.Candidates(request.Procedure).Where((candidate) =>
+        {
+            return request.Filter is null || request.Filter(new Subscriber
+            {
+                ConnectionHandle = candidate.ConnectionHandle,
+                Identifier = _notifications.SubscriptionAt(candidate.CallId, candidate.ConnectionHandle)?.Session,
+            });
+        })];
+    }
+
     // a credential's session that bounds no subscription any more is kept no more, nor timed
     private void OnUnsubscribed(Subscription subscription)
     {
@@ -666,7 +682,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return;
         }
 
-        var place = new SubscriptionPlace(subscription.ConnectionHandle, identifier);
+        var place = new Subscriber { ConnectionHandle = subscription.ConnectionHandle, Identifier = identifier };
 
         if (!_kept.TryGetValue(place, out var kept)
             || _notifications.Subscriptions(subscription.ConnectionHandle).Any((held) =>
@@ -685,7 +701,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     // later of the two, and runs with it: a credential renewed keeps its subscriptions
     private CallSession Renew(CallSession session, string connectionHandle)
     {
-        var place = new SubscriptionPlace(connectionHandle, session.Identifier);
+        var place = new Subscriber { ConnectionHandle = connectionHandle, Identifier = session.Identifier };
 
         if (!_kept.TryGetValue(place, out var kept))
         {
@@ -704,7 +720,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     // the timer toward a kept session's end, in place of the one before, from the wall clock read
     // now, never counted down: R = E − W, ended at once at R ≤ 0, else armed for R, or for the
     // longest timer, whose due reads it again
-    private void Arm(SubscriptionPlace place, Kept kept)
+    private void Arm(Subscriber place, Kept kept)
     {
         kept.Stop();
 
@@ -748,7 +764,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     // a kept session that ends ends the subscriptions it bounds on its connection, each with
     // SESSION_REQUIRED on its call id; a call still unanswered is left to its own answer
-    private Task EndKept(SubscriptionPlace place)
+    private Task EndKept(Subscriber place)
     {
         if (_kept.Remove(place, out var kept))
         {

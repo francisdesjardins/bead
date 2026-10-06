@@ -422,6 +422,19 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+
+        var server = Assert.IsAssignableFrom<IBeadServer<string>>(Server);
+
+        Assert.Same(_transport, server.Transport);
+        Assert.Same(Server.RequireSessionOrCredential, server.RequireSessionOrCredential);
+        Assert.Same(Server.RequireSession, server.RequireSession);
+        Assert.Same(Server.Services, server.Services);
+    }
+
+    [Fact]
     public async Task A_request_runs_in_its_connection_s_session_presenting_none_or_its_token_as_OPAQUE_the_session_s_data_a_copy_the_call_keeps_another_token_is_refused_SESSION_REQUIRED_whatever_its_procedure_requires()
     {
         static Envelope Presenting(Envelope request, Credential credential)

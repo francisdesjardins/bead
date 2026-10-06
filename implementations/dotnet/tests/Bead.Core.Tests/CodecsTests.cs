@@ -1,17 +1,21 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Bead.Codecs.V1;
+using Google.Protobuf;
 
 namespace Bead.Tests;
 
 /// <summary>
-/// Bead's codecs, <c>spec/codecs.json</c>, played whole through this side's (decision 0016): each
-/// payload read in its encoding, then refused, or written back to the bytes given, the value read
-/// equal by <see cref="JsonElement.DeepEquals"/> to the value read of those bytes and its raw text
-/// those very bytes, so that the value handed on is the canonical form's; each value built from its
-/// form and written, to its bytes or refused. A row a row of the support matrix excuses this side
-/// from, a value no <see cref="JsonElement"/> holds, is counted and not played. The TypeScript side
-/// plays the same file.
+/// Bead's codecs, <c>spec/codecs.json</c>, played whole through this side's (decisions 0016 and
+/// 0018): each payload read in its encoding, then refused, or written back to the bytes given, the
+/// value read equal by <see cref="JsonElement.DeepEquals"/> to the value read of those bytes and its
+/// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
+/// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the codec generated code makes
+/// of Google.Protobuf, then refused, or its fields those read; each value built from its form and
+/// written, to its bytes or refused. A row a row of the support matrix excuses this side from, a
+/// value no <see cref="JsonElement"/> holds, is counted and not played. The TypeScript side plays the
+/// same file.
 /// </summary>
 public sealed class CodecsTests
 {
@@ -21,6 +25,38 @@ public sealed class CodecsTests
     private const string Language = "C#";
 
     private static readonly JsonElement Root = Load();
+
+    // * the codec generated code makes of a proto binding: Google.Protobuf's reader and writer, Bead's
+    // bound set as generated code sets it
+    private static readonly IPayloadCodec<Probe> ProbeCodec = PayloadCodecs.Of(
+        (bytes) =>
+        {
+            // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
+            // read as a message field holds one, after its length: the library then refuses a message
+            // that ends before its bytes do, a stray end group among them, as its own parse of bytes
+            // does and its parse of a stream does not; and the top message counts, so 101 is 100
+            // below it
+            var framed = new byte[CodedOutputStream.ComputeLengthSize(bytes.Length) + bytes.Length];
+
+            using (var output = new CodedOutputStream(framed))
+            {
+                output.WriteLength(bytes.Length);
+            }
+
+            bytes.Span.CopyTo(framed.AsSpan(framed.Length - bytes.Length));
+
+            using var stream = new MemoryStream(framed, writable: false);
+            using var input = CodedInputStream.CreateWithLimits(stream, int.MaxValue, 101);
+            var message = new Probe();
+
+            input.ReadMessage(message);
+
+            return message;
+        },
+        (Probe message) =>
+        {
+            return message.ToByteArray();
+        });
 
     // helpers
 
@@ -119,6 +155,64 @@ public sealed class CodecsTests
         return value.TryGetProperty("text", out var text) ? text.GetString()! : "a\ud800b";
     }
 
+    // a string as the file writes it: its UTF-16 code units in hexadecimal, a space between two
+    private static string StringOf(JsonElement codeUnits)
+    {
+        var text = codeUnits.GetString()!;
+
+        return text.Length == 0
+            ? ""
+            : new string([.. text.Split(' ').Select((unit) =>
+            {
+                return (char)ushort.Parse(unit, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            })]);
+    }
+
+    // a string's UTF-16 code units, as the file writes them
+    private static string CodeUnitsOf(string text)
+    {
+        return string.Join(' ', text.Select((unit) =>
+        {
+            return ((ushort)unit).ToString("X4", CultureInfo.InvariantCulture);
+        }));
+    }
+
+    // a probe built from its form: one field, or none
+    private static Probe ProbeOf(JsonElement form)
+    {
+        var probe = new Probe();
+
+        if (form.TryGetProperty("text", out var text))
+        {
+            probe.Text = StringOf(text);
+        }
+
+        if (form.TryGetProperty("number", out var number))
+        {
+            probe.Number = number.GetUInt32();
+        }
+
+        if (form.TryGetProperty("child", out _))
+        {
+            probe.Child = new Probe();
+        }
+
+        return probe;
+    }
+
+    // how many messages nest below a probe, through its child
+    private static int NestedOf(Probe probe)
+    {
+        var nested = 0;
+
+        for (var child = probe.Child; child is not null; child = child.Child)
+        {
+            nested += 1;
+        }
+
+        return nested;
+    }
+
     // what the writer of an encoding writes of a value given in its form
     private static ReadOnlyMemory<byte> WrittenOf(JsonElement entry)
     {
@@ -128,6 +222,7 @@ public sealed class CodecsTests
         {
             "json" => Payloads.WriteJson(ElementOf(value)),
             "text" => Payloads.WriteText(TextOf(value)),
+            "proto" => ProbeCodec.Encode(ProbeOf(value.GetProperty("probe"))),
             _ => Payloads.WriteRaw(BytesOf(value.GetProperty("bytes"))),
         };
     }
@@ -188,6 +283,24 @@ public sealed class CodecsTests
                 Assert.Equal(textWritten, Payloads.WriteText(text).ToArray());
                 Assert.Equal(Payloads.ReadText(textWritten), text);
                 break;
+            case "proto":
+                if (isRefused)
+                {
+                    Assert.Throws<InvalidProtocolBufferException>(() =>
+                    {
+                        return ProbeCodec.Decode(bytes);
+                    });
+
+                    return;
+                }
+
+                var probe = ProbeCodec.Decode(bytes);
+                var read = entry.GetProperty("read");
+
+                Assert.Equal(
+                    (read.GetProperty("text").GetString(), read.GetProperty("number").GetUInt32(), read.GetProperty("nested").GetInt32()),
+                    (CodeUnitsOf(probe.Text), probe.Number, NestedOf(probe)));
+                break;
             default:
                 Assert.False(isRefused);
                 Assert.Equal(BytesOf(entry.GetProperty("written")), Payloads.WriteRaw(Payloads.ReadRaw(bytes)).ToArray());
@@ -212,6 +325,30 @@ public sealed class CodecsTests
         }
 
         Assert.Equal(BytesOf(entry.GetProperty("written")), WrittenOf(entry).ToArray());
+    }
+
+    [Fact]
+    public void A_proto_field_at_another_wire_type_as_Google_Protobuf_reads_it()
+    {
+        // * text at the varint wire type, number at the length-delimited one, child at fixed32: each
+        // kept as an unknown field, and written back as it came
+        foreach (var given in new[] { "08 61", "12 00", "15 01 02 03 04" })
+        {
+            var bytes = Convert.FromHexString(given.Replace(" ", "", StringComparison.Ordinal));
+            var probe = ProbeCodec.Decode(bytes);
+
+            Assert.Equal(("", 0u, (Probe?)null), (probe.Text, probe.Number, probe.Child));
+            Assert.Equal(bytes, ProbeCodec.Encode(probe).ToArray());
+        }
+    }
+
+    [Fact]
+    public void A_proto_string_holding_a_surrogate_alone_as_Google_Protobuf_writes_it()
+    {
+        var probe = new Probe { Text = string.Concat("a", (char)0xD800, "b") };
+
+        // * repaired, U+FFFD in its place, where text and json refuse it
+        Assert.Equal(Convert.FromHexString("0A0561EFBFBD62"), ProbeCodec.Encode(probe).ToArray());
     }
 
     [Fact]

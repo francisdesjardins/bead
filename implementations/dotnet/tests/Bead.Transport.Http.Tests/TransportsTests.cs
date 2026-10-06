@@ -315,7 +315,7 @@ public sealed class TransportsTests
         });
         var transport = server.Transport;
 
-        InteropService.Offer(server.Services, (server.Sessions, server.RequireSession, server.Router));
+        InteropService.Offer(server);
 
         return new Served
         {

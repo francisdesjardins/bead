@@ -116,7 +116,7 @@ public sealed record ServerOptions
 /// session, and a session stored for a connection already closed goes at once.
 /// </summary>
 /// <typeparam name="TData">What a session keeps.</typeparam>
-public sealed class Server<TData> : IAsyncDisposable
+public sealed class Server<TData> : IBeadServer<TData>
 {
     private readonly Lock _gate = new();
     private readonly TimeSpan _connectionInactivityTimeout;

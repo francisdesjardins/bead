@@ -1397,7 +1397,7 @@ public sealed class ServiceManagerTests
         var (payload, request) = Assert.Single(router.Notified);
 
         Assert.Equal(new Text("news"), payload);
-        Assert.Equal(new NotifyRequest(Echo.Address, null, null), request);
+        Assert.Equal(new NotifyRequest { Procedure = Echo.Address }, request);
     }
 
     [Fact]
@@ -1458,17 +1458,17 @@ public sealed class ServiceManagerTests
         await resolver.Notify(new Text("news"), new NotifyOptions { Exclude = "b" }).WaitAsync(Patience, Cancelled);
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
-            Filter = (handle, _) =>
+            Filter = (subscriber) =>
             {
-                return handle != "a";
+                return subscriber.ConnectionHandle != "a";
             },
         }).WaitAsync(Patience, Cancelled);
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
             Exclude = "c",
-            Filter = (handle, _) =>
+            Filter = (subscriber) =>
             {
-                return handle != "a";
+                return subscriber.ConnectionHandle != "a";
             },
         }).WaitAsync(Patience, Cancelled);
 
@@ -1479,7 +1479,7 @@ public sealed class ServiceManagerTests
                 return notified.Request.Filter is { } filter
                     ? string.Join(' ', handles.Where((handle) =>
                     {
-                        return filter(handle, null);
+                        return filter(new Subscriber { ConnectionHandle = handle });
                     }))
                     : "each";
             }));
@@ -1800,6 +1800,31 @@ public sealed class ServiceManagerTests
 
         Assert.Equal(2, manager.GetNotification(Echo, Notified(window: 2)).Window);
         Assert.Null(manager.GetNotification(Echo with { ProcedureId = 9 }, Notified()).Window);
+    }
+
+    [Fact]
+    public void Refuses_a_notification_asked_for_again_at_another_window_none_against_one_among_them_and_gives_the_same_at_the_same()
+    {
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
+        var paced = manager.GetNotification(Echo, Notified(window: 4));
+        var unpaced = manager.GetNotification(Echo with { ProcedureId = 9 }, Notified());
+
+        Assert.Same(paced, manager.GetNotification(Echo, Notified(window: 4)));
+        Assert.Same(unpaced, manager.GetNotification(Echo with { ProcedureId = 9 }, Notified()));
+        Assert.Equal("2/1 is already a notification with window 4, not window 1", Assert.Throws<InvalidOperationException>(() =>
+        {
+            return manager.GetNotification(Echo, Notified(window: 1));
+        }).Message);
+
+        // * unpaced and paced are two windows, one of them none
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            return manager.GetNotification(Echo, Notified());
+        });
+        Assert.Equal("2/9 is already a notification with no window, not window 1", Assert.Throws<InvalidOperationException>(() =>
+        {
+            return manager.GetNotification(Echo with { ProcedureId = 9 }, Notified(window: 1));
+        }).Message);
     }
 
     [Fact]
@@ -2237,7 +2262,7 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public async Task Hands_the_filter_the_identifier_of_the_session_holding_each_subscription_beside_its_connection()
+    public async Task Hands_the_filter_one_subscriber_its_connection_and_its_session_s_identifier()
     {
         var router = new RecordingRouter();
         var resolver = new ServiceManager(router).GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
@@ -2247,17 +2272,24 @@ public sealed class ServiceManagerTests
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
             Exclude = "b",
-            Filter = (handle, identifier) =>
+            Filter = (subscriber) =>
             {
-                heard.Add((handle, identifier));
+                heard.Add((subscriber.ConnectionHandle, subscriber.Identifier));
 
-                return identifier == grace;
+                return subscriber.Identifier == grace;
             },
         }).WaitAsync(Patience, Cancelled);
 
         var filter = Assert.Single(router.Notified).Request.Filter!;
 
-        Assert.Equal([true, false, false], new[] { filter("a", grace), filter("a", null), filter("b", grace) });
+        Assert.Equal(
+            [true, false, false],
+            new[]
+            {
+                filter(new Subscriber { ConnectionHandle = "a", Identifier = grace }),
+                filter(new Subscriber { ConnectionHandle = "a" }),
+                filter(new Subscriber { ConnectionHandle = "b", Identifier = grace }),
+            });
         Assert.Equal([("a", (SessionIdentifier?)grace), ("a", null)], heard);
     }
 
@@ -2552,16 +2584,25 @@ public sealed class ServiceManagerTests
         {
             lock (_gate)
             {
-                if (request.Unwritten is { } unwritten)
-                {
-                    Unwritten.Add(unwritten);
-                }
-                else
-                {
-                    Notified.Add((Json.Decode(payload), request));
-                }
+                Notified.Add((Json.Decode(payload), request));
             }
 
+            await Notifying();
+        }
+
+        public async Task Notify(Exception unwritten, NotifyRequest request)
+        {
+            lock (_gate)
+            {
+                Unwritten.Add(unwritten);
+            }
+
+            await Notifying();
+        }
+
+        // a notification handed on settles as the test lets it, with the error it gives
+        private async Task Notifying()
+        {
             await NotifyGate;
 
             if (NotifyError is { } error)

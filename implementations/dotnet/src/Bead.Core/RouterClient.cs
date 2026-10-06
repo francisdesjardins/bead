@@ -348,6 +348,12 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         return Task.FromException(new InvalidOperationException("only a server notifies; a client asks with a request"));
     }
 
+    /// <summary>Only a server notifies, even what did not write: an <see cref="InvalidOperationException"/>.</summary>
+    public Task Notify(Exception unwritten, NotifyRequest request)
+    {
+        return Task.FromException(new InvalidOperationException("only a server notifies; a client asks with a request"));
+    }
+
     /// <summary>Only a server subscribes a connection: an <see cref="InvalidOperationException"/>.</summary>
     public Task<uint> Subscribe(AnswerTarget target)
     {
@@ -377,15 +383,15 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     public ProcedureSeries? DeclareRequester(Procedure procedure)
     {
         ArgumentNullException.ThrowIfNull(procedure);
-        Identity.Check(procedure, nameof(procedure));
+        Identity.Check(procedure, (DeclarationWay.ClientRequester, nameof(procedure)));
 
         return _metrics is { } metrics ? new ProcedureSeries(metrics.DeclareRequester(procedure)) : null;
     }
 
     /// <summary>
     /// Holds a notification for its procedure, declared to its registry as the side that hears
-    /// (spec/debugging.md 7.2): one out of its range or off its form (spec 16.10), first, is an
-    /// <see cref="ArgumentException"/>; a second for the same procedure an
+    /// (spec/debugging.md 7.2): one out of its range, off its form or against its call (spec 16.10),
+    /// first, is an <see cref="ArgumentException"/>; a second for the same procedure an
     /// <see cref="InvalidOperationException"/>; and one its registry refuses an
     /// <see cref="ArgumentException"/>.
     /// </summary>
@@ -395,7 +401,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
         try
         {
-            Identity.Check(notification.Procedure, nameof(notification));
+            Identity.Check(notification.Procedure, (DeclarationWay.ClientNotification, nameof(notification)));
         }
         catch (ArgumentException refused)
         {

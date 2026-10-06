@@ -238,6 +238,36 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
+    public async Task Hands_the_filter_one_subscriber_its_connection_and_its_session_s_identifier()
+    {
+        var seen = new List<Subscriber>();
+
+        StartKeeping();
+        Deliver(First, SubscribingOf(1));
+        SubscribeElsewhere(First, (3, "ada +5000"));
+        await Settle();
+
+        await Router.Notify(BytesOf("to none"), new NotifyRequest
+        {
+            Procedure = News.Address,
+            Filter = (subscriber) =>
+            {
+                seen.Add(subscriber);
+
+                return false;
+            },
+        }).WaitAsync(Patience, Cancelled);
+
+        // * its subscriber alone: nothing of the subscription's call reaches a filter
+        Assert.Equal(
+            [
+                new Subscriber { ConnectionHandle = First },
+                new Subscriber { ConnectionHandle = First, Identifier = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "ada" } },
+            ],
+            seen);
+    }
+
+    [Fact]
     public async Task Ends_nothing_in_the_turn_after_its_end_was_reached_for_a_session_forgotten_or_renewed_meanwhile()
     {
         using var renewing = new ManualResetEventSlim();

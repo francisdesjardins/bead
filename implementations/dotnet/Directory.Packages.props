@@ -1,6 +1,8 @@
 <Project>
   <!-- One version per package, for every project, as `yarn constraints` holds one per dependency. -->
   <ItemGroup>
+    <PackageVersion Include="Google.Protobuf" Version="3.36.2" />
+    <PackageVersion Include="Grpc.Tools" Version="2.84.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />

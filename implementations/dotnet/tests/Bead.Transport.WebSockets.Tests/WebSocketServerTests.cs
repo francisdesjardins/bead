@@ -415,6 +415,20 @@ public sealed class WebSocketServerTests
     // definition
 
     [Fact]
+    public async Task Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    {
+        await using var server = new WebSocketServer<string>();
+
+        var beadServer = Assert.IsAssignableFrom<IBeadServer<string>>(server);
+
+        Assert.Same(server.Transport, beadServer.Transport);
+        Assert.Same(server.Router, beadServer.Router);
+        Assert.Same(server.RequireSession, beadServer.RequireSession);
+        Assert.NotNull(server.RequireSessionOrCredential);
+        Assert.Same(server.RequireSessionOrCredential, beadServer.RequireSessionOrCredential);
+    }
+
+    [Fact]
     public async Task WebSocketServer_builds_on_a_WebSocket_transport_server_not_yet_started_with_its_layers_and_the_limits_given()
     {
         // the TypeScript side takes a factory for each layer; this side builds its own

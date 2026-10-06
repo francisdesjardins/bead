@@ -56,7 +56,7 @@ public sealed class HttpServerTests
         return Convert.ToHexStringLower(SHA256.HashData(payload));
     }
 
-    private static Func<string, Requester<string>> TextRequester(ServiceManager services, Procedure procedure)
+    private static Func<string, BoundCall<string>> TextRequester(ServiceManager services, Procedure procedure)
     {
         return services.GetRequest(procedure, new RequestDependencies<string, string> { Serializer = Text });
     }
@@ -166,6 +166,20 @@ public sealed class HttpServerTests
     }
 
     // definition
+
+    [Fact]
+    public async Task Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    {
+        await using var server = new HttpServer<string>();
+
+        var beadServer = Assert.IsAssignableFrom<IBeadServer<string>>(server);
+
+        Assert.Same(server.Transport, beadServer.Transport);
+        Assert.Same(server.Router, beadServer.Router);
+        Assert.Same(server.RequireSession, beadServer.RequireSession);
+        Assert.NotNull(server.RequireSessionOrCredential);
+        Assert.Same(server.RequireSessionOrCredential, beadServer.RequireSessionOrCredential);
+    }
 
     [Fact]
     public async Task Open_a_session_by_a_request_and_answer_within_it_refusing_before_it()

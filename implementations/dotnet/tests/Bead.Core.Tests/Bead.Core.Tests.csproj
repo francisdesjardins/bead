@@ -12,6 +12,14 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <!-- the proto rows of the codecs, read and written by the platform's stock library and the code its generator writes -->
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the fixed message of the proto rows, Bead.Codecs.V1.Probe, generated as each build runs -->
+    <Protobuf Include="../../../../spec/codecs.proto" ProtoRoot="../../../../spec" GrpcServices="None" />
   </ItemGroup>
 
   <ItemGroup>

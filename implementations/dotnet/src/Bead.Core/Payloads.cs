@@ -11,9 +11,9 @@ namespace Bead;
 /// The encodings of a payload, as spec section 17 states them (decision 0016): <c>raw</c>, its
 /// bytes; <c>text</c>, a string in UTF-8, read strictly; <c>json</c>, one JSON text in UTF-8, read
 /// as an I-JSON message is read but for its noncharacters, and written in the canonical form of
-/// RFC 8785, so that one value has one form whichever side writes it. Internal until the builder
-/// names them; the interop's serializers delegate to them. What does not read, or does not write,
-/// is a <see cref="FormatException"/> saying why, in this side's words.
+/// RFC 8785, so that one value has one form whichever side writes it. <see cref="PayloadCodecs"/>
+/// gives them as codecs, and the interop's serializers delegate to them. What does not read, or does
+/// not write, is a <see cref="FormatException"/> saying why, in this side's words.
 /// </summary>
 internal static class Payloads
 {

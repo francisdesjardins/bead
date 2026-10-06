@@ -12,24 +12,18 @@ internal readonly record struct SubscribingCall(uint CallId, string ConnectionHa
     /// <summary>Its call's session: a credential's, by its identifier, or none for its connection's.</summary>
     public CallSession? Session { get; init; }
 
-    /// <summary>Where it subscribes: its connection, and its session's identifier, none for its connection's.</summary>
-    public SubscriptionPlace Place
+    /// <summary>
+    /// Who it subscribes, the place of its subscription (spec 11.3): its connection, and its session's
+    /// identifier, none for its connection's, which a call presenting none or OPAQUE counts as.
+    /// </summary>
+    public Subscriber Subscriber
     {
         get
         {
-            return new SubscriptionPlace(ConnectionHandle, Session?.Identifier);
+            return new Subscriber { ConnectionHandle = ConnectionHandle, Identifier = Session?.Identifier };
         }
     }
 }
-
-/// <summary>
-/// Where a subscription is held (spec 11.3): its connection, and the session of its calls — a
-/// credential's, by its identifier, or none for the connection's, which a call presenting none or
-/// OPAQUE counts as.
-/// </summary>
-/// <param name="ConnectionHandle">Its connection.</param>
-/// <param name="Session">Its credential's session's identifier; none for its connection's session.</param>
-internal readonly record struct SubscriptionPlace(string ConnectionHandle, SessionIdentifier? Session);
 
 /// <summary>One subscription: which procedure, which connection, under which call id.</summary>
 /// <param name="CallId">The call id it travels on.</param>
@@ -51,7 +45,7 @@ internal sealed class NotificationManager(PacingLimits limits)
 {
     // in the order they were made, as a JavaScript map keeps them: a session's end fails them, and a
     // notification goes to them, in that order
-    private readonly Dictionary<ProcedureAddress, OrderedDictionary<SubscriptionPlace, uint>> _candidates = [];
+    private readonly Dictionary<ProcedureAddress, OrderedDictionary<Subscriber, uint>> _candidates = [];
     private readonly Dictionary<string, OrderedDictionary<uint, Target>> _targets = [];
 
     /// <summary>What hears each subscription as it goes, however it goes.</summary>
@@ -183,7 +177,7 @@ internal sealed class NotificationManager(PacingLimits limits)
     /// </summary>
     public uint Register(ProcedureAddress procedure, SubscribingCall call)
     {
-        if (SubscriptionOf(procedure, call.Place) is { } holder)
+        if (SubscriptionOf(procedure, call.Subscriber) is { } holder)
         {
             throw new InvalidOperationException(
                 $"{call.ConnectionHandle} is subscribed to {procedure.ServiceId}/{procedure.ProcedureId} under call {holder} already, in that session");
@@ -206,7 +200,7 @@ internal sealed class NotificationManager(PacingLimits limits)
             _targets[call.ConnectionHandle] = targets;
         }
 
-        candidates[call.Place] = call.CallId;
+        candidates[call.Subscriber] = call.CallId;
         targets[call.CallId] = new Target(
             new Subscription(call.CallId, call.ConnectionHandle, procedure) { Session = call.Session?.Identifier },
             call.Paced ? new NotificationPacing(limits) : null)
@@ -224,11 +218,11 @@ internal sealed class NotificationManager(PacingLimits limits)
     /// </summary>
     public uint? SubscriptionOf(ProcedureAddress procedure, string connectionHandle)
     {
-        return SubscriptionOf(procedure, new SubscriptionPlace(connectionHandle, null));
+        return SubscriptionOf(procedure, new Subscriber { ConnectionHandle = connectionHandle });
     }
 
     /// <summary>The call id a place holds its subscription to <paramref name="procedure"/> under.</summary>
-    public uint? SubscriptionOf(ProcedureAddress procedure, SubscriptionPlace place)
+    public uint? SubscriptionOf(ProcedureAddress procedure, Subscriber place)
     {
         return _candidates.TryGetValue(procedure, out var candidates) && candidates.TryGetValue(place, out var callId)
             ? callId
@@ -274,7 +268,7 @@ internal sealed class NotificationManager(PacingLimits limits)
     private void Remove(Target target)
     {
         var (callId, connectionHandle, procedure) = target.Subscription;
-        var place = new SubscriptionPlace(connectionHandle, target.Subscription.Session);
+        var place = new Subscriber { ConnectionHandle = connectionHandle, Identifier = target.Subscription.Session };
 
         if (_targets.TryGetValue(connectionHandle, out var targets))
         {

@@ -606,6 +606,11 @@ public sealed partial class DurationsTests
             return Task.CompletedTask;
         }
 
+        public Task Notify(Exception unwritten, NotifyRequest request)
+        {
+            return Task.CompletedTask;
+        }
+
         public Task<uint> Subscribe(AnswerTarget target)
         {
             return Task.FromResult(target.Header.CallId);
