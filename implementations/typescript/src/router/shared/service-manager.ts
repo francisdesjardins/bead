@@ -8,7 +8,13 @@ import { ProgrammerError, TimeoutError, toError } from '../../transport/shared/e
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { noop } from '../../transport/shared/noop';
 import { admissionOf, isAdmissionFailure } from './admission';
-import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT, FailureScope } from './constants';
+import {
+  DEBUG_EVENT,
+  DEPRECATED_EVENT,
+  DROPPED_EVENT,
+  FailureScope,
+  SERVER_CONNECTION_HANDLE,
+} from './constants';
 import { FailureError } from './errors';
 import { checkDeclaration } from './identity';
 import { createNotification } from './notification';
@@ -62,6 +68,8 @@ interface IStarted {
 
 /** One step of a call, as `trace` tells it to `debug`. */
 interface ITraceStep<Handle extends string> {
+  /** Its call's id: a call made's once its router drew it, a request received's from its header. */
+  callId?: CallId | undefined;
   /** The connection the call came from or goes to, which a listener's error is reported with. */
   connectionHandle?: Handle | undefined;
   direction: DebugDirection;
@@ -74,6 +82,15 @@ interface ITraceStep<Handle extends string> {
   started: IStarted;
   tx?: unknown;
   type: DebugType;
+}
+
+/** A call made while someone listens: its steps' common part, and the id its router drew. */
+interface ITracedCall<Handle extends string> {
+  /** Its router's id for it, once `onCallId` heard it; none while it has not. */
+  callId: CallId | undefined;
+  /** What its router's `request` is handed, to hear the id it draws. */
+  readonly onCallId: (callId: CallId) => void;
+  readonly step: Omit<ITraceStep<Handle>, 'direction'>;
 }
 
 // types
@@ -223,6 +240,23 @@ const procedureOf = (given: IProcedure): IProcedure => {
   return deprecation === undefined ? procedure : { ...procedure, deprecation: { ...deprecation } };
 };
 
+/** A call made, traced from `step`, which hears the id its router draws. */
+const tracedCallOf = <Handle extends string>(
+  step: Omit<ITraceStep<Handle>, 'direction'>
+): ITracedCall<Handle> => {
+  // ! apart from `callOf`, and called only while someone listens: a closure made in that async
+  // body would hold its locals in a context V8 makes at every call, listened to or not
+  const traced: ITracedCall<Handle> = {
+    callId: undefined,
+    onCallId: (callId) => {
+      traced.callId = callId;
+    },
+    step,
+  };
+
+  return traced;
+};
+
 /** A copy for `debug`, or the value itself when it cannot be cloned: a trace never fails a call. */
 const snapshot = (value: unknown): unknown => {
   try {
@@ -303,8 +337,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       return;
     }
 
-    const { connectionHandle, direction, error = null, isAnswered = false, options } = step;
-    const { rx, started, tx, type } = step;
+    const { callId, connectionHandle, direction, error = null, isAnswered = false } = step;
+    const { options, rx, started, tx, type } = step;
     // ! the credential a call presents stays out of what is told: its token, or what its transport
     // carries, never reaches a listener
     const { credential: _credential, ...told } = options ?? {};
@@ -316,6 +350,13 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       params: [
         error,
         {
+          callId,
+          // a step names its connection with its call, the server on a client, and none without
+          connectionHandle:
+            callId === undefined
+              ? undefined
+              : (connectionHandle ??
+                (router.failures.side === 'client' ? SERVER_CONNECTION_HANDLE : undefined)),
           direction,
           duration: isAnswered
             ? Math.trunc(clock.performance.now() - started.timestamp)
@@ -362,33 +403,38 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         const connectionHandle = options?.connectionHandle;
         const encoded = serializer.encode(requestPayload);
         // * the one check a call makes while nobody listens: no clock is read, no step is built
-        const step = isDebugging()
-          ? {
+        const traced = isDebugging()
+          ? tracedCallOf<Handle>({
               connectionHandle,
               options: resolvedOptions,
               started: startedNow(),
               tx: requestPayload,
               type,
-            }
+            })
           : undefined;
-
-        if (step !== undefined) {
-          trace(procedure, { ...step, direction: 'tx' });
-        }
 
         if (deprecation !== undefined) {
           emitter.emit(DEPRECATED_EVENT, procedureOf(procedure));
         }
 
+        const requested = router.request(encoded, {
+          onCallId: traced?.onCallId,
+          options: resolvedOptions,
+          procedure: procedureOf(procedure),
+          series,
+          subscribes: subscribes?.(),
+        });
+
+        // ! told as `request` returns, before the await, on every path: with the id its router
+        // drew, or none for a call refused first; a listener never runs in its router's turn
+        if (traced !== undefined) {
+          trace(procedure, { ...traced.step, callId: traced.callId, direction: 'tx' });
+        }
+
         let result: IRouterResult;
 
         try {
-          result = await router.request(encoded, {
-            options: resolvedOptions,
-            procedure: procedureOf(procedure),
-            series,
-            subscribes: subscribes?.(),
-          });
+          result = await requested;
         } catch (reason) {
           // a connection that let it go unanswered is closed, when the call or the manager says so
           if (reason instanceof TimeoutError && closeOnTimeout && connectionHandle !== undefined) {
@@ -396,10 +442,18 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
           }
 
           // what the call fails with once it went out is told as its answer
-          if (step !== undefined) {
+          if (traced !== undefined) {
+            const { callId, step } = traced;
             const rx = tracedFailureOf(reason);
 
-            trace(procedure, { ...step, direction: 'rx', error: reason, isAnswered: true, rx });
+            trace(procedure, {
+              ...step,
+              callId,
+              direction: 'rx',
+              error: reason,
+              isAnswered: true,
+              rx,
+            });
           }
 
           throw reason;
@@ -422,17 +476,33 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
             }
           );
 
-          if (step !== undefined) {
+          if (traced !== undefined) {
+            const { callId, step } = traced;
             const rx = tracedFailureOf(failure);
 
-            trace(procedure, { ...step, direction: 'rx', error: failure, isAnswered: true, rx });
+            trace(procedure, {
+              ...step,
+              callId,
+              direction: 'rx',
+              error: failure,
+              isAnswered: true,
+              rx,
+            });
           }
 
           throw failure;
         }
 
-        if (step !== undefined) {
-          trace(procedure, { ...step, direction: 'rx', isAnswered: true, rx: responsePayload });
+        if (traced !== undefined) {
+          const { callId, step } = traced;
+
+          trace(procedure, {
+            ...step,
+            callId,
+            direction: 'rx',
+            isAnswered: true,
+            rx: responsePayload,
+          });
         }
 
         return { callId: header.callId, payload: responsePayload };
@@ -585,7 +655,14 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       }
 
       if (started !== undefined) {
-        trace(procedure, { connectionHandle, direction: 'rx', rx: requestPayload, started, type });
+        trace(procedure, {
+          callId: header.callId,
+          connectionHandle,
+          direction: 'rx',
+          rx: requestPayload,
+          started,
+          type,
+        });
       }
 
       // the callback is handed the request, decoded, its call's session, and no more
@@ -613,6 +690,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
         if (started !== undefined) {
           trace(procedure, {
+            callId: header.callId,
             connectionHandle,
             direction: 'tx',
             isAnswered: true,

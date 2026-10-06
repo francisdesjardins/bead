@@ -11,6 +11,8 @@ import { callRecordOf, envelopeRecordOf, plainHeaderOf } from '../records';
 // helpers
 
 const EVENT: IDebugEvent = Object.freeze({
+  callId: 9,
+  connectionHandle: 'server',
   direction: 'rx',
   duration: 12,
   options: {

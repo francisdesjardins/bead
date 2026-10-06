@@ -12,6 +12,8 @@ const eventOf = (
   { direction = 'tx', type = 'request' }: { direction?: DebugDirection; type?: DebugType } = {}
 ): IDebugEvent => {
   return {
+    callId: undefined,
+    connectionHandle: undefined,
     direction,
     duration: undefined,
     options: undefined,

@@ -9,7 +9,12 @@ import { createEventMethods } from '../../transport/shared/lifecycle';
 import { CLOSE_EVENT, MESSAGE_EVENT, RECONNECT_EVENT } from '../../transport/shared/constants';
 import type { ITransportMessage } from '../../transport/shared/types';
 import { connectionSessionOf, presentedCredentialOf, uncarriedOf } from '../shared/call-session';
-import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind } from '../shared/constants';
+import {
+  CLIENT_FAILURES,
+  CredentialScheme,
+  EnvelopeKind,
+  SERVER_CONNECTION_HANDLE,
+} from '../shared/constants';
 import { assertLimitsHoldJwt, createCredentialResolver } from '../shared/credentials';
 import { FailureError } from '../shared/errors';
 import { checkDeclaration, checkProcedureKind } from '../shared/identity';
@@ -38,6 +43,7 @@ export {
   FailureScope,
   LIMIT_DEFAULTS,
   ProtocolCode,
+  SERVER_CONNECTION_HANDLE,
   SERVER_FAILURES,
 } from '../shared/constants';
 export { filterEnvelopeDebug, parseDebugFilter } from '../shared/debug-filter';
@@ -129,11 +135,6 @@ interface IClientPacing {
   settled: number;
   readonly window: number;
 }
-
-// constants
-
-/** The one peer a client has: every request reaching it comes from the server. */
-export const SERVER_CONNECTION_HANDLE: RouterClientConnectionHandle = 'server';
 
 // helpers
 
@@ -599,7 +600,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       core.registerResolver(resolver);
     },
     report,
-    request: (payload, { onSent, options, procedure, series, subscribes }) => {
+    request: (payload, { onCallId, onSent, options, procedure, series, subscribes }) => {
       const connectionHandle = SERVER_CONNECTION_HANDLE;
 
       // ! a programmer's error first, before the call starts, so it is never counted: only the
@@ -661,15 +662,22 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       };
 
       if (subscribes === undefined) {
-        return core.request(payload, { ...sent, transportCredential: carried }).catch(withdrawing);
+        return core
+          .request(payload, { ...sent, onCallId, transportCredential: carried })
+          .catch(withdrawing);
       }
 
-      const { onCallId, release } = bindingOf(subscribes, options.timeout);
+      const binding = bindingOf(subscribes, options.timeout);
 
       return core
         .request(payload, {
           ...sent,
-          onCallId,
+          // ! bound first, then the id told its caller: whatever hears it finds the subscription
+          // held, and a notification right behind the result reaches it
+          onCallId: (callId) => {
+            binding.onCallId(callId);
+            onCallId?.(callId);
+          },
           opensSubscription: true,
           paced: subscribes.window !== undefined,
           transportCredential: carried,
@@ -690,7 +698,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
             return result;
           },
           (reason: unknown) => {
-            release();
+            binding.release();
 
             return withdrawing(reason);
           }

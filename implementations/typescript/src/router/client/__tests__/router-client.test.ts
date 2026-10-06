@@ -5,8 +5,10 @@ import { createEmitter } from '../../../transport/shared/emitter';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { toSessionToken } from '../../shared/identifiers';
+import { createServiceManager } from '../../shared/service-manager';
 import type {
   Announcement,
+  CallId,
   DefaultCredential,
   Envelope,
   INotificationLike,
@@ -51,6 +53,22 @@ const service: IProcedure = {
   serviceRevision: 3,
 };
 const options = { timeout: 1_000 };
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/** Text both ways, a notification's too, for a service manager over the router. */
+const text = {
+  decode: (bytes: Uint8Array) => {
+    return decoder.decode(bytes);
+  },
+  decodeNotification: (bytes: Uint8Array) => {
+    return decoder.decode(bytes);
+  },
+  encode: (value: string) => {
+    return encoder.encode(value);
+  },
+};
 
 const TOKEN = toSessionToken(new Uint8Array(16).fill(1));
 const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
@@ -2295,6 +2313,124 @@ test.describe('createRouterClient', () => {
       expect(sent).toHaveLength(1);
       expect(heard).toEqual(['tx', 'rx']);
       expect(errors).toEqual([failure, failure]);
+    });
+
+    test('tells a call’s steps with the call id its REQUEST carries', async () => {
+      const { deliver, transport } = createScriptedTransport();
+      // a payload past 1,000 bytes goes as a transfer
+      using router = createRouterClient(transport, {
+        limits: { chunkBytes: 1_000, maximumEnvelopeBytes: 1_000, windowBytes: 2_000 },
+      });
+      const services = createServiceManager(router);
+      const asking = services.getRequest(service, { serializer: text });
+      const envelopes: unknown[] = [];
+      const steps: unknown[] = [];
+
+      router.on('debug', ({ direction, header }) => {
+        envelopes.push([direction, header.kind, header.callId, 'total' in header]);
+      });
+      services.on('debug', (_error, { callId, direction }) => {
+        steps.push([direction, callId]);
+      });
+
+      const whole = asking('a')(options);
+
+      deliver(resultOf(1, { payload: text.encode('b') }));
+      await expect(whole).resolves.toBe('b');
+
+      // its opening carries its call id as a whole request does; the server refuses it there
+      const opening = asking('x'.repeat(3_000))(options);
+
+      deliver(sessionRequiredOf(3));
+      await expect(opening).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+
+      // * each trace in its own order: no order between a step and its envelope
+      expect(envelopes).toEqual([
+        ['tx', EnvelopeKind.REQUEST, 1, false],
+        ['rx', EnvelopeKind.RESULT, 1, false],
+        ['tx', EnvelopeKind.REQUEST, 3, true],
+        ['rx', EnvelopeKind.FAILURE, 3, false],
+      ]);
+      expect(steps).toEqual([
+        ['tx', 1],
+        ['rx', 1],
+        ['tx', 3],
+        ['rx', 3],
+      ]);
+    });
+
+    test('two calls to one procedure started in one millisecond and answered in one batch name each its own call id', async () => {
+      const start = Date.UTC(2026, 0, 1);
+      const { deliver, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { clock: createTestClock(start) });
+      const services = createServiceManager(router);
+      const asking = services.getRequest(service, { serializer: text });
+      const steps: [
+        direction: string,
+        callId: CallId | undefined,
+        startedAt: number,
+        seen: unknown,
+      ][] = [];
+
+      services.on('debug', (_error, { callId, direction, rx, startedAt, tx }) => {
+        steps.push([direction, callId, startedAt, direction === 'tx' ? tx : rx]);
+      });
+
+      const first = asking('a')(options);
+      const second = asking('b')(options);
+
+      // one batch, in one turn, the second call's answer first
+      deliver(resultOf(3, { payload: text.encode('answers b') }));
+      deliver(resultOf(1, { payload: text.encode('answers a') }));
+
+      await expect(Promise.all([first, second])).resolves.toEqual(['answers a', 'answers b']);
+      expect(
+        steps.filter(([direction]) => {
+          return direction === 'tx';
+        })
+      ).toEqual([
+        ['tx', 1, start, 'a'],
+        ['tx', 3, start, 'b'],
+      ]);
+      expect(
+        steps
+          .filter(([direction]) => {
+            return direction === 'rx';
+          })
+          .toSorted(([, one = 0], [, other = 0]) => {
+            return one - other;
+          })
+      ).toEqual([
+        ['rx', 1, start, 'answers a'],
+        ['rx', 3, start, 'answers b'],
+      ]);
+    });
+
+    test('a subscribing call binds its subscription before debug hears its tx step', async () => {
+      const { deliver, transport } = createScriptedTransport();
+      using router = createRouterClient(transport);
+      const errors = recordErrors(router);
+      const services = createServiceManager(router);
+      const notification = services.getNotification(service, { serializer: text });
+      const heard: string[] = [];
+
+      // a notification right behind its result, delivered as the tx step is told
+      services.on('debug', (_error, { callId, direction, type }) => {
+        if (direction === 'tx' && type === 'request' && callId !== undefined) {
+          deliver(notificationEnvelopeOf(callId, text.encode('first news')));
+        }
+      });
+
+      const registering = notification('subscribe', (news) => {
+        heard.push(news);
+      })(options);
+
+      await sleep(0);
+      deliver(resultOf(1));
+      await registering;
+
+      expect(heard).toEqual(['first news']);
+      expect(errors).toEqual([]);
     });
   });
 

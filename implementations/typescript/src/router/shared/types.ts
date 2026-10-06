@@ -842,11 +842,19 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   /**
    * Sends a request and resolves with its result. With `subscribes` — the notification the router
    * holds for the procedure — the call subscribes it: the request says it opens a subscription, and
-   * what comes under its call id triggers the notification.
+   * what comes under its call id triggers the notification. It fails by the promise it gives, never
+   * by a throw: the manager tells the call's `tx` step once it returns, so a router that throws
+   * loses that step.
    */
   request(
     payload: Uint8Array,
     request: {
+      /**
+       * Hears the call's id once the router drew it, before the request goes; a call refused before
+       * it draws one is never heard. A router that never calls it leaves each step of its calls
+       * naming no call, as a call refused before its id does.
+       */
+      onCallId?: ((callId: CallId) => void) | undefined;
       options: IResolvedRequestOptions;
       procedure: IProcedure;
       /** The series its requester's declaration gave; a call that carries none counts as `_OTHER`. */
@@ -1097,6 +1105,18 @@ export interface IDebugFilter {
 
 /** What one step of a call told whoever listens to `debug`. */
 export interface IDebugEvent {
+  /**
+   * Its call's id, as its envelopes carry it: a call made's once its router drew it, a request
+   * received's from its header; `undefined` for a call refused before its id was drawn, and for a
+   * notification, which goes to each subscription under that one's id. OpenTelemetry's
+   * `jsonrpc.request.id`, at its Development status.
+   */
+  callId: CallId | undefined;
+  /**
+   * The connection its call is on, as its envelopes name it, `server` on a client; `undefined` where
+   * the step names no call: a call refused before its id was drawn, a notification.
+   */
+  connectionHandle: string | undefined;
   direction: DebugDirection;
   /**
    * How long the call took once it answered, in whole milliseconds of its router clock's monotonic
