@@ -128,15 +128,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the transports' file come from one module of the generators.
 - `spec/debugging.md`, the spec's companion (decision 0013), at version 0.1.0 of its own: what a
   side traces, filters and counts beside the wire, which a constrained profile may leave out and
-  still conform to the wire. It states the trace of calls and of envelopes; a listener's error,
-  which never changes a call; the cost while nobody listens, and two build switches; the debug
-  filter's grammar in ABNF, in ASCII alone, and its refusals by reason; and a registry of metrics,
-  its declarations, its ceiling, nine families under OpenTelemetry's RPC names, `bead` for `rpc`,
-  every series made at 0, the router's gates and every exit of a call, A66's buckets in whole
-  microseconds with each `le` OpenMetrics' canonical number, and its exposition's bytes in the
-  Prometheus text format 0.0.4. `spec/spec.md` says where it stands beside it, and decision 0008's
-  spec axis carries its version, which moves as the spec's does, a release whose companion moved
-  tagging `debugging-v` and that version.
+  still conform to the wire. It states the trace of calls and of envelopes, each step of a call
+  naming its call; a listener's error, which never changes a call; the cost while nobody listens,
+  and two build switches; the debug filter's grammar in ABNF, in ASCII alone, and its refusals by
+  reason; and a registry of metrics, its declarations, its ceiling, nine families under
+  OpenTelemetry's RPC names, `bead` for `rpc`, every series made at 0, the router's gates and every
+  exit of a call, A66's buckets in whole microseconds with each `le` OpenMetrics' canonical number,
+  and its exposition's bytes in the Prometheus text format 0.0.4. `spec/spec.md` says where it
+  stands beside it, and decision 0008's spec axis carries its version, which moves as the spec's
+  does, a release whose companion moved tagging `debugging-v` and that version.
 - `spec/debug-filters.json` and `spec/metrics.json`, their schemas and their generators, each
   repeating the companion's version as its `debuggingVersion`: 52 filters, what each reads as and
   keeps of fixed calls and envelopes, or its refusal's reason and what it names, and 5 filters given

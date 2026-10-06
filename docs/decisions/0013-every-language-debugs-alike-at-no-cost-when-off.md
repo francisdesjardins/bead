@@ -30,6 +30,19 @@ answers answer `PROCEDURE_FAILED`: a listener that throws on a call's answer wou
 into a rejection, and one that throws on a request's step would leave the request unanswered, its
 requester waiting out its timeout.
 
+**A step names its call by a key, not by an order.** Without a call id, a trace of calls is linked
+to the trace of envelopes by order and by its start. On the TypeScript side that order holds, an
+HTTP batch of answers included, but it rests on the depth of a promise chain no test pins; on the
+C# side it holds for one call, not across the threads that make calls. On a server, requests
+received from many connections hold one id at once. Six ways were weighed: none, the order pinned
+by a test, which one language cannot keep; the step told inside the router's turn, which puts a
+listener on the C# router's scheduler, where one connection's listener stalls every other; the
+router telling the steps, which undoes where the trace lives; the id given back by `request`,
+which a timeout, a cancel and a connection gone carry none of; the id on the answer's step alone,
+which leaves a call in flight to its position; and the manager telling the step once its router
+drew the id, from its own flow. Chosen: the last. The field follows OpenTelemetry's
+`jsonrpc.request.id`, at Development status.
+
 **A dashboard asks**, per service and per procedure, how many calls, how many failed and why, how
 long they took, and how many are under way. A gauge counts what a layer holds now, never per
 procedure; health is a verdict for a probe, `application/health+json`, which no scraper reads; and a
@@ -143,6 +156,7 @@ listener, a record and an object, a `TimeSpan` and milliseconds.
 | The registry           | `createMetricsRegistry({ maximumProcedures })`, `IMetricsRegistry`; `metricsRegistry`     | `new MetricsRegistry(options)`, `MetricsRegistryOptions`; `MetricsRegistry`                        |
 | Its exposition         | `registry.exposition()`, `IMetricsExposition`: `{ contentType, text }`                    | `registry.Exposition()`, `MetricsExposition(ContentType, Text)`                                    |
 | A requester's series   | `router.declareRequester(procedure)`, `IProcedureSeries`; the router's request's `series` | `router.DeclareRequester(procedure)`, `ProcedureSeries`; `RouterRequest.Series`                    |
+| A step's call          | `IDebugEvent`'s `callId` and `connectionHandle`; the router's request's `onCallId`        | `DebugEvent.CallId`, `DebugEvent.ConnectionHandle`; `RouterRequest.OnCallId`                       |
 
 `metricsRegistry` and `MetricsRegistry` are a router's option, which the servers and clients that
 build a router pass on. The registry is not `Metrics`: `prometheus-net`'s static class of that name
@@ -158,7 +172,12 @@ with their defaults applied and its credential left out, and an envelope's heade
 credential's scheme in place of its credential, so the header a trace hands on is the one redacted.
 A client's trace of envelopes names its connection, `server`, as a server's names each of its own. A
 call's `startedAt` is on the wall clock and its `duration` whole milliseconds on the monotonic
-reading ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
+reading ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). Each step of a call
+names it as its envelopes do, `callId` and `connectionHandle`, `server` on a client: a call made
+once its router drew its id, which the router's `request` hands its manager through `onCallId`,
+`OnCallId`; a request received by its header's. The manager tells a call's `tx` step from its own
+flow once it holds the id, never from its router's turn. A call refused before its id is drawn
+names none, and neither does a notification, sent or heard (debugging 4.1, 4.2, 4.4).
 
 **A listener's error never changes a call** (debugging 2.2 and 2.3). It is reported, as spec 9.0
 reports an error, through the router's `error` event, `Error`; the call goes on as if nobody
@@ -261,6 +280,22 @@ the C# side's threads stay with twin tests.
 
 ## Consequences
 
+**A call made is told once its id is drawn.** On the TypeScript side its `tx` step comes in the
+caller's turn, after its REQUEST is traced; a deprecated procedure's `deprecated` comes before it.
+The call has started by then, so a `tx` listener's synchronous work counts in its duration when it
+outlasts the round trip, as any work of the caller's turn does. On the C# side the step is told
+once the id is heard, off the caller's thread unless its router drew the id before the manager
+awaits it: steps of calls made from one thread come in no order among themselves, and a listener
+counts on no caller's stack. A listener never runs on a router's scheduler.
+
+**A step's call id is the wire's, and lives as long as its call.** A reader keys a step and its
+envelopes by connection and call id between the call's opening and its end; a log longer than a
+call id's turn sees an id again.
+
+**The hook costs one empty reference a call.** The request a manager hands its router carries
+`onCallId`, empty while nobody listens, as it carries the series of the registry: 8 bytes a call
+on .NET, about 6 a literal on V8.
+
 **A filter runs in its listener**: a listener that keeps one procedure pays for every event built,
 and turning the trace on is a cost an application chooses.
 
@@ -315,7 +350,7 @@ supervision link or a relay's, is the C side's to decide.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-three rounds. Its objections, each with the answer that holds:
+four rounds. Its objections, each with the answer that holds:
 
 ### The first round
 
@@ -351,3 +386,19 @@ three rounds. Its objections, each with the answer that holds:
 | Objection                                                                                                                                             | Answer                                                                                                                                                                                                                                                             |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | The latency bench is a gate in this record and in the decisions' README, not in 0006's gates owed, and the change strikes it from the companion alone | Accepted: no clause of section 3 states a threshold a bench could fail on, so it measures and gates nothing. It leaves the companion's 3.4 and this record's gates together, stays here as what a bench measures, and the README names it under "Where Bead goes". |
+
+### On the call id
+
+| Objection                                                                                                                                                                                                                                       | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Two calls to one procedure, started in one millisecond and answered in one HTTP batch, are told apart by nothing; on the TypeScript side they are linked by position, and on the C# side order is lost only across threads                      | Accepted: the batch is linked by position on the TypeScript side, under a promise chain no test pins; on the C# side one call's step comes before its request. The Context states the need as a key in place of an order, and weighs pinning the order by a test, which one language cannot keep.                                                                                                                                                                                                                                                     |
+| The id on the answer's step alone is refused for leaving calls in flight unlinked, yet it closes the batch, and the standard a step maps to needs the id only once the call ends                                                                | Accepted in part: the id on the answer's step alone closes the batch and moves nothing, and a panel links a call in flight by its turn; it is weighed fairly, and loses to the manager telling the step once its router drew the id, which names every step at the same cost while nobody listens and links a call in flight across threads for a reader of C# logs. `jsonrpc.request.id` is an attribute set any time before its span ends, which favours neither.                                                                                   |
+| Telling the step inside `OnCallId` puts it on the C# router's scheduler, which keeps application code off on purpose: one slow listener stalls every connection of a server, and one that makes a blocking call on the same router deadlocks it | Accepted: the step is never told inside the router's turn. The manager tells it from its own flow; a task source made with `RunContinuationsAsynchronously` keeps its continuation off the scheduler, and a C# test pins it.                                                                                                                                                                                                                                                                                                                          |
+| Debugging 4.4's order sentence forces the step told inside the router's turn, and telling it from the manager's own flow once the id is drawn is never weighed                                                                                  | Accepted: the manager's own flow is the decision. Debugging 4.4 states that a call names its call once its id is drawn and that its `tx` step comes before its `rx` step, no order against its envelope; the twin test asserts the id, not the order. On the TypeScript side the step comes in the caller's turn, after its REQUEST, in the order the calls were made.                                                                                                                                                                                |
+| Told inside the core, a listener's work counts in the call's duration, a listener's call re-enters mid-call, refused calls lose their order, and a caller's stack sits under the core's frames                                                  | Accepted in part: told from the manager's own flow, the step avoids the re-entry, the reorder and the deeper stack on the TypeScript side. The counted duration still spans a `tx` listener's synchronous work when it outlasts the round trip, since the call has started; the Consequences say so. On the C# side the step is told off the caller's thread unless its router drew the id first, unordered across calls, with no caller's stack to count on; said too. `deprecated` comes before the `tx` step on both sides, pinned by a twin test. |
+| A `tx` step told only on failure is lost on success over a router that draws no id; an absent id means three things; a panel's fallback for an older Bead covers none                                                                           | Accepted: the manager tells the `tx` step at one place on every path, named or not. `IRouterLike`'s doc states the router's duty on both sides; a notification names none by its type; the extension keeps no fallback, and the hook's protocol stays 1.                                                                                                                                                                                                                                                                                              |
+| `connectionHandle` is no option once each step names its call: a server's step without its connection names nothing; and the reason given covers only requests received                                                                         | Accepted: `connectionHandle` is part of the decision, for a server's steps and to key a client's as its envelopes are. The Context limits "one id open on many connections" to requests received; a server's commands draw from one sequence for the router on both sides.                                                                                                                                                                                                                                                                            |
+| The cost while nobody listens is not none: the request handed to the router gains a field on every call, which a reflection check cannot see                                                                                                    | Accepted: one empty reference a call, 8 bytes on .NET and about 6 a literal on V8, as the series is paid; debugging 3.1 says so. The C# allocation gate is pinned absolute, which sees a field and a display class alike.                                                                                                                                                                                                                                                                                                                             |
+| The id of a notification heard buys nothing and changes two public interfaces: a client holds one notification per procedure, bound to one call at a time                                                                                       | Accepted: a notification heard names no call, and `trigger`, `Trigger` stay as they are; a reader keys it by its source and its procedure, whose subscribing call names the id.                                                                                                                                                                                                                                                                                                                                                                       |
+| The bytes of an envelope are a second decision bundled into this one                                                                                                                                                                            | Accepted: they are left to a decision of their own, when the panel's view of exchanges needs them.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| No standard is named for the field                                                                                                                                                                                                              | Accepted: the field follows OpenTelemetry's `jsonrpc.request.id`, at Development status, named in the Context, the nearest convention for a wire's own request id on an RPC span; Bead is not JSON-RPC, and a bridge writes the id as its string.                                                                                                                                                                                                                                                                                                     |

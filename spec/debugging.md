@@ -52,7 +52,8 @@ the same.
 
 3.1. While nobody listens and no registry is given, a call MUST read no clock and allocate nothing
 for debugging: no step, no copy of its options or its payloads, no redacted header. One check a call,
-and one an envelope, is the whole cost.
+and one an envelope, is the whole cost. What a call allocates for itself may hold an empty reference
+the trace or the registry fills, the hook through which its call id is heard among them.
 
 3.2. A side that traces reads, at a call's start, the wall clock for `startedAt` and the monotonic
 clock for `duration`, and the monotonic clock at its end.
@@ -93,20 +94,28 @@ side, each in its platform's case:
 | `options`                      | the call's options, its defaults applied, its credential left out                                                               |
 | `rx`, `tx`                     | what came in and what went out, decoded                                                                                         |
 | the error, beside the step     | what the step failed with; a failure by its code, its scope and its detail                                                      |
+| `callId`, `connectionHandle`   | its call, as its envelopes name it (5.1): its call id, and its connection, `server` on a client; none where 4.2 names none      |
 
-4.2. The steps it tells:
+4.2. The steps it tells, and the call each names:
 
-| Step                                                     | Direction |
-| -------------------------------------------------------- | --------- |
-| a call made                                              | `tx`      |
-| its answer, or its failure                               | `rx`      |
-| a request received, once admitted and decoded            | `rx`      |
-| the answer it sends                                      | `tx`      |
-| a notification sent, and its failure to go at that start | `tx`      |
-| a notification heard, or its failure to decode           | `rx`      |
+| Step                                                     | Direction | Its call                                                    |
+| -------------------------------------------------------- | --------- | ----------------------------------------------------------- |
+| a call made                                              | `tx`      | its own, once its router drew its id; none if refused first |
+| its answer, or its failure                               | `rx`      | the call made's                                             |
+| a request received, once admitted and decoded            | `rx`      | its request's                                               |
+| the answer it sends                                      | `tx`      | its request's                                               |
+| a notification sent, and its failure to go at that start | `tx`      | none: it goes to each subscription under that one's id      |
+| a notification heard, or its failure to decode           | `rx`      | none: its subscription's call names it                      |
 
 4.3. A request refused by its admission, or whose payload does not decode, is not traced; nor is a
-call whose value does not write, which is not made (`spec.md` 17.2).
+call whose value does not write, which is not made (`spec.md` 17.2). A relayed call is no call of a
+service manager's at the relay: neither of its legs is traced as one, and their envelopes are, each
+leg under its own call id (5.1).
+
+4.4. A call made names its call once its router drew its id, and its `tx` step is told then; one its
+router refuses before drawing an id names none, and its `tx` step is told as it is refused. Its `tx`
+step comes before its `rx` step. A call id names its call on its connection while the call is open:
+once it ended, its router may draw it again (`spec.md` 9.1).
 
 ## 5. The trace of envelopes
 
