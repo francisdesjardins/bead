@@ -1,7 +1,7 @@
 # 0018 — A service's procedures are typed descriptors, served and called through one layer in each runtime
 
 - **Status**: accepted
-- **Scope**: both runtimes' public surface: a procedure's call, checked by each router as it is
+- **Scope**: both runtimes' public surface: a procedure's kind, checked by each router as it is
   declared; the payload codecs made public; the admission vocabulary; the failure catalogue; the
   typed descriptors, and their room for a validator; the service layer that serves and calls them;
   the notify filter's argument; a notification asked for again at another window; the bound call
@@ -11,8 +11,8 @@
   `spec/identities.json`, its schema and its generator; spec section 17's `proto` encoding, with
   `spec/codecs.proto`, `spec/codecs.json`'s `proto` rows, its schema, its generator, `spec/check.py`
   and `spec/uncited.txt`; both sides' test toolchains, which gain each side's stock protobuf library
-  and generator; the support matrix; [0003](0003-one-word-one-meaning.md)'s sentence on _type_; the
-  builder's design; the CHANGELOG
+  and generator; the support matrix; [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_;
+  the builder's design; the CHANGELOG
 
 ## Context
 
@@ -80,7 +80,7 @@ result of another type and a subscription from a plain request's callback each f
 
 Each item of the builder's round, in its order.
 
-**1. A procedure's call.**
+**1. A procedure's kind.**
 
 - A third value of the trace's `type`, `notification`: a request to a procedure that notifies may
   open no subscription (spec 11.2), and the trace and the metrics count the subscribing call as a
@@ -92,27 +92,31 @@ Each item of the builder's round, in its order.
   which the trace gives a step, not a procedure: its `type` takes `notification`
   (`spec/debugging.md` 4.1; `DebugType` on both sides), and a notification sent for a procedure of
   type `request` is traced `notification`.
-- **One optional member, `call`: `request`, `notifies` or `command`. Chosen**, the user's choice: it
-  mirrors the builder's `oneof call { Notifies notifies; Command command; }`, chosen there because it
-  makes a command that notifies impossible to write, plus the value an unset `oneof` means, a plain
-  request, since on a hand-written procedure an absent member checks nothing. No state needs a
-  refusal, and the word is the options' own; the manifest takes it too.
+- **One optional member, `procedureKind`: `request`, `notifies` or `command`. Chosen**, the user's
+  choice: it mirrors the builder's `oneof procedure_kind { Notifies notifies; Command command; }`,
+  whose local name protobuf-es reads `procedureKind`, word for word, chosen there because it makes a
+  command that notifies impossible to write, plus the value an unset `oneof` means, a plain request,
+  since on a hand-written procedure an absent member checks nothing. No state needs a refusal, and
+  the word is the options' own; the manifest takes it too. It is neither a _call_, a request and its
+  answer ([0003](0003-one-word-one-meaning.md)), nor a member a function has, since the runtime
+  merges a procedure into the callable it hands out; and it is never its envelopes' kind, every call
+  opening with a `REQUEST`, a command's too.
 
 Where it is checked:
 
 - **The service manager, by the accessor's name**: `getRequest` on a server's manager, for a
-  procedure of call `request`, passes, yet its call goes to a client, and the registry counts it a
+  procedure of kind `request`, passes, yet its call goes to a client, and the registry counts it a
   command. The accessor does not say the side; the router does.
 - **Each router, at its declaration, by the way it is declared. Chosen.** A router knows its side,
   and whether a resolver notifies before it registers it: `typeof resolver.notify === 'function'`,
   `resolver is INotificationResolver`. A notification is registered on a client's router alone. The
   ways are `spec/identities.json`'s own, six of them: `client-resolver`, `server-resolver`,
   `server-notification-resolver`, `client-requester`, `server-requester`, `client-notification`. A
-  resolver that notifies is a way of its own, since a server's router takes another call of it than
+  resolver that notifies is a way of its own, since a server's router takes another kind of it than
   of a plain one. The manager adds no reason of its own, and 0017's paragraph "The service manager
   checks first where it refuses first" stands as it is: it checks the procedure's identity, once.
 
-What each way takes, the procedure's `call` given:
+What each way takes, the procedure's `procedureKind` given:
 
 | Way                            | Takes                 | Refuses                                                                         |
 | ------------------------------ | --------------------- | ------------------------------------------------------------------------------- |
@@ -127,16 +131,16 @@ A request to a procedure that notifies, by a `client-requester`, is taken: it op
 (spec 11.2).
 
 Where it is stated: each router's own, with twin tests; or **a third reason of spec 16.10's table,
-`against its call`, after `out of its range` and `off its form`, with `spec/identities.json` gaining
+`against its kind`, after `out of its range` and `off its form`, with `spec/identities.json` gaining
 a group of declarations played per way, as [0006](0006-a-rule-has-its-gate.md) asks a rule's gate
 and as 0017 pinned there refusals no peer sees. Chosen**, the user's choice: a third language takes
 the rule from the file, where twin tests hold two sides alone, and the spec's minor moves in this
 round already, for `proto`. Section 16.11 says what each way takes. A side built without the trace
-and the metrics, which never refuses `off its form`, still refuses `against its call`, which needs
+and the metrics, which never refuses `off its form`, still refuses `against its kind`, which needs
 no name.
 
-_Conformance:_ 16.10, 16.11 and `spec/identities.json`'s `calls`, six declarations each played
-the six ways. _Matrix:_ the feature row "The identity rules" counts the call.
+_Conformance:_ 16.10, 16.11 and `spec/identities.json`'s `procedureKinds`, six declarations each
+played the six ways. _Matrix:_ the feature row "The identity rules" counts the procedure's kind.
 
 **2. The codecs made public.**
 
@@ -437,24 +441,30 @@ _Conformance:_ none. _Matrix:_ the feature row "The service layer".
 **A procedure says how it is called.** `IProcedure` and `Procedure` gain one optional member:
 
 ```ts
-/** How a procedure is called: a request, a request that may also notify (spec 11.2), or a command a server makes of a client. */
-export const ProcedureCall = Object.freeze({
+/**
+ * A procedure's kind, how it is called: a request, a request that may also notify (spec 11.2), or a
+ * command a server makes of a client. Never an envelope's kind, which is `REQUEST` for every call.
+ */
+export const ProcedureKind = Object.freeze({
   COMMAND: 'command',
   NOTIFIES: 'notifies',
   REQUEST: 'request',
 } as const);
-export type ProcedureCall = (typeof ProcedureCall)[keyof typeof ProcedureCall];
+export type ProcedureKind = (typeof ProcedureKind)[keyof typeof ProcedureKind];
 
 export interface IProcedure extends IProcedureAddress {
   // … its ids, name, revision, limit and deprecation
-  /** How it is called; not given, nothing checks it. Never a debug event's `type`, which is a step's. */
-  call?: ProcedureCall | undefined;
+  /** Its kind; not given, nothing checks it. Never a debug event's `type`, which is a step's. */
+  procedureKind?: ProcedureKind | undefined;
 }
 ```
 
 ```csharp
-/// <summary>How a procedure is called: a request, a request that may also notify (spec 11.2), or a command a server makes of a client.</summary>
-public enum ProcedureCall
+/// <summary>
+/// A procedure's kind, how it is called: a request, a request that may also notify (spec 11.2), or a
+/// command a server makes of a client. Never an envelope's kind, which is REQUEST for every call.
+/// </summary>
+public enum ProcedureKind
 {
     /// <summary>A request a client makes of its server.</summary>
     Request,
@@ -469,8 +479,10 @@ public enum ProcedureCall
 public sealed record Procedure
 {
     // … its ids, name, revision, limit and deprecation
-    /// <summary>How it is called; none checks nothing.</summary>
-    public ProcedureCall? Call { get; init; }
+    // ! named as its type: inside this record, ProcedureKind is this property, so a member written
+    // here names the enum Bead.ProcedureKind
+    /// <summary>Its kind; none checks nothing.</summary>
+    public ProcedureKind? ProcedureKind { get; init; }
 }
 ```
 
@@ -479,17 +491,17 @@ of item 1), after its identity and before any reason of the router's own or its 
 declaration refused declares nothing. A resolver is checked before it is registered and declared to
 the registry; a requester before `declareRequester` hands it on; a notification before it is
 registered. The refusal is the router's, as 16.10's are on each side: a `ProgrammerError`, an
-`ArgumentException`, its sentence naming the procedure, its call and what the way takes, the
-TypeScript one ending with `against its call`. The service manager checks a procedure's identity
-alone, first; the call is the routers', so a notification of a procedure whose call is `request` is
-refused as it is registered with its router. `procedureOf` carries `call`, and a notification asked
-for again with another `call` is asked for otherwise. A debug event never lays the procedure's
-`call` out beside its `type`.
+`ArgumentException`, its sentence naming the procedure, its kind and what the way takes, the
+TypeScript one ending with `against its kind`. The service manager checks a procedure's identity
+alone, first; the kind is the routers', so a notification of a procedure whose kind is `request` is
+refused as it is registered with its router. `procedureOf` carries `procedureKind`, and a
+notification asked for again with another `procedureKind` is asked for otherwise. A debug event
+never lays the procedure's kind out beside its `type`.
 
-On the TypeScript side, a procedure the runtime makes callable — a resolver, a requester, a
-notification — is a function, and inherits `Function.prototype.call`: the runtime reads a
-procedure's call as its own member alone, `procedureCallOf` in `router/shared/identity.ts`, never
-`procedure.call` bare.
+A procedure the runtime makes callable — a resolver, a requester, a notification — is a function
+that carries its procedure's members as its own, read bare, none of them a member a function has:
+its `call`, `apply` and `bind` stay the platform's, which a test of `service-manager.test.ts`
+holds.
 
 **The payload codecs are public, and a protobuf message's codec is made from two functions.**
 
@@ -801,7 +813,7 @@ export interface IDescriptorInit {
   readonly validate?: ((request: unknown) => void) | undefined;
 }
 
-/** A request's descriptor, `notification` given for a procedure that notifies: its procedure's call set. */
+/** A request's descriptor, `notification` given for a procedure that notifies: its procedure's kind set. */
 export const requestOf: <const Init extends IRequestInit>(init: Init) => RequestDescriptor<Init>;
 
 /** A command's descriptor: a command never notifies. */
@@ -809,7 +821,7 @@ export const commandOf: <const Init extends IDescriptorInit>(init: Init) => Comm
 ```
 
 ```csharp
-/// <summary>A procedure of the service whose type tag is TService, whatever its call.</summary>
+/// <summary>A procedure of the service whose type tag is TService, whatever its kind.</summary>
 public interface IServiceProcedure<TService>
 {
     Procedure Procedure { get; }
@@ -846,10 +858,10 @@ public sealed record ProcedureBindings<TRequest, TResult>
 // and ProcedureBindings<TRequest, TResult, TNotification>, with a required Notification
 ```
 
-A descriptor sets its procedure's `call`: `request` or `notifies` by `requestOf` and the request
+A descriptor sets its procedure's `procedureKind`: `request` or `notifies` by `requestOf` and the request
 classes, as `notification` is given or not, and `command` by `commandOf` and `CommandProcedure`; a
 procedure that states another is refused as the descriptor is made, and so is a codec missing. A
-descriptor is no declaration: its identity and its call are checked as it is declared (spec 16.10),
+descriptor is no declaration: its identity and its kind are checked as it is declared (spec 16.10),
 by `on`, `offer`, or the client side's building.
 
 `validate` is empty until a later step fills it. The side that answers calls it on the decoded
@@ -1149,7 +1161,7 @@ gaining `RequireSessionOrCredential` and giving their transport by an explicit i
 
 **The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
-`failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureCall`,
+`failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureKind`,
 `GENERATED_CODE_SUPPORTS_VERSION_1`, `FailureError`, `ProgrammerError`, and their types. A generated
 file imports nothing else of Bead's.
 
@@ -1162,18 +1174,19 @@ an older constant is kept within a major.
 **Where it lives.** The TypeScript side: `src/service/` — `service.ts` the entry,
 `service-server.ts`, `service-client.ts`, `descriptors.ts`, `failures.ts`, `generated-code.ts`, a
 test file each in `src/service/__tests__/`; the codecs stay in `router/shared/payloads.ts`, with
-`payloadCodecOf` beside them; `ProcedureCall` in `router/shared/constants.ts`; `ISubscriber`,
-`IBoundCall` and `IRegistrar` in `router/shared/types.ts`; `checkCall` and `procedureCallOf` in
+`payloadCodecOf` beside them; `ProcedureKind` in `router/shared/constants.ts`; `ISubscriber`,
+`IBoundCall` and `IRegistrar` in `router/shared/types.ts`; `checkProcedureKind` in
 `router/shared/identity.ts`, run by each router. The C# side, in `Bead.Core`: `ServiceServer.cs`,
 `ServiceClient.cs`, `ServiceProcedures.cs` (the descriptors, `ProcedureBindings`, `AdmissionRule`,
 `AdmissionHook`), `FailureCatalogue.cs` (with `IApplicationFailure`, `NoFailure`,
 `AdmissionFailure`), `PayloadCodecs.cs` (public, over the internal `Payloads`), `GeneratedCode.cs`,
-`IBeadServer.cs`, `IClient.cs`; `ProcedureCall` in `RouterTypes.cs`, `Subscriber` and
-`NotifyRequest` beside `NotifyOptions`, the call's check in `Identity.cs`, run by the core and each
+`IBeadServer.cs`, `IClient.cs`; `ProcedureKind` in `RouterTypes.cs`, `Subscriber` and
+`NotifyRequest` beside `NotifyOptions`, the kind's check in `Identity.cs`, run by the core and each
 router.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/identities.json`'s group of
-calls, played the six ways on both sides; the twin tests of the feature row "The service layer";
+procedure kinds, played the six ways on both sides; the test of `service-manager.test.ts` that holds
+a callable's members; the twin tests of the feature row "The service layer";
 `spec/check.py` over the `proto` rows, their `differs` and their schema; `yarn check` and `dotnet
 format`/`dotnet test` over the new code; the generated `Probe` checked for drift by `yarn check`.
 
@@ -1181,7 +1194,7 @@ format`/`dotnet test` over the new code; the generated `Probe` checked for drift
 
 **Nothing a peer receives changes.** No envelope, no code, no conversation moves; the interop's
 answers are the same bytes. What changes is what a side refuses as it is built: a procedure
-declared against its call, a notification asked for again at another window.
+declared against its kind, a notification asked for again at another window.
 
 **Four changes break an application's code, at 0.x**, each in the CHANGELOG under "Changed": a
 notify filter takes one argument, on both sides; a notification asked for again at another window
@@ -1191,11 +1204,12 @@ The interop moves its two filters, its C# requesters' type, and its C# `Offer`, 
 `IBeadServer<string>`. The `json` codec's types change nothing public, since the codecs were
 internal.
 
-**On the TypeScript side, `call` shares its name with `Function.prototype.call`.** A procedure the
-runtime hands out is a function, so `procedure.call` read bare is the platform's method, never
-`undefined`, while its type says `ProcedureCall | undefined`. The runtime reads it through
-`procedureCallOf`, and `{ ...procedure }` never carries it; code of an application's that reads a
-callable procedure's `call` must do the same. The C# side has no such clash.
+**On the TypeScript side, a member joining `IProcedure` must not be named as a function's member**
+(`call`, `apply`, `bind`, `name`, `length`): the runtime merges the procedure into the callable it
+hands out, whose own member would shadow the platform's, or be read through the prototype where the
+procedure states none. A test of `service-manager.test.ts` holds it, over every member of a full
+`IProcedure`; `name` alone is set on purpose, to the procedure's name. The C# side merges no
+procedure into a delegate, a platform row of the matrix.
 
 **The tests of both sides depend on a protobuf library**, each its platform's stock one, as a
 development dependency: the TypeScript side's lockfile gains `@bufbuild/protobuf`,
@@ -1214,20 +1228,21 @@ around them, for the bound to be Bead's rather than the library's.
 
 **A third language** plays the `proto` rows through its own stock library and its target's calls,
 sets the bound in its library, and finds its own outcome for the two platform rows; it plays the
-`calls` group the six ways.
+`procedureKinds` group the six ways.
 
 **Rows of the matrix.** The feature "Payloads" counts `proto`; "The identity rules" counts the
-call; "The service layer" joins, its twin tests named; an open row, "A string's leading U+FEFF in a
+procedure's kind; "The service layer" joins, its twin tests named; an open row, "A string's leading U+FEFF in a
 proto payload", holds the one `differs`; three platform rows join: "A proto field at a wire type not
 its own", "A proto string no string holds, given to a writer", and "A failure its procedure does not
 list, answered"; and the open row "How a notification's value that does not write reaches its
 router" closes.
 
 **0003** gains a sentence: a debug event's `type` is a step's, `request`, `command` or
-`notification`; a _call_ is a request and its answer, and a procedure's `call` says which calls it
-takes. **The builder's design** follows: the manifest's procedure takes `call`, `request`,
-`notifies` or `command`, its `notification` binding present exactly when `call` is `notifies`; the
-generic layer's names, the `proto` binding's bound and the version guard take this record's.
+`notification`; a procedure's kind, `procedureKind`, is how it is called, and never its envelopes'.
+**The builder's design** follows: the `.proto` options' `oneof procedure_kind`, and the manifest's
+procedure takes `procedureKind`, `request`, `notifies` or `command`, its `notification` binding
+present exactly when `procedureKind` is `notifies`; the generic layer's names, the `proto` binding's
+bound and the version guard take this record's.
 
 **Versions** ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the spec's
 minor, an encoding, a reason of 16.10 and rows every side's tests read, in the release that carries
@@ -1237,8 +1252,9 @@ minor, an encoding, a reason of 16.10 and rows every side's tests read, in the r
 
 The draft met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)), at
 xhigh effort, on every name of the surface, the `proto` rows and their schema, the filter's shape,
-the window's refusal and the procedure's call. Each claim was verified before its answer; the user
-chose where it asked, each way as the revised draft recommended, and added room for a validator. Its
+the window's refusal and the procedure's kind. Each claim was verified before its answer; the user
+chose where it asked, each way as the revised draft recommended, and added room for a validator. The
+name of the procedure's kind met it on its own, at xhigh effort: the table's last ten rows. Its
 objections, each with its answer:
 
 | Objection                                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -1246,8 +1262,8 @@ objections, each with its answer:
 | The draft's section on `proto` restates protobuf's binary format and gets it wrong three times: a field of explicit presence is written at its default, a packed field arrives at another wire type and is still the field, and the order of fields written is an implementation detail | Accepted: verified on protobuf.dev ("Explicitly set values are always serialized, including default values"; "parse repeated fields that were compiled as `packed` as if they were not packed, and vice versa"; "Do not assume the byte output of a serialized message is stable") and on both libraries (`1A 00` written as read). 17.9 names protobuf's format and restates none of it; it states four things of Bead's. A row pins taken or refused, and the fields read; a value row pins bytes one field at a time. `1A 00` joins the rows and the values                                                                                                                                                                                                                        |
 | The draft turns two behaviours of Google.Protobuf into Bead's MUSTs, the nesting count and a known field at another wire type, excuses protobuf-es by `differs`, and tests a library version Bead does not ship; its probe ran under npm, not the repository's Yarn                     | Accepted: the bound is Bead's, 0016's reason, 100 below the top, set explicitly on both sides — `recursionLimit: 101`, and `CreateWithLimits(…, 101)` over the payload framed as a field, both probed to take 100 and refuse 101; protobuf's C++ default read at its source, protobuf-go's 10,000 noted. A known field at another wire type is no rule of Bead's: a platform row, each side's test pinning its library. The leading U+FEFF stays Bead's, 17.4.2's reason, its `differs` crossing an open row that says protobuf-es strips it, its only lever global and deprecated. What a side conforms to for `proto` is its target's calls over its locked library, said in the Consequences. buf from npm ran under Yarn 4.18.1, node-modules linker, and generated the same file |
 | The draft's clause on a writer makes the writer's U+FFFD a MUST, false of protobuf-go, which refuses, and a third behaviour beside 0016's refusal                                                                                                                                       | Accepted: the clause goes. A writer refuses or repairs as its library does; a platform row says both stock libraries write U+FFFD, each side's test pinning it, no bytes in the file. Verified: golang/protobuf issue 1228; "A string must always contain UTF-8 encoded or 7-bit ASCII text" (protobuf.dev, proto 3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| The service manager checks the type by the accessor's name, yet Bead types a call by the router's side, so `getRequest` on a server passes; the check belongs where 0017 put identity, at the router; "no peer sees it" is no reason against a file                                     | Accepted: verified in `spec/debugging.md` 8.2, the metrics registry and both routers' `declareRequester`. Each router checks the call at its declaration, by the ways of `spec/identities.json`, before registering anything; the manager adds no reason, and 0017's paragraph stands. The reason joins 16.10 and the file, the user's choice                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| "The procedure's type is the trace's type" is false: the trace's `type` takes `notification` and types a step; two optional members bring back a state the builder's `oneof` made impossible, then refuse it at run time                                                                | Accepted: verified in `spec/debugging.md` 4.1, `DebugType` on both sides, the service manager's trace of a notification, and `IDebugEvent` laid out flat. One optional member, `call`, `request`, `notifies` or `command`: the `oneof`'s two members and the plain request it means unset, since an absent member on a hand-written procedure checks nothing. No state is refused. The manifest follows                                                                                                                                                                                                                                                                                                                                                                               |
+| The service manager checks the type by the accessor's name, yet Bead types a call by the router's side, so `getRequest` on a server passes; the check belongs where 0017 put identity, at the router; "no peer sees it" is no reason against a file                                     | Accepted: verified in `spec/debugging.md` 8.2, the metrics registry and both routers' `declareRequester`. Each router checks the procedure's kind at its declaration, by the ways of `spec/identities.json`, before registering anything; the manager adds no reason, and 0017's paragraph stands. The reason joins 16.10 and the file, the user's choice                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| "The procedure's type is the trace's type" is false: the trace's `type` takes `notification` and types a step; two optional members bring back a state the builder's `oneof` made impossible, then refuse it at run time                                                                | Accepted: verified in `spec/debugging.md` 4.1, `DebugType` on both sides, the service manager's trace of a notification, and `IDebugEvent` laid out flat. One optional member, `procedureKind`, `request`, `notifies` or `command`: the `oneof`'s two members and the plain request it means unset, since an absent member on a hand-written procedure checks nothing. No state is refused. The manifest follows                                                                                                                                                                                                                                                                                                                                                                      |
 | `createAPIServer`, `ApiServer<TApi, TData>` and their peers bring an abbreviation into Bead's names, for a layer that serves one service, and take the word the builder leaves to a per-package aggregate                                                                               | Accepted: verified, no name under `implementations/*/src` holds _API_, and 0003 lists the words it owns. The layer is named after a service — `createServiceServer`, `ServiceServer<TService, TData>`, `IServiceProcedure<TService>`, `./service` — the user's choice against _API_ with 0003 amended                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | The C# `Subscriber`, a positional record struct, breaks every filter that deconstructs it, matches it by position or constructs it the day a member joins, which is item 7's only reason; and `SubscriptionPlace` stays beside it                                                       | Accepted: the probe gives CS8129, CS8130 and CS7036; a `readonly record struct` of `init` properties builds clean under the repository's gates with a third member against the same filters. `Subscriber` replaces the internal `SubscriptionPlace`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `JsonValue` both ways is neither sound nor complete against 17.7, refuses an interface-typed value the house style writes, and its break is of nothing public                                                                                                                           | Accepted: re-run, the type takes `NaN`, an infinity and a lone surrogate and refuses an interface-typed value (TS2322). `JsonValue` read, `unknown` written; 17.7's refusals stay at run time. The Consequences drop the break, and the interop's casts are not moved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -1256,3 +1272,13 @@ objections, each with its answer:
 | `IBoundRequest` and `IBoundRegistration` each give a word a second meaning; "requester" already names the outer object; the C# renames are breaks the Consequences omit                                                                                                                 | Accepted in part: verified in the shared types, the C# `Registrar`, 0003 and `spec/debugging.md`. The bound call is named after the call it makes, `IBoundCall` and `BoundCall<TResponse>`, the C# rename a break in "Changed", the user's choice; `Registrar` already names neither a registration nor a request, so it stays, and the TypeScript side gains `IRegistrar`. Refused in part: _bound call_ is no exact fit either, since the object makes a call rather than being one; the record says so, and no name found fits better                                                                                                                                                                                                                                              |
 | The run-time report of an unlisted code guards a TypeScript cast, which the C# types make unreachable; `Failures` restates the class's members; the difference is a matrix row, not a twin test                                                                                         | Accepted: `ProcedureBindings` holds no `Failures`, and `IServiceProcedure` no `FailureCodes`, which nothing would read; the C# side checks nothing; a platform row names the TypeScript test `sends an unlisted code as written, and reports it`, as "A value a side's type cannot hold" does for a value                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `IServer<TData>` takes ASP.NET Core's name in the very projects that call it, against 0003, with 0008's `HealthStatus` for precedent                                                                                                                                                    | Accepted in part: the collision verified, arity keeping the compiler right and the reader not; `IBeadServer<TData>`, the user's choice, as 0003 has it for a new name. Refused, the precedent as stated: 0008 kept `HealthStatus` and qualified the builder's output with `global::Bead.`, "Nothing else is renamed"; it is a precedent for keeping a name already in the tree, which weighs for `IServer<TData>`, not against it                                                                                                                                                                                                                                                                                                                                                     |
+| The test that refuses `callKind` refuses `procedureKind` too: a procedure of kind `command` answers envelopes of kind `REQUEST`, and the two kinds meet where a request is routed to its procedure                                                                                      | Accepted in part: verified in spec 9.1 and 16.11, `IRequestHeader` and `IProcedure` over one `IProcedureAddress`, and the router that finds a request's resolver by its header. 16.11, 0003, the constant's doc and the enum's summary say a procedure's kind is never its envelopes'. Refused, the symmetry: `callKind`'s disagreement is on one noun, the call, whose kind and type would differ on the same call; `procedureKind`'s is across two owners, each always written; and `callKind` gives _kind_ the same second owner. The user chose `procedureKind`                                                                                                                                                                                                                   |
+| 0003's "bare, it is an envelope's" is false in the tree, and a general definition of _kind_ fits every enum, `DebugType` among them                                                                                                                                                     | Accepted: verified, and wider than raised: `spec/durations.json`'s place `kind`, the devtools record's `kind` and the C# `AdmissionKind` are bare too. 0003 gives no general definition: it names the procedure as _kind_'s second owner, and asks a kind be named with its owner where it sits in one structure beside an envelope's. The other bare kinds stay as they are, none beside an envelope's in one structure; the devtools record, [0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md)'s format, is the one a later round may take up                                                                                                                                                                                                                      |
+| protobuf-es does not name this concept: its `kind` is generic, its `methodKind` the streaming axis; `oneof kind` puts three kinds on one rpc                                                                                                                                            | Accepted in part: verified in `@bufbuild/protobuf`'s descriptors. No standard names the axis. `oneof procedure_kind`, whose local name in protobuf-es is `procedureKind`. The streaming shape is another axis, a member of its own named the day Bead has streams, never a value of `procedureKind`; refused, naming that member now, for an axis Bead does not have                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| The prefix's stated reason is wrong, 0008 qualifying packages, namespaces and headers; the record's own pattern, `ProcedureKind? Kind`, has no C# trap                                                                                                                                  | Accepted in part: the reason is objection 1's meeting. The request header and the procedure are siblings over one address, the header carrying `kind`, so `procedureKind` reads alone, as `procedureId` and `procedureName` do; `deprecation` and `maximumPayloadBytes`, which nothing sits beside, stay bare. Both options went to the user, who chose `procedureKind`; the C# property named as its type carries a `!` comment, since inside `Procedure` its name binds to the property                                                                                                                                                                                                                                                                                             |
+| The defect is understated: a procedure that states its kind under a function's member name overwrites the callable's method, and a test of a plain object does not cover the callable                                                                                                   | Accepted: verified, a function given a member `call` by `Object.assign` throws `r.call is not a function`, and `r.apply` still answers. A test of `service-manager.test.ts` holds that a requester, a resolver and a notification carry their procedure's members as their own and keep a function's `call`, `apply` and `bind`, and that no member of a full `IProcedure` is a bare function's; a platform row of the matrix names it; the Consequences keep the constraint on a member to come                                                                                                                                                                                                                                                                                      |
+| Sites are missed: `getNotification`'s doc, and `spec/interop-service.json`                                                                                                                                                                                                              | Accepted in part: `getNotification`'s doc says kind. Refused, `spec/interop-service.json`: its `offeredBy` says who offers, and its `notifies` describes, not a kind; it is a shipped file with four readers, for a round of its own if ever                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Item 1's reason, the mirror of the builder's `oneof`, does not hold with `oneof kind`                                                                                                                                                                                                   | Accepted: `oneof procedure_kind`, the mirror held letter for letter in the front end, the manifest and the runtime; item 1 keeps its reason, with 0003 and a function's members added                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `callKind`'s first refusal is untrue: a kind of call is 0003's one sense of _call_                                                                                                                                                                                                      | Accepted: `callKind` is refused on the trace's _type of call_ alone (`spec/debugging.md` 4.1): a call to a procedure that notifies is traced `request`, while its `callKind` would say `notifies`, two classifiers of one noun that disagree on the same call                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| The values freeze with the name: `request` has three extents, two of them called kinds                                                                                                                                                                                                  | Accepted in part: verified in spec 3.1, 9.1 and 16.11 and `spec/debugging.md` 4.1, the values unreleased. The user kept them, the `oneof`'s members and its unset meaning, and 16.11 and 0003 write the extents. Refused, renaming the plain value: no word says "a request answered, nothing more" better than `request`                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `against its kind` reads as an envelope's in the spec's files                                                                                                                                                                                                                           | Accepted in part: verified where the spec and its files say an envelope's kind. In 16.10 and `spec/identities.json` the subject is the declared procedure and no envelope is near, and 0003 does not read a bare kind as an envelope's. `against its procedure kind` went to the user, who chose `against its kind`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

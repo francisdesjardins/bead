@@ -423,14 +423,14 @@ export const GreeterProcedures = Object.freeze({
 });
 ```
 
-A descriptor sets its procedure's `call` — `request`, `notifies` or `command` — and each router
-checks it as the procedure is declared, by the way it is declared (spec 16.11): a requester on a
-client's router takes a request, and one that notifies; on a server's, a command; a resolver on a
-server's, a request where it notifies nothing and one that notifies where it notifies; on a
-client's, a command; a notification, one that notifies. A procedure written by hand may state its
-`call`, and one that states none is taken every way. A procedure the runtime makes callable is a
-function, whose `call` is `Function.prototype.call` unless it has its own: the runtime reads it
-through `procedureCallOf`, and so does code that must.
+A descriptor sets its procedure's kind, `procedureKind` — `request`, `notifies` or `command` — and
+each router checks it as the procedure is declared, by the way it is declared (spec 16.11): a
+requester on a client's router takes a request, and one that notifies; on a server's, a command; a
+resolver on a server's, a request where it notifies nothing and one that notifies where it
+notifies; on a client's, a command; a notification, one that notifies. A procedure written by hand
+may state its `procedureKind`, and one that states none is taken every way. A procedure's kind is
+never its envelopes': every call opens with a `REQUEST`, a command's too. A procedure the runtime
+hands out is a function that carries its procedure's members, read bare.
 
 The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last reading a `JsonValue`
 and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
@@ -906,7 +906,7 @@ address — two names one when they are equal once their ASCII letters are read 
 never on a call, and so is one past `maximumProcedures`, the procedures each group of families names
 at most, 1,000 by default. Its router refuses first, whatever its registry, a declaration off
 section 16: an id or a revision out of its range, a procedure's name off its form, or a procedure
-whose `call` the way it is declared does not take, against its call. A call it has no declaration
+whose kind the way it is declared does not take, against its kind. A call it has no declaration
 for — a service or a procedure unknown, a request whose header does not read, a relayed call —
 counts under `_OTHER`.
 Each series is made at 0 as its procedure is declared, so an alert reads it from its start and a
@@ -1149,7 +1149,7 @@ abbreviated ([0003](../../docs/decisions/0003-one-word-one-meaning.md)).
 | notification id               | the subscribing call's `callId`              | nothing of it travels in a payload                                                                                                              |
 | req, res, err                 | `request`, `response`, `failure`             | no abbreviation                                                                                                                                 |
 | exclude self                  | `exclude`                                    | it names the connection to leave out                                                                                                            |
-| procedure type                | `call`                                       | a type is a debug event's step; a procedure's `call` says which calls it takes                                                                  |
+| procedure type                | `procedureKind`                              | a type is a debug event's step; a procedure's kind is how it is called, never its envelopes'                                                    |
 | API server, API client        | `createServiceServer`, `createServiceClient` | each serves or calls one service, and _API_ is an abbreviation                                                                                  |
 | an error with a code          | `FailureError`                               | it says its side, its scope and where it was raised                                                                                             |
 

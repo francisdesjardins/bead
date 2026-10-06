@@ -231,11 +231,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side's entry `@francisdesjardins/bead/service` exports it all, which a generated file imports
   alone; the constant of the contract with generated code is `GENERATED_CODE_SUPPORTS_VERSION_1`
   and `GeneratedCode.SupportsVersion1`.
-- A procedure's call, `call` and `Call`, `ProcedureCall`'s `request`, `notifies` or `command`, which
-  each router checks as the procedure is declared, by the way it is declared, after its identity:
-  spec 16.10's third reason, `against its call`, and 16.11, what each way takes. A procedure that
-  states none is taken every way. `spec/identities.json` gains a sixth way, a server's resolver that
-  notifies, and a group of 6 calls, which both sides play each way.
+- A procedure's kind, `procedureKind` and `ProcedureKind`, `ProcedureKind`'s `request`, `notifies`
+  or `command`, never its envelopes' kind, which each router checks as the procedure is declared, by
+  the way it is declared, after its identity: spec 16.10's third reason, `against its kind`, and
+  16.11, what each way takes. A procedure that states none is taken every way. `spec/identities.json`
+  gains a sixth way, a server's resolver that notifies, and a group of 6 procedure kinds, which both
+  sides play each way. A procedure the TypeScript side hands out as a function carries its
+  procedure's members as its own, none of them a function's.
 - The payload codecs, public: `IPayloadCodec`, `PAYLOAD_CODECS` and `payloadCodecOf` on the
   TypeScript side, a `json` value read as `JsonValue` and written as `unknown`; `IPayloadCodec<T>`
   and `PayloadCodecs`, with `Raw`, `Text`, `Json` and `Of`, on the C# side. `payloadCodecOf` and
@@ -431,7 +433,7 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   its session's `identifier`, and `Subscriber`, a record of `init` properties, which replaces the
   C# side's internal `SubscriptionPlace` (decision 0018). On the TypeScript side `ISubscriber` moves
   to the shared types, generic over its handle, `string` by default, and the `service-manager`
-  entry exports it with `ProcedureCall`, `IBoundCall`, `IRegistrar` and `SessionIdentifier`.
+  entry exports it with `ProcedureKind`, `IBoundCall`, `IRegistrar` and `SessionIdentifier`.
 - A notification asked for again at another window, or with none against one, is refused on both
   sides, a `ProgrammerError` and an `InvalidOperationException`, where the second window was dropped
   in silence.
