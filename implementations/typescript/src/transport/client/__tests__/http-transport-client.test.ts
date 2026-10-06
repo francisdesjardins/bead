@@ -81,7 +81,7 @@ const startServer = async () => {
 
 const nextEvent = (client: HTTPTransportClient, event: 'close' | 'message') => {
   return new Promise<unknown[]>((resolve) => {
-    client.once(event, (...params: unknown[]) => {
+    client.once(event, (...params) => {
       resolve(params);
     });
   });
@@ -865,7 +865,7 @@ const methodsOf = (fake: ReturnType<typeof createFakeFetch>) => {
 const closesOf = (client: HTTPTransportClient) => {
   const closes: unknown[][] = [];
 
-  client.on('close', (...params: unknown[]) => {
+  client.on('close', (...params) => {
     closes.push(params);
   });
 

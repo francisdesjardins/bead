@@ -263,6 +263,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `HttpServer<TData>` implement, the last two gaining `RequireSessionOrCredential`, and `IClient`,
   which `WebSocketClient` and `BeadHttpClient` implement; and `FailureException`'s `IsApplication`
   and `IsProtocol`, the TypeScript side's `isApplication` and `isProtocol`.
+- `bead/options-last`, the TypeScript side's oxlint JS plugin, `tools/oxlint-plugin.mjs`, at `error`:
+  past `max-params`'s count, it judges what a third parameter may be, the elements of a rest tuple,
+  a type's signatures and an event's values, and lists each exception of today with its reason;
+  `yarn check` holds it to its cases.
 
 ### Changed
 
@@ -277,7 +281,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tools/check-links.mjs`, holds every relative link of the repository's Markdown, and its anchor,
   to a file or a heading that exists.
 - The parameter rule takes an options object after two parameters, as Deno's style guide counts them,
-  held by `max-params` at 3 and by review.
+  held by `max-params` at 3 and `bead/options-last` on the TypeScript side, and by review.
 - The SESSION block gives way to the CREDENTIAL block (decision 0010): bit `0x08`, the header's last
   block, a credential scheme on 2 bytes — `NONE`, `OPAQUE`, `JWT`, `ELSEWHERE`, or one to come — its
   length on 2, its bytes padded to a word, so a header holds 1,020 bytes; `0x01` is kept for a block

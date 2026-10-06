@@ -2,7 +2,10 @@
 
 // dependencies
 
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type {
+  TransportServerConnectionHandle,
+  TransportServerEventMap,
+} from '../../transport/server/types';
 import { clockOf } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { CancelError, ProgrammerError, toError } from '../../transport/shared/errors';
@@ -477,11 +480,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   };
 
   const onConnection = (
-    ...[, , connectionHandle]: [
-      socket: unknown,
-      request: unknown,
-      connectionHandle: TransportServerConnectionHandle,
-    ]
+    ...[, , connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
   ): void => {
     connections.set(connectionHandle, connectionHandle);
   };

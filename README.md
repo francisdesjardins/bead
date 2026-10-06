@@ -139,7 +139,7 @@ In `implementations/typescript`. Node 24 or later. Yarn 4 is vendored under `.ya
 ```sh
 cd implementations/typescript
 yarn install --immutable
-yarn check        # types, lint, format, comment budget, the doc examples, the generated Probe
+yarn check        # types, lint and its plugin's cases, format, comment budget, the doc examples, the generated Probe
 yarn test         # the unit tests, and the interop against the C# server
 ```
 

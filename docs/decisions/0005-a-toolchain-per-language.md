@@ -55,9 +55,9 @@ the spec, as the builder is, is placed by a decision of its own.
   ([0004](0004-one-behaviour-in-every-language.md)), and so does CI's `dotnet` job.
 - The house style is stated once per language, in that language's own terms: the TypeScript side's
   `curly` and `arrow-body-style` are oxlint rules whose C# counterparts are `.editorconfig` rules
-  the build holds; the parameter rule is `max-params` on one side and review's on the other
-  ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). Keeping the two alike is
-  review's, not a tool's.
+  the build holds; the parameter rule is `max-params` and `bead/options-last` on one side and
+  review's on the other ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)).
+  Keeping the two alike is review's, not a tool's.
 - The root's prose and scripts have no formatter of their own: CI holds the root's prose, scripts
   and schemas, and the spec's text, to the TypeScript side's oxfmt, through
   `-c implementations/typescript/.oxfmtrc.json` (`ci.yml` lists them), so formatting them needs that

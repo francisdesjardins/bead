@@ -40,6 +40,7 @@ export interface IChrome {
         inspectedWindow: { tabId: number };
         network: { onRequestFinished: IExtensionEvent<(entry: IHarEntry) => void> };
         panels: {
+          // oxlint-disable-next-line bead/options-last -- Chrome's own, `create(title, iconPath, pagePath)`
           create: (...parts: [title: string, icon: string, page: string]) => void;
           themeName?: string;
         };

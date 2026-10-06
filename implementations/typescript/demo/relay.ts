@@ -22,6 +22,7 @@ export interface IRelayTarget {
 // types
 
 /** What Node hands an `upgrade` listener: the request, its socket, and what came past its head. */
+// oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
 type Upgrade = [request: IncomingMessage, socket: Duplex, head: Buffer];
 
 // constants

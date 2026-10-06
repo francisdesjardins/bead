@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+
+  // The package's configuration, for `oxlint-plugin.cases.ts` alone: `check-oxlint-plugin.mjs` lints
+  // the cases through it. The `ignorePatterns` that leave them out of the package's lint are not
+  // inherited through `extends`; were they ever, the check would lint no file, and fail.
+  "extends": ["../.oxlintrc.json"]
+}
