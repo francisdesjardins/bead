@@ -1,4 +1,4 @@
-# 0002 — A subscription goes at its client's pace
+# 0002 — A client may pace its subscription, and what waits, waits by key
 
 - **Status**: accepted
 - **Scope**: the protocol, and every implementation
@@ -6,8 +6,8 @@
 ## Context
 
 A subscription pushes each notification as it comes. A client that does something with each one, a
-fetch or a render, falls behind a burst: forty-five changes in a few seconds are forty-five
-notifications and forty-five fetches where two would have done, and large notifications fill what
+fetch or a render, falls behind a burst: changes that come in a few seconds are as many
+notifications and as many fetches, where two would have done, and large notifications fill what
 holds them on the way, a socket's buffer or an HTTP connection's outbox, which then closes.
 
 What a server sends is not all alike, and a complex system sends every kind at once: a state, of
@@ -52,7 +52,9 @@ request that opens a subscription, and on a CREDIT; on anything else, the envelo
   application's, around `notify`. So is choosing the key: it is what the notification means.
 - A signal with no data, "it changed", needs no pacing to be cheap: the client merges it around its
   own handler, one fetch at a time and one more if something came meanwhile.
-- A relay carries no subscription yet ([0001](0001-the-envelope-sits-at-fixed-offsets.md)), paced or
-  not, and neither does an HTTP connection whose client does not listen.
+- A relay carries no subscription, paced or not
+  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), which is open work, and
+  neither does an HTTP connection whose client does not listen
+  ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)).
 - The rule is section 11 of [`spec/spec.md`](../../spec/spec.md), and `spec/conversations.json`
   plays it step by step against every implementation's server.
