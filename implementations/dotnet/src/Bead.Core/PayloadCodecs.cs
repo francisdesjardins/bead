@@ -14,7 +14,7 @@ public interface IPayloadCodec<T>
 }
 
 /// <summary>
-/// The codecs of spec section 17, by the manifest's encoding — <c>raw</c>, <c>text</c> and
+/// The codecs of spec section 17, by their encoding's name — <c>raw</c>, <c>text</c> and
 /// <c>json</c>, each refusing with a <see cref="FormatException"/> saying why — and a codec made of
 /// two functions, a protobuf message's from its stock library's, as gRPC's marshallers are.
 /// </summary>

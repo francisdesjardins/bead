@@ -93,8 +93,8 @@ vector cannot.
   ([0004](0004-one-behaviour-in-every-language.md));
 - a check of the C# side's parameters, which no analyzer of .NET's recommended set counts
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
-- `beadc check`, which holds a manifest to section 16 and to the builder's rules, and
-  `beadc breaking`, which holds a manifest to the last release's
+- `beadc check`, which holds a blueprint to section 16 and to the builder's rules, and
+  `beadc breaking`, which holds a blueprint to the last release's
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
 - tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
   root's tools' tests, in Node's runner, would hold.

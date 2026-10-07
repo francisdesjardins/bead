@@ -35,7 +35,7 @@ promise to be decided at once, on the day of the first release.
    pre-releases: the minor moves when an implementation must change to keep passing — an expectation
    changed, a field, a group or a file added — and the patch when a conforming implementation passes
    unchanged — a vector or a conversation added for what the spec already requires, a clarification.
-   It moves in the release commit, as the manifests' versions do, and a release whose spec moved
+   It moves in the release commit, as the product's version does, and a release whose spec moved
    tags `spec-v` and that version beside its `v*`. The spec's companion, `spec/debugging.md`, which
    states what a side traces, filters and counts beside the wire
    ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), runs on this axis under a
@@ -55,7 +55,7 @@ promise to be decided at once, on the day of the first release.
    and one whose files did not keeps it.
 
 3. **The product**: each implementation's releases, under Semantic Versioning, at `0.x`, tagged
-   `v*`, one version for both manifests, cut from a `release/*` branch
+   `v*`, one version in `package.json` and `Directory.Build.props`, cut from a `release/*` branch
    ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 
 **A name is qualified by its owner.** The TypeScript package is `@francisdesjardins/bead` on npm.

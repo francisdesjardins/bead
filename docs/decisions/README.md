@@ -29,7 +29,7 @@ not hold:
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)), the clock its code runs
   on ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), the call's session it
   binds to ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), the names it generates and
-  the manifests it checks
+  the blueprints it checks
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)), over the layer
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)
   gives it;

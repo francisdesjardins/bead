@@ -264,12 +264,12 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 
 A release moves every version in one commit, on a `release/*` branch or a `hotfix/*` one, and CI
 judges that commit, every job, before any tag exists. `tools/release.mjs prepare` moves the
-product's version in both manifests and in the C# lock files' project ranges, and each changed
-document's a step past its last release; it runs the generators, dates the CHANGELOG's version and
-links it, then runs the gate as a release, `spec/check.py` and the root's format check, naming any
-whose tool is absent with the CI job that holds it. `tools/release.mjs tag`, after the finish, tags
-each document whose version no tag names yet at the release's `v*`, runs the gate as `main`'s run
-will, and prints the one push:
+product's version in `package.json`, in `Directory.Build.props` and in the C# lock files' project
+ranges, and each changed document's a step past its last release; it runs the generators, dates the
+CHANGELOG's version and links it, then runs the gate as a release, `spec/check.py` and the root's
+format check, naming any whose tool is absent with the CI job that holds it.
+`tools/release.mjs tag`, after the finish, tags each document whose version no tag names yet at the
+release's `v*`, runs the gate as `main`'s run will, and prints the one push:
 
 ```sh
 git flow release start 0.2.0
