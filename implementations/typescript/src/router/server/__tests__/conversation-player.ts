@@ -111,6 +111,26 @@ const ADMISSIONS = Object.freeze({ requireSession, requireSessionOrCredential })
 // a token named in a send, between angle brackets
 const TOKEN_NAME = /<([a-z][a-z0-9]*)>/g;
 
+// ! every key of a step this player reads: one it does not know fails the step, rather than pass it
+// unplayed
+const STEP_KEYS: ReadonlySet<string> = new Set([
+  'advance',
+  'carried',
+  'carries',
+  'close',
+  'counted',
+  'expect',
+  'on',
+  'open',
+  'report',
+  'secure',
+  'send',
+  'token',
+  'twoWay',
+  'until',
+  'wall',
+]);
+
 // helpers
 
 /**
@@ -395,6 +415,13 @@ export const playConversation = async (
     for (const [index, step] of steps.entries()) {
       const at = `step ${String(index + 1)}`;
       const on = step.on ?? ONLY_CONNECTION;
+
+      expect(
+        Object.keys(step).filter((key) => {
+          return !STEP_KEYS.has(key);
+        }),
+        `${at}: the keys this player does not read`
+      ).toEqual([]);
 
       if (step.open !== undefined || step.send !== undefined || step.close === true) {
         expectNothingMore(`before ${at}`);

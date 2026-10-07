@@ -687,6 +687,8 @@ conversations = [
         json_request(3, 'fail', 'null'), failure(3, 7, APPLICATION)]),
     ('a service unknown is answered SERVICE_UNKNOWN', ['9.2.4'], None, [
         json_request(1, 1, '{}', service_id=9), failure(1, SERVICE_UNKNOWN)]),
+    ('a request to service 0 is read, and answered SERVICE_UNKNOWN by routing', ['4.7', '9.2.4'], None, [
+        json_request(1, 1, '{}', service_id=0), failure(1, SERVICE_UNKNOWN)]),
     ('a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN', ['9.2.4'], None, [
         json_request(1, 99, '{}'), failure(1, PROCEDURE_UNKNOWN)]),
     ('an admission that refuses is answered with its refusal', ['9.2.5'], None, [
