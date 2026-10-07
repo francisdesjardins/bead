@@ -1,14 +1,19 @@
 // ── Interop service, offered ──────────────────────────────────────────────────
 
-// The procedures of Bead's interop service, `spec/interop-service.json`, as Bead's TypeScript implementation offers them:
-// what a client of any implementation calls, and what `spec/conversations.json` plays against.
+// The procedures of Bead's interop service, its API `spec/interop-blueprint.json` and its behaviour
+// `spec/interop-service.json`, as Bead's TypeScript implementation offers them: what a client of any
+// implementation calls, and what `spec/conversations.json` plays against.
 
 // dependencies
 
 import { existsSync, readFileSync } from 'node:fs';
 import type { IDestinationRegistration } from '../src/router/server/types';
 import { sessionKeyOf } from '../src/router/shared/call-session';
-import { CredentialScheme, LIMIT_DEFAULTS } from '../src/router/shared/constants';
+import {
+  CredentialScheme,
+  LIMIT_DEFAULTS,
+  type ProcedureKind,
+} from '../src/router/shared/constants';
 import { JWT_LIMIT_BYTES } from '../src/router/shared/credentials';
 import type { IJwtKey } from '../src/router/shared/jwt-verifier';
 import { PAYLOAD_CODECS } from '../src/router/shared/payloads';
@@ -30,7 +35,7 @@ import { assertHeldFinite, type IClock } from '../src/transport/shared/clock';
 
 // interfaces
 
-/** The interop service, as its manifest names it. */
+/** The interop service's relay and credentials, as its file states them. */
 interface IInteropService {
   credentials: {
     jwt: {
@@ -42,30 +47,45 @@ interface IInteropService {
       keys: IJwtKey[];
     };
   };
-  procedures: { offeredBy?: 'client'; procedureId: number; procedureName: string }[];
+}
+
+/** The interop service's API: the one service of its blueprint (decision 0022). */
+interface IInteropApi {
+  procedures: { procedureId: number; procedureKind: ProcedureKind; procedureName: string }[];
   serviceId: number;
   serviceRevision: number;
 }
 
 // constants
 
-// the manifest, found up from this module, wherever a bundle put it
-const MANIFEST = ((): URL => {
+// a file of spec/, found up from this module, wherever a bundle put it
+const specFileOf = (name: string): URL => {
   for (let directory = new URL('./', import.meta.url); ; directory = new URL('../', directory)) {
-    const candidate = new URL('spec/interop-service.json', directory);
+    const candidate = new URL(`spec/${name}`, directory);
 
     if (existsSync(candidate)) {
       return candidate;
     }
 
     if (new URL('../', directory).href === directory.href) {
-      throw new Error('no spec/interop-service.json above this module');
+      throw new Error(`no spec/${name} above this module`);
     }
   }
-})();
+};
 
-/** The manifest the interop servers of every implementation read. */
-export const INTEROP_SERVICE = JSON.parse(readFileSync(MANIFEST, 'utf8')) as IInteropService;
+/** The interop service's relay and credentials, which the interop servers of every implementation read. */
+export const INTEROP_SERVICE = JSON.parse(
+  readFileSync(specFileOf('interop-service.json'), 'utf8')
+) as IInteropService;
+
+/** The interop service's API, its blueprint's one service, which every implementation's interop server offers. */
+export const INTEROP_API = (
+  JSON.parse(readFileSync(specFileOf('interop-blueprint.json'), 'utf8')) as {
+    // one service and no feature, as its schema pins them; each kind one of `ProcedureKind`'s, as
+    // the format's `enum` holds it
+    services: [IInteropApi];
+  }
+).services[0];
 
 /**
  * What the interop service's payloads are: JSON, read and written as spec section 17 states, in
@@ -174,9 +194,9 @@ const afterOn = <Value>(
   });
 };
 
-/** The procedure of the interop service named `procedureName`. */
+/** The procedure of the interop service named `procedureName`, of the kind its blueprint gives it. */
 export const procedureOf = (procedureName: string): IProcedure => {
-  const found = INTEROP_SERVICE.procedures.find((procedure) => {
+  const found = INTEROP_API.procedures.find((procedure) => {
     return procedure.procedureName === procedureName;
   });
 
@@ -186,9 +206,10 @@ export const procedureOf = (procedureName: string): IProcedure => {
 
   return {
     procedureId: found.procedureId,
+    procedureKind: found.procedureKind,
     procedureName,
-    serviceId: INTEROP_SERVICE.serviceId,
-    serviceRevision: INTEROP_SERVICE.serviceRevision,
+    serviceId: INTEROP_API.serviceId,
+    serviceRevision: INTEROP_API.serviceRevision,
   };
 };
 
@@ -244,12 +265,12 @@ export const interopVerifierOf = (
 
 /**
  * What the interop server resolves a request's credential with, on `clock`, as `credentials` in
- * its manifest says: its `JWT` keys, its audience and its key set, with the most calls that wait
+ * its file says: its `JWT` keys, its audience and its key set, with the most calls that wait
  * for one issuer's keys, but under limits that hold no `JWT` (spec 12.2); and its `ELSEWHERE`
- * verifier. The key set answers for the manifest's issuers, each once a second passed on `clock`,
+ * verifier. The key set answers for its file's issuers, each once a second passed on `clock`,
  * whatever its signal: the rotated one its keys at its first ask, counted per key set, so per
  * server, and none after; the stalled one never, arming no timer; any other, the kid-less one among
- * them, its keys at every ask. Asked for an issuer the manifest does not name, it fails at once.
+ * them, its keys at every ask. Asked for an issuer its file does not name, it fails at once.
  */
 export const interopCredentialsOf = (clock: IClock, limits?: RouterLimitsOptions): ICredentials => {
   const { audience, keySet, keys } = INTEROP_SERVICE.credentials.jwt;
