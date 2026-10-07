@@ -158,7 +158,10 @@ jobs:
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
-  # anchor, resolves: here, since the job runs once, on the Node it already has.
+  # anchor, resolves; every version agrees with itself, and a release moves each as its changes owe;
+  # and the root's tools pass their own tests: here, since the job runs once, on the Node it already
+  # has. `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
+  # version's last release are read from: a clone without its tags fails the versions' floors.
   commits:
     name: Commits
     runs-on: ubuntu-26.04
@@ -192,6 +195,19 @@ jobs:
           node tools/check-commits.mjs "$@"
       - name: Check the links
         run: node tools/check-links.mjs
+      # Each version agrees with itself, the C# lock files' project ranges included, and a released
+      # section of the CHANGELOG stays as its tag shipped it; on a release branch, a pull request
+      # into main and main, the release moved each version its changes owe, dated its section, and
+      # tagged its documents where they belong (decision 0008). On a pull request, `github.ref` is
+      # its merge ref, so the head branch names the ref, and a base of main makes it a release.
+      - name: Check the versions
+        env:
+          REF: ${{ github.head_ref || github.ref }}
+          BASE: ${{ github.base_ref }}
+        run: node tools/check-versions.mjs --ref "$REF" --base "$BASE"
+      # The root's tools, by their own tests, in Node's runner: no dependency.
+      - name: Test the root's tools
+        run: node --test "tools/__tests__/*.test.mjs"
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
   # The one check that stands for every job: green when every job above passed, red otherwise,

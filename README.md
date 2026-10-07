@@ -68,7 +68,7 @@ implementations/
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks and the coverage report, Node without dependencies
+tools/                        repository checks, the release and the coverage report, Node without dependencies
 .githooks/                    the repository checks before each commit, opt-in
 .github/workflows/ci.yml      the CI
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
@@ -243,10 +243,51 @@ there only until it closes.
   must also be UTF-8 without a byte order mark.
 - `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
   or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
+- `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
+  package's, the C# side's and its lock files' project ranges, and each conformance file's with its
+  document's — and each released section of the CHANGELOG stays as its tag shipped it. On a release
+  branch, a pull request into `main` and `main`, the product and each changed document also move
+  one step past their last release, the CHANGELOG is dated and linked, and each document's tag
+  stands where it belongs. `--ref` and `--base` judge the tree as another ref, as CI does.
+- `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
+  repositories it makes under the system's temporary folder.
 
 The first also runs before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
 `commit-msg` holds the subject to Conventional Commits, merges aside. Both hooks also run the
 checks a clone keeps for itself in `.claude/local/`, when it has them.
+
+## Releasing
+
+A release moves every version in one commit, on a `release/*` branch or a `hotfix/*` one, and CI
+judges that commit, every job, before any tag exists. `tools/release.mjs prepare` moves the
+product's version in both manifests and in the C# lock files' project ranges, and each changed
+document's a step past its last release; it runs the generators, dates the CHANGELOG's version and
+links it, then runs the gate as a release, `spec/check.py` and the root's format check, naming any
+whose tool is absent with the CI job that holds it. `tools/release.mjs tag`, after the finish, tags
+each document whose version no tag names yet at the release's `v*`, runs the gate as `main`'s run
+will, and prints the one push:
+
+```sh
+git flow release start 0.2.0
+node tools/release.mjs prepare --spec minor --python .venv/bin/python
+git add -A && git commit -m "chore(release): 0.2.0"
+git flow release publish 0.2.0                 # CI judges the release commit, every job, as a release
+# fixes, if any, each with its line under [0.2.0]; then, right before the finish:
+node tools/release.mjs prepare --python .venv/bin/python   # re-dates, regenerates, checks
+git commit -am "chore(release): 0.2.0, dated"   # only if it changed something
+# wait for ci-ok on release/0.2.0
+git flow release finish 0.2.0                  # without -p
+node tools/release.mjs tag                     # spec-v… and debugging-v… at v0.2.0, then the gate on develop
+git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0
+```
+
+A document whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
+change to keep passing, `patch` when a conforming one passes unchanged, and `minor` at least when a
+file, a key or a property was added
+([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)). Nothing is
+staged, committed, tagged or pushed except by these commands. If `tag` reports an entry the
+back-merge filed under the released version, it goes back under `[Unreleased]` in a commit on
+`develop` before the push.
 
 ## CI
 
@@ -254,16 +295,17 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 runner image, `ubuntu-26.04`: `spec` (regenerate, then diff, then `spec/check.py`), `typescript` on
 Node 26 and on the floor, 24.9 (install, check, test, the demo's static build, and the root's
 files under the same formatter), `dotnet` (format, test, and the interop both ways with
-`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects, then the links). `ci-ok` needs them all, so
-one check stands for every job; branch protection, which would make it the one check a branch
-requires, waits on GitHub Pro or a public repository.
+`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects, the links, the versions, then the root's
+tools' own tests). `ci-ok` needs them all, so one check stands for every job; branch protection,
+which would make it the one check a branch requires, waits on GitHub Pro or a public repository.
 
 ## Contributing
 
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 - Branches follow git-flow: `main`, `develop`, `feature/*`, `release/*`, `hotfix/*`.
 - [`CHANGELOG.md`](CHANGELOG.md) follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/):
-  a change worth telling goes under `[Unreleased]` with the commit that makes it.
+  a change worth telling goes under `[Unreleased]` with the commit that makes it; on a release
+  branch, once its version is dated, under that version.
 - [`docs/decisions/`](docs/decisions/README.md) holds why Bead is shaped as it is, one record a
   decision, changed rather than appended to; the CHANGELOG says what changed, a record says why
   ([0009](docs/decisions/0009-conventional-commits-git-flow-and-the-tenth-man.md)).
