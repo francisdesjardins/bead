@@ -80,10 +80,17 @@ def pairs(fields):
     return list(fields.items()) if isinstance(fields, dict) else list(fields or [])
 
 
+def lines_of(name, value):
+    """A field's lines: none when its value is None, a line a value when it is a list, else one."""
+    values = [] if value is None else value if isinstance(value, list) else [value]
+    return [f'{name}: {each}' for each in values]
+
+
 def send(on, method, target='/bead', *, fields=None, body=None, host='{host}'):
     """A request of HTTP/1.1, rendered to its octets: its line, its fields in their order — its host,
-    those given, its body's length when it has one or posts — and a socket closed once answered."""
-    lines = [f'{method} {target} HTTP/1.1', f'host: {host}']
+    or none, or several, those given, its body's length when it has one or posts — and a socket
+    closed once answered."""
+    lines = [f'{method} {target} HTTP/1.1', *lines_of('host', host)]
     lines += [f'{name}: {value}' for name, value in pairs(fields)]
 
     if body is not None or method in ('POST', 'DELETE'):
@@ -113,6 +120,11 @@ def expect(on, status, *, fields=None, **body):
 
 def refused(on, status, refusal, fields=None):
     return expect(on, status, fields={'bead-refusal': refusal, **(fields or {})}, body='')
+
+
+def unmarked(on):
+    """HTTP's own 400, which its server writes as it does: no mark, its body empty."""
+    return expect(on, 400, fields={'bead-refusal': None}, body='')
 
 
 def drawn(on='connect', *, listening=False):
@@ -236,6 +248,12 @@ cases = [
     ('a host the server does not take is refused 403, marked', ['15.6.5', '15.12'], {'hosts': ['bead.test']}, [
         connect(host='elsewhere.test'), refused('connect', 403, 'host-refused'),
         connect('taken', host='bead.test'), expect('taken', 201)]),
+    # RFC 9112 §3.2: what HTTP refuses of its own, answered as HTTP answers it, before hosts is read
+    ('an HTTP/1.1 request without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked, before its host is judged',
+     ['15.12'], {'hosts': ['bead.test']}, [
+         connect('none', host=None), unmarked('none'),
+         connect('two', host=['bead.test', 'elsewhere.test']), unmarked('two'),
+         connect('bad', host='bad host'), unmarked('bad')]),
     ('an exchange from an origin the server does not take is refused 403, marked', ['15.6.5', '15.12'], None, [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
@@ -269,17 +287,17 @@ cases = [
         connect(fields={'origin': 'null'}), expect('connect', 201)]),
     # 15.12: the bounds, past which the server answers 429 or 503
     ('past the connections a server holds, a connect is refused 503, with Retry-After',
-     ['15.6.12', '15.12.1'], {'maximumConnections': 1}, [
+     ['15.6.13', '15.12.1'], {'maximumConnections': 1}, [
          *drawn('first'), connect('second'),
          refused('second', 503, 'busy', {'retry-after': {'shape': 'delay-seconds'}})]),
     ('past the connections one address holds, behind a proxy trusted, a connect is refused 503',
-     ['15.6.12', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'isProxyTrusted': True}, [
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'isProxyTrusted': True}, [
          connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
          refused('second', 503, 'busy', {'retry-after': {'shape': 'delay-seconds'}}),
          connect('other', fields={'x-forwarded-for': '192.0.2.2'}), expect('other', 201)]),
     ('past the requests waiting on one connection, a request is refused 429, marked',
-     ['15.6.11', '15.12.3'], {'maximumWaitingExchanges': 1}, [
+     ['15.6.12', '15.12.3'], {'maximumWaitingExchanges': 1}, [
          *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
          post('more', request(3, 'slow', SLOW)), refused('more', 429, 'busy')]),
     ('a DELETE ends its connection, and an exchange after it is refused 404', ['15.4', '15.6.3', '15.6.6'], None, [
@@ -490,23 +508,45 @@ CONTINUATION, BINARY = 0x0, 0x2
 NORMAL, GOING_AWAY, TOO_BIG = 1000, 1001, 1009
 
 
+def asked(on='socket', fields=None, *, method='GET', http='HTTP/1.1', host='{host}', upgrade='websocket',
+          connection='Upgrade', key=KEY, version=13, body=None):
+    """A request at a WebSocket's address, on a socket of its own: an opening handshake unless told
+    otherwise. Its host and each field of a handshake are left out when None, and written a line a
+    value when a list; the fields given come after them, and the body's octets after its head."""
+    lines = [f'{method} / {http}', *lines_of('host', host), *lines_of('upgrade', upgrade),
+             *lines_of('connection', connection), *lines_of('sec-websocket-key', key),
+             *lines_of('sec-websocket-version', version), *(f'{name}: {value}' for name, value in pairs(fields))]
+    return {'send': {'head': '\r\n'.join(lines) + '\r\n\r\n', **({'body': body} if body else {})}, 'on': on}
+
+
+# a request that asks no WebSocket: none of a handshake's fields
+PLAIN = {'upgrade': None, 'connection': None, 'key': None, 'version': None}
+
+
 def handshake(on='socket', fields=None, host='{host}', version=13):
     """An opening handshake, on a socket of its own, naming the host given, of the version given, or
     of none when None, with the fields given besides."""
-    head = (f'GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\n'
-            f'sec-websocket-key: {KEY}\r\n'
-            + ('' if version is None else f'sec-websocket-version: {version}\r\n')
-            + ''.join(f'{name}: {value}\r\n' for name, value in pairs(fields)) + '\r\n')
-    return {'send': {'head': head}, 'on': on}
+    return asked(on, fields, host=host, version=version)
+
+
+def taken(on='socket'):
+    return expect(on, 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT})
 
 
 def upgrade(on='socket', fields=None, host='{host}'):
     """A handshake the server takes, its socket kept as its WebSocket once answered 101."""
-    return [handshake(on, fields, host), expect(on, 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT})]
+    return [handshake(on, fields, host), taken(on)]
 
 
 # what a WebSocket server's refusal of an upgrade carries besides its mark, as an HTTP exchange's
 UPGRADE_REFUSED = {'cache-control': 'no-store', 'x-content-type-options': 'nosniff'}
+# a 426 names the protocol it asks for (RFC 9110 §15.5.22), and the version's the one it speaks
+UPGRADE_REQUIRED = {**UPGRADE_REFUSED, 'upgrade': 'websocket'}
+VERSION_REFUSED = {**UPGRADE_REQUIRED, 'sec-websocket-version': '13'}
+# a 405 names the methods it takes (RFC 9110 §15.5.6)
+METHOD_REFUSED = {**UPGRADE_REFUSED, 'allow': 'GET, HEAD'}
+# a key of 4 bytes, "test", where an opening handshake's is 16
+SHORT_KEY = 'dGVzdA=='
 
 
 def message(on, **sent):
@@ -536,10 +576,22 @@ websocket = [
      ['15.2'], {}, [
          *upgrade(fields={'authorization': 'Interop sub=ada'}), message('socket', binary=elsewhere(1)),
          heard('socket', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL))]),
-    # 15.2 and 15.12: an upgrade is taken from the hosts and origins an HTTP exchange is
-    ('an upgrade naming a host the server does not take is refused 403, marked, before its handshake',
+    # 15.2 and 15.12: what HTTP refuses of its own, answered as HTTP answers it, before hosts is read
+    ('a request at a WebSocket\'s address without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked',
+     ['15.2', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         asked('none', host=None), unmarked('none'),
+         asked('two', host=['bead.test', 'elsewhere.test']), unmarked('two'),
+         asked('bad', host='bad host'), unmarked('bad')]),
+    # 15.2 and 15.12: a request is taken from the hosts an HTTP exchange is, whatever else it holds,
+    # and an upgrade from its origins
+    ('a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form',
      ['15.2', '15.6.5', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          handshake('elsewhere', host='elsewhere.test'), refused('elsewhere', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('post', method='POST', host='elsewhere.test'), refused('post', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('plain', host='elsewhere.test', **PLAIN), refused('plain', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('short', host='elsewhere.test', key=SHORT_KEY), refused('short', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('eighth', host='elsewhere.test', version=8),
+         refused('eighth', 403, 'host-refused', UPGRADE_REFUSED),
          *upgrade('taken', host='bead.test'), message('taken', binary=ECHO), heard('taken', envelope=result(1, '"x"'))]),
     ('an upgrade from an origin the server does not take is refused 403, marked, before its handshake; one from its own origin, or with none, is taken',
      ['15.2', '15.6.5', '15.12'], {}, [
@@ -578,15 +630,67 @@ websocket = [
          heard('own', envelope=result(1, '"x"'))]),
     ('an upgrade with an Origin of null is taken when origins names it', ['15.2', '15.12'], {'options': {'origins': ['null']}}, [
         *upgrade(fields={'origin': 'null'}), message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
+    # 15.2: the method, then whether a WebSocket is asked at all, then its version, then its form
+    ('a request at a WebSocket\'s address of a method but GET or HEAD is refused 405, its Allow naming GET and HEAD, before its handshake is read',
+     ['15.2', '15.6.7'], {}, [
+         asked('post', method='POST'), refused('post', 405, 'method-refused', METHOD_REFUSED),
+         asked('put', method='PUT'), refused('put', 405, 'method-refused', METHOD_REFUSED),
+         asked('options', method='OPTIONS'), refused('options', 405, 'method-refused', METHOD_REFUSED),
+         asked('delete', method='DELETE', **PLAIN), refused('delete', 405, 'method-refused', METHOD_REFUSED),
+         asked('eighth', method='POST', version=8), refused('eighth', 405, 'method-refused', METHOD_REFUSED)]),
+    # ! a HEAD's answer has no body: the peers read it by its length, which both sides write 0
+    ('a request at a WebSocket\'s address that asks no WebSocket is answered 426, marked, its Upgrade naming websocket',
+     ['15.2', '15.6.11'], {}, [
+         asked('plain', **PLAIN), refused('plain', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('unupgraded', upgrade=None), refused('unupgraded', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('h2c', upgrade='h2c'), refused('h2c', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('versioned', upgrade='websocket/13'), refused('versioned', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('unconnected', connection=None), refused('unconnected', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('kept', connection='keep-alive'), refused('kept', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('eighth', upgrade='h2c', version=8), refused('eighth', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('head', method='HEAD'), refused('head', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('plainhead', method='HEAD', **PLAIN),
+         refused('plainhead', 426, 'upgrade-required', UPGRADE_REQUIRED),
+         asked('old', http='HTTP/1.0'), refused('old', 426, 'upgrade-required', UPGRADE_REQUIRED)]),
     # 15.2: an upgrade is judged by its Origin, the field an exchange is, so one of another version,
-    # which may carry its origin elsewhere, is never taken
-    ('an upgrade of a version but 13 is answered 426, naming 13, whatever its Origin', ['15.2'], {}, [
-        handshake('foreign', {'origin': 'https://elsewhere.test'}, version=8),
-        expect('foreign', 426, fields={'sec-websocket-version': '13'}),
-        handshake('none', version=8), expect('none', 426, fields={'sec-websocket-version': '13'}),
-        handshake('seventh', {'origin': 'https://elsewhere.test'}, version=7),
-        expect('seventh', 426, fields={'sec-websocket-version': '13'}),
-        handshake('unversioned', version=None), expect('unversioned', 426, fields={'sec-websocket-version': '13'})]),
+    # which may carry its origin elsewhere, is never taken, and is told the version before its form
+    ('an upgrade of a version but 13, or of none, is refused 426, marked, naming 13 and websocket, whatever its Origin or its key',
+     ['15.2', '15.6.11'], {}, [
+         handshake('foreign', {'origin': 'https://elsewhere.test'}, version=8),
+         refused('foreign', 426, 'version-refused', VERSION_REFUSED),
+         handshake('none', version=8), refused('none', 426, 'version-refused', VERSION_REFUSED),
+         handshake('seventh', {'origin': 'https://elsewhere.test'}, version=7),
+         refused('seventh', 426, 'version-refused', VERSION_REFUSED),
+         handshake('unversioned', version=None), refused('unversioned', 426, 'version-refused', VERSION_REFUSED),
+         handshake('padded', version='013'), refused('padded', 426, 'version-refused', VERSION_REFUSED),
+         handshake('listed', version='13, 8'), refused('listed', 426, 'version-refused', VERSION_REFUSED),
+         asked('short', key=SHORT_KEY, version=8), refused('short', 426, 'version-refused', VERSION_REFUSED)]),
+    ('an upgrade whose key is not one field of 16 bytes in base64, whose version comes twice, whose subprotocols are no list of tokens, or that has content, is refused 400, marked, before its origin is judged',
+     ['15.2', '15.6.4'], {}, [
+         asked('keyless', key=None), refused('keyless', 400, 'malformed', UPGRADE_REFUSED),
+         asked('unencoded', key='not a key at all!!!!!=='), refused('unencoded', 400, 'malformed', UPGRADE_REFUSED),
+         asked('short', key=SHORT_KEY), refused('short', 400, 'malformed', UPGRADE_REFUSED),
+         asked('keys', key=[KEY, KEY]), refused('keys', 400, 'malformed', UPGRADE_REFUSED),
+         asked('spaced', key='dGhlIHNhbXBs ZSBub25jZQ=='), refused('spaced', 400, 'malformed', UPGRADE_REFUSED),
+         asked('versions', version=[13, 13]), refused('versions', 400, 'malformed', UPGRADE_REFUSED),
+         asked('protocols', {'sec-websocket-protocol': 'a b'}),
+         refused('protocols', 400, 'malformed', UPGRADE_REFUSED),
+         asked('content', {'content-length': '5'}, body=text('hello')),
+         refused('content', 400, 'malformed', UPGRADE_REFUSED),
+         asked('chunked', {'transfer-encoding': 'chunked'}, body=text('5\r\nhello\r\n0\r\n\r\n')),
+         refused('chunked', 400, 'malformed', UPGRADE_REFUSED),
+         asked('foreign', {'origin': 'https://elsewhere.test'}, key=SHORT_KEY),
+         refused('foreign', 400, 'malformed', UPGRADE_REFUSED)]),
+    # RFC 9110 §7.8 and §5.3: Upgrade and Connection are lists, read across their lines
+    ('an upgrade is taken whose Upgrade lists websocket in any case, in one field line or several, whose Connection names upgrade among other tokens, with no content',
+     ['15.2'], {}, [
+         asked('cased', upgrade='WebSocket'), taken('cased'),
+         asked('listed', upgrade='h2c, websocket'), taken('listed'),
+         asked('lines', upgrade=['h2c', 'websocket']), taken('lines'),
+         asked('kept', connection='keep-alive, upgrade'), taken('kept'),
+         asked('connections', connection=['keep-alive', 'upgrade']), taken('connections'),
+         asked('empty', {'content-length': '0'}), taken('empty'),
+         message('empty', binary=ECHO), heard('empty', envelope=result(1, '"x"'))]),
     ('a peer that closes with 1000 is answered 1000, the clean close', ['15.3'], {}, [
         *upgrade(), message('socket', close=NORMAL), heard('socket', close=NORMAL)]),
     ('a server that stops closes its connections with 1001', ['15.3'], {}, [

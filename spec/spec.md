@@ -1042,17 +1042,34 @@ credential beside an envelope, either way: a request that presents `ELSEWHERE` o
 `SESSION_REQUIRED` (section 9.2, step 5), and a side fails a call that would present it over one
 before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake
 carried, its `Authorization` among it, is no credential beside an envelope, and never stands for
-`ELSEWHERE`. A server answers 426 an upgrade of any `Sec-WebSocket-Version` but 13, or of none,
-its own `Sec-WebSocket-Version` naming 13
-([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)), so that the `Origin` it
-judges an upgrade by is the field it judges an exchange by. It takes an upgrade as it takes an HTTP
-exchange (section 15.12): one that names a host it does not take, or that carries an `Origin`
-neither its own nor among those it takes, is refused before its handshake, 403, its `bead-refusal`
-`host-refused` or `origin-refused`, with `cache-control: no-store` and
-`x-content-type-options: nosniff`, its body empty, since no same-origin policy guards an upgrade and
-a page of any origin may ask for one
-([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). A page that rebinds its
-name to the server's address is its own origin by its `Host`: `hosts` is what refuses it.
+`ELSEWHERE`. A server judges a request at its WebSocket's address in this order, and answers the
+first that applies. What HTTP refuses of its own, a `Host` missing, repeated or no host, its HTTP
+server answers, unmarked (section 15.12). It takes an upgrade from the hosts an HTTP exchange is
+taken from (section 15.12): a request naming a host it does not take is refused 403, its
+`bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
+server's address is its own origin by its `Host`, and `hosts` is what refuses it. A method other
+than `GET` or `HEAD` is refused 405, its `Allow` naming both
+([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)). A request that asks
+no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming `websocket`
+([RFC 9110 §15.5.22](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.22)): a `HEAD`, which
+cannot switch; an `HTTP/1.0` request, whose `Upgrade` is ignored; one whose `Upgrade` lists no
+`websocket`, or whose `Connection` lists no `upgrade`, each token compared in any ASCII case,
+across the field's lines ([RFC 9110 §7.8](https://www.rfc-editor.org/rfc/rfc9110#section-7.8)).
+An upgrade whose `Sec-WebSocket-Version` comes in more than one field line is malformed; one of
+any other `Sec-WebSocket-Version` but 13, or of none, is answered 426, `version-refused`, its own
+`Sec-WebSocket-Version` naming 13
+([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)), before any field its
+version shapes. An upgrade of version 13 is malformed, and refused 400, `malformed`, whose
+`Sec-WebSocket-Key` is not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not
+a list of distinct tokens, or that has content
+([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)). One that carries an
+`Origin` neither its own nor among those it takes is then refused 403, `origin-refused`, so that
+the `Origin` it judges an upgrade by is the field it judges an exchange by; no same-origin policy
+guards an upgrade, and a page of any origin may ask for one
+([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). Each of these refusals
+but HTTP's own is marked as section 15.6 says, with `cache-control: no-store` and
+`x-content-type-options: nosniff`, its body empty, and closes its connection; a 426 names
+`upgrade` in its `Connection`.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
@@ -1099,22 +1116,24 @@ rejects a send on a marked refusal: nothing was tried. Any other status that is 
 gateway's 502, a proxy's 404 — may come after the request ran: the client counts the exchange
 lost.
 
-| Status | `bead-refusal`                       | Says                                                                                                                                                                                               |
-| ------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 200    |                                      | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                  |
-| 201    |                                      | a connection drawn, its token in `bead-connection-token`                                                                                                                                           |
-| 204    |                                      | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                              |
-| 400    | `malformed`                          | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen's count that is none, or an `after` past what was sent |
-| 403    | `host-refused`, `origin-refused`     | a host not among those the server takes; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                       |
-| 404    | `path-unknown`, `connection-unknown` | not the path; the connection is gone                                                                                                                                                               |
-| 405    | `method-refused`                     | neither `GET`, `POST` nor `DELETE`, which `Allow` names                                                                                                                                            |
-| 409    | `call-waiting`, `listen-undeclared`  | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                    |
-| 413    | `too-large`                          | a body past the envelope's limit                                                                                                                                                                   |
-| 415    | `type-refused`                       | not `application/prs.bead`, or encoded                                                                                                                                                             |
-| 429    | `busy`                               | too many requests waiting on one connection, or exchanges under way                                                                                                                                |
-| 503    | `busy`                               | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                          |
+| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                               |
+| ------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                  |
+| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                           |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                              |
+| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
+| 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                        |
+| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                               |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                   |
+| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                    |
+| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                   |
+| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                             |
+| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                |
+| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                          |
 
-Every response on the path carries `cache-control: no-store` and `x-content-type-options: nosniff`.
+Every response on the path carries `cache-control: no-store` and `x-content-type-options: nosniff`,
+and so does every refusal of a WebSocket server's own.
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
 exchange lost — a network that failed, an answer that could not be written, a request unanswered
@@ -1187,11 +1206,15 @@ alike (section 15.10):
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
 `maximumWait` may not.
 
-Past the first four it answers 429 or 503, as section 15.6's table says. It takes the hosts a
-request may name, `hosts`, every host when not given, and the origins an exchange may come
-from besides its own, `origins`, none when not given. Its own is its request's `Host` under `http`
-or `https`: an `Origin` that is `http://` or `https://` followed by that `Host`, compared ASCII
-case-insensitively, the field read as the serialized origin it carries
+Past the first four it answers 429 or 503, as section 15.6's table says. A server answers 400, as
+HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host` field line or a
+`Host` that is no host, `uri-host` and an optional port, before it reads anything else of it
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
+transport's own, unmarked. An empty `Host` is a host, and so is a name of invalid punycode. It
+takes the hosts a request may name, `hosts`, every host when not given, and the origins an exchange
+may come from besides its own, `origins`, none when not given. Its own is its request's `Host` under
+`http` or `https`: an `Origin` that is `http://` or `https://` followed by that `Host`, compared
+ASCII case-insensitively, the field read as the serialized origin it carries
 ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), never parsed as a URL; a
 browser writes both from one URL alike. Any other `Origin` is none of its own, whatever host it
 names: `null`, which a browser sends for an opaque origin — a sandboxed frame's, a `file:` or a

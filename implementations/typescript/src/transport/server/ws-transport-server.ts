@@ -3,6 +3,13 @@
 // dependencies
 
 import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+  STATUS_CODES,
+} from 'node:http';
+import {
   CLOSE_EVENT,
   CONNECTION_EVENT,
   ERROR_EVENT,
@@ -15,7 +22,6 @@ import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
-import { HOST_REFUSAL, isTakenHost, isTakenOrigin, ORIGIN_REFUSAL } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   IIncomingMessageLike,
@@ -23,10 +29,12 @@ import type {
   ITransportServerAddress,
   ITransportServerClientAware,
   ITransportServerStartOptions,
+  IUpgradeSocketLike,
   IWebSocketServerLike,
   IWSTransportServerOptions,
   WSTransportServer,
 } from './types';
+import { type IHandshakeRefusal, MALFORMED_HANDSHAKE, refusalOfHandshake } from './ws-handshake';
 
 export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
@@ -34,11 +42,13 @@ export { HOST_REFUSAL, ORIGIN_REFUSAL } from './hosts-and-origins';
 export type {
   IIncomingMessageLike,
   IServerSocketLike,
+  IUpgradeSocketLike,
   IWebSocketServerConstructor,
   IWebSocketServerLike,
   IWSTransportServerOptions,
   WSTransportServer,
 } from './types';
+export { WS_REFUSALS } from './ws-handshake';
 
 // constants
 
@@ -57,11 +67,26 @@ export const START_DEFAULTS = Object.freeze({
 
 // helpers
 
-/** A header of `request` as one string: none when it is absent or given more than once. */
-const headerOf = (request: IIncomingMessageLike, name: string): string | undefined => {
-  const value = request.headers[name];
+// closes what a start opened and does not keep: an HTTP server still binding its address once it
+// listens, since it closes nothing before then
+const closeOpened = (
+  opened: { http: Server; instance: IWebSocketServerLike } | undefined
+): void => {
+  if (opened === undefined) {
+    return;
+  }
 
-  return typeof value === 'string' ? value : undefined;
+  const { http, instance } = opened;
+
+  instance.close();
+
+  if (!http.listening) {
+    http.once('listening', () => {
+      http.close();
+    });
+  }
+
+  http.close();
 };
 
 // definition
@@ -77,10 +102,13 @@ const headerOf = (request: IIncomingMessageLike, name: string): string | undefin
  * A WebSocket carries no credential beside an envelope: each message delivered carries none, and a
  * credential given to `send` is not carried.
  *
- * An upgrade is taken as the HTTP transport takes an exchange (spec 15.2, 15.12): one that names a
- * host not among `hosts`, or that carries an `Origin` neither the server's own nor among `origins`,
- * is refused 403 before its handshake, and one of a version but 13 is answered 426. Each message is an envelope at most by default,
- * {@link MAXIMUM_MESSAGE_BYTES}, and `ws` closes a connection that sends a larger one with 1009.
+ * A request at its address is judged in the order of spec 15.2, `hosts` and `origins` among its
+ * steps as the HTTP transport's (spec 15.12): 400 as HTTP answers it to a `Host` missing, repeated
+ * or no host; 403 to a host not among `hosts`; 405 to a method but `GET` or `HEAD`; 426 to a
+ * request that asks no WebSocket, and to a version but 13; 400 to a malformed upgrade; 403 to an
+ * `Origin` neither its own nor among `origins`; each refusal as {@link refusalOfHandshake} writes
+ * it. Each message is an envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws`
+ * closes a connection that sends a larger one with 1009.
  *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
@@ -102,10 +130,12 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
   } = options;
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
+  const judged = { hosts, origins };
 
   const decoder = new TextDecoder();
 
   return createTransportServer<IServerSocketLike, IIncomingMessageLike>((server, connections) => {
+    let httpServer: Server | undefined;
     let webSocketServer: IWebSocketServerLike | undefined;
 
     // resolves once `socket` has closed, dropping it when the handshake takes longer than allowed:
@@ -137,95 +167,61 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       });
     };
 
-    // ! ws writes a body of its own on an upgrade it is told not to take, where the transport's
-    // answer has none (spec 15.6): it is written here, and ws, told nothing, goes no further with
-    // this upgrade
-    const answer = (
-      request: IIncomingMessageLike,
-      { fields, status }: { fields: readonly string[]; status: string }
-    ): void => {
-      const { socket } = request;
+    const dateOf = (): string => {
+      return new Date(server.clock.Date.now()).toUTCString();
+    };
 
+    // a refusal written raw where no response is at hand, a `CONNECT`'s or an upgrade's ws could
+    // not read, and its socket ended
+    const answer = (socket: IUpgradeSocketLike, { fields, status }: IHandshakeRefusal): void => {
+      socket.on(ERROR_EVENT, () => {
+        socket.destroy();
+      });
       socket.once('finish', () => {
         socket.destroy();
       });
       socket.end(
         [
-          `HTTP/1.1 ${status}`,
-          `date: ${new Date(server.clock.Date.now()).toUTCString()}`,
-          ...fields,
-          'content-length: 0',
-          'connection: close',
+          `HTTP/1.1 ${String(status)} ${STATUS_CODES[status] ?? ''}`,
+          `date: ${dateOf()}`,
+          ...Object.entries(fields).map(([name, value]) => {
+            return `${name}: ${value}`;
+          }),
           '',
           '',
         ].join('\r\n')
       );
     };
 
-    const refuse = (request: IIncomingMessageLike, refusal: string): void => {
-      answer(request, {
-        fields: [
-          `bead-refusal: ${refusal}`,
-          'cache-control: no-store',
-          'x-content-type-options: nosniff',
-        ],
-        status: '403 Forbidden',
-      });
+    // ! Node raises `request` for no upgrade the callback takes: one the judgement takes here is
+    // one Node did not read as an upgrade, refused as malformed
+    const onRequest = (request: IncomingMessage, response: ServerResponse): void => {
+      const { fields, status } = refusalOfHandshake(request, judged) ?? MALFORMED_HANDSHAKE;
+
+      response.sendDate = false;
+      response.writeHead(status, { date: dateOf(), ...fields }).end();
     };
 
-    // an upgrade of a version but 13, answered 426, naming the one version the transport speaks
-    // (RFC 6455 §4.4)
-    const answerVersion = (request: IIncomingMessageLike): void => {
-      answer(request, { fields: ['sec-websocket-version: 13'], status: '426 Upgrade Required' });
+    // a `CONNECT` keeps an event of its own, where it is refused for its host or its method
+    const onConnect = (request: IncomingMessage, socket: IUpgradeSocketLike): void => {
+      answer(socket, refusalOfHandshake(request, judged) ?? MALFORMED_HANDSHAKE);
     };
 
-    // ! ws answers an upgrade it cannot read before `verifyClient`, a version but 8 or 13 among
-    // them, and nothing once told of it: a WebSocket's of a version but 13 is answered 426 here, as
-    // `verifyClient` answers version 8, and any other 405 or 400, as ws would
-    const onClientError = (
-      _error: Error,
-      _socket: unknown,
-      // oxlint-disable-next-line bead/options-last -- ws's own, a `wsClientError` listener's
-      request: IIncomingMessageLike
-    ): void => {
-      if (
-        /websocket/iu.test(headerOf(request, 'upgrade') ?? '') &&
-        headerOf(request, 'sec-websocket-version') !== '13'
-      ) {
-        return (answerVersion(request), undefined);
+    // ! what the callback takes, ws takes, but for `Upgrade`: ws compares its whole value with
+    // `websocket`, where RFC 9110 §7.8 makes it a list, so it is set to the token the judgement found
+    const shouldUpgradeCallback = (request: IncomingMessage): boolean => {
+      if (refusalOfHandshake(request, judged) !== undefined) {
+        return false;
       }
 
-      return (
-        answer(request, {
-          fields: [],
-          status: request.method === 'GET' ? '400 Bad Request' : '405 Method Not Allowed',
-        }),
-        undefined
-      );
+      request.headers.upgrade = 'websocket';
+
+      return true;
     };
 
-    // an upgrade of version 13, from a host and an origin the transport takes, judged before its
-    // handshake; ws takes version 8 as well, whose origin it reads from another field, and the
-    // transport answers it 426
-    const verifyClient = (
-      { origin, req }: { origin: string | undefined; req: IIncomingMessageLike },
-      verified: (isTaken: boolean) => void
-    ): void => {
-      const host = headerOf(req, 'host');
-
-      if (headerOf(req, 'sec-websocket-version') !== '13') {
-        return (answerVersion(req), undefined);
-      }
-
-      if (!isTakenHost(host, hosts)) {
-        return (refuse(req, HOST_REFUSAL), undefined);
-      }
-
-      if (!isTakenOrigin(origin, { host, origins })) {
-        return (refuse(req, ORIGIN_REFUSAL), undefined);
-      }
-
-      return (verified(true), undefined);
+    // a guard: ws reads nothing the judgement has not taken, and would refuse it 400
+    const onClientError = (_error: Error, socket: IUpgradeSocketLike): void => {
+      answer(socket, MALFORMED_HANDSHAKE);
     };
 
     const onConnection = (socket: IServerSocketLike, request: IIncomingMessageLike): void => {
@@ -312,21 +308,19 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       type: TRANSPORT_WS,
 
       start: async ({ address, findOpenPort, port, signal }) => {
-        let opened: IWebSocketServerLike | undefined;
+        let opened: { http: Server; instance: IWebSocketServerLike } | undefined;
         let isListening = false;
 
         try {
           return await createPromise<ITransportServerAddress>(
             (resolve, reject) => {
-              const instance = new WebSocketServer({
-                host: address,
-                maxPayload,
-                port: findOpenPort ? 0 : port,
-                verifyClient,
-              });
+              const http = createServer({ shouldUpgradeCallback }, onRequest);
+              const instance = new WebSocketServer({ maxPayload, server: http });
 
-              opened = instance;
+              opened = { http, instance };
+              http.on('connect', onConnect);
 
+              // ws forwards its server's `error` and `listening`
               instance.on(ERROR_EVENT, (error) => {
                 if (isListening) {
                   return (server.emit(ERROR_EVENT, error, ''), undefined);
@@ -339,6 +333,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
                 const addressInfo = instance.address();
 
                 isListening = true;
+                httpServer = http;
                 webSocketServer = instance;
 
                 resolve({
@@ -352,13 +347,16 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
               instance.on(CONNECTION_EVENT, onConnection);
               instance.on('wsClientError', onClientError);
+              http.listen(findOpenPort ? 0 : port, address);
             },
             { signal }
           );
         } catch (reason) {
-          // an error before listening, or an abort: close what was opened, listening or not
+          // an error before listening, or an abort: close what was opened, listening or not, and
+          // once it listens when its address is still being bound
+          httpServer = undefined;
           webSocketServer = undefined;
-          opened?.close();
+          closeOpened(opened);
 
           throw reason;
         }
@@ -366,12 +364,17 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
       stop: async () => {
         const instance = webSocketServer;
+        const http = httpServer;
 
         webSocketServer = undefined;
+        httpServer = undefined;
 
         // first, so no connection arrives while the open ones are closing; the port is free once it
-        // returns, and its callback is not awaited because it also waits on peers that never upgraded
+        // returns, and its callback is not awaited because it also waits on peers that never
+        // upgraded; ws leaves open the server it was given
         instance?.close();
+        http?.close();
+        http?.closeIdleConnections();
 
         await Promise.all(
           connections

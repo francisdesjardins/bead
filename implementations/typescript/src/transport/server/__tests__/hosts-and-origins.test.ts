@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { HOST_REFUSAL, isTakenHost, isTakenOrigin, ORIGIN_REFUSAL } from '../hosts-and-origins';
+import {
+  HOST_REFUSAL,
+  isTakenHost,
+  isTakenOrigin,
+  isWellFormedHost,
+  ORIGIN_REFUSAL,
+} from '../hosts-and-origins';
 
 // constants
 
@@ -16,6 +22,64 @@ const OTHER_HOSTS = [
   'xn--a.test',
 ];
 const ORIGINS = ['https://bead.example', 'null'];
+
+// a `Host` value HTTP takes, `uri-host` and an optional port, and one it does not (RFC 9112 §3.2):
+// the rows the C# side judges alike
+const WELL_FORMED_HOSTS = [
+  'bead.test',
+  'bead.test:8080',
+  'BEAD.test:8080',
+  'bead.test:',
+  'BEAD.TEST',
+  '',
+  ':8080',
+  '127.0.0.1',
+  '127.0.0.1:8080',
+  '[::1]',
+  '[::1]:8080',
+  '[2001:db8::7]',
+  '[::ffff:127.0.0.1]',
+  '[::ffff:192.0.2.1]',
+  '[v1.fe80::a+en1]',
+  'xn--a',
+  'xn---bad-cpa.test',
+  'bead%2Etest',
+  'b%C3%A9ad.test',
+  'bead_test~',
+  "!$&'()*+,;=",
+  "a-._~!$&'()*+,;=b",
+  ' bead.test\t',
+];
+const MALFORMED_HOSTS = [
+  'bad host',
+  'user@bead.test',
+  'bead/test',
+  'bead.test/path',
+  'bead.test?query',
+  'bead.test#fragment',
+  'bead.test:80x',
+  'bead.test:80a',
+  'bead.test:80:80',
+  'bead.test:8080:1',
+  'bead.test:-1',
+  '[::1',
+  '[::1]x',
+  '[::1]:a',
+  '[]',
+  '[bead.test]',
+  '[127.0.0.1]',
+  '[::1%eth0]',
+  '[::1%25eth0]',
+  '[fe80::1%25eth0]',
+  '[::1/64]',
+  '[v.x]',
+  '[v1.]',
+  'bead%2test',
+  '%zz.test',
+  'bead.test%',
+  'béad.test',
+  '::1',
+];
 
 // an origin, and the Host of a request that comes from it: the server's own, `http://` or
 // `https://` followed by its Host, in any ASCII case, as a browser writes both from one URL first
@@ -76,6 +140,27 @@ const NOT_OWN: [origin: string, host: string | undefined][] = [
 // definition
 
 test.describe('hosts and origins', () => {
+  test('takes a Host HTTP takes: one line, none in a request that needs none, its value uri-host and an optional port without the whitespace around it', () => {
+    expect(
+      WELL_FORMED_HOSTS.filter((host) => {
+        return isWellFormedHost([host], { isRequired: true });
+      })
+    ).toEqual(WELL_FORMED_HOSTS);
+    expect(
+      MALFORMED_HOSTS.filter((host) => {
+        return isWellFormedHost([host], { isRequired: false });
+      })
+    ).toEqual([]);
+
+    // none, where HTTP/1.1 asks one and HTTP/1.0 does not; two, whatever they name
+    expect([
+      isWellFormedHost([], { isRequired: true }),
+      isWellFormedHost([], { isRequired: false }),
+      isWellFormedHost(['bead.test', 'bead.test'], { isRequired: true }),
+      isWellFormedHost(['bead.test', 'elsewhere.test'], { isRequired: false }),
+    ]).toEqual([false, true, false, false]);
+  });
+
   test('takes every host when given none, and among those given in any ASCII case', () => {
     expect(
       ['elsewhere.test', 'xn--a', undefined].map((host) => {

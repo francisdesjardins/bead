@@ -651,6 +651,64 @@ test.describe('createHTTPTransportServer', () => {
     ]);
   });
 
+  test('answers a request without a Host, with two, or with one that is no host, 400 as HTTP does, unmarked', async () => {
+    // the status, the mark and the body of a connect whose `Host` lines are `hosts`, once the
+    // server closed its socket; a body in chunks read whole
+    const answerOf = async (port: number, hostLines: readonly string[]) => {
+      const socket = connectTcp(port, host);
+      let text = '';
+
+      socket.on('data', (chunk: Buffer) => {
+        text += chunk.toString('latin1');
+      });
+      await once(socket, 'connect');
+      socket.write(
+        'POST /bead HTTP/1.1\r\n' +
+          hostLines
+            .map((line) => {
+              return `Host: ${line}\r\n`;
+            })
+            .join('') +
+          `Content-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
+      );
+      await once(socket, 'close');
+
+      const [head = '', body = ''] = text.split(/\r\n\r\n(?<body>.*)/su);
+
+      return [
+        Number(head.split(' ')[1]),
+        new RegExp(`${REFUSAL_HEADER}: (.*)\r\n`, 'iu').exec(head)?.[1] ?? null,
+        /transfer-encoding: chunked/iu.test(head) && body === '0\r\n\r\n' ? '' : body,
+      ];
+    };
+
+    // its head is the HTTP server's own, Node's for a `Host` missing, whether the server takes
+    // every host or names some
+    for (const hosts of [undefined, ['bead.test']]) {
+      await using started = await startTransport({ hosts });
+      const port = Number(new URL(started.url).port);
+
+      expect(
+        await Promise.all(
+          [
+            [],
+            ['bead.test', 'elsewhere.test'],
+            ['elsewhere.test', 'bead.test'],
+            ['bead.test', 'bead.test'],
+            ['bad host'],
+          ].map((hostLines) => {
+            return answerOf(port, hostLines);
+          })
+        )
+      ).toEqual(
+        Array.from({ length: 5 }, () => {
+          return [400, null, ''];
+        })
+      );
+      expect(namesOf(started.events, 'connection')).toEqual([]);
+    }
+  });
+
   test('refuses a request on a call id already waiting, 409', async () => {
     await using started = await startTransport();
     const { server, url } = started;
@@ -1376,6 +1434,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf(bead, { url: '/bead?after=1' }),
       statusOf({ ...bead, origin: 'not an origin' }),
       statusOf({ ...bead, host: 'rebound.example' }),
+      // an HTTP/1.1 request with no host, which HTTP refuses of its own, unmarked
       statusOf({ 'content-type': BEAD_MEDIA_TYPE, host: [] as unknown as string }),
       // HTTP/2 names its host by its authority, and a browser's origin matches it
       statusOf(
@@ -1395,19 +1454,19 @@ test.describe('createHTTPTransportServer, its edges', () => {
       [201, undefined],
       [403, REFUSALS.ORIGIN],
       [403, REFUSALS.HOST],
-      [403, REFUSALS.HOST],
+      [400, undefined],
       [201, undefined],
       [415, REFUSALS.TYPE],
     ]);
 
-    const { response } = fake.exchange({ headers: bead });
+    const { response } = fake.exchange({ headers: bead, httpVersion: '1.0' });
     // no target at all: the root, which is not the path
     const untargeted = fake.exchange({
       headers: { ...bead, host: 'bead.example' },
       url: undefined,
     });
 
-    // no host at all, where hosts are listed
+    // no host at all, which an HTTP/1.0 request may name, where hosts are listed
     expect(response.status).toBe(403);
     expect(untargeted.response.headers?.[REFUSAL_HEADER]).toBe(REFUSALS.PATH);
     await server.stop();

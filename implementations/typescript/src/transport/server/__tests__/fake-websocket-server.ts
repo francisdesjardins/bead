@@ -9,6 +9,8 @@ import type {
 /**
  * A `WebSocketServer` a test scripts by hand, for the branches a real one does not take on demand:
  * an error after listening, one before it, a peer that never answers a close, a close that throws.
+ * The transport's HTTP server, which it is given, listens for real; its `listening` and its `error`
+ * are what the test scripts, as `ws` forwards them.
  */
 
 export interface IFakeSocket extends IServerSocketLike {
@@ -93,23 +95,20 @@ export const createFakeWebSocketServer = (options?: {
     });
   } as unknown as IWebSocketServerConstructor;
 
-  // the request's own socket, which a refused upgrade alone writes on
-  const requestSocket = () => {
-    return { destroy: () => {}, end: () => {}, once: () => {} };
+  // the request of an upgrade taken, from `socket`
+  const requestOf = (socket: IIncomingMessageLike['socket']): IIncomingMessageLike => {
+    return { headers: {}, httpVersion: '1.1', rawHeaders: [], socket };
   };
 
   const connect = (socket: IServerSocketLike, remotePort = 40_000) => {
-    const request: IIncomingMessageLike = {
-      headers: {},
-      socket: { ...requestSocket(), remoteAddress: '10.0.0.1', remotePort },
-    };
+    const request = requestOf({ remoteAddress: '10.0.0.1', remotePort });
     instances.at(-1)?.emit('connection', socket, request);
     return generateHandle({ ip: '10.0.0.1', port: remotePort, type: 'WS' });
   };
 
   /** A connection whose TCP socket was torn down before the server saw it: it reports no address. */
   const connectGone = (socket: IServerSocketLike) => {
-    const request: IIncomingMessageLike = { headers: {}, socket: requestSocket() };
+    const request = requestOf({});
     instances.at(-1)?.emit('connection', socket, request);
   };
 

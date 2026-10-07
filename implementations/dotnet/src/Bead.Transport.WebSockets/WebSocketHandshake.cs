@@ -1,0 +1,266 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Primitives;
+
+namespace Bead.Transport.WebSockets;
+
+/// <summary>
+/// The reasons each refusal of a WebSocket server's own is marked with, in its
+/// <c>bead-refusal</c> field (spec 15.2, 15.6).
+/// </summary>
+public static class WebSocketRefusals
+{
+    /// <summary>A host the server does not take, whatever the request: 403.</summary>
+    public const string Host = HostsAndOrigins.HostRefusal;
+
+    /// <summary>
+    /// An upgrade of version 13 whose key, version, subprotocols or content are not a handshake's: 400.
+    /// </summary>
+    public const string Malformed = "malformed";
+
+    /// <summary>Neither GET nor HEAD: 405.</summary>
+    public const string Method = "method-refused";
+
+    /// <summary>An upgrade from an origin neither the server's own nor among those it takes: 403.</summary>
+    public const string Origin = HostsAndOrigins.OriginRefusal;
+
+    /// <summary>A request that asks no WebSocket: 426.</summary>
+    public const string Upgrade = "upgrade-required";
+
+    /// <summary>An upgrade of a version but 13, or of none: 426.</summary>
+    public const string Version = "version-refused";
+}
+
+/// <summary>
+/// What a WebSocket server answers a request it does not upgrade: its status, its mark, none for a
+/// refusal HTTP makes of its own, and its fields by their names in lower case, the mark, its date
+/// and its length aside.
+/// </summary>
+internal sealed record HandshakeRefusal(int Status, string? Refusal, IReadOnlyDictionary<string, string> Fields);
+
+/// <summary>
+/// How a WebSocket server judges a request at its address, in the order spec 15.2 states: the first
+/// that applies answers, and the rest is not read.
+/// </summary>
+internal static class WebSocketHandshake
+{
+    // constants
+
+    // the one version of the protocol the server speaks (RFC 6455 §4.2.2)
+    private const string Version = "13";
+
+    // a token's characters besides letters and digits (RFC 9110 §5.6.2)
+    private const string TokenMarks = "!#$%&'*+-.^_`|~";
+
+    // the fields of every refusal of the transport's own: never stored nor sniffed, and the connection
+    // goes with it
+    private static readonly Dictionary<string, string> Refused = new()
+    {
+        ["cache-control"] = "no-store",
+        ["x-content-type-options"] = "nosniff",
+        ["connection"] = "close",
+    };
+
+    /// <summary>
+    /// What the transport answers a request Kestrel cannot upgrade that the judgement took, and a
+    /// version 13 upgrade the judgement refuses for its form: 400, malformed.
+    /// </summary>
+    public static readonly HandshakeRefusal Malformed = new(StatusCodes.Status400BadRequest, WebSocketRefusals.Malformed, Refused);
+
+    // a refusal HTTP makes of its own, unmarked (RFC 9112 §3.2)
+    private static readonly HandshakeRefusal BadHost = new(StatusCodes.Status400BadRequest, null, new Dictionary<string, string> { ["connection"] = "close" });
+
+    private static readonly HandshakeRefusal HostRefused = new(StatusCodes.Status403Forbidden, WebSocketRefusals.Host, Refused);
+
+    private static readonly HandshakeRefusal OriginRefused = new(StatusCodes.Status403Forbidden, WebSocketRefusals.Origin, Refused);
+
+    // the address serves GET and HEAD alone (RFC 9110 §15.5.6)
+    private static readonly HandshakeRefusal MethodRefused = new(StatusCodes.Status405MethodNotAllowed, WebSocketRefusals.Method, new Dictionary<string, string>(Refused)
+    {
+        ["allow"] = "GET, HEAD",
+    });
+
+    // a 426 names the protocol to upgrade to, and a sender of Upgrade names it in its Connection
+    // (RFC 9110 §15.5.22, §7.8)
+    private static readonly HandshakeRefusal UpgradeRequired = new(StatusCodes.Status426UpgradeRequired, WebSocketRefusals.Upgrade, new Dictionary<string, string>(Refused)
+    {
+        ["connection"] = "upgrade, close",
+        ["upgrade"] = "websocket",
+    });
+
+    // and the one version the server speaks (RFC 6455 §4.2.2)
+    private static readonly HandshakeRefusal VersionRefused = new(StatusCodes.Status426UpgradeRequired, WebSocketRefusals.Version, new Dictionary<string, string>(Refused)
+    {
+        ["connection"] = "upgrade, close",
+        ["upgrade"] = "websocket",
+        ["sec-websocket-version"] = Version,
+    });
+
+    // helpers
+
+    // a field's value without the whitespace around it (RFC 9110 §5.5)
+    private static string ValueOf(string? value)
+    {
+        return (value ?? "").Trim(HostsAndOrigins.FieldWhitespace);
+    }
+
+    // the elements of a list field across its field lines, each without the whitespace around it
+    // (RFC 9110 §5.6.1), the empty ones kept
+    private static IEnumerable<string> ElementsOf(StringValues lines)
+    {
+        return lines.SelectMany((line) =>
+        {
+            return (line ?? "").Split(',');
+        }).Select(ValueOf);
+    }
+
+    // whether a list field names a token, in any ASCII case
+    private static bool Names(StringValues lines, string token)
+    {
+        return ElementsOf(lines).Any((element) =>
+        {
+            return HostsAndOrigins.IsAsciiEqual(element, token);
+        });
+    }
+
+    // whether a string is a token (RFC 9110 §5.6.2)
+    private static bool IsToken(string text)
+    {
+        return text.Length > 0 && text.All((character) =>
+        {
+            return char.IsAsciiLetterOrDigit(character) || TokenMarks.Contains(character, StringComparison.Ordinal);
+        });
+    }
+
+    // whether a Sec-WebSocket-Protocol, across its field lines, is a list of distinct tokens: its
+    // elements MUST be non-empty, which an empty element or an empty field breaks (RFC 6455 §4.1
+    // item 10, §11.3.4)
+    private static bool IsSubprotocolList(StringValues lines)
+    {
+        var elements = ElementsOf(lines).ToList();
+
+        return elements.All(IsToken)
+            && elements.Distinct(StringComparer.Ordinal).Count() == elements.Count;
+    }
+
+    // whether a Sec-WebSocket-Key is one field line of 16 bytes in base64 (RFC 6455 §4.2.1 item 5,
+    // §11.3.1): 22 characters of the alphabet, then two pads
+    private static bool IsKey(StringValues lines)
+    {
+        if (lines.Count != 1)
+        {
+            return false;
+        }
+
+        var key = ValueOf(lines[0]);
+
+        return key.Length == 24 && key.EndsWith("==", StringComparison.Ordinal) && key[..22].All((character) =>
+        {
+            return char.IsAsciiLetterOrDigit(character) || character == '+' || character == '/';
+        });
+    }
+
+    // whether a request's method is the one named: a method is case-sensitive (RFC 9110 §9.1), which
+    // HttpMethods is not
+    private static bool IsMethod(HttpRequest request, string method)
+    {
+        return string.Equals(request.Method, method, StringComparison.Ordinal);
+    }
+
+    // whether a request asks a WebSocket of HTTP (RFC 9110 §7.8, RFC 6455 §4.2.1 items 3 and 4): an
+    // HTTP/1.1 request, never a HEAD, whose Upgrade names websocket and whose Connection names upgrade
+    private static bool AsksWebSocket(HttpRequest request)
+    {
+        // ! an HTTP/1.0 request's Upgrade is ignored, a MUST; a HEAD cannot switch
+        return HttpProtocol.IsHttp11(request.Protocol)
+            && !IsMethod(request, "HEAD")
+            && Names(request.Headers.Upgrade, "websocket")
+            && Names(request.Headers.Connection, "upgrade");
+    }
+
+    // whether an upgrade of version 13 holds the rest of a handshake's form: one key, a list of
+    // distinct subprotocols when any, and no content
+    private static bool IsWellFormed(HttpRequest request)
+    {
+        var headers = request.Headers;
+
+        return IsKey(headers.SecWebSocketKey)
+            && (headers.SecWebSocketProtocol.Count == 0 || IsSubprotocolList(headers.SecWebSocketProtocol))
+            && headers.ContentLength is null or 0
+            && headers.TransferEncoding.Count == 0;
+    }
+
+    // definition
+
+    /// <summary>
+    /// What the server answers a request at its WebSocket's address, or none when it upgrades it:
+    /// what HTTP refuses of its own, a <c>Host</c> missing, repeated or no host, 400 unmarked; a
+    /// host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, 400; an origin
+    /// not taken, 403.
+    /// </summary>
+    public static HandshakeRefusal? RefusalOf(HttpRequest request, WebSocketTransportServerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var headers = request.Headers;
+
+        // HTTP's own, which Kestrel answers before the application runs; HTTP/2's authority is its
+        // server's
+        var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+
+        if (isHttp1 && !HostsAndOrigins.IsWellFormedHost(headers.Host, HttpProtocol.IsHttp11(request.Protocol)))
+        {
+            return BadHost;
+        }
+
+        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
+        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
+        var host = headers.Host.Count == 0 ? null : ValueOf(headers.Host[0]);
+
+        // * the host before anything else is read: a page that rebinds its name reaches the address
+        // with any method and no upgrade, and hosts refuses it on every transport alike
+        if (!HostsAndOrigins.IsTakenHost(host, options.Hosts))
+        {
+            return HostRefused;
+        }
+
+        if (!IsMethod(request, "GET") && !IsMethod(request, "HEAD"))
+        {
+            return MethodRefused;
+        }
+
+        if (!AsksWebSocket(request))
+        {
+            return UpgradeRequired;
+        }
+
+        // the version before the rest of the form, so an older client learns the one to speak
+        // (RFC 6455 §4.4); two field lines are no version at all (§11.3.5)
+        var versions = headers.SecWebSocketVersion;
+
+        if (versions.Count > 1)
+        {
+            return Malformed;
+        }
+
+        if (versions.Count == 0 || ValueOf(versions[0]) != Version)
+        {
+            return VersionRefused;
+        }
+
+        if (!IsWellFormed(request))
+        {
+            return Malformed;
+        }
+
+        var origin = headers.Origin;
+
+        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (host, options.Origins)))
+        {
+            return OriginRefused;
+        }
+
+        return null;
+    }
+}

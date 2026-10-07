@@ -76,3 +76,6 @@ The order of HTTP's outbox and of its exchanges, and a failure that comes before
 [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps. That such a failure withdraws no default
 met it with the transport's security, whose round
 [0010](0010-a-request-presents-a-credential-of-a-scheme.md) keeps, Security for 0.2.0.
+Section 15.6's rows at a WebSocket's address, and RFC 9112 §3.2 on both transports, met it with a
+WebSocket's handshake, whose round [0010](0010-a-request-presents-a-credential-of-a-scheme.md)
+keeps, On a WebSocket server's answer to a malformed handshake.

@@ -22,11 +22,11 @@ contributor learns between each language and its native commands.
 linter, formatter and test runner, and runs from its own folder.** Within it, one configuration
 judges every file, and a version is held once.
 
-- **TypeScript**, in `implementations/typescript`: Node 24 or later, as `engines` declares, and CI
-  runs it on the current line and on that floor; Yarn, vendored under `.yarn/releases/` and pointed
-  at by `yarnPath`, so every `yarn` there runs that file whatever the machine has; one `yarn.lock`,
-  installed `--immutable` in CI; oxlint, its type-aware half on tsgolint, and oxfmt; TypeScript for
-  the types; Playwright's runner for the tests, and c8 for their coverage.
+- **TypeScript**, in `implementations/typescript`: Node 24.9 or later, as `engines` declares, and CI
+  runs it on the current line and on that floor, 24.9; Yarn, vendored under `.yarn/releases/`
+  and pointed at by `yarnPath`, so every `yarn` there runs that file whatever the machine has; one
+  `yarn.lock`, installed `--immutable` in CI; oxlint, its type-aware half on tsgolint, and oxfmt;
+  TypeScript for the types; Playwright's runner for the tests, and c8 for their coverage.
 - **C#**, in `implementations/dotnet`: `net10.0`; `global.json` pins the SDK and the test runner,
   Microsoft.Testing.Platform; `Directory.Build.props` holds every project to one set of rules
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); `Directory.Packages.props`
