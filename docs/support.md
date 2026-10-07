@@ -53,7 +53,7 @@ The TypeScript tests run under Node alone, in one Playwright project and no brow
 
 ## Interop
 
-Each client is played against the other implementation's server of the interop service (`spec/interop-service.json`), over each transport both serve.
+Each client is played against the other implementation's server of the interop service (`spec/interop-blueprint.json` and `spec/interop-service.json`), over each transport both serve.
 
 | Client     | Server     | Transport  | Cases | Test                                                                                                                                    |
 | ---------- | ---------- | ---------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------- |

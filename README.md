@@ -85,19 +85,20 @@ file of entries is named by a section whose clauses it plays, and each entry cit
 checks. Its companion, [`spec/debugging.md`](spec/debugging.md), states what a side traces, filters
 and counts beside the wire, under a version of its own. Beside them:
 
-| File                                                | What it holds                                                                                                                                                                                         |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                 | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
-| [`conversations.json`](spec/conversations.json)     | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)           | 80 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                              |
-| [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
-| [`durations.json`](spec/durations.json)             | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
-| [`identities.json`](spec/identities.json)           | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
-| [`codecs.json`](spec/codecs.json)                   | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
-| [`codecs.proto`](spec/codecs.proto)                 | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
-| [`debug-filters.json`](spec/debug-filters.json)     | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                   |
-| [`metrics.json`](spec/metrics.json)                 | 24 expositions, the text a registry writes for what it counts, byte for byte, and 50 exits of the interop service's server, the series each step moved                                                |
-| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, its procedures, what its relay admits and forwards, and the credentials it verifies                                                                        |
+| File                                                    | What it holds                                                                                                                                                                                         |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
+| [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
+| [`transports.json`](spec/transports.json)               | 80 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                              |
+| [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
+| [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
+| [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
+| [`codecs.json`](spec/codecs.json)                       | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
+| [`codecs.proto`](spec/codecs.proto)                     | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
+| [`debug-filters.json`](spec/debug-filters.json)         | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                   |
+| [`metrics.json`](spec/metrics.json)                     | 24 expositions, the text a registry writes for what it counts, byte for byte, and 50 exits of the interop service's server, the series each step moved                                                |
+| [`interop-blueprint.json`](spec/interop-blueprint.json) | the interop service's API: its one service, its 18 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                    |
+| [`interop-service.json`](spec/interop-service.json)     | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                      |
 
 Both implementations read these files from `spec/` in their tests; neither keeps a copy. Nine
 generators write them, and regenerating must give the same bytes:
@@ -119,7 +120,8 @@ Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repea
 `spec.md` states as its `specVersion`, or, for `debug-filters.json` and `metrics.json`, the version
 `debugging.md` states as its `debuggingVersion`. `spec/check.py` holds both, that the spec's sections
 and the groups of vectors name each other, that every unit an entry cites is its document's, and
-that every exposition reads as the Prometheus text format 0.0.4; then it reports
+that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint is in
+its form and `interop-service.json` states its procedures; then it reports
 which groups and files each side's tests read, and fails on one a side does not. It runs on Python
 3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
 
@@ -128,6 +130,10 @@ python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts
 python -m pip install --require-hashes --only-binary=:all: -r spec/requirements.txt
 python spec/check.py
 ```
+
+The interop's blueprint is written by hand and laid out by `python spec/check.py --write-blueprints`:
+members sorted as RFC 8785 sorts them, arrays by identity, integers alone, two spaces and a final
+newline.
 
 ## TypeScript
 
