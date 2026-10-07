@@ -952,6 +952,74 @@ public sealed partial class RouterCoreTests
         Assert.Empty(link.Reports);
     }
 
+    [Fact]
+    public async Task Refuses_CHUNK_INVALID_the_chunks_of_a_sender_whose_chunkBytes_is_larger_than_its_own_and_smaller_both_ends_setting_their_limits_alike()
+    {
+        var larger = Chunked with { ChunkBytes = 128, WindowBytes = 256 };
+
+        foreach (var (requesterLimits, receiverLimits, chunks, detail) in new (RouterLimits, RouterLimits, int[], string)[]
+        {
+            // its opening of 108 bytes taken, its first chunk of 112 past the receiver's full of 48
+            (larger, Chunked, [112], "a chunk before the last carries 48 bytes, not 112"),
+
+            // its chunks of 48 under the receiver's full of 112, every one under the credit
+            (Chunked, larger, [48, 48, 48, 48, 48, 16], "a chunk before the last carries 112 bytes, not 48"),
+        })
+        {
+            var requester = new Peer(RouterSide.Client, requesterLimits);
+            var receiver = new Peer(RouterSide.Server, receiverLimits);
+            var resolver = receiver.Resolve();
+
+            requester.OnSend = (envelope) =>
+            {
+                receiver.Core.Receive(EnvelopeCodec.WriteEnvelope(envelope), Handle);
+
+                return Task.CompletedTask;
+            };
+            receiver.OnSend = (envelope) =>
+            {
+                requester.Core.Receive(EnvelopeCodec.WriteEnvelope(envelope), Handle);
+
+                return Task.CompletedTask;
+            };
+
+            var asked = requester.Request(PatternOf(300), TimeSpan.FromSeconds(5));
+
+            for (var round = 0; round < 4; round += 1)
+            {
+                await requester.Settle();
+                await receiver.Settle();
+            }
+
+            var failed = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Equal(
+                ((ushort)ProtocolCode.ChunkInvalid, detail, FailureOrigin.Peer),
+                (failed.Code, failed.Detail, failed.Origin));
+
+            // the opening taken and credited, then the first chunk refused
+            Assert.Equal(
+                [(EnvelopeKind.Request, requesterLimits.ChunkBytes), .. chunks.Select((bytes) =>
+                {
+                    return (EnvelopeKind.Chunk, 16 + bytes);
+                })],
+                requester.Sent.Select((envelope) =>
+                {
+                    return (envelope.Kind, EnvelopeCodec.WriteEnvelope(envelope).Length);
+                }));
+            Assert.Equal(
+                [EnvelopeKind.Credit, EnvelopeKind.Failure],
+                receiver.Sent.Select((envelope) =>
+                {
+                    return envelope.Kind;
+                }));
+            Assert.Empty(resolver.Requests);
+        }
+    }
+
     // a resolver of one procedure, the interop service's echo, that keeps each request it is given for
     // the test to answer; what it admits, and what handling a request does, are the test's to say
     private sealed class Held(RouterCore core) : IRequestResolver
@@ -959,6 +1027,10 @@ public sealed partial class RouterCoreTests
         public Procedure Procedure { get; init; } = Echo;
 
         public int? MaximumPayloadBytes { get; init; }
+
+        // whether it forwards a JWT and an ELSEWHERE without resolving them, as a relay that does not
+        // verify
+        public bool ForwardsCredentials { get; init; }
 
         public List<RequestResolverProps> Requests { get; } = [];
 

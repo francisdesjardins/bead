@@ -25,7 +25,7 @@ public static partial class EnvelopeCodec
     private const long Uint53Maximum = (1L << 53) - 1;
 
     // the most a header holds: the 255 words byte 3 counts
-    private const int MaximumHeaderBytes = 1_020;
+    internal const int MaximumHeaderBytes = 1_020;
 
     // the last character a JWT's token is written in: a byte a character
     private const char LastLatin1 = '\u00FF';
@@ -127,10 +127,11 @@ public static partial class EnvelopeCodec
         return CredentialOf(header) is { } credential ? bytes + BlockBytesOf(LengthOf(credential)) : bytes;
     }
 
-    // how `header` is laid out: its flags, and its length to the end of its credential's padding.
-    // Throws for a header no kind of this layout is, a request paced that opens no subscription, a
-    // credential its kind does not take or that is not its scheme's, and a header past 1,020 bytes
-    private static (EnvelopeFlags Flags, int HeaderBytes) LayoutOf(IEnvelopeHeader header)
+    // how `header` is laid out, its bound of 1,020 bytes unchecked: its flags, and its length to the
+    // end of its credential's padding. Throws for a header no kind of this layout is, a request
+    // paced that opens no subscription, and a credential its kind does not take or that is not its
+    // scheme's
+    private static (EnvelopeFlags Flags, int HeaderBytes) UnboundedLayoutOf(IEnvelopeHeader header)
     {
         var flags = FlagsOf(header);
 
@@ -139,7 +140,15 @@ public static partial class EnvelopeCodec
             AssertCredential(credential, header.Kind);
         }
 
-        var headerBytes = SizeOf(header, flags);
+        return (flags, SizeOf(header, flags));
+    }
+
+    // how `header` is laid out: its flags, and its length to the end of its credential's padding.
+    // Throws for a header no kind of this layout is, a request paced that opens no subscription, a
+    // credential its kind does not take or that is not its scheme's, and a header past 1,020 bytes
+    private static (EnvelopeFlags Flags, int HeaderBytes) LayoutOf(IEnvelopeHeader header)
+    {
+        var (flags, headerBytes) = UnboundedLayoutOf(header);
 
         if (headerBytes > MaximumHeaderBytes)
         {
@@ -552,6 +561,18 @@ public static partial class EnvelopeCodec
         ArgumentNullException.ThrowIfNull(header);
 
         return LayoutOf(header).HeaderBytes;
+    }
+
+    /// <summary>
+    /// The bytes <paramref name="header"/> takes, as <see cref="HeaderBytesOf"/> counts them, its
+    /// bound of 1,020 bytes unchecked: what a writer asks of a header it may refuse with a protocol
+    /// failure. Throws as <see cref="HeaderBytesOf"/> does for anything else.
+    /// </summary>
+    internal static int UnboundedHeaderBytesOf(IEnvelopeHeader header)
+    {
+        ArgumentNullException.ThrowIfNull(header);
+
+        return UnboundedLayoutOf(header).HeaderBytes;
     }
 
     /// <summary>

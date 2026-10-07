@@ -181,7 +181,7 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
-    public async Task Counts_a_call_whose_handler_fails_with_no_answer_handed_to_its_transport_as_an_error()
+    public async Task Answers_a_call_whose_handler_fails_before_it_answers_PROCEDURE_FAILED_and_counts_it_so()
     {
         var registry = new MetricsRegistry();
 
@@ -205,12 +205,12 @@ public sealed partial class RouterServerTests
         Deliver(First, RequestOf(1, Other));
         await Settle();
 
-        Assert.Empty(SentSince());
+        Assert.Equal(["first failure 1 ProcedureFailed"], SentSince());
         Assert.Equal(
             [
                 "bead_server_call_duration_seconds_bucket{type=\"request\",le=\"0.0\"} 1",
                 "bead_server_call_duration_seconds_count{type=\"request\"} 1",
-                "bead_server_call_handled_total{type=\"request\",outcome=\"error\"} 1",
+                "bead_server_call_handled_total{type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1",
                 "bead_server_call_started_total{type=\"request\"} 1",
             ],
             CountedOf((registry, "other")));

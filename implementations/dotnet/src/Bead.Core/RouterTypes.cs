@@ -175,7 +175,10 @@ public interface IRequestHandler
     }
 }
 
-/// <summary>A procedure as a resolver answers it.</summary>
+/// <summary>
+/// A procedure as a resolver answers it; its router answers PROCEDURE_FAILED for one whose task
+/// fails before it answers.
+/// </summary>
 public interface IRequestResolver : IRequestHandler
 {
     /// <summary>The procedure it answers.</summary>

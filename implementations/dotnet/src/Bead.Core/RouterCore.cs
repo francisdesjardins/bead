@@ -567,15 +567,23 @@ public sealed class RouterCore : IDisposable
         IEnvelopeHeader opening = header is RequestHeader request
             ? request with { Total = payload.Length }
             : (ResultHeader)header with { Total = payload.Length };
-        var openingBytes = _wholeBytes - EnvelopeCodec.HeaderBytesOf(opening) - announcementBytes;
+        var openingHeaderBytes = EnvelopeCodec.UnboundedHeaderBytesOf(opening);
+        var openingBytes = _wholeBytes - openingHeaderBytes - announcementBytes;
 
-        // an opening carries one byte of its payload at least: a header that leaves it none — a
-        // credential's, which a request alone grows by — would be refused by its reader
+        // ! a header past 1,020 bytes no reader takes, and an opening without a byte of its payload
+        // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
+        if (openingHeaderBytes > EnvelopeCodec.MaximumHeaderBytes)
+        {
+            return (null, ProtocolFailureOf(
+                ProtocolCode.PayloadTooLarge,
+                $"a payload of {payload.Length} bytes goes as a transfer, whose opening's header of {openingHeaderBytes} bytes passes {EnvelopeCodec.MaximumHeaderBytes}"));
+        }
+
         if (openingBytes < 1)
         {
             return (null, ProtocolFailureOf(
-                ProtocolCode.EnvelopeTooLarge,
-                $"a header of {EnvelopeCodec.HeaderBytesOf(opening)} bytes leaves a transfer's opening no byte within {_wholeBytes}"));
+                ProtocolCode.PayloadTooLarge,
+                $"a payload of {payload.Length} bytes goes as a transfer, whose opening's header of {openingHeaderBytes} bytes leaves it no byte within {_wholeBytes}"));
         }
 
         return (new OutgoingTransfer(payload, (openingBytes, _payloadBytesPerChunk)), null);
@@ -608,8 +616,8 @@ public sealed class RouterCore : IDisposable
     }
 
     // what a request of the side's own goes out as, or why it does not, before it goes: a
-    // connection not open, its credential, no call id free, its payload past its limit, or a header
-    // that leaves a transfer's opening no byte
+    // connection not open, its credential, no call id free, its payload past its limit, or a
+    // transfer its opening's header leaves no room
     private (RequestHeader Header, OutgoingTransfer? Outgoing, string? Carried) HeaderOf(
         ReadOnlyMemory<byte> payload,
         (CoreRequest Request, int MaximumPayloadBytes) going)
@@ -660,6 +668,29 @@ public sealed class RouterCore : IDisposable
         return (header, outgoing, carried);
     }
 
+    // lays out the header `request` goes out with, its call id aside: a credential whose bytes its
+    // caller gives, a JWT or a scheme to come, may be longer than any header holds; OPAQUE, 16
+    // bytes, and ELSEWHERE, none, always fit, OPAQUE's token known only once the call starts.
+    // Throws an ArgumentException past 1,020 bytes
+    private static void AssertHeaderHolds(CoreRequest request)
+    {
+        var options = request.Options;
+        var asked = options.Credential is { Scheme: not (CredentialScheme.None or CredentialScheme.Opaque or CredentialScheme.Elsewhere) } given
+            ? given
+            : (Credential?)null;
+
+        EnvelopeCodec.HeaderBytesOf(new RequestHeader
+        {
+            CallId = 1,
+            ServiceId = request.Procedure.ServiceId,
+            ProcedureId = request.Procedure.ProcedureId,
+            DestinationId = options.DestinationId,
+            OpensSubscription = request.OpensSubscription,
+            Paced = request.Paced,
+            Credential = asked,
+        });
+    }
+
     private async Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, CoreRequest request)
     {
         var options = request.Options;
@@ -679,6 +710,10 @@ public sealed class RouterCore : IDisposable
 
         // drawn once the call starts: a cancelled token draws nothing
         token.ThrowIfCancellationRequested();
+
+        // ! a credential no header of its request holds, whatever its payload, is a programmer's
+        // error, thrown before the call starts and not counted (spec 4.4)
+        AssertHeaderHolds(request);
 
         // * nothing made it a programmer's error: the call starts (spec/debugging.md 9.3), and each
         // refusal after ends it in this turn
@@ -1148,9 +1183,10 @@ public sealed class RouterCore : IDisposable
             _resolverScheduler);
     }
 
-    // hands a request to its resolver, where resolvers run: one that fails is reported, and frees
-    // its call id unless its answer went out; a call cancelled, or gone with its connection, is not
-    // reported
+    // hands a request to its resolver, where resolvers run: one that throws before it returns fails
+    // as one whose task faults; one that fails before it answers is reported and answered
+    // PROCEDURE_FAILED, its call id free once that answer goes; a call cancelled, or gone with its
+    // connection, is not reported, and answered nothing
     private void Dispatch(IRequestHandler resolver, (AnswerTarget Target, AnsweringCall Answering, ReadOnlyMemory<byte> Payload) dispatched)
     {
         var (target, answering, payload) = dispatched;
@@ -1185,16 +1221,28 @@ public sealed class RouterCore : IDisposable
 
                     var reason = handled.Exception?.InnerException ?? new TaskCanceledException(handled);
 
-                    if (_answeringCalls.IsAnswering(target))
-                    {
-                        EndAnswered(answering, (CallOutcome.Error, null));
-                        _answeringCalls.Close(new CallAddress(target.Header.CallId, target.ConnectionHandle), answering);
-                    }
-
                     if (!answering.IsAborted)
                     {
                         _port.Report(reason, target.ConnectionHandle);
                     }
+
+                    if (!_answeringCalls.IsAnswering(target))
+                    {
+                        return;
+                    }
+
+                    // ! a resolver that fails before it answers is answered PROCEDURE_FAILED, so its
+                    // requester does not wait out its timeout (spec 9.5); a call cancelled, or gone
+                    // with its connection, is answered nothing
+                    if (answering.IsAborted)
+                    {
+                        EndAnswered(answering, (CallOutcome.Error, null));
+                        _answeringCalls.Close(new CallAddress(target.Header.CallId, target.ConnectionHandle), answering);
+
+                        return;
+                    }
+
+                    Refuse(ProtocolFailureOf(ProtocolCode.ProcedureFailed), (target, answering));
                 },
                 CancellationToken.None,
                 TaskContinuationOptions.DenyChildAttach,
@@ -1514,10 +1562,17 @@ public sealed class RouterCore : IDisposable
             return;
         }
 
-        // ! read from its scheme alone: it resolves to no session here, and its destination verifies it
+        // ! read from its scheme alone, it resolves to no session here, and its destination
+        // verifies it; in a later turn all the same, as a JWT and an ELSEWHERE resolve on every side
         if (waits && isForwarded)
         {
-            Admit(resolver, arrival);
+            Post(() =>
+            {
+                if (IsResolving(arrival))
+                {
+                    Admit(resolver, arrival);
+                }
+            });
 
             return;
         }

@@ -282,6 +282,11 @@ public sealed partial class RouterCoreTests
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
         Assert.Same(broken, Assert.Single(server.Reports));
 
+        // answered PROCEDURE_FAILED, so its requester does not wait out its timeout
+        var answered = Assert.Single(server.Sent);
+
+        Assert.Equal((1u, (ushort)ProtocolCode.ProcedureFailed), (answered.Header.CallId, answered.Failure!.Code));
+
         // free again: a request on it is dispatched, then cancelled, and its call id opened anew
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
         await server.Deliver(new Envelope { Header = new CancelHeader { CallId = 1 } });
