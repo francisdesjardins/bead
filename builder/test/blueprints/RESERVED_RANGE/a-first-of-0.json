@@ -1,0 +1,18 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/reservedServices/ids/-",
+      "value": {
+        "first": 0,
+        "last": 1
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "RESERVED_RANGE",
+      "pointer": "/reservedServices/ids/0/first"
+    }
+  ]
+}

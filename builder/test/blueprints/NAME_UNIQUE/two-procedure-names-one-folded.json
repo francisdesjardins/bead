@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/1/procedureName",
+      "value": "eCHO"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_UNIQUE",
+      "pointer": "/services/0/procedures/1/procedureName"
+    }
+  ]
+}

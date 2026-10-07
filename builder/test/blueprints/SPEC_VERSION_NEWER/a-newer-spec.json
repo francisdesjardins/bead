@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/specVersion",
+      "value": "99.0.0"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SPEC_VERSION_NEWER",
+      "pointer": "/specVersion"
+    }
+  ]
+}

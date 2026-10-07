@@ -1,0 +1,40 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/services/-",
+      "value": {
+        "serviceName": "Other",
+        "serviceId": 1,
+        "serviceRevision": 1,
+        "failures": [],
+        "reserved": {
+          "procedureIds": [],
+          "procedureNames": [],
+          "failureCodes": []
+        },
+        "procedures": [
+          {
+            "procedureId": 1,
+            "procedureName": "echo",
+            "procedureKind": "request",
+            "request": {
+              "encoding": "json"
+            },
+            "result": {
+              "encoding": "json"
+            },
+            "admission": "none",
+            "failures": []
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_ID_UNIQUE",
+      "pointer": "/services/1/serviceId"
+    }
+  ]
+}

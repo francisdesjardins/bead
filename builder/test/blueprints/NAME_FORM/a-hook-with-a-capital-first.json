@@ -1,0 +1,17 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/4/admission",
+      "value": {
+        "hook": "Nobody"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_FORM",
+      "pointer": "/services/0/procedures/4/admission/hook"
+    }
+  ]
+}

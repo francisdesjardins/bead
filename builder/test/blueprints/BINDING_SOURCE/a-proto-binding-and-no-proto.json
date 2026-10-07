@@ -1,0 +1,18 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Request"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "BINDING_SOURCE",
+      "pointer": "/services/0/procedures/0/request"
+    }
+  ]
+}

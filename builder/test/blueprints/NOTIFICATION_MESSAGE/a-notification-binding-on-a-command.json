@@ -1,0 +1,17 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/8/notification",
+      "value": {
+        "encoding": "json"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NOTIFICATION_MESSAGE",
+      "pointer": "/services/0/procedures/8/notification"
+    }
+  ]
+}

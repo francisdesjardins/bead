@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/admission",
+      "value": "everyone"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "BLUEPRINT_SCHEMA",
+      "pointer": "/services/0/procedures/0/admission"
+    }
+  ]
+}
