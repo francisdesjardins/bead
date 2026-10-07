@@ -11,6 +11,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `.claude/workflows/`: three workflows launched by name, a round of the Tenth Man, an implementation
   on both sides with its integration and a commit plan, and an adversarial review by lens.
+- `tools/check-format.mjs`, the root's files in the layout the TypeScript side's formatter gives
+  them: CI runs it, and the pre-commit hook over the staged files.
 
 ### Fixed
 

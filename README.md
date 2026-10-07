@@ -249,11 +249,15 @@ there only until it closes.
   branch, a pull request into `main` and `main`, the product and each changed document also move
   one step past their last release, the CHANGELOG is dated and linked, and each document's tag
   stands where it belongs. `--ref` and `--base` judge the tree as another ref, as CI does.
+- `node tools/check-format.mjs`: the root's own files — the README to the CI, the spec's texts and
+  schemas, the tools, the workflows — in the layout the TypeScript side's formatter gives them; with `--staged`,
+  the staged ones alone. It needs the TypeScript side installed.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder.
 
-The first also runs before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
-`commit-msg` holds the subject to Conventional Commits, merges aside. Both hooks also run the
+Two run before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
+`pre-commit` holds the staged root files to their format, when the TypeScript side is installed,
+and `commit-msg` holds the subject to Conventional Commits, merges aside. Both hooks also run the
 checks a clone keeps for itself in `.claude/local/`, when it has them.
 
 ## Releasing

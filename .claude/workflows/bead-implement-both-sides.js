@@ -43,8 +43,7 @@ You work on Bead, at ${REPO}, on the branch \`${BRANCH}\`, checked out. You impl
 ${args.notes ? `${args.notes}\n` : ''}`;
 
 const GENERATE = `regenerate every conformance file with \`${VENV}\` and each script of \`spec/generators/\` the README lists (never edit a generated file by hand)`;
-const FORMAT =
-  "the root's format step (`implementations/typescript/node_modules/.bin/oxfmt -c implementations/typescript/.oxfmtrc.json --check README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/debugging.md spec/interop-service.json spec/schemas tools .github`)";
+const FORMAT = "the root's format step (`node tools/check-format.mjs`)";
 
 const TASKS = {
   spec: `# Your task: the spec, the conformance, the records (effort ${args.specEffort || 'high'})
