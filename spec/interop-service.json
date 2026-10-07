@@ -10,7 +10,7 @@
     "credentials: what the interop server resolves a request's credential with, by its scheme. elsewhere is its ELSEWHERE verifier: what it reads, the grammar of the values it holds, in ABNF (RFC 5234, where a string is case-insensitive, and RFC 7405, where %s makes one case-sensitive), and what it settles with.",
     "credentials.jwt: what the interop server verifies a JWT with (section 13.8), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; maximumWaitingCalls, the most calls that wait for one issuer's deadline at once, which the server is given with it, small so that a conversation passes it; answers, what it does asked for any other."
   ],
-  "specVersion": "0.1.0",
+  "specVersion": "0.2.0",
   "serviceId": 1,
   "serviceRevision": 1,
   "relay": {

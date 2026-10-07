@@ -174,7 +174,7 @@
       "bead.interop": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.1.0, )"
+          "Bead.Core": "[0.2.0, )"
         }
       }
     }

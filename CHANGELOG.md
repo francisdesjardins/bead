@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-07
+
 ### Added
 
 - Badges in the README: CI on `main`, and the license.
@@ -14,8 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   given from due to due, `until` a timer armed on it, `wall`, which moves the wall clock alone, and
   each file's `wallClock`, where it starts; `spec/check.py` refuses an `advance` that no timer armed
   precedes.
-- `specVersion` in each conformance file, repeating the version `spec/spec.md` now states, `0.1.0`,
-  and when it moves, in decision 0008.
+- `specVersion` in each conformance file, repeating the version `spec/spec.md` states, and when it
+  moves, in decision 0008.
 - JSON Schemas for the conformance files, in `spec/schemas/`.
 - `spec/check.py`, which the `spec` job runs after the regeneration, from dependencies locked with
   every hash in `spec/requirements.txt`: every file under its schema and every schema with its file,
@@ -324,6 +326,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.2.0 (`spec-v0.2.0`), and its companion, `spec/debugging.md`, is first released
+  at 0.1.0 (`debugging-v0.1.0`). Layout `0xA1` is revised in place: the CREDENTIAL block takes the
+  SESSION block's bit, so a 0.1.0 peer and a 0.2.0 peer refuse each other's envelopes that carry a
+  credential, `ENVELOPE_MALFORMED`.
 - The decision records state what holds and where Bead goes: their index groups them by theme under
   its rules and names, under "Where Bead goes", the parts the records bind before the repository
   holds them; 0001's relay is decision 0019 and the connection HTTP draws decision 0020; the rule of
@@ -676,5 +682,6 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.1.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.2.0...develop
+[0.2.0]: https://github.com/francisdesjardins/bead/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/francisdesjardins/bead/releases/tag/v0.1.0

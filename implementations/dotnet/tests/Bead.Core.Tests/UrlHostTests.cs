@@ -9,7 +9,8 @@ public sealed class UrlHostTests
 {
     // constants
 
-    // a host, and what the parser reads it as: none where it fails
+    // a host, and what the parser reads it as: none where it fails; an xn-- label that does not decode
+    // is left out, its answer moving with the IDNA version a parser follows
     private static readonly (string Host, string? Parsed)[] Hosts =
     [
         ("127.0.0.1.", "127.0.0.1"),
@@ -39,7 +40,6 @@ public sealed class UrlHostTests
         ("a%2520", null),
         ("\uFF11\uFF12\uFF17\uFF0E\uFF10\uFF0E\uFF10\uFF0E\uFF11", "127.0.0.1"),
         ("\uFF4C\uFF4F\uFF43\uFF41\uFF4C\uFF48\uFF4F\uFF53\uFF54", "localhost"),
-        ("xn--localhost", null),
         ("b\u00FCcher.example", "xn--bcher-kva.example"),
         ("a..b", "a..b"),
         ("[::1]", "[::1]"),

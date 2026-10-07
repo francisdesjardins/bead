@@ -25,8 +25,9 @@ const IN_THE_CLEAR = [
   'ws://[::ffff:127.0.0.1]',
 ];
 
-// a host, and what the parser reads it as: none where it fails; the rows the C# side's own port of
-// the parser reads alike, through the platform's `URL`, by which this side reads a host
+// a host, and what the parser reads it as: none where it fails; the C# side's port reads the rows
+// alike, this side through `URL`. An `xn--` label that does not decode is left out: its answer moves
+// with the IDNA version a parser follows
 const PARSED_HOSTS: [host: string, parsed: string | undefined][] = [
   ['127.0.0.1.', '127.0.0.1'],
   ['127.1', '127.0.0.1'],
@@ -55,7 +56,6 @@ const PARSED_HOSTS: [host: string, parsed: string | undefined][] = [
   ['a%2520', undefined],
   ['\uFF11\uFF12\uFF17\uFF0E\uFF10\uFF0E\uFF10\uFF0E\uFF11', '127.0.0.1'],
   ['\uFF4C\uFF4F\uFF43\uFF41\uFF4C\uFF48\uFF4F\uFF53\uFF54', 'localhost'],
-  ['xn--localhost', undefined],
   ['b\u00FCcher.example', 'xn--bcher-kva.example'],
   ['a..b', 'a..b'],
   ['[::1]', '[::1]'],
