@@ -71,9 +71,6 @@ internal static class MetricsCodes
     /// <summary>The 12 codes of a procedure's series in the server families, by their indices.</summary>
     public static readonly int[] Server = [IndexOf(22), IndexOf(32), IndexOf(33), IndexOf(34), IndexOf(35), IndexOf(36), IndexOf(48), IndexOf(49), IndexOf(50), IndexOf(51), IndexOf(64), Application];
 
-    /// <summary>The 2 codes of a procedure's subscriptions dropped at the side that notifies.</summary>
-    public static readonly int[] Notifying = [IndexOf(32), IndexOf(35)];
-
     /// <summary>Every one of the 24, by its index.</summary>
     public static readonly int[] Every = [.. Enumerable.Range(0, Names.Length)];
 
@@ -234,9 +231,10 @@ internal sealed class CallTable
 
         var coded = ending.Failure is { } failure ? _codes[MetricsCodes.IndexOf(failure)] : -1;
 
-        // ? a resolver of its own answering a protocol code its procedure's exits never end with
-        // falls here, counted as what a service manager answers for a failure a resolver may not
-        // answer; the companion's tables leave it unsaid
+        // a code its table has no column for, which a resolver registered on its router itself
+        // alone can answer, counts as PROCEDURE_FAILED, the code a service manager answers in its
+        // place, since no count makes a series (spec/debugging.md 9.8); a table of every code has a
+        // column for each, _OTHER among them
         return coded >= 0 ? coded : _codes[MetricsCodes.ProcedureFailed];
     }
 }
@@ -302,15 +300,13 @@ internal sealed class CallSeries(CallTable table, string labels)
 }
 
 /// <summary>
-/// A procedure's subscriptions dropped, at either end, by code: none, and those it was declared to
-/// (10.3), made at 0 as it is declared; the side that notifies and the side that hears count into
-/// the same.
+/// A procedure's subscriptions dropped, at either end, by code: none and every one of the 24 (7.6),
+/// made at 0 as it is declared; the side that notifies and the side that hears count into the same.
 /// </summary>
 internal sealed class DroppedSeries(string labels)
 {
-    // by a code's index, then none at the end: its count, and whether it was made
+    // by a code's index, then none at the end
     private readonly long[] _counts = new long[MetricsCodes.Names.Length + 1];
-    private readonly bool[] _made = new bool[MetricsCodes.Names.Length + 1];
 
     /// <summary>Its labels as the exposition writes them, but <c>code</c>.</summary>
     public string Labels { get; } = labels;
@@ -324,42 +320,20 @@ internal sealed class DroppedSeries(string labels)
         }
     }
 
-    /// <summary>Makes its series of none and of each code given, at 0; under the registry's lock.</summary>
-    public void Make(int[] codes)
-    {
-        _made[None] = true;
-
-        foreach (var code in codes)
-        {
-            _made[code] = true;
-        }
-    }
-
-    /// <summary>A subscription dropped: by its failure's code, or none for none; a code it has no series of counts nothing.</summary>
+    /// <summary>A subscription dropped: by its failure's code, or none for none; every code has its series.</summary>
     public void Drop(Failure? failure)
     {
-        var index = failure is null ? None : MetricsCodes.IndexOf(failure);
-
-        if (_made[index])
-        {
-            Interlocked.Increment(ref _counts[index]);
-        }
+        Interlocked.Increment(ref _counts[failure is null ? None : MetricsCodes.IndexOf(failure)]);
     }
 
-    /// <summary>Its series made, in the exposition's order: none first, then by code; each with its count.</summary>
+    /// <summary>Its series, in the exposition's order: none first, then by code; each with its count.</summary>
     public IEnumerable<(string? Code, long Count)> Series()
     {
-        if (_made[None])
-        {
-            yield return (null, Volatile.Read(ref _counts[None]));
-        }
+        yield return (null, Volatile.Read(ref _counts[None]));
 
         for (var index = 0; index < MetricsCodes.Names.Length; index += 1)
         {
-            if (_made[index])
-            {
-                yield return (MetricsCodes.Names[index], Volatile.Read(ref _counts[index]));
-            }
+            yield return (MetricsCodes.Names[index], Volatile.Read(ref _counts[index]));
         }
     }
 }

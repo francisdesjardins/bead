@@ -131,9 +131,8 @@ interface ILayout {
 /** A procedure the registry holds: its address, its one name, and its series in each family. */
 interface IEntry {
   readonly answered: Map<CallType, ICallData>;
-  /** Its subscriptions dropped, by code, none first; a code not made at 0 is `undefined`. */
+  /** Its subscriptions dropped, none first, then under every code; `undefined` until declared. */
   dropped: Float64Array | undefined;
-  droppedMade: Uint8Array | undefined;
   heard: number | undefined;
   hearing: IHearingSeries | undefined;
   readonly made: Map<CallType, ICallData>;
@@ -285,12 +284,6 @@ const ANSWERED_CODES: ReadonlySet<number> = new Set([
   ProtocolCode.PROCEDURE_FAILED,
 ]);
 
-// the codes a subscription dropped at the side that notifies can end with (10.3)
-const NOTIFYING_DROPS: ReadonlySet<number> = new Set([
-  ProtocolCode.SESSION_REQUIRED,
-  ProtocolCode.CAPACITY_EXCEEDED,
-]);
-
 // a subscription dropped's codes, none first, then section 8's, then application and _OTHER
 const DROP_SLOTS = CODES.length + 3;
 const DROP_APPLICATION = CODES.length + 1;
@@ -390,9 +383,9 @@ const layoutOf = ({
     })
   );
   const errorAt = slots.length - 1;
-  // ? an ending a series was made no slot for — a failure a procedure's exits never end with,
-  // answered through `respond` by hand — counts as the nearest it holds: _OTHER, else
-  // PROCEDURE_FAILED; a timeout on a call answered, as an error
+  // a failure a procedure's exits never end with, answered through `respond` by hand, counts as the
+  // nearest the series holds: _OTHER, else PROCEDURE_FAILED (spec/debugging.md 9.8); a timeout on a
+  // call answered, as an error
   const failureFallback =
     failureAt.get(CallEnding.OTHER) ?? failureAt.get(ProtocolCode.PROCEDURE_FAILED) ?? errorAt;
 
@@ -642,7 +635,6 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
     const entry: IEntry = {
       answered: new Map(),
       dropped: undefined,
-      droppedMade: undefined,
       heard: undefined,
       hearing: undefined,
       made: new Map(),
@@ -680,28 +672,20 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
     return made;
   };
 
-  // an entry's subscriptions dropped, made at 0 under `codes` as well as those made already
-  const dropsOf = (entry: IEntry, codes: (slot: number) => boolean): void => {
-    const counts = entry.dropped ?? new Float64Array(DROP_SLOTS);
-    const made = entry.droppedMade ?? new Uint8Array(DROP_SLOTS);
-
-    for (let slot = 0; slot < DROP_SLOTS; slot += 1) {
-      made[slot] = codes(slot) ? 1 : (made[slot] ?? 0);
-    }
-
-    entry.dropped = counts;
-    entry.droppedMade = made;
+  // an entry's subscriptions dropped, made at 0 under none and every code (7.6), once, whichever
+  // end declares it first
+  const dropsOf = (entry: IEntry): void => {
+    entry.dropped ??= new Float64Array(DROP_SLOTS);
   };
 
-  // counts a subscription of `entry` dropped by `failure`; a code it holds no series of counts as
-  // none, since a count never makes a series
+  // counts a subscription of `entry` dropped by `failure`, under its code: every code has its series
   const drop = (entry: IEntry, failure: Pick<IFailure, 'code' | 'scope'> | undefined): void => {
-    const { dropped, droppedMade } = entry;
-    const slot = dropSlotOf(failure);
-    const counted = droppedMade?.[slot] === 1 ? slot : 0;
+    const { dropped } = entry;
 
     if (dropped !== undefined) {
-      dropped[counted] = (dropped[counted] ?? 0) + 1;
+      const slot = dropSlotOf(failure);
+
+      dropped[slot] = (dropped[slot] ?? 0) + 1;
     }
   };
 
@@ -713,9 +697,7 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
     const counts = { failed: 0, sent: 0 };
 
     entry.sent = counts;
-    dropsOf(entry, (slot) => {
-      return slot === 0 || NOTIFYING_DROPS.has(CODES[slot - 1]?.[0] ?? 0);
-    });
+    dropsOf(entry);
     entry.notifying = {
       dropped: (failure) => {
         drop(entry, failure);
@@ -737,9 +719,7 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
     }
 
     entry.heard = 0;
-    dropsOf(entry, () => {
-      return true;
-    });
+    dropsOf(entry);
     entry.hearing = {
       dropped: (failure) => {
         drop(entry, failure);
@@ -896,21 +876,19 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
     writeFamily(
       FAMILIES.dropped,
       ordered.flatMap((entry) => {
-        const { dropped, droppedMade } = entry;
+        const { dropped } = entry;
 
-        if (dropped === undefined || droppedMade === undefined) {
+        if (dropped === undefined) {
           return [];
         }
 
-        return [...droppedMade].flatMap((made, slot) => {
+        return [...dropped].map((count, slot) => {
           const code =
             slot === 0
               ? ''
               : `,code="${slot === DROP_APPLICATION ? 'application' : slot === DROP_OTHER ? '_OTHER' : (CODES[slot - 1]?.[1] ?? '')}"`;
 
-          return made === 1
-            ? [`${FAMILIES.dropped[0]}{${labelsOf(entry)}${code}} ${String(dropped[slot] ?? 0)}`]
-            : [];
+          return `${FAMILIES.dropped[0]}{${labelsOf(entry)}${code}} ${String(count)}`;
         });
       })
     );

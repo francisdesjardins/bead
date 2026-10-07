@@ -256,16 +256,15 @@ public sealed class MetricsRegistry
         }
     }
 
-    // a procedure's subscriptions dropped, made at none and the codes given; under the lock
-    private DroppedSeries DroppedOf(ProcedureAddress address, int[] codes)
+    // a procedure's subscriptions dropped, made at 0 under none and every code, once, whichever end
+    // declares it first; under the lock
+    private DroppedSeries DroppedOf(ProcedureAddress address)
     {
         if (!_dropped.TryGetValue(address, out var dropped))
         {
             dropped = new DroppedSeries(LabelsOf(address));
             _dropped[address] = dropped;
         }
-
-        dropped.Make(codes);
 
         return dropped;
     }
@@ -484,7 +483,7 @@ public sealed class MetricsRegistry
             }
 
             var address = procedure.Address;
-            var dropped = DroppedOf(address, MetricsCodes.Notifying);
+            var dropped = DroppedOf(address);
 
             if (!_notifying.TryGetValue(address, out var notifying))
             {
@@ -521,7 +520,7 @@ public sealed class MetricsRegistry
             Declare(procedure, [_notification]);
 
             var address = procedure.Address;
-            var dropped = DroppedOf(address, MetricsCodes.Every);
+            var dropped = DroppedOf(address);
 
             if (!_hearing.TryGetValue(address, out var hearing))
             {
