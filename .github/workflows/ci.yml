@@ -106,15 +106,11 @@ jobs:
         run: $YARN playwright install --with-deps chromium
       - if: matrix.node == '26'
         run: $YARN test:devtools
-      # The root's own files, from the README to this CI, under the TypeScript side's formatter. The
-      # conformance files are left to their generators.
+      # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
+      # tool holds their list. The conformance files are left to their generators.
       - name: Format of the root's files
         working-directory: .
-        run: >-
-          implementations/typescript/node_modules/.bin/oxfmt
-          -c implementations/typescript/.oxfmtrc.json --check
-          README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/debugging.md spec/interop-service.json
-          spec/schemas tools .github
+        run: node tools/check-format.mjs
 
   # ── .NET ─────────────────────────────────────────────────────────────────────
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and

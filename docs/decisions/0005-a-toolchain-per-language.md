@@ -60,8 +60,8 @@ the spec, as the builder is, is placed by a decision of its own.
   Keeping the two alike is review's, not a tool's.
 - The root's prose and scripts have no formatter of their own: CI holds the root's prose, scripts
   and schemas, and the spec's text, to the TypeScript side's oxfmt, through
-  `-c implementations/typescript/.oxfmtrc.json` (`ci.yml` lists them), so formatting them needs that
-  side installed. The conformance files are left to their generators.
+  `-c implementations/typescript/.oxfmtrc.json` (`tools/check-format.mjs` lists them, for CI and the
+  pre-commit hook), so formatting them needs that side installed. The conformance files are left to their generators.
 - Coverage is measured by each side's own tool, c8's istanbul report and `dotnet test --coverage`'s
   cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either; it is a
   local command, not a CI job.
