@@ -1159,6 +1159,10 @@ def credentials_through_a_relay():
     # the HS256 issuer's tokens for carol: one that holds, and one an hour expired
     token = hs256(access(sub='carol', jti='at-relay-0001'))
     expired = hs256(access(sub='carol', exp=START - HOUR, iat=START - 2 * HOUR, jti='at-relay-0002'))
+    # a JWT whose aud holds a lone surrogate after the destination's audience, which names nothing,
+    # and one whose aud array holds that string beside the audience, which is no array of strings
+    lone = hs256(access(sub='carol', aud=audience + '\ud800', jti='at-relay-0003'))
+    beside = hs256(access(sub='carol', aud=[audience + '\ud800', audience], jti='at-relay-0004'))
     # a JWT whose parts do not read: its aud names nothing
     unreadable = '00 02 00 05  61 2E 62 2E 63  00 00 00'
     no_credential_came, does_not_hold = NO_CREDENTIAL, DOES_NOT_HOLD
@@ -1191,6 +1195,11 @@ def credentials_through_a_relay():
              to(1, '"x"', jwt(token), carried=bearer),
              *crosses(1, 2, '"x"', leg_b_presenting(2, '"x"', as_jwt(token))),
              to(3, '"y"', jwt(expired)), *crosses(3, 4, '"y"', leg_b_presenting(4, '"y"', as_jwt(expired)))]),
+        ('a JWT whose aud holds a lone surrogate after its destination\'s audience, alone or in an array beside that audience, names nothing at a relay that does not verify: DESTINATION_UNREACHABLE',
+         ['13.8', '14.3.5'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', jwt(lone)), refused_with(1, DESTINATION_UNREACHABLE),
+             to(3, '"y"', jwt(beside)), refused_with(3, DESTINATION_UNREACHABLE)]),
         ('a JWT to a destination of another audience, or of none, is answered DESTINATION_UNREACHABLE: its credential may hold, and its route does not',
          ['14.1', '14.3.5'], None, [
              opened('client'), opened('device'), opened('other'),

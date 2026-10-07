@@ -57,7 +57,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Section 13.8 verifies a `JWT` one way, an access token of RFC 9068's profile, as RFC 8725
   recommends, and its verdicts are a group of vectors, `jwtVerdicts`: a token, a key, a time and an
   audience, taken or refused and why. Both sides verify it, on Web Crypto and on `ECDsa` and
-  `HMACSHA256`, and play the group, its audience one or a set.
+  `HMACSHA256`, and play the group, its audience one or a set. A string a claim holds is of
+  well-formed Unicode: an `aud`, a `sid` or a `sub` that holds a surrogate alone is no string, and
+  an `aud` array holding one no array of strings, refused at its step on both sides.
 - `spec/check.py` refuses a published test key outside `spec/`, the tests and the interop service:
   its parameters, or its thumbprint (RFC 7638), in any file git lists.
 - A transport carries a credential beside an envelope, both ways, as one argument: on the TypeScript
@@ -86,7 +88,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and asked for those alone, when no key of a token's issuer names its `kid`, once a minute at most
   for an issuer, with a signal its deadline aborts: its answer is held ten minutes, an ask under way
   is shared, a `kid` that comes while its issuer's minute runs waits for the ask its deadline lets
-  go, a token without a `kid` waits on its issuer's keys while none serve, and at most
+  go, a token without a `kid` waits on its issuer's keys while none serve, keys of one issuer and
+  one material, by their RFC 7638 thumbprint, count as one key, the first in the order searched, so
+  a key set that answers again a key the application gave refuses none of the tokens that name it by
+  its `kid`, nor one without a `kid` when it answers no other key of that issuer, and at most
   `maximumWaitingCalls`, `MaximumWaitingCalls`, 64 by default, wait for an issuer's deadline at
   once, one past them refused `CAPACITY_EXCEEDED`, which section 8.2 says, as it says a requester's
   call with no call id free; and an `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the
@@ -96,15 +101,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A client's credential, `credential`, `Credential`, by default and per call: `NONE`, `OPAQUE`, a
   `JWT` or an `ELSEWHERE`. A default withdrawn once a call that presented it is refused
   `SESSION_REQUIRED`, while it is still, by value, the credential that call presented, tells its
-  application, `credentialWithdrawn`, `CredentialWithdrawn`; a call presenting an `ELSEWHERE` over a
-  transport that carries none, or a bearer credential in the clear off the machine, fails before it
-  goes, `DESTINATION_UNREACHABLE`, as does a server's command over HTTP; a call that asks for
+  application, `credentialWithdrawn`, `CredentialWithdrawn`; a failure that ends a subscription its
+  server had answered withdraws nothing, over HTTP even when it overtakes that answer in a listen's
+  batch, which the failure says, `mayOvertake`, `MayOvertake`; a call presenting an `ELSEWHERE` over
+  a transport that carries none, or a bearer credential in the clear off the machine, fails before
+  it goes, `DESTINATION_UNREACHABLE`, as does a server's command over HTTP; a call that asks for
   `OPAQUE` while its client knows no session fails before it goes, `SESSION_REQUIRED`, and withdraws
   nothing. Section 13.4 names the IPv6 loopback as a URL writes it, `[::1]`, and takes a `localhost`
-  name on the loopback without resolving it, as Secure Contexts does. A transport says whether it
-  carries a credential and whether it is secure, `carriesCredential` and `isSecure`, on both sides,
-  and a server's transport may be told what stands in front of it, `secure`, `Secure`: TLS
-  terminated before it, or a proxy in the clear.
+  name on the loopback without resolving it, as Secure Contexts does; both sides read a loopback
+  host by the WHATWG URL Standard's host parser, so `127.0.0.1.` is on the loopback, and a host
+  followed by a space is not. A transport says whether it carries a credential and whether it is
+  secure, `carriesCredential` and `isSecure`, on both sides, and a server's transport may be told
+  what stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy in the clear.
 - A relay forwards a credential, and its destination verifies it (section 14): its default
   admission is `requireSessionOrCredential`, `RequireSessionOrCredential`, and an admission never
   answers `SESSION_REQUIRED` to a call that presented a credential, but `ACCESS_DENIED`, so its
@@ -511,6 +519,36 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   `chunkBytes` to a CHUNK, and an opening and a payload sent whole to `maximumEnvelopeBytes`; 12.3.3
   states the order of its refusals, `PAYLOAD_TOO_LARGE`, `CAPACITY_EXCEEDED`, `CHUNK_INVALID`. Three
   conversations play them.
+- A WebSocket server takes an upgrade from its own origin, or with no `Origin`, by default: any
+  client that sends an `Origin` is judged by it, as an HTTP exchange is, so a page of another origin,
+  a development server on another port or an extension's among them, and a client that always sends
+  one, Go's `x/net/websocket` among them, are refused 403 where they were taken. A client gets in by
+  sending no `Origin`, by sending the server's own, or by being named in `origins`, `Origins`. A
+  `file:` page, a `data:` page and a sandboxed frame send `null`, as a browser does in place of an
+  origin it withholds, after a cross-origin redirect or under a referrer policy: naming `null` takes
+  every one of them, of any site.
+- A server's own origin is `http://` or `https://` followed by its request's `Host`, compared ASCII
+  case-insensitively, the `Origin` field read as the serialized origin it carries, never parsed as a
+  URL (spec 15.12, RFC 6454 §6.2), on both sides and both transports: an `Origin` of `ws:`, `wss:`,
+  `ftp:`, `file:` or any other scheme, or with a path or a userinfo, naming the server's host, is
+  refused 403 where the HTTP server took it. Every browser writes its `Origin` and its `Host` from
+  one URL, and keeps its own.
+- Both sides' WebSocket servers answer 426 an upgrade of any `Sec-WebSocket-Version` but 13, or of
+  none, naming 13 in their own `Sec-WebSocket-Version`, and close its connection (spec 15.2, RFC 6455
+  §4.2.2): the TypeScript side's where `ws` took version 8, whose handshake carries its origin in
+  `Sec-WebSocket-Origin`, and answered any other 400; the C# side's where it answered 426 alone. An
+  upgrade is judged by the `Origin` an exchange is.
+- The TypeScript side's WebSocket transports take a message of an envelope's limit by default,
+  16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, as the C# side's do: the server where `ws` took
+  104,857,600, the client wherever its `WebSocket` takes a bound, `ws`'s; `createWSClient` holds it
+  to its limits, as `createWSServer` does.
+- The TypeScript side's `IIncomingMessageLike`, the request a `WebSocketServer` hands its
+  transport, gives its headers and its method, and a socket that answers a refused upgrade, `end`,
+  `destroy` and `once`, as Node's request does; and the server is built with `verifyClient`, which
+  judges an upgrade's host and origin, in `ws`'s asynchronous form, and listens for `wsClientError`,
+  which `ws` emits for an upgrade it cannot read and leaves to its listener to answer: a
+  `WebSocketServer` given in place of `ws`'s hands such a request, and calls `verifyClient` before
+  each handshake, or takes every upgrade.
 
 ### Removed
 
@@ -546,6 +584,23 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 - A resolver registered on a router, on both sides, that fails before it answers is answered
   `PROCEDURE_FAILED`, as spec 9.5 says, where its requester waited out its timeout; the twin tests
   that pinned the silence are reversed.
+- The TypeScript side's HTTP server takes its own origin with a `Host` in any ASCII case, as the C#
+  side does, and both take a host among `hosts` in any ASCII case (RFC 9110 §4.2.3).
+- The C# side's servers read the `Host` field as it came, as the TypeScript side's do, where
+  ASP.NET Core's `HttpRequest.Host` turned its punycode into Unicode: a page on an IDN host, its
+  `Host` and its `Origin` in punycode as a browser sends them, is its own where the HTTP server
+  refused it 403; `hosts` names such a host in punycode, the form the field carries; and a `Host` of
+  invalid punycode, `xn--a` say, is a host as any other where the HTTP server answered 500.
+
+### Security
+
+- A WebSocket server takes an upgrade only from the hosts and origins it takes, `hosts`, `Hosts`,
+  and `origins`, `Origins`, as the HTTP server does, and refuses any other 403 before its handshake,
+  `host-refused` or `origin-refused`, its body empty: a page of another origin no longer calls a
+  server on the loopback. It judges its own origin by `Host`: `hosts` refuses a page that rebinds
+  its name to the server's address.
+- The C# side's `TransportMessage`, `SessionRequest` and `Session<TData>` write whether a
+  credential or a session's token is there in their strings, never it.
 
 ## [0.1.0] - 2026-10-02
 

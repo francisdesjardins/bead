@@ -663,9 +663,10 @@ none by default from then on, and tells its application, by the credential's sch
 call that renews it goes out without it. A refusal withdraws the default only while it is still the
 credential its call presented, the same scheme and the same bytes: a default given other bytes since
 is kept, and one set again to the same bytes is withdrawn with it; and a failure that ends a
-subscription once answered (section 13.6) withdraws nothing, since a session the application ended
-leaves a credential that may still hold. A client receiving a command resolves its credential as a
-server does (section 9.2, step 5), the session it learned standing for its connection's.
+subscription its server had answered (section 13.6) withdraws nothing, even one that comes before
+that answer (section 15.9), since a session the application ended leaves a credential that may still
+hold. A client receiving a command resolves its credential as a server does (section 9.2, step 5),
+the session it learned standing for its connection's.
 
 A client fails a call before it goes, and a server a command alike, with `DESTINATION_UNREACHABLE`,
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
@@ -676,12 +677,16 @@ envelope alone, a server's over HTTP (section 15.9) — and for one that present
 only TLS off the machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A
 transport is judged by what it is given, never by what a name resolves to. It is secure under TLS,
 its scheme `wss` or `https`; on the loopback, its host — the one a client names in its URL, or the
-one a server listens on — `localhost` or a name that ends in `.localhost`, compared in ASCII lower
-case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback, `::1`, `[::1]` in a URL, as the W3C's
-[Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
+one a server listens on, bracketed when it is an IPv6 address — as the
+[WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
+the W3C's Secure Contexts reads an origin: `localhost` or a name that ends in `.localhost`, compared
+in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback, `::1`, `[::1]` in a URL,
+as [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
 potentially trustworthy; or when it never leaves the machine, a Web Worker or a router called in
-process. A side takes a `localhost` name on the loopback without resolving it, as Secure Contexts
-does where the platform resolves such names there alone
+process. Every side reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as
+127.0.0.1, are on the loopback; a host it fails on, one followed by a space among them, is not, nor
+is `localhost.`, which it keeps as given. A side takes a `localhost` name on the loopback without
+resolving it, as Secure Contexts does where the platform resolves such names there alone
 ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a platform whose resolver
 sends one elsewhere, its application gives another host. Any other leaves the machine in the clear.
 A server cannot tell what stands in front of it: its application MAY say so, and is then believed
@@ -742,7 +747,12 @@ the first that fails refuses the token for the reason it names:
    token of another kind from the same issuer, an ID token among them, is refused (RFC 8725 §3.12);
 4. `kid`: its key is found among the keys alone: by its header's `kid`, the key of that `kid`, or,
    of several, the one whose issuer is its `iss`; without a `kid`, its `iss`'s key, when that issuer
-   has one key. A `kid` that names none is refused, never tried against the others;
+   has one key. Keys of one issuer whose thumbprints are equal (RFC 7638) — their `crv`, `kty`, `x`
+   and `y` for an `EC` key, their `k` and `kty` for an `oct` one, octet for octet — are one key, the
+   first of them in the order this step searches, which step 6 reads alone. So a key set that
+   answers again a key the application gave refuses none of the tokens that name that key by its
+   `kid`, nor one without a `kid` when it answers no other key of that issuer. A `kid` that names
+   none is refused, never tried against the others, and so is one that leaves keys of two materials;
 5. `alg`: its header's `alg` is its key's algorithm, so `none`, an algorithm no key takes, and an
    `HS256` token met by a public key are refused;
 6. `key`: its key's JWK serves: its `alg`, when present, is its algorithm, its `use`, when present,
@@ -761,8 +771,10 @@ the first that fails refuses the token for the reason it names:
 13. `sub`: without a `sid`, its `sub` is a string.
 
 A string these steps read is of well-formed Unicode, which a JSON escape need not write: one that
-holds a surrogate alone names nothing. A claim is read as an IEEE 754 double, as both sides' JSON
-readers read it, and the 60 s is a leeway for clock skew, a constant on every side, never an option.
+holds a surrogate alone names nothing, so a `sid`, a `sub` or an `aud` that holds one is no string,
+and an `aud` array holding one is no array of strings. A claim is read as an IEEE 754 double, as
+both sides' JSON readers read it, and the 60 s is a leeway for clock skew, a constant on every side,
+never an option.
 A token that holds gives its session: its identifier, `{ issuer, sid }`, its `iss` with its `sid`,
 else `{ issuer, sub }`, its `iss` with its `sub`; its claims set; and its end, _E_ = _X_ + 60,000.
 A key not shaped for its algorithm — an `ES256` one that is not `EC` on `P-256`, its `x` and `y` 32
@@ -790,8 +802,8 @@ call that waits on it (section 9.2, step 5), as a key set that cannot be reached
 The keys an answer gave are held for its issuer, beside the application's, in place of those its
 last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
 reading is before the answer's plus 600,000 ms, and an ask that fails replaces none of them. The
-application's own keys are held for good. Step 4 finds a key among the application's keys and the
-held keys that serve.
+application's own keys are held for good. Step 4 finds a key among the application's keys, in the
+order given, then the held keys that serve, an issuer's in the order its answer gave them.
 
 A token the keys that serve verify waits for nothing. One of an issuer the key set names, which they
 do not verify, waits for that issuer's keys while its key does not serve: while its `kid` names none
@@ -1030,7 +1042,17 @@ credential beside an envelope, either way: a request that presents `ELSEWHERE` o
 `SESSION_REQUIRED` (section 9.2, step 5), and a side fails a call that would present it over one
 before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake
 carried, its `Authorization` among it, is no credential beside an envelope, and never stands for
-`ELSEWHERE`.
+`ELSEWHERE`. A server answers 426 an upgrade of any `Sec-WebSocket-Version` but 13, or of none,
+its own `Sec-WebSocket-Version` naming 13
+([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)), so that the `Origin` it
+judges an upgrade by is the field it judges an exchange by. It takes an upgrade as it takes an HTTP
+exchange (section 15.12): one that names a host it does not take, or that carries an `Origin`
+neither its own nor among those it takes, is refused before its handshake, 403, its `bead-refusal`
+`host-refused` or `origin-refused`, with `cache-control: no-store` and
+`x-content-type-options: nosniff`, its body empty, since no same-origin policy guards an upgrade and
+a page of any origin may ask for one
+([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). A page that rebinds its
+name to the server's address is its own origin by its `Host`: `hosts` is what refuses it.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
@@ -1083,7 +1105,7 @@ lost.
 | 201    |                                      | a connection drawn, its token in `bead-connection-token`                                                                                                                                           |
 | 204    |                                      | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                              |
 | 400    | `malformed`                          | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen's count that is none, or an `after` past what was sent |
-| 403    | `host-refused`, `origin-refused`     | a host not among those the server takes; a browser's exchange from an origin neither the server's nor among those it takes                                                                         |
+| 403    | `host-refused`, `origin-refused`     | a host not among those the server takes; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                       |
 | 404    | `path-unknown`, `connection-unknown` | not the path; the connection is gone                                                                                                                                                               |
 | 405    | `method-refused`                     | neither `GET`, `POST` nor `DELETE`, which `Allow` names                                                                                                                                            |
 | 409    | `call-waiting`, `listen-undeclared`  | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                    |
@@ -1123,10 +1145,12 @@ reads a batch as it comes, and hears each envelope as it comes whole; what a lis
 past what was heard comes again to the next, so nothing is lost and nothing heard twice. A failure
 that ends a subscription, in a batch, may come before the result that answered its call, in a
 `POST`'s body: the client pairs the failure with the call still waiting, which fails with it
-(section 9.7), and reports the result that follows as `CALL_UNKNOWN`. An outbox past its bound — two
-envelopes' worth by default — closes its connection, its client having fallen behind. A batch
-carries no credential beside its envelopes, nor does an answer: a command of the server's that
-presents `ELSEWHERE` over HTTP fails before it goes, `DESTINATION_UNREACHABLE`.
+(section 9.7), and reports the result that follows as `CALL_UNKNOWN`. It withdraws no default
+(section 13.4): a request's own answer comes in its `POST`'s body alone (section 15.5), so a failure
+a batch brings for a call still waiting ends a subscription its server had answered. An outbox past
+its bound — two envelopes' worth by default — closes its connection, its client having fallen
+behind. A batch carries no credential beside its envelopes, nor does an answer: a command of the
+server's that presents `ELSEWHERE` over HTTP fails before it goes, `DESTINATION_UNREACHABLE`.
 
 15.10. A client SHOULD listen from its connect on, asking a `wait` under the server's bound, and
 listen again at once once a listen ends. A listen lost is listened again from where it was: at once,
@@ -1160,11 +1184,25 @@ alike (section 15.10):
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
 `maximumWait` may not.
 
-Past the first four it answers 429 or 503, as section 15.6's table says. It takes the hosts a request
-may name, `hosts`, against a page that rebinds its name to the server's address, and the origins a
-browser's exchange may come from besides its own, `origins`. A client's address is its socket's;
-behind a proxy on the same machine, which the server is told to trust, `isProxyTrusted`, it is the
-last entry of the proxy's `X-Forwarded-For`, when that entry is an address.
+Past the first four it answers 429 or 503, as section 15.6's table says. It takes the hosts a
+request may name, `hosts`, every host when not given, and the origins an exchange may come
+from besides its own, `origins`, none when not given. Its own is its request's `Host` under `http`
+or `https`: an `Origin` that is `http://` or `https://` followed by that `Host`, compared ASCII
+case-insensitively, the field read as the serialized origin it carries
+([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), never parsed as a URL; a
+browser writes both from one URL alike. Any other `Origin` is none of its own, whatever host it
+names: `null`, which a browser sends for an opaque origin — a sandboxed frame's, a `file:` or a
+`data:` page's — and in place of one it withholds, after a cross-origin redirect or under a referrer
+policy; and any other scheme, an extension's or a `blob:` URL's among them. A server takes `null`,
+as any other, only when `origins` names it, and then from every page that sends it. A request
+without an `Origin` comes from no page, and is taken. A host among `hosts` is compared ASCII
+case-insensitively ([RFC 9110 §4.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.3)), in
+the form the `Host` field carries it, an IDN host in its punycode. Since a page that rebinds
+its name to the server's address names its own `Host`, `hosts` is what refuses it, never the
+origin's test. A WebSocket server takes both alike on an upgrade (section 15.2). A client's address
+is its socket's; behind a proxy on the same machine, which the server is told to trust,
+`isProxyTrusted`, it is the last entry of the proxy's `X-Forwarded-For`, when that entry is an
+address.
 
 ## 16. Services and procedures
 
