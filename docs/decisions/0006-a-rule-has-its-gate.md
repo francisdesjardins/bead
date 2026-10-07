@@ -38,7 +38,11 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 | The TypeScript side's types, lint, format and comments                                                                                                                                                                                                                                                                                                  | `typescript`                                     |
 | A TypeScript function takes at most two parameters, then one options object; an event, at most two values                                                                                                                                                                                                                                               | `typescript`                                     |
 | The C# side's layout, code style, analyzers and doc comments                                                                                                                                                                                                                                                                                            | `dotnet`                                         |
-| A lockfile changes only on purpose                                                                                                                                                                                                                                                                                                                      | `spec`, `typescript`, `dotnet`                   |
+| `bead/options.proto` and the builder's fixtures keep buf's lint and format, and the options' generated code is what protoc-gen-es writes ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                 | `builder`                                        |
+| The builder's tests on Linux and on Windows; its types, lint and format on Linux                                                                                                                                                                                                                                                                        | `builder`                                        |
+| The interop's `.proto` gives the interop's blueprint, its projection byte for byte, in either line ending, on Linux and on Windows ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                       | `builder`                                        |
+| A blueprint keeps section 16 and the builder's rules, and its form, the interop's by `beadc check` and `beadc blueprint --check` ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md), [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                            | `builder`                                        |
+| A lockfile changes only on purpose                                                                                                                                                                                                                                                                                                                      | `spec`, `typescript`, `dotnet`, `builder`        |
 | The root's files keep the house format                                                                                                                                                                                                                                                                                                                  | `typescript`                                     |
 | A commit subject is a Conventional Commit                                                                                                                                                                                                                                                                                                               | `commits`                                        |
 | Every relative link of the repository's Markdown, and its anchor, resolves                                                                                                                                                                                                                                                                              | `commits`                                        |
@@ -94,18 +98,16 @@ vector cannot.
   ([0004](0004-one-behaviour-in-every-language.md));
 - a check of the C# side's parameters, which no analyzer of .NET's recommended set counts
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
-- `beadc check`, which holds a blueprint to section 16 and to the builder's rules, and
-  `beadc breaking`, which holds a blueprint to the last release's
+- `beadc breaking`, which holds a blueprint to the last release's
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
-- the builder's types, lint, format, tests and rules, on Linux and Windows; `interop.proto`'s
-  blueprint, its projection the interop's byte for byte, in every line ending;
-  `beadc generate --check` over the repository; the image's and the wrappers' tests; and
+- `beadc generate --check` over the repository; the image's and the wrappers' tests; and
   `examples/hello`'s two builds, its C# messages generated and external
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
 - tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
   root's tools' tests, in Node's runner, would hold.
 
-**The hooks copy one gate and add a clone's own.** `.githooks/commit-msg` holds a subject to
-Conventional Commits before git records it, as CI's `commits` job does, and both hooks run the
-checks a clone keeps for itself, which CI cannot run. A clone opts in with
-`git config core.hooksPath .githooks`.
+**The hooks copy two gates and add a clone's own.** `.githooks/commit-msg` holds a subject to
+Conventional Commits before git records it, as CI's `commits` job does, and `.githooks/pre-commit`
+the staged root files to their format, as its `typescript` job does, when the TypeScript side is
+installed; both hooks run the checks a clone keeps for itself, which CI cannot run. A clone opts in
+with `git config core.hooksPath .githooks`.
