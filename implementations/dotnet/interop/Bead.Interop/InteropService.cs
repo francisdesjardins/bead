@@ -489,7 +489,7 @@ public static class InteropService
         {
             if (request.Session?.Identifier is not null)
             {
-                return response.Fail(Failure.OfProtocol(ProtocolCode.AccessDenied, "logout ends its connection's session, which this call does not run in"));
+                return response.Fail(Failure.OfProtocol(ProtocolCode.AccessDenied, "a call in a credential's session ends no connection's session"));
             }
 
             sessionManager.Delete(request.ConnectionHandle);

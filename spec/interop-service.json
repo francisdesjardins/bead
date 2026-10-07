@@ -98,7 +98,7 @@
       "procedureId": 13,
       "procedureName": "logout",
       "request": "any JSON value",
-      "admits": "a call in its connection's session; one in a credential's session is refused with ACCESS_DENIED, since SESSION_REQUIRED would have its client withdraw a credential that holds, and one in none with SESSION_REQUIRED",
+      "admits": "a call in its connection's session; one in a credential's session is refused with ACCESS_DENIED, detail \"a call in a credential's session ends no connection's session\", since SESSION_REQUIRED would have its client withdraw a credential that holds, and one in none with SESSION_REQUIRED",
       "answers": "null, once it ended its connection's session"
     },
     {

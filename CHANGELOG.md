@@ -23,6 +23,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `tools/release.mjs prepare` moves the version of every conformance file that repeats one, as
   `tools/check-versions.mjs` finds them, the interop's blueprint among them.
+- The C# interop's `logout` refuses a call in a credential's session with the TypeScript side's
+  detail, "a call in a credential's session ends no connection's session", which the interop
+  holds both ways.
 
 ### Fixed
 

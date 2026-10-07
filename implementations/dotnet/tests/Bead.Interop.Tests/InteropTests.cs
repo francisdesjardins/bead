@@ -454,6 +454,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         });
 
         Assert.Equal(((ushort)ProtocolCode.AccessDenied, FailureOrigin.Peer), (refused.Code, refused.Origin));
+        Assert.Equal("a call in a credential's session ends no connection's session", refused.Detail);
         Assert.NotNull(client.Router.Credential);
     }
 

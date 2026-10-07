@@ -429,6 +429,7 @@ test.describe('the C# server of the interop service', () => {
         await expect(requesterOf('whoami')(null)()).resolves.toBe('grace');
         await expect(requesterOf('logout')(null)()).rejects.toMatchObject({
           code: ProtocolCode.ACCESS_DENIED,
+          detail: "a call in a credential's session ends no connection's session",
         });
         // the connection's session stays, a call presenting none running in it
         await expect(
