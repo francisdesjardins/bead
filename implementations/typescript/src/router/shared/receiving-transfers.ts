@@ -82,7 +82,8 @@ export interface IReceivingTransfers<Handle extends string> {
  * them — the opening's first — so an opening holds only what its peer sends, and a transfer the
  * budget cannot credit waits until another gives some back. Each connection receives
  * `maximumTransfers` at once. `sendCredit` sends a credit a transfer is granted; a chunk before the
- * last carries `payloadBytesPerChunk` at least. A transfer's inactivity runs on `clock`.
+ * last carries `payloadBytesPerChunk`, exactly, the last that many at most. A transfer's inactivity
+ * runs on `clock`.
  */
 export const createReceivingTransfers = <Handle extends string>({
   clock,

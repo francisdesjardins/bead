@@ -2169,7 +2169,7 @@ test.describe('createRouterClient', () => {
     });
 
     test('reports a resolver that rejects, and an answer the transport cannot send', async () => {
-      const { control, deliver, transport } = createScriptedTransport();
+      const { control, deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
       const errors = recordErrors(router);
       const failure = new Error('resolver failed');
@@ -2184,6 +2184,7 @@ test.describe('createRouterClient', () => {
         kind: EnvelopeKind.REQUEST,
         payload: new Uint8Array(0),
       });
+      await sleep(0);
 
       control.sendError = new Error('not open');
       deliver({
@@ -2191,6 +2192,7 @@ test.describe('createRouterClient', () => {
         kind: EnvelopeKind.REQUEST,
         payload: new Uint8Array(0),
       });
+      await sleep(0);
       deliver({
         header: { ...requestHeaderOf(6), serviceId: 99 },
         kind: EnvelopeKind.REQUEST,
@@ -2198,7 +2200,20 @@ test.describe('createRouterClient', () => {
       });
       await sleep(0);
 
-      expect(errors).toEqual([failure, failure, control.sendError]);
+      // call 2 reported and answered; call 4 reported, its answer refused by the transport and
+      // reported; call 6's refusal refused and reported
+      expect(errors).toEqual([failure, failure, control.sendError, control.sendError]);
+      expect(
+        sent.map((envelope) => {
+          return envelope?.kind === EnvelopeKind.FAILURE
+            ? [envelope.header.callId, envelope.failure.code]
+            : envelope?.kind;
+        })
+      ).toEqual([
+        [2, ProtocolCode.PROCEDURE_FAILED],
+        [4, ProtocolCode.PROCEDURE_FAILED],
+        [6, ProtocolCode.SERVICE_UNKNOWN],
+      ]);
     });
 
     test('reports a resolver that throws before it returns, and keeps taking envelopes', () => {

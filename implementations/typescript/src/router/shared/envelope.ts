@@ -80,6 +80,43 @@ const isContinuation = (byte: number | undefined): boolean => {
   return byte !== undefined && (byte & 0xc0) === 0x80;
 };
 
+/**
+ * The bytes of the character `byte` leads, as UTF-8 writes one (RFC 3629 §4): 2 to 4; 1 for any
+ * other byte.
+ */
+const sequenceBytesOf = (byte: number): number => {
+  if (byte >= 0xc2 && byte <= 0xdf) {
+    return 2;
+  }
+
+  if (byte >= 0xe0 && byte <= 0xef) {
+    return 3;
+  }
+
+  return byte >= 0xf0 && byte <= 0xf4 ? 4 : 1;
+};
+
+/**
+ * Where a detail cut at `end` of `payload` ends: at the lead byte of the character the cut fell in,
+ * at most three bytes back, whose sequence crosses the cut; where it fell for anything else.
+ */
+const cutOf = (payload: Uint8Array, end: number): number => {
+  // past the end there is nothing to continue
+  if (end >= payload.length) {
+    return end;
+  }
+
+  for (let index = end - 1; index >= Math.max(RECORD_BYTES, end - 3); index -= 1) {
+    const byte = payload[index] ?? 0;
+
+    if (!isContinuation(byte)) {
+      return index + sequenceBytesOf(byte) > end ? index : end;
+    }
+  }
+
+  return end;
+};
+
 // definition
 
 /**
@@ -137,12 +174,9 @@ export const readFailure = (
     throw malformed(`a failure's record carries no flag 0x${(flags & ~APPLICATION).toString(16)}`);
   }
 
-  let end = Math.min(payload.length, RECORD_BYTES + maximumDetailBytes);
-
-  // a cut inside a character drops the whole character; past the end there is nothing to continue
-  while (end > RECORD_BYTES && isContinuation(payload[end])) {
-    end -= 1;
-  }
+  // ! a cut inside a character drops that character alone: a lead byte at most three bytes back
+  // whose sequence crosses the cut; a stray continuation byte at the cut drops nothing (spec 7.3)
+  const end = cutOf(payload, Math.min(payload.length, RECORD_BYTES + maximumDetailBytes));
 
   return {
     code,

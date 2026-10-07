@@ -48,6 +48,9 @@ export const FIELD_MAXIMUMS = Object.freeze({
   serviceId: 0xffff,
 } as const);
 
+/** The bytes a header takes at most: the 255 words its fourth byte counts. */
+export const MAXIMUM_HEADER_BYTES = 1_020;
+
 // the prefix: layout, kind, flags, header words, then the call id at bytes 4 to 7
 const PREFIX_BYTES = 8;
 
@@ -69,9 +72,6 @@ const BLOCK_BYTES: readonly (readonly [flag: number, bytes: number])[] = Object.
 // a credential's head, as a TLS extension's (RFC 8446 §4.2): its scheme, then its length, 2 bytes
 // each
 const CREDENTIAL_HEAD_BYTES = 4;
-
-// the 255 words a header's fourth byte counts
-const MAXIMUM_HEADER_BYTES = 1_020;
 
 // each credential scheme's name, for a detail
 const SCHEME_NAMES: ReadonlyMap<number, string> = new Map(
@@ -354,11 +354,11 @@ const credentialOf = (
 
 /**
  * How `header` is laid out: its flags, its credential as written, and its length, to the end of
- * the credential's padding. Throws a {@link ProgrammerError} for a kind this layout does not write,
- * a block its kind does not carry, a credential {@link credentialOf} refuses, and a header past
- * 1,020 bytes.
+ * the credential's padding, its bound unchecked. Throws a {@link ProgrammerError} for a kind this
+ * layout does not write, a block its kind does not carry, and a credential {@link credentialOf}
+ * refuses.
  */
-const layoutOf = (
+const unboundedLayoutOf = (
   header: EnvelopeHeader
 ): {
   credential: { bytes: Uint8Array; scheme: number } | undefined;
@@ -372,13 +372,24 @@ const layoutOf = (
     fixedSizeOf(header.kind, flags) +
     (credential === undefined ? 0 : CREDENTIAL_HEAD_BYTES + paddedOf(credential.bytes.length));
 
+  return { credential, flags, headerBytes };
+};
+
+/**
+ * How `header` is laid out, as {@link unboundedLayoutOf} lays it out. Throws as it does, and a
+ * {@link ProgrammerError} for a header past 1,020 bytes.
+ */
+const layoutOf = (header: EnvelopeHeader): ReturnType<typeof unboundedLayoutOf> => {
+  const layout = unboundedLayoutOf(header);
+  const { headerBytes } = layout;
+
   if (headerBytes > MAXIMUM_HEADER_BYTES) {
     throw new ProgrammerError(
       `a header is ${String(MAXIMUM_HEADER_BYTES)} bytes at most, not ${String(headerBytes)}`
     );
   }
 
-  return { credential, flags, headerBytes };
+  return layout;
 };
 
 /**
@@ -763,6 +774,15 @@ export const readHeader = (bytes: Uint8Array, failures: ReadFailures): IReadHead
  */
 export const headerBytesOf = (header: EnvelopeHeader): number => {
   return layoutOf(header).headerBytes;
+};
+
+/**
+ * The bytes `header` takes, as {@link headerBytesOf} counts them, its bound of 1,020 bytes
+ * unchecked: what a writer asks of a header it may refuse with a protocol failure. Throws as
+ * {@link headerBytesOf} does for anything else.
+ */
+export const unboundedHeaderBytesOf = (header: EnvelopeHeader): number => {
+  return unboundedLayoutOf(header).headerBytes;
 };
 
 /**
