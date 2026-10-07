@@ -419,7 +419,9 @@ export const prepare = (root, options = {}) => {
   } else {
     log(`next: git commit -am "chore(release): ${product}, dated", if git status shows a change`);
     log(`      wait for ci-ok on ${branch}`);
-    log(`      git flow ${kind} finish --keepremote ${product}, without -p; then node tools/release.mjs tag`);
+    log(
+      `      git flow ${kind} finish --keepremote ${product}, without -p; then node tools/release.mjs tag`
+    );
   }
   return plan;
 };
@@ -514,7 +516,9 @@ export const tag = (root, options = {}) => {
       return `${kind}/${version}`;
     })
     .filter((branch) => {
-      return git(root, ['for-each-ref', '--format=%(refname)', `refs/remotes/origin/${branch}`]) !== '';
+      return (
+        git(root, ['for-each-ref', '--format=%(refname)', `refs/remotes/origin/${branch}`]) !== ''
+      );
     })
     .map((branch) => {
       return `:${branch}`;
