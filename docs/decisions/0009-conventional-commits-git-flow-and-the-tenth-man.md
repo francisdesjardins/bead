@@ -33,7 +33,8 @@ starts from `main` and ends in both. git-flow's `finish` writes the merges, and 
 **The CHANGELOG follows Keep a Changelog 1.1.0.** There is one, `CHANGELOG.md` at the root, for
 every implementation and the spec. Its `[Unreleased]` section is kept current: a change worth
 telling goes there, under Keep a Changelog's own headings, in the commit that makes it. A release
-turns `[Unreleased]` into its version and its date.
+turns `[Unreleased]` into its version and its date. Once a `release/*` or `hotfix/*` branch has
+dated its version, a change made on it tells its line under that version, which ships it.
 
 **The reasons are in `docs/decisions/`**, one decision a record, changed rather than appended to
 ([README](README.md)). What the repository says looks forward: a comment, a README or a record
@@ -81,6 +82,9 @@ does not keep.
   of its decision.
 
 ## The Tenth Man
+
+This record's sentence on a release branch's lines met the Tenth Man with the release's gate, in
+[0008](0008-three-version-axes-and-names-qualified-by-their-owner.md).
 
 How a record is kept and voiced met the Tenth Man twice: when the records were realigned, and when
 this record said where a round lives. Its objections, each with the answer that holds:

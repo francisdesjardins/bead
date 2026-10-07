@@ -42,6 +42,18 @@ promise to be decided at once, on the day of the first release.
    version of its own: its files repeat it as their `debuggingVersion`, it moves by the same rule, a
    code the wire gains moving both, and a release whose companion moved tags `debugging-v` and that
    version.
+
+   `tools/release.mjs` moves every version in the release commit, the C# lock files' project ranges
+   with them, and sets each document's tag at the `v*` that `git flow release finish` makes;
+   `tools/check-versions.mjs` holds them ([0006](0006-a-rule-has-its-gate.md)). A document's files
+   are its text, the conformance files that repeat its version and their schemas; the generators
+   and checks that write and read them are none of them. A document's last release is the newest
+   `v*` before the commit whose tree holds it, at the version that tree states, or at that `v*`'s
+   own when it states none; its tag stands at the first `v*` that gives it that version. A document
+   whose files changed since its last release moves to a successor of that version, its minor at
+   least when a conformance file, a top-level key of one or a property of its schemas was added,
+   and one whose files did not keeps it.
+
 3. **The product**: each implementation's releases, under Semantic Versioning, at `0.x`, tagged
    `v*`, one version for both manifests, cut from a `release/*` branch
    ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
@@ -73,15 +85,20 @@ Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manife
   when it joins.
 - At `0.x`, Semantic Versioning lets a minor release break; the CHANGELOG says what broke, and the
   record that decided it says why.
+- Past the floor the gate holds, whether a document's move is its minor or its patch is the
+  maintainer's to say; the gate holds that it moves by one step when its files changed, and not
+  otherwise.
 - A name costs more the further it travels: a rename at `0.x` costs every side's call sites, a line
   in the CHANGELOG and the Tenth Man; after a publication, it costs every consumer besides.
 - The C# the builder generates is longer for its `global::` prefixes, and never ambiguous.
 
 ## The Tenth Man
 
-The names this record settles met the Tenth Man
-([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). Its objections, and the options
-it proposed itself, each with its answer:
+The names this record settles, and the gate that holds its versions, met the Tenth Man
+([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). Each round's objections, each
+with its answer:
+
+### On the names
 
 | Objection                                                                                                                         | Answer                                                                                                                                                                                                |
 | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -95,3 +112,18 @@ it proposed itself, each with its answer:
 | another media type than `application/prs.bead`                                                                                    | Refused: RFC 6838's personal tree fits it.                                                                                                                                                            |
 | another namespace than `Bead` in `Bead.Core`                                                                                      | Refused: a library's namespace is its name, as Polly's is `Polly`.                                                                                                                                    |
 | one spelling of WebSocket across the sides                                                                                        | Refused: `ws` and `WS` are each language's idiom.                                                                                                                                                     |
+
+### On the release's versions and their gate
+
+| Objection                                                                                                                                                                                                            | Answer                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| On `main`, a document's first own tag at HEAD leaves no tag before it, so the gate reads no last release and passes a spec the release left unmoved, or moved past its successor                                     | Accepted, through the next row: a document's last release is read from the `v*` tags alone, so its own tag at HEAD changes nothing, and there is no second code path for the first release.                                                                                                                                                                   |
+| The gate trusts the documents' tags: one set or moved by hand redefines "changed since", and the gate checks their names, never their places                                                                         | Accepted: a document's last release is the newest `v*` before the commit whose tree holds it, at the version that tree states, or at that `v*`'s own when it states none. `spec-v*` and `debugging-v*` are outputs that the gate checks by name and by place, each at the oldest `v*` that gives its version.                                                 |
+| The release leaves the C# lock files' project ranges at the old version, which a locked restore accepts and the next unrelated restore rewrites                                                                      | Accepted: `prepare` moves every project range of every `packages.lock.json` as text, with no third toolchain at the root ([0005](0005-a-toolchain-per-language.md)), and the gate holds, on every ref, each range at `<Version>`.                                                                                                                             |
+| A last release found by `git tag --merged` holds only after AVH's back-merge of the tag; Driessen's text, `finish -b` and a pull request merge the release branch, and the next release is refused                   | Accepted: a `v*` is reached when its commit, or that commit's second parent, is an ancestor of the commit judged, as AVH itself finds the release branch; the gate diffs against the tag's tree.                                                                                                                                                              |
+| The back-merge files `develop`'s new entries under the released version, in silence, and nothing gates the CHANGELOG though [0009](0009-conventional-commits-git-flow-and-the-tenth-man.md) makes its release a rule | Accepted: on every ref, a released section equals that section in its tag's tree, so a released section stays as shipped; on a release, `[Unreleased]` is empty, the version's section is dated and holds an entry, and both links compare the right tags. The entries' wording stays with review.                                                            |
+| `prepare` runs once, at the bump, while a release branch lives on after it; and it dates the release in UTC                                                                                                          | Accepted: `prepare` reads every fact from the last release and the tree, so it runs again right before the finish, re-dating, regenerating and checking. It dates in local time, the day the tag carries. On a release branch, once its version is dated, a change tells its line under that version, and `prepare` refuses an `[Unreleased]` that holds one. |
+| The flow lets CI first judge a release on `main`, after its tag; a push in parts lands `main` without its tags; and `prepare`'s Python and `node_modules` exceed a root tool                                         | Accepted: the release branch is published, and CI judges the release commit, every job, before the finish; the push is one `git push --atomic`; `main` fails when no `v*` tags its HEAD. `prepare` needs only the generators' Python, and names any check whose tool is absent, with the CI job that holds it.                                                |
+| `tag`'s default looks for a `v*` at HEAD, which the finish leaves on `develop`; and git-flow's post-finish hook, which AVH runs before `-p`'s push, is the one way `finish -p` carries the documents' tags           | Accepted in part: `tag` takes the newest `v*` in the repository, refused unless `main` reaches it. Refused: the hook. `-p` pushes `develop`, `main` and then `--tags`, every local tag, neither atomic nor only the release's, and a hook is a clone's own configuration. One `tag` and one atomic push hold the release in every clone.                      |
+| Line endings: `.gitattributes` holds git's blobs at LF, not the working tree the scripts read                                                                                                                        | Accepted: both scripts read the working tree's text with LF.                                                                                                                                                                                                                                                                                                  |
+| Part of the minor-or-patch choice is in the diff: a file, a group or a field added                                                                                                                                   | Accepted as a floor: a conformance file, a top-level key of one, or a property of its schemas added since the last release holds the document's move to its minor at least, as axis 2 counts those additions; any other change takes either, and review holds that half.                                                                                      |

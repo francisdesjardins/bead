@@ -21,32 +21,37 @@ that one check stands for them all. Branch protection, which makes `ci-ok` the o
 requires, waits on GitHub Pro or a public repository. Each rule, and the job that holds it, whose
 comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 
-| Rule                                                                                                                | Job                                              |
-| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| The conformance files are what their generators write                                                               | `spec`                                           |
-| The conformance files keep their frame ([0004](0004-one-behaviour-in-every-language.md)), and every side reads them | `spec`                                           |
-| No configuration holds a published test key                                                                         | `spec`                                           |
-| Every implementation reads the wire alike, as the conformance files state it, but what a row of the matrix excuses  | `typescript`, `dotnet`                           |
-| Every implementation refuses a declaration off section 16                                                           | `typescript`, `dotnet`                           |
-| Every implementation traces, filters and counts alike                                                               | `typescript`, `dotnet`                           |
-| Debugging costs nothing while off: it reads no clock                                                                | `typescript`, `dotnet`                           |
-| Debugging costs nothing while off: it allocates nothing                                                             | `dotnet`; on the TypeScript side, review (below) |
-| Every side takes its time from the clock it is given                                                                | `typescript`, `dotnet`                           |
-| A side holds a duration as section 1.4 states, at every place that takes one                                        | `typescript`, `dotnet`                           |
-| Each side's client speaks to the other's server                                                                     | `dotnet`, the interop both ways                  |
-| The TypeScript side's types, lint, format and comments                                                              | `typescript`                                     |
-| A TypeScript function takes at most two parameters, then one options object; an event, at most two values           | `typescript`                                     |
-| The C# side's layout, code style, analyzers and doc comments                                                        | `dotnet`                                         |
-| A lockfile changes only on purpose                                                                                  | `spec`, `typescript`, `dotnet`                   |
-| The root's files keep the house format                                                                              | `typescript`                                     |
-| A commit subject is a Conventional Commit                                                                           | `commits`                                        |
-| Every relative link of the repository's Markdown, and its anchor, resolves                                          | `commits`                                        |
+| Rule                                                                                                                                                                                                                                                                                                                                                    | Job                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| The conformance files are what their generators write                                                                                                                                                                                                                                                                                                   | `spec`                                           |
+| The conformance files keep their frame ([0004](0004-one-behaviour-in-every-language.md)), and every side reads them                                                                                                                                                                                                                                     | `spec`                                           |
+| No configuration holds a published test key                                                                                                                                                                                                                                                                                                             | `spec`                                           |
+| Every implementation reads the wire alike, as the conformance files state it, but what a row of the matrix excuses                                                                                                                                                                                                                                      | `typescript`, `dotnet`                           |
+| Every implementation refuses a declaration off section 16                                                                                                                                                                                                                                                                                               | `typescript`, `dotnet`                           |
+| Every implementation traces, filters and counts alike                                                                                                                                                                                                                                                                                                   | `typescript`, `dotnet`                           |
+| Debugging costs nothing while off: it reads no clock                                                                                                                                                                                                                                                                                                    | `typescript`, `dotnet`                           |
+| Debugging costs nothing while off: it allocates nothing                                                                                                                                                                                                                                                                                                 | `dotnet`; on the TypeScript side, review (below) |
+| Every side takes its time from the clock it is given                                                                                                                                                                                                                                                                                                    | `typescript`, `dotnet`                           |
+| A side holds a duration as section 1.4 states, at every place that takes one                                                                                                                                                                                                                                                                            | `typescript`, `dotnet`                           |
+| Each side's client speaks to the other's server                                                                                                                                                                                                                                                                                                         | `dotnet`, the interop both ways                  |
+| The TypeScript side's types, lint, format and comments                                                                                                                                                                                                                                                                                                  | `typescript`                                     |
+| A TypeScript function takes at most two parameters, then one options object; an event, at most two values                                                                                                                                                                                                                                               | `typescript`                                     |
+| The C# side's layout, code style, analyzers and doc comments                                                                                                                                                                                                                                                                                            | `dotnet`                                         |
+| A lockfile changes only on purpose                                                                                                                                                                                                                                                                                                                      | `spec`, `typescript`, `dotnet`                   |
+| The root's files keep the house format                                                                                                                                                                                                                                                                                                                  | `typescript`                                     |
+| A commit subject is a Conventional Commit                                                                                                                                                                                                                                                                                                               | `commits`                                        |
+| Every relative link of the repository's Markdown, and its anchor, resolves                                                                                                                                                                                                                                                                              | `commits`                                        |
+| Each version agrees with itself, the C# lock files' project ranges included, and a released section of the CHANGELOG stays as its tag shipped it                                                                                                                                                                                                        | `commits`                                        |
+| A release moves each version its changes owe, one step past its last release, at least its minor where a file, a key or a property was added; it dates its CHANGELOG section and links it; each document's tag sits at the first `v*` that gives its version, stated or its own ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)) | `commits`                                        |
+| The root's tools do what their tests say                                                                                                                                                                                                                                                                                                                | `commits`                                        |
 
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
 with exit code 8, and Playwright one that found no test; `BEAD_INTEROP_REQUIRED=1` turns an interop
-that would skip into one that fails. A floor is passed by a wide margin and fails only when code
-really went away, which is worth being told.
+that would skip into one that fails; `tools/check-versions.mjs` fails where no `v*` is reached and
+where a released section of the CHANGELOG has no tag, and a document none of whose files repeats its
+version. A floor is passed by a wide margin and fails only when code really went away, which is
+worth being told.
 
 **A ceiling is a policy, and is chosen as one.** The comment budget's, 50 words to a comment and 120
 to an internal JSDoc, is a decision about what a reader's attention is worth, never a snapshot of
@@ -60,8 +65,8 @@ what `bead/options-last` lets pass, a callback aliased under a name ending in `O
 exceptions it lists, the events of three values among them, with the one optional positional on
 both sides and the C# side's classes without a base
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); git-flow's branch names and
-the CHANGELOG's entries; the spec's version and its companion's, each moved by the release that
-changes its document, and their `spec-v` and `debugging-v` tags
+the CHANGELOG's entries; whether a document's move is its minor or its patch, past the floor
+`tools/check-versions.mjs` holds
 ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); a row of the support matrix
 for every difference between languages ([0004](0004-one-behaviour-in-every-language.md)); what a
 call allocates for debugging on the TypeScript side, which no test reads
@@ -90,7 +95,9 @@ vector cannot.
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
 - `beadc check`, which holds a manifest to section 16 and to the builder's rules, and
   `beadc breaking`, which holds a manifest to the last release's
-  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)).
+  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
+- tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
+  root's tools' tests, in Node's runner, would hold.
 
 **The hooks copy one gate and add a clone's own.** `.githooks/commit-msg` holds a subject to
 Conventional Commits before git records it, as CI's `commits` job does, and both hooks run the
