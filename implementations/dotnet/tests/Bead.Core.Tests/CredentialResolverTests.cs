@@ -1001,6 +1001,71 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
+    public async Task Takes_the_application_s_copy_of_a_key_its_key_set_answers_again_beside_another_under_its_kid_and_refuses_a_token_without_a_kid_there()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet(SetIssuer);
+        var resolver = ResolverOf(
+            new Credentials
+            {
+                Audience = Audience,
+                Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = SetIssuer, Jwk = JwkOf((First, "app-1")) }],
+                KeySet = keySet.KeySet,
+            },
+            clock);
+        var asking = ResolvedOf((resolver, Credential.Jwt(TokenOf((Second, "set-1"), SetIssuer))));
+
+        // the application's key again, under its kid, which does not serve, beside a key of another
+        // material
+        var again = JsonSerializer.SerializeToElement(new Dictionary<string, string>
+        {
+            ["k"] = Base64Url.EncodeToString(First),
+            ["kid"] = "app-1",
+            ["kty"] = "oct",
+            ["use"] = "enc",
+        });
+
+        Assert.Single(keySet.Asks);
+        keySet.Asks[0].Settle.SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = again }, SetKeyOf((Second, "set-1"))]);
+        Assert.NotNull(await asking);
+
+        // one material under app-1: the application's copy, which serves, taken first
+        Assert.Equal("grace", (await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, "app-1"), SetIssuer)))))!.Identifier!.Sub);
+
+        // two materials for its issuer: a token without a kid is refused at once, asking nothing
+        Assert.Null(await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, null), SetIssuer)))));
+        Assert.Single(keySet.Asks);
+    }
+
+    [Fact]
+    public async Task Takes_a_token_without_a_kid_once_its_key_set_answers_the_application_s_key_alone_again_under_another_kid()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet(SetIssuer);
+        var resolver = ResolverOf(
+            new Credentials
+            {
+                Audience = Audience,
+                Keys = [new JwtKey { Algorithm = JwtAlgorithm.Hs256, Issuer = SetIssuer, Jwk = JwkOf((First, "app-1")) }],
+                KeySet = keySet.KeySet,
+            },
+            clock);
+        var asking = ResolvedOf((resolver, Credential.Jwt(TokenOf((First, "app-2"), SetIssuer))));
+
+        Assert.Single(keySet.Asks);
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((First, "app-2"))]);
+        Assert.NotNull(await asking);
+
+        // one material for its issuer, under two kids: each token finds it, one without a kid too
+        foreach (var kid in new[] { "app-1", "app-2", null })
+        {
+            Assert.Equal("grace", (await ResolvedOf((resolver, Credential.Jwt(TokenOf((First, kid), SetIssuer)))))!.Identifier!.Sub);
+        }
+
+        Assert.Single(keySet.Asks);
+    }
+
+    [Fact]
     public async Task Frees_the_place_of_each_call_that_leaves_its_wait_10000_that_leave_as_their_connection_closes_wait_again_none_refused_and_no_ask_goes_at_a_deadline_none_waits_for()
     {
         const int Many = 10_000;

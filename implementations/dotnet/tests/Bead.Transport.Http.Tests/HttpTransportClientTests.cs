@@ -1447,6 +1447,36 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
+    public async Task Marks_what_a_listen_brings_back_as_what_may_overtake_and_never_what_a_POST_s_body_brings()
+    {
+        await using var faked = await ConnectFake(ListeningOn(new FakeTimeProvider()) with { Wait = TimeSpan.FromSeconds(1) });
+        var listen = await faked.Fetch.CallOf(1);
+        var marks = Channel.CreateUnbounded<bool>();
+
+        faked.Client.Message += (message) =>
+        {
+            marks.Writer.TryWrite(message.MayOvertake);
+        };
+
+        // a request's own answer, in its POST's body
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+
+        (await faked.Fetch.CallOf(2)).Answer(new Answer { Status = 200, Headers = Bead, Body = EnvelopeOf(EnvelopeKind.Result, (1, 0)) });
+        await sending.WaitAsync(Patience, Cancelled);
+
+        Assert.False(await Next(marks));
+
+        // what a listen brings back keeps no order with it (spec 15.9)
+        listen.Answer(Batch(1, EnvelopeOf(EnvelopeKind.Failure, (3, 0)), EnvelopeOf(EnvelopeKind.Notification, (1, 0))));
+
+        var overtaking = new[] { await Next(marks), await Next(marks) };
+
+        Assert.Equal([true, true], overtaking);
+
+        await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
     public async Task Listens_again_from_where_it_was_when_a_listen_is_lost_at_once_then_later_and_later_drawn_apart_and_one_that_reaches_the_server_ends_the_losses()
     {
         var time = new FakeTimeProvider();

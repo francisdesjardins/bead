@@ -157,14 +157,17 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
         transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired));
-        await Assert.ThrowsAsync<FailureException>(() =>
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
             return first.WaitAsync(Patience, Cancelled);
         });
+
         await Assert.ThrowsAsync<FailureException>(() =>
         {
             return second.WaitAsync(Patience, Cancelled);
         });
+        Assert.False(refused.MayOvertake);
 
         _ = CallOf(router);
         await scripted.Settle();
@@ -308,6 +311,36 @@ public sealed partial class RouterClientTests
         Assert.Equal([Failure.OfProtocol(ProtocolCode.SessionRequired)], notification.Dropped);
         Assert.Empty(withdrawn);
         Assert.Equal(DefaultJwt, router.Credential);
+    }
+
+    [Fact]
+    public async Task Withdraws_nothing_when_SESSION_REQUIRED_that_ends_a_subscription_overtakes_its_result_the_call_failing_with_it_marked()
+    {
+        using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = DefaultJwt });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var notification = new ScriptedNotification(Service);
+        var withdrawn = new List<CredentialScheme>();
+
+        router.CredentialWithdrawn += withdrawn.Add;
+
+        var subscribing = await scripted.Subscribe(notification);
+
+        // over HTTP, a listen's batch brings the failure before the POST's body brings the result
+        transport.Overtaking(FailureOf(1, ProtocolCode.SessionRequired));
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return subscribing.WaitAsync(Patience, Cancelled);
+        });
+
+        transport.Deliver(ResultOf(1));
+        await scripted.Settle();
+
+        Assert.True(refused.IsProtocol(ProtocolCode.SessionRequired));
+        Assert.True(refused.MayOvertake);
+        Assert.Empty(withdrawn);
+        Assert.Equal(DefaultJwt, router.Credential);
+        Assert.Equal([nameof(ProtocolCode.CallUnknown)], CodesOf(scripted.Errors));
     }
 
     [Fact]

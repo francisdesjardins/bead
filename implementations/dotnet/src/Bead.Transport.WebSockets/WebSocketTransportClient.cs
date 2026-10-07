@@ -9,7 +9,7 @@ public sealed record WebSocketTransportClientOptions
     /// <summary>
     /// The largest message it reads, in bytes: one larger closes its connection with 1009. A
     /// router's envelope limit at least; an envelope's limit by default, as the TypeScript side's
-    /// <c>maxPayload</c> is ws's own when not given.
+    /// <c>maxPayload</c> is.
     /// </summary>
     public int? MaximumMessageBytes { get; init; }
 
@@ -153,6 +153,18 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// TypeScript side's tests replace <c>connect</c>.
     /// </summary>
     internal event Action? Opened;
+
+    /// <summary>
+    /// The largest message its connections read: the option given, or a router's largest envelope
+    /// by default, which a transport built alone takes, its router unknown to it.
+    /// </summary>
+    internal int MaximumMessageBytes
+    {
+        get
+        {
+            return _options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes;
+        }
+    }
 
     /// <summary>Where it is in its life: Uninitialized until its first connect.</summary>
     public ReadyState ReadyState
@@ -513,7 +525,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
 
                 _connecting = null;
-                _connection = connection = new WebSocketConnection(socket, (_options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes, _options.CloseTimeout));
+                _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
                 _readyState = ReadyState.Open;
             }
         }

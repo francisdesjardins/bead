@@ -524,7 +524,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         {
             return await call;
         }
-        catch (FailureException refused) when (refused is { Origin: not FailureOrigin.Local, Scope: FailureScope.Protocol, Code: (ushort)ProtocolCode.SessionRequired })
+        // ! a failure that overtook its result in a listen's batch ends a subscription the server had
+        // answered: it withdraws nothing (spec 13.4, 15.9)
+        catch (FailureException refused) when (refused is { Origin: not FailureOrigin.Local, Scope: FailureScope.Protocol, Code: (ushort)ProtocolCode.SessionRequired, MayOvertake: false })
         {
             bool isWithdrawn;
 

@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace Bead;
 
@@ -32,6 +34,18 @@ public sealed record Session<TData>
 
     /// <summary>What the router announces to the connection; none until <c>Set</c> draws one.</summary>
     public SessionToken? SessionToken { get; init; }
+
+    // every member as the compiler writes it, but the token, of which whether one was drawn
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a credential's own string reaches no log, no exception's message and no debugger (spec
+        // 15.1): whether there is one, alone
+        builder.Append(CultureInfo.CurrentCulture, $"ConnectionHandle = {ConnectionHandle}, ConnectionInactivityTimeout = {ConnectionInactivityTimeout}, Data = {Data}, ");
+        builder.Append(CultureInfo.CurrentCulture, $"LastActivity = {LastActivity}, SessionInactivityTimeout = {SessionInactivityTimeout}, SessionToken = ");
+        builder.Append(SessionToken is null ? "none" : "drawn");
+
+        return true;
+    }
 }
 
 /// <summary>How a session manager is built.</summary>

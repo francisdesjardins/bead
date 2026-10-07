@@ -170,8 +170,9 @@ internal sealed class CredentialResolver
         return issuer.AnsweredAt is { } answeredAt && now < answeredAt + _hold;
     }
 
-    // the keys that serve: the application's, for good, and those each answer gave, ten minutes from
-    // it; under the lock
+    // the keys that serve: the application's, for good, in the order given, then those each answer
+    // gave, ten minutes from it, in its order: the order section 13.8's step 4 searches. Under the
+    // lock
     private List<JwtKey> KeysServing(long now)
     {
         return [.. _credentials.Keys, .. _issuers.Values

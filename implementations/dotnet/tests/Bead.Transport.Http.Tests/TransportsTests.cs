@@ -195,6 +195,8 @@ public sealed class TransportsTests
             {
                 "maximumMessageBytes" => options with { MaximumMessageBytes = option.Value.GetInt32() },
                 "heartbeat" => options with { Heartbeat = TimeOf(option.Value) },
+                "hosts" => options with { Hosts = TextsOf(option.Value) },
+                "origins" => options with { Origins = TextsOf(option.Value) },
                 _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
             };
         }
@@ -438,8 +440,8 @@ public sealed class TransportsTests
             // the HTTP server's own, which its server layer holds
             "connectionInactivityTimeout" => (long)HttpServerOptions.ConnectionInactivityTimeoutDefault.TotalMilliseconds,
 
-            // the WebSocket server takes its router's largest envelope when its transport's options give none
-            "maximumMessageBytes" => webSocket.MaximumMessageBytes ?? RouterLimits.Default.MaximumEnvelopeBytes,
+            // the bound the WebSocket server layer takes when built alone and told none
+            "maximumMessageBytes" => new WebSocketTransportServer(webSocket).MaximumMessageBytes,
             "heartbeat" => (long)webSocket.Heartbeat.TotalMilliseconds,
             _ => throw new ArgumentException($"the file states a default no test reads: {bound}", nameof(bound)),
         };

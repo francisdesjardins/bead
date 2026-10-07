@@ -1,15 +1,13 @@
-using System.Net;
-using System.Net.Sockets;
-
 namespace Bead;
 
 /// <summary>
 /// Whether a transport is secure (spec 13.4), judged by what it is given, never by what a name
 /// resolves to: under TLS, its scheme <c>wss</c> or <c>https</c>; or on the loopback, its host — the
-/// one a client names, or the one a server listens on — <c>localhost</c> or a name that ends in
-/// <c>.localhost</c>, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or <c>::1</c>, as
-/// the W3C's Secure Contexts judges an origin potentially trustworthy. Any other leaves the machine
-/// in the clear, which a bearer credential never crosses (RFC 6750 §5.3).
+/// one a client names, or the one a server listens on — as the WHATWG URL Standard's host parser
+/// reads it, <see cref="UrlHost"/>: <c>localhost</c> or a name that ends in <c>.localhost</c>,
+/// compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or <c>::1</c>, as the W3C's Secure
+/// Contexts judges an origin potentially trustworthy. Any other leaves the machine in the clear,
+/// which a bearer credential never crosses (RFC 6750 §5.3).
 /// </summary>
 internal static class TransportSecurity
 {
@@ -20,40 +18,33 @@ internal static class TransportSecurity
     }
 
     /// <summary>
-    /// Whether a host is on the loopback: <c>localhost</c>, a name that ends in <c>.localhost</c>, an
-    /// IPv4 address in 127.0.0.0/8, or <c>::1</c>, bracketed or not; never an IPv4 address mapped
-    /// into IPv6, which no origin names so.
+    /// Whether a host is on the loopback as the URL Standard's host parser reads it, an IPv6 one
+    /// bracketed first when it is bare: <c>localhost</c>, a name that ends in <c>.localhost</c>, an
+    /// IPv4 address in 127.0.0.0/8, <c>127.0.0.1.</c> and <c>127.1</c> among them, or <c>::1</c>;
+    /// never <c>localhost.</c>, which the parser keeps as given, nor a host it fails on, one
+    /// followed by a space among them, nor an IPv4 address mapped into IPv6, which no origin names
+    /// so.
     /// </summary>
     public static bool IsLoopback(string host)
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        var name = AsciiLowerOf(host.StartsWith('[') && host.EndsWith(']') ? host[1..^1] : host);
+        var bracketed = host.Contains(':', StringComparison.Ordinal) && !host.StartsWith('[') ? $"[{host}]" : host;
 
-        if (name == "localhost" || name.EndsWith(".localhost", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (!IPAddress.TryParse(name, out var address))
+        if (UrlHost.Parse(bracketed) is not { } parsed)
         {
             return false;
         }
 
-        return address.AddressFamily == AddressFamily.InterNetwork
-            ? address.GetAddressBytes()[0] == 127
-            : address.Equals(IPAddress.IPv6Loopback);
-    }
-
-    // a name in ASCII lower case: A to Z alone, every other character as it is
-    private static string AsciiLowerOf(string name)
-    {
-        return string.Create(name.Length, name, (lowered, given) =>
+        var parts = parsed.Split('.');
+        var isIPv4 = parts.Length == 4 && parts.All((part) =>
         {
-            for (var index = 0; index < given.Length; index += 1)
-            {
-                lowered[index] = char.IsAsciiLetterUpper(given[index]) ? (char)(given[index] + ('a' - 'A')) : given[index];
-            }
+            return part.Length is >= 1 and <= 3 && part.All(char.IsAsciiDigit);
         });
+
+        return parsed == "localhost"
+            || parsed.EndsWith(".localhost", StringComparison.Ordinal)
+            || parsed == "[::1]"
+            || (isIPv4 && parts[0] == "127");
     }
 }

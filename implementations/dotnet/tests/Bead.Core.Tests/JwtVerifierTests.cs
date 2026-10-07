@@ -220,6 +220,19 @@ public sealed class JwtVerifierTests
     }
 
     [Fact]
+    public async Task Refuses_at_key_a_key_whose_key_ops_holds_verify_with_a_lone_surrogate()
+    {
+        var vector = Vectors.Of("jwtVerdicts", Holding);
+        var key = KeysOf(vector)[0];
+
+        // the escape reaches the JWK through its JSON text alone, as a key set's answer brings it
+        var jwk = ElementOf($$"""{"k":"{{key.Jwk.GetProperty("k").GetString()}}","key_ops":["verify\ud800"],"kty":"oct"}""");
+        var props = PropsOf(vector) with { Keys = [key with { Jwk = jwk }] };
+
+        Assert.Equal(JwtRefusal.Key, (await JwtVerifier.VerifyJwt(vector.GetProperty("token").GetString()!, props)).Reason);
+    }
+
+    [Fact]
     public async Task Throws_for_an_audience_that_is_not_well_formed_Unicode()
     {
         var vector = Vectors.Of("jwtVerdicts", Holding);

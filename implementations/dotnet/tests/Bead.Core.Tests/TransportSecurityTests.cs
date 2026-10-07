@@ -38,6 +38,19 @@ public sealed class TransportSecurityTests
 
     private static readonly string[] OtherHosts = ["0.0.0.0", "::", "192.0.2.1", "bead.example", "::ffff:127.0.0.1"];
 
+    // hosts as the URL Standard's host parser reads them, and whether each is on the loopback
+    private static readonly (string Host, bool IsLoopback)[] ParsedHosts =
+    [
+        ("127.0.0.1.", true),
+        ("127.1", true),
+        ("[::1]", true),
+        ("localhost", true),
+        ("localhost.", false),
+        ("127.0.0.1 ", false),
+        ("localhost ", false),
+        ("[::1] ", false),
+    ];
+
     // helpers
 
     // a URL as a client of the TypeScript side is given it, read as this side's clients are: its
@@ -66,5 +79,20 @@ public sealed class TransportSecurityTests
             Assert.True(TransportSecurity.IsLoopback(host), host);
         });
         Assert.DoesNotContain(OtherHosts, TransportSecurity.IsLoopback);
+    }
+
+    [Fact]
+    public void Judges_a_host_as_the_URL_Standard_s_host_parser_reads_it_127_0_0_1_127_1_the_IPv6_loopback_and_localhost_on_the_loopback_a_host_followed_by_a_space_and_localhost_not_alike_for_a_server_and_its_client()
+    {
+        // a server's by the host it listens on, a client's by the host its connect is given, which
+        // this side's clients take in place of a URL
+        Assert.Equal(ParsedHosts, ParsedHosts.Select((row) =>
+        {
+            return (row.Host, TransportSecurity.IsLoopback(row.Host));
+        }));
+        Assert.Equal(ParsedHosts, ParsedHosts.Select((row) =>
+        {
+            return (row.Host, TransportSecurity.IsSecure((false, row.Host)));
+        }));
     }
 }

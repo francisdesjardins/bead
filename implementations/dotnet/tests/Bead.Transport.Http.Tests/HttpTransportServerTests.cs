@@ -1489,6 +1489,39 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Reads_the_Host_as_it_came_an_IDN_page_s_own_in_punycode_and_one_of_invalid_punycode_taken_or_refused_host_refused_never_a_500()
+    {
+        async Task<(int Status, string? Reason)> StatusOf((string Host, string? Origin) from)
+        {
+            using var wire = await Wire.Open(_port);
+            var origin = from.Origin is { } given ? $"Origin: {given}\r\n" : "";
+
+            await wire.Write($"POST /bead HTTP/1.1\r\nHost: {from.Host}\r\n{origin}Content-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+
+            var head = await wire.ReadHead();
+
+            return (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader));
+        }
+
+        // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
+        // and a Host of punycode that decodes to none, taken where no host is named
+        var page = ("xn--bad-bma.test:8080", "http://xn--bad-bma.test:8080");
+
+        await Start();
+
+        Assert.Equal(
+            [(201, null), (201, null), (201, null), (201, null)],
+            [await StatusOf(page), await StatusOf(("xn--a", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null))]);
+
+        // hosts name an IDN host as the field carries it, in punycode
+        await Start(new HttpTransportServerOptions { Hosts = ["xn--bad-bma.test:8080"] });
+
+        Assert.Equal(
+            [(201, null), (201, null), (403, HttpRefusals.Host), (403, HttpRefusals.Host)],
+            [await StatusOf(page), await StatusOf(("XN--BAD-BMA.test:8080", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null))]);
+    }
+
+    [Fact]
     public async Task Takes_a_proxy_s_last_forwarded_address_when_told_to_and_bounds_the_connections_of_each_address()
     {
         await Start(new HttpTransportServerOptions { IsProxyTrusted = true, MaximumConnectionsPerAddress = 1 });
