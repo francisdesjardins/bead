@@ -4829,6 +4829,80 @@
       ]
     },
     {
+      "name": "a chunk before the last one byte past full is answered CHUNK_INVALID",
+      "clauses": [
+        "12.5",
+        "12.6.1"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "send": "A1 14 40 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a last chunk past full is answered CHUNK_INVALID, though it reaches the total",
+      "clauses": [
+        "12.5",
+        "12.6.1"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 64 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 100
+          }
+        },
+        {
+          "send": "A1 14 00 04  00 00 00 01  00 00 00 00 00 00 00 2C | 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "a chunk that says more follow though it reaches the total is answered CHUNK_INVALID",
       "clauses": [
         "12.6.1"
@@ -5053,6 +5127,60 @@
           "expect": {
             "kind": 18,
             "callId": 3,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        }
+      ]
+    },
+    {
+      "name": "an opening refused for two reasons is answered with the first of 12.3.3's order",
+      "clauses": [
+        "12.3.3"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "maximumTransfers": 1
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "creditEnd": 172
+          }
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 00 00"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 34,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 05  00 01 00 01  00 00 00 00 00 00 00 04 | 22 61 62 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
             "failure": {
               "code": 35,
               "scope": 0,

@@ -109,7 +109,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   forwards against its destinations' audiences; a `JWT` crosses with its same bytes to a destination
   of its audience, an `ELSEWHERE` moves to leg B's transport, and a call the relay cannot so forward
   is refused `DESTINATION_UNREACHABLE` at a step of its own, 14.3's fifth; leg B's header counts its
-  credential, at the sixth.
+  credential, at the sixth; a `JWT` and an `ELSEWHERE` a relay forwards without verifying resolve to
+  no session in a later turn, as section 9.2's do: a call presenting none that came after one may be
+  taken first.
 - The interop service verifies a `JWT` under two issuers' published test keys and a key set's third,
   and an `ELSEWHERE` of its own auth-scheme, `Interop`; `endSession` ends a credential's session by
   its identifier, and `endSessionsOf` an issuer's, `register` takes the audience its destination
@@ -309,9 +311,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Credential.Elsewhere` is a method, `JwtKey` and `JwtAlgorithm` are public, and
   `DropSubscriptions` ends the subscriptions of a connection's own session alone.
 - A transfer's opening carries one byte of its payload at least: one without is refused
-  `CHUNK_INVALID`, and a requester whose header leaves it none fails before it goes,
-  `ENVELOPE_TOO_LARGE`. An opening gets no credit before its credential resolves and its admission
-  settles.
+  `CHUNK_INVALID`, and a requester whose header, its `TRANSFER` block added, leaves it none or
+  passes 1,020 bytes fails before it goes, `PAYLOAD_TOO_LARGE`: a `JWT` of 997 bytes or more, 993
+  beside a destination, goes whole only, and a credential no header of its request holds is a
+  programmer's error, before the call starts. An opening gets no credit before its credential
+  resolves and its admission settles.
 - The interop service's `whoami` answers from its call's session, and `login` opens its
   connection's session whatever its call presents.
 - The demo's tokens are access tokens of RFC 9068's profile, typed `at+jwt` and signed HS256: the
@@ -476,6 +480,12 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   not write gives, where `NotifyRequest` was positional: one shape on both sides, the TypeScript
   union's two arms.
 - The C# interop service's `Offer` takes any `IBeadServer<string>`.
+- Spec 12.5 and 12.6.1: the last chunk of a transfer is full at most, and both sides refuse one past
+  full `CHUNK_INVALID`. A sender whose `chunkBytes` is larger than its receiver's, whose chunks
+  0.1.0 placed, is refused so: both ends set `chunkBytes` alike (12.2). 12.2 says a receiver holds
+  `chunkBytes` to a CHUNK, and an opening and a payload sent whole to `maximumEnvelopeBytes`; 12.3.3
+  states the order of its refusals, `PAYLOAD_TOO_LARGE`, `CAPACITY_EXCEEDED`, `CHUNK_INVALID`. Three
+  conversations play them.
 
 ### Removed
 
@@ -503,6 +513,14 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 - The C# side's server router fails a request of its own that names no connection, or that
   subscribes, by the task it gives, as the TypeScript side's does by its promise, where it threw as
   it was called.
+- Both sides refuse `CHUNK_INVALID` a chunk before the last past full, which spec 12.6.1 refuses,
+  where they placed it.
+- Both sides cut a failure's detail back to the start of the character the cut fell in, and no
+  further: a continuation byte at the cut that no character before it reaches drops nothing (spec
+  7.3). Two vectors.
+- A resolver registered on a router, on both sides, that fails before it answers is answered
+  `PROCEDURE_FAILED`, as spec 9.5 says, where its requester waited out its timeout; the twin tests
+  that pinned the silence are reversed.
 
 ## [0.1.0] - 2026-10-02
 
