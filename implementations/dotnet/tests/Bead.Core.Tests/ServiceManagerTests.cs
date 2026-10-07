@@ -434,6 +434,35 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Tells_each_step_with_its_payloads_as_they_are_the_call_s_own_and_no_copy()
+    {
+        var manager = new ServiceManager(new RecordingRouter());
+        var seen = RecordDebug(manager);
+        var asked = new Text("hello");
+        var answer = new Text("hi!");
+        Text? received = null;
+        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        {
+            received = request.Payload;
+
+            return response.Answer(answer);
+        });
+
+        await manager.GetRequest(Echo, Asked)(asked)().WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        // the call made's value, the request its resolver received and the answer it gave: the
+        // same objects, which a listener that changed one would change for its call too
+        Assert.Equal(4, seen.Count);
+        Assert.Same(asked, seen[0].Event.Tx);
+        Assert.Same(asked, seen[1].Event.Tx);
+        Assert.NotNull(received);
+        Assert.Same(received, seen[2].Event.Rx);
+        Assert.Same(received, seen[3].Event.Rx);
+        Assert.Same(answer, seen[3].Event.Tx);
+    }
+
+    [Fact]
     public async Task Tells_each_step_of_a_request_and_once_answered_its_duration()
     {
         var time = new FakeTimeProvider(Started);
@@ -797,17 +826,17 @@ public sealed class ServiceManagerTests
         });
         var asking = hearing.GetRequest(Echo, Asked);
 
-        // the readings `run` takes of the clock, wall and monotonic together
-        async Task<int> ReadingsOf(Func<Task> run)
+        // the readings `run` takes of the wall clock and of the monotonic one, each apart
+        async Task<(int Wall, int Monotonic)> ReadingsOf(Func<Task> run)
         {
             var before = clock.Readings;
 
             await run().WaitAsync(Patience, Cancelled);
 
-            return clock.Readings - before;
+            return (clock.Readings.Wall - before.Wall, clock.Readings.Monotonic - before.Monotonic);
         }
 
-        async Task<int[]> ReadEach()
+        async Task<(int Wall, int Monotonic)[]> ReadEach()
         {
             return
             [
@@ -833,7 +862,7 @@ public sealed class ServiceManagerTests
         await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
         var unheard = await ReadEach();
 
-        Assert.Equal([0, 0, 0, 0], unheard);
+        Assert.Equal([(0, 0), (0, 0), (0, 0), (0, 0)], unheard);
 
         foreach (var manager in new[] { hearing, notifying })
         {
@@ -843,10 +872,10 @@ public sealed class ServiceManagerTests
         }
 
         // a call's start on both clocks, and its end on the monotonic one; a notification's on the
-        // wall clock alone
+        // wall clock alone (spec/debugging.md 3.2)
         var listened = await ReadEach();
 
-        Assert.Equal([3, 3, 1, 1], listened);
+        Assert.Equal([(1, 2), (1, 2), (1, 0), (1, 0)], listened);
     }
 
     [Fact]
@@ -1380,6 +1409,135 @@ public sealed class ServiceManagerTests
             {
                 return told.Event;
             }));
+    }
+
+    [Fact]
+    public async Task Tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not_go_with_why_beside_it_nothing_more_for_one_that_fails_once_it_answered_nor_for_an_admission_that_fails()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+        var thrown = new InvalidOperationException("thrown");
+        var rejected = new InvalidOperationException("rejected");
+        var after = new InvalidOperationException("after");
+        var throwing = manager.GetRequestResolver(Echo, Answered())((_, _) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+
+            throw thrown;
+        });
+        var rejecting = manager.GetRequestResolver(Echo with { ProcedureId = 2 }, Answered())((_, _) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(20));
+
+            return Task.FromException(rejected);
+        });
+        var refusing = manager.GetRequestResolver(Echo with { ProcedureId = 3 }, Answered(new BeforeRequest((_) =>
+        {
+            throw thrown;
+        })))(Unanswering);
+        var answering = manager.GetRequestResolver(Echo with { ProcedureId = 4 }, Answered())(async (_, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(5));
+            await response.Answer(new Text("hi"));
+            time.Advance(TimeSpan.FromMilliseconds(5));
+
+            throw after;
+        });
+        var request = PropsOf(Encode(new Text("hi")));
+
+        foreach (var resolver in new[] { throwing, rejecting, refusing, answering })
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return resolver.Handle(request).WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        // each pair shares its start; the step of no answer carries the request and why, timed
+        Assert.Equal<(DebugDirection, ushort, Exception?, object?, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, 1, null, new Text("hi"), null, Started, null),
+                (DebugDirection.Tx, 1, thrown, new Text("hi"), null, Started, TimeSpan.FromMilliseconds(10)),
+                (DebugDirection.Rx, 2, null, new Text("hi"), null, Started.AddMilliseconds(10), null),
+                (DebugDirection.Tx, 2, rejected, new Text("hi"), null, Started.AddMilliseconds(10), TimeSpan.FromMilliseconds(20)),
+                (DebugDirection.Rx, 4, null, new Text("hi"), null, Started.AddMilliseconds(30), null),
+                (DebugDirection.Tx, 4, null, new Text("hi"), new Text("hi"), Started.AddMilliseconds(30), TimeSpan.FromMilliseconds(5)),
+            ],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.ProcedureId, told.Error, told.Event.Rx, told.Event.Tx, told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_beside_it()
+    {
+        var time = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var tooLarge = FailureException.OfProtocol(ProtocolCode.PayloadTooLarge, RouterSide.Server);
+        Exception? heard = null;
+
+        // the payload answer goes nowhere, 5 ms after it was told; a failure goes out
+        router.RespondError = (answer) =>
+        {
+            if (answer.Failure is not null)
+            {
+                return null;
+            }
+
+            time.Advance(TimeSpan.FromMilliseconds(5));
+
+            return tooLarge;
+        };
+
+        var resolver = manager.GetRequestResolver(Echo, Answered())(async (request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+            heard = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return response.Answer(request.Payload);
+            });
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Same(tooLarge, heard);
+        Assert.Equal<(DebugDirection, Exception?, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, null, null, Started, null),
+                (DebugDirection.Tx, null, new Text("hi"), Started, TimeSpan.FromMilliseconds(10)),
+                (DebugDirection.Tx, tooLarge, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
+            ],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Error, told.Event.Tx, told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_nothing_more_than_its_request_for_a_callback_that_fails_on_its_signal_its_call_cancelled_or_gone_with_its_connection()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+        using var source = new CancellationTokenSource();
+
+        // its requester cancels, or its connection goes: either way its router aborts its signal
+        var resolver = manager.GetRequestResolver(Echo, Answered())(async (request, _) =>
+        {
+            await source.CancelAsync();
+            request.Signal.ThrowIfCancellationRequested();
+        });
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        {
+            return resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Signal = source.Token }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal([(DebugDirection.Rx, DebugType.Request)], StepsOf(seen));
     }
 
     [Fact]

@@ -46,8 +46,9 @@ internal sealed class SteppingClock : TimeProvider
     // an advance under way, which a second one would move back
     private bool _isAdvancing;
 
-    // the readings taken of it, wall and monotonic, since it was made
-    private int _readingCount;
+    // the readings taken of it since it was made, of the wall clock and of the monotonic one
+    private int _wallReadings;
+    private int _monotonicReadings;
 
     /// <summary>A clock whose wall reading starts at <paramref name="wallClock"/>.</summary>
     public SteppingClock(DateTimeOffset wallClock)
@@ -71,21 +72,22 @@ internal sealed class SteppingClock : TimeProvider
     }
 
     /// <summary>
-    /// How many readings the side under test took of it, wall and monotonic together, since it was
-    /// made: what a reading of debugging's costs is counted by (spec/debugging.md 3.4).
+    /// How many readings the side under test took of it since it was made, of the wall clock and of
+    /// the monotonic one, each apart: what a reading of debugging's costs is counted by
+    /// (spec/debugging.md 3.2 to 3.4).
     /// </summary>
-    public int Readings
+    public (int Wall, int Monotonic) Readings
     {
         get
         {
-            return Volatile.Read(ref _readingCount);
+            return (Volatile.Read(ref _wallReadings), Volatile.Read(ref _monotonicReadings));
         }
     }
 
     /// <inheritdoc/>
     public override DateTimeOffset GetUtcNow()
     {
-        Interlocked.Increment(ref _readingCount);
+        Interlocked.Increment(ref _wallReadings);
 
         lock (_gate)
         {
@@ -96,7 +98,7 @@ internal sealed class SteppingClock : TimeProvider
     /// <inheritdoc/>
     public override long GetTimestamp()
     {
-        Interlocked.Increment(ref _readingCount);
+        Interlocked.Increment(ref _monotonicReadings);
 
         lock (_gate)
         {
