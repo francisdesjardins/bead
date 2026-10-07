@@ -1084,8 +1084,12 @@ export const createRouterCore = <Handle extends string>(
     resolver: IRequestHandler<Handle>,
     dispatched: IDispatched<Handle> & { payload: Uint8Array }
   ): void => {
-    const { connectionHandle, controller, header, payload, session, transportCredential } =
-      dispatched;
+    const { connectionHandle, controller, header, payload, session } = dispatched;
+    // what its transport carried stands for ELSEWHERE alone, and stays here for any other
+    const transportCredential =
+      header.credential?.scheme === CredentialScheme.ELSEWHERE
+        ? dispatched.transportCredential
+        : undefined;
     const fail = (reason: unknown): void => {
       const isAnswering = answeringCalls.isAnswering({ connectionHandle, header });
 

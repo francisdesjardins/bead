@@ -480,8 +480,9 @@ export interface IRequestResolverProps<Handle extends string = ConnectionHandle>
    */
   signal: AbortSignal;
   /**
-   * What its transport carried beside it, which a relay moves to leg B for an `ELSEWHERE`; none when
-   * nothing was carried. Never handed to a resolver's callback.
+   * What its transport carried beside it, for a request presenting `ELSEWHERE`, which a relay moves
+   * to leg B's transport as it came; none for any other, whose transport's credential stays where it
+   * came (spec 14.2), and none when nothing was carried. Never handed to a resolver's callback.
    */
   transportCredential?: string | undefined;
 }
