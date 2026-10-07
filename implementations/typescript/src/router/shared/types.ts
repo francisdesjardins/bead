@@ -1552,7 +1552,9 @@ export type RequestResolverCallback<
 /** Event name → the arguments its listeners receive. */
 export type ServiceManagerEventMap = {
   /**
-   * `error` is what the call failed with, or `null`. What a listener throws is reported through the
+   * `error` is what the call failed with, or `null`; on a `tx` step, why its `tx` did not go out — a
+   * notification that could not go, an answer its router refused, told again at its start, or none,
+   * from a resolver that failed before it answered. What a listener throws is reported through the
    * router's `error` — with the call's connection, on a server — and changes nothing of the call.
    */
   debug: [error: unknown, info: IDebugEvent];

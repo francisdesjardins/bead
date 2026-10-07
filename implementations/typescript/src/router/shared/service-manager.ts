@@ -688,24 +688,34 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
         isAnswered = true;
 
-        if (started !== undefined) {
-          trace(procedure, {
-            callId: header.callId,
-            connectionHandle,
-            direction: 'tx',
-            isAnswered: true,
-            rx: requestPayload,
-            started,
-            tx: failure ?? payload,
-            type,
-          });
+        const step =
+          started === undefined
+            ? undefined
+            : ({
+                callId: header.callId,
+                connectionHandle,
+                direction: 'tx',
+                isAnswered: true,
+                rx: requestPayload,
+                started,
+                tx: failure ?? payload,
+                type,
+              } as const);
+
+        if (step !== undefined) {
+          trace(procedure, step);
         }
 
         try {
           await router.respond(routerAnswer, target);
         } catch (reason) {
-          // an answer the router could not send — too large, say — is answered as failed, so its
-          // requester does not wait out its timeout; a connection gone takes neither
+          // an answer the router could not send — too large, say — is told again at its start with
+          // why, and answered as failed, so its requester does not wait out its timeout; a call no
+          // longer answered takes neither
+          if (step !== undefined && !signal.aborted) {
+            trace(procedure, { ...step, error: reason });
+          }
+
           await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
 
           throw reason;
@@ -726,9 +736,24 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         await callback(request, response);
       } catch (reason) {
         // a resolver that failed before it answered still answers, so its requester does not wait
-        // out its timeout; why it failed stays here, for the router to report
+        // out its timeout, told with why beside it, and why goes on for the router to report; a
+        // call no longer answered takes neither
         if (!isAnswered) {
           isAnswered = true;
+
+          if (started !== undefined && !signal.aborted) {
+            trace(procedure, {
+              callId: header.callId,
+              connectionHandle,
+              direction: 'tx',
+              error: reason,
+              isAnswered: true,
+              rx: requestPayload,
+              started,
+              type,
+            });
+          }
+
           await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
         }
 

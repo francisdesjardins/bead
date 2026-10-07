@@ -384,10 +384,10 @@ export const parseDebugFilter = (spec: string): IDebugFilter => {
  * `listener`, hearing only the `debug` events of the calls its filter keeps: their direction, their
  * type, their procedure's name; an envelope's kind says nothing of a call, and is not asked. A
  * filter given as a function is asked at each event, and compiled again only when what it gives
- * changed. The filter given at first must hold, or this throws a {@link ProgrammerError}; one that
- * stops holding later — or a function that throws — leaves the last that held in place, since a
- * trace never fails a call. A filter given whole, not as a string, is refused in the grammar's
- * names.
+ * changed; a function that gives none keeps every event, as an empty filter does. The filter given
+ * at first must hold, or this throws a {@link ProgrammerError}; one that stops holding later — or a
+ * function that throws — leaves the last that held in place, reported to no one, since a trace
+ * never fails a call. A filter given whole, not as a string, is refused in the grammar's names.
  *
  * @example
  * import { createServiceManager, filterDebug } from '@francisdesjardins/bead/service-manager';
