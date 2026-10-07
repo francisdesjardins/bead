@@ -27,8 +27,8 @@ and the connection registry for a server. The transport supplies what only it kn
 close and send on the wire. WebSocket is the first, HTTP the second — see [HTTP](#http); another
 transport supplies its own.
 
-The client runs on the global `WebSocket` — every browser, and Node 24, the package's floor — or on
-any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite runs on both. The
+The client runs on the global `WebSocket` — every browser, and Node 24.9, the package's floor — or
+on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite runs on both. The
 server has no global to fall back on, so it always takes `ws`'s `WebSocketServer`, and its suite
 talks to it through the client, on both.
 
@@ -43,9 +43,13 @@ a connection is alive is its transport's to know.
 
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
 its `maxPayload` says otherwise, and closes a larger one with 1009; over the global `WebSocket`, its
-platform's bound applies. A WebSocket server takes an upgrade from the hosts and origins its HTTP
-server would take, `hosts` and `origins`, and refuses any other 403 before its handshake; it speaks
-version 13 alone, and answers 426 to any other — see [HTTP](#http).
+platform's bound applies. A WebSocket server judges a request at its address in the order of spec
+15.2: 400 as HTTP answers it to a `Host` missing, repeated or no host; 403 to a host not among
+`hosts`, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a request that asks no
+WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but 13, the one it
+speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among `origins`. Each
+refusal but HTTP's own is marked, its body empty, and closes its connection; an `Upgrade` listing
+`websocket` among other protocols is taken — see [HTTP](#http).
 
 ```ts
 import { WebSocketServer } from 'ws';
@@ -715,43 +719,48 @@ from one alive, as a WebSocket's heartbeat does: a connection with no exchange u
 minutes closes, and, by `createHTTPServer`'s default, one without a session silent for 30 seconds,
 a listen held being no silence: the transport emits `listen` as it holds one and as it ends.
 
-| Status | `bead-refusal`                       | Says                                                                                                                                                                                                             |
-| ------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 200    |                                      | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                |
-| 201    |                                      | a connection drawn, its token in `bead-connection-token`                                                                                                                                                         |
-| 204    |                                      | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                            |
-| 400    | `malformed`                          | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent |
-| 403    | `host-refused`, `origin-refused`     | a host not among `hosts`; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                                  |
-| 404    | `path-unknown`, `connection-unknown` | not the path; the connection is gone                                                                                                                                                                             |
-| 405    | `method-refused`                     | neither `GET`, `POST` nor `DELETE`, which `Allow` names                                                                                                                                                          |
-| 409    | `call-waiting`, `listen-undeclared`  | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                  |
-| 413    | `too-large`                          | a body past the envelope's limit                                                                                                                                                                                 |
-| 415    | `type-refused`                       | not `application/prs.bead`, or encoded                                                                                                                                                                           |
-| 429    | `busy`                               | too many requests waiting on one connection, or exchanges under way                                                                                                                                              |
-| 503    | `busy`                               | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                        |
+| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                              |
+| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                 |
+| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                          |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                             |
+| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed |
+| 403    | `host-refused`, `origin-refused`      | a host not among `hosts`, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                    |
+| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                              |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                  |
+| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                   |
+| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                  |
+| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                            |
+| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                               |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                               |
+| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                         |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
 `maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
-read at once across them all. `hosts` names the hosts a request may name, every host when not given,
+read at once across them all. An HTTP/1.1 request without a `Host`, and one with two `Host` fields
+or a `Host` that is no host, `uri-host` and an optional port, is answered 400 as HTTP answers it,
+unmarked, before anything else of it is read (RFC 9112 §3.2): an empty `Host` is one, and so is a
+name of invalid punycode. `hosts` names the hosts a request may name, every host when not given,
 compared in any ASCII case (RFC 9110 §4.2.3) with its `Host` as the field carries it: an IDN host is
 named in the punycode a browser sends. `origins` names the origins a request may come from besides
-the server's own, none when not given, compared exactly; a WebSocket server takes both alike, on an
-upgrade, before its handshake. Any client that sends an `Origin` is judged by it, a browser's page
-or not: it gets in by sending none, by sending the server's own, or by being named in `origins`. The
-server's own is `http://` or `https://` followed by the request's `Host`, compared in any ASCII
-case, the field read as the serialized origin it carries (RFC 6454 §6.2), never parsed as a URL: a
-browser writes both from one URL alike, and a client that writes a default port, a path or another
-form on one side alone is refused. Any other `Origin` is none of its own, whatever host it names:
-`null`, an extension's, a `blob:` URL's, any scheme but `http` and `https`. So `hosts` is what
-refuses a page that rebinds its name to the server's address, never the origin's test. Over HTTP,
-`origins` serves a proxy that rewrites the host: the server answers no CORS, so a page of another
-origin is not served yet, and a page presents `ELSEWHERE` to its own origin alone: `Authorization`
-is no field a browser sends across origins without a preflight. Over WebSocket no CORS stands in the
-way, so a listed origin's page is served outright, a page of another port of the same machine — a
-development server — among them. Naming `null` takes every request that sends it, from any site: a
-sandboxed frame's, a `file:` or a `data:` page's, and one whose origin a browser withholds, after a
-cross-origin redirect or under a referrer policy. `isProxyTrusted` takes the address a proxy on the
-same machine forwards in `x-forwarded-for` for the client's, which the bound per address counts.
+the server's own, none when not given, compared exactly; a WebSocket server takes both alike,
+`hosts` on any request at its address, `origins` on an upgrade, after its version and its form. Any
+client that sends an `Origin` is judged by it, a browser's page or not: it gets in by sending none,
+by sending the server's own, or by being named in `origins`. The server's own is `http://` or
+`https://` followed by the request's `Host`, compared in any ASCII case, the field read as the
+serialized origin it carries (RFC 6454 §6.2), never parsed as a URL: a browser writes both from one
+URL alike, and a client that writes a default port, a path or another form on one side alone is
+refused. Any other `Origin` is none of its own, whatever host it names: `null`, an extension's, a
+`blob:` URL's, any scheme but `http` and `https`. So `hosts` is what refuses a page that rebinds its
+name to the server's address, never the origin's test. Over HTTP, `origins` serves a proxy that
+rewrites the host: the server answers no CORS, so a page of another origin is not served yet, and a
+page presents `ELSEWHERE` to its own origin alone: `Authorization` is no field a browser sends
+across origins without a preflight. Over WebSocket no CORS stands in the way, so a listed origin's
+page is served outright, a page of another port of the same machine — a development server — among
+them. Naming `null` takes every request that sends it, from any site: a sandboxed frame's, a `file:`
+or a `data:` page's, and one whose origin a browser withholds, after a cross-origin redirect or
+under a referrer policy. `isProxyTrusted` takes the address a proxy on the same machine forwards in
+`x-forwarded-for` for the client's, which the bound per address counts.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,

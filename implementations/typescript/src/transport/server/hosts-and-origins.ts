@@ -1,5 +1,9 @@
 // ── Hosts and origins ─────────────────────────────────────────────────────────
 
+// dependencies
+
+import { isIPv6 } from 'node:net';
+
 // constants
 
 /** The refusal of a request that names a host the server does not take (spec 15.12). */
@@ -8,7 +12,32 @@ export const HOST_REFUSAL = 'host-refused';
 /** The refusal of a request whose `Origin` is neither the server's own nor among those it takes. */
 export const ORIGIN_REFUSAL = 'origin-refused';
 
+// a `reg-name`, an IPv4 address among them, then an optional port (RFC 3986 §3.2.2, §3.2.3)
+const REG_NAME_HOST = /^(?:[A-Za-z\d\-._~!$&'()*+,;=]|%[\dA-Fa-f]{2})*(?::\d*)?$/u;
+
+// an IP literal, then an optional port: what is inside the brackets is read apart
+const IP_LITERAL_HOST = /^\[(?<literal>[^\]]*)\](?::\d*)?$/u;
+
+// `IPvFuture` (RFC 3986 §3.2.2)
+const IP_FUTURE = /^[Vv][\dA-Fa-f]+\.[A-Za-z\d\-._~!$&'()*+,;=:]+$/u;
+
 // helpers
+
+// a field's value without the spaces and tabs around it (RFC 9110 §5.5)
+const trimmed = (value: string): string => {
+  return value.replaceAll(/^[\t ]+|[\t ]+$/gu, '');
+};
+
+// whether `value` is `uri-host [ ":" port ]` (RFC 9110 §7.2): an IPv6 address bare, with no zone
+const isHost = (value: string): boolean => {
+  const literal = IP_LITERAL_HOST.exec(value)?.groups?.['literal'];
+
+  if (literal === undefined) {
+    return REG_NAME_HOST.test(value);
+  }
+
+  return IP_FUTURE.test(literal) || (!literal.includes('%') && isIPv6(literal));
+};
 
 // a host or an origin in ASCII lower case: A to Z alone, every other character as it is
 const asciiLowerCase = (text: string): string => {
@@ -18,6 +47,27 @@ const asciiLowerCase = (text: string): string => {
 };
 
 // definition
+
+/**
+ * Whether a request's `Host` is one HTTP takes (RFC 9112 §3.2), from its field lines as they came:
+ * one line at most, none only where `isRequired` is false, as in an HTTP/1.0 request; its value,
+ * without the spaces and tabs around it, `uri-host` and an optional port (RFC 9110 §7.2, RFC 3986
+ * §3.2.2–3.2.3). An empty value is one, and so is a name of invalid punycode, which
+ * {@link isTakenHost} judges. A request this refuses is answered 400 before anything else of it is
+ * read.
+ */
+export const isWellFormedHost = (
+  lines: readonly string[],
+  { isRequired }: { isRequired: boolean }
+): boolean => {
+  const [line, ...others] = lines;
+
+  if (line === undefined) {
+    return !isRequired;
+  }
+
+  return others.length === 0 && isHost(trimmed(line));
+};
 
 /**
  * Whether a request that names `host` is taken: every host when `hosts` is not given; otherwise one

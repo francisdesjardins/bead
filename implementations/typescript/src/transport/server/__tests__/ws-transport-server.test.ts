@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
+import { Server } from 'node:http';
 import { connect as connectTcp } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
@@ -30,6 +31,7 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IIncomingMessageLike,
   type IServerSocketLike,
+  type IWSTransportServerOptions,
   type WSTransportServer,
 } from '../ws-transport-server';
 import { createFakeSocket, createFakeWebSocketServer } from './fake-websocket-server';
@@ -121,6 +123,111 @@ const answerOf = async (port: number, head: string) => {
   socket.destroy();
 
   return answer;
+};
+
+// where a scripted server's HTTP server listens: for real, on a port the system picked
+const SCRIPTED = { address: host, findOpenPort: true };
+
+// the key of RFC 6455 §1.3's handshake
+const KEY = 'dGhlIHNhbXBsZSBub25jZQ==';
+
+// the date the test clock gives every refusal
+const DATED = Date.parse('2026-01-01T00:00:00Z');
+
+// an opening handshake's fields, from a host the servers below take
+const HANDSHAKE_FIELDS = [
+  'Host: bead.test',
+  'Upgrade: websocket',
+  'Connection: Upgrade',
+  `Sec-WebSocket-Key: ${KEY}`,
+  'Sec-WebSocket-Version: 13',
+];
+
+// what removes every field that asks an upgrade
+const NO_UPGRADE = ['Upgrade', 'Connection', 'Sec-WebSocket-Key', 'Sec-WebSocket-Version'];
+
+/**
+ * A request of `line` whose fields are an opening handshake's, changed by `changes`: a name alone
+ * removes its field, `Name: value` takes its place, and a name given twice gives two lines.
+ */
+const requestOf = (line: string, changes: readonly string[] = []) => {
+  const nameOf = (field: string) => {
+    return (field.split(':')[0] ?? '').trim().toLowerCase();
+  };
+  const changed = new Set(changes.map(nameOf));
+  const fields = [
+    ...HANDSHAKE_FIELDS.filter((field) => {
+      return !changed.has(nameOf(field));
+    }),
+    ...changes.filter((change) => {
+      return change.includes(':');
+    }),
+  ];
+
+  return `${line}\r\n${fields
+    .map((field) => {
+      return `${field}\r\n`;
+    })
+    .join('')}\r\n`;
+};
+
+/** A refusal of the transport's own, whole, the test clock's date in it, its socket closed. */
+const refusedWith = (
+  status: string,
+  { fields = [], refusal }: { fields?: readonly string[]; refusal: string }
+) => {
+  const connection = fields.some((field) => {
+    return field.startsWith('upgrade:');
+  })
+    ? 'upgrade, close'
+    : 'close';
+
+  return {
+    isClosed: true,
+    text:
+      `HTTP/1.1 ${status}\r\ndate: Thu, 01 Jan 2026 00:00:00 GMT\r\nbead-refusal: ${refusal}\r\n` +
+      'cache-control: no-store\r\nx-content-type-options: nosniff\r\n' +
+      fields
+        .map((field) => {
+          return `${field}\r\n`;
+        })
+        .join('') +
+      `content-length: 0\r\nconnection: ${connection}\r\n\r\n`,
+  };
+};
+
+/** A server of `options` on the test clock, on a port the system picked, stopped as it goes. */
+const startDated = async (options: Omit<Partial<IWSTransportServerOptions>, 'WebSocketServer'>) => {
+  const server = createWSTransportServer({
+    clock: createTestClock(DATED),
+    ...options,
+    WebSocketServer,
+  });
+  const { port } = await server.start({ address: host, findOpenPort: true });
+
+  return {
+    port,
+    server,
+    [Symbol.asyncDispose]: async () => {
+      await server.stop();
+      await allClosed();
+    },
+  };
+};
+
+/** Whether each of `requests` is answered `answer`, on a socket of its own. */
+const expectAnswered = async (
+  port: number,
+  { answer, requests }: { answer: { isClosed: boolean; text: string }; requests: string[] }
+) => {
+  for (const request of requests) {
+    expect(await answerOf(port, request), request).toEqual(answer);
+  }
+};
+
+/** The status line of what the server answers `request`: a 101's when it upgrades. */
+const statusLineOf = async (port: number, request: string) => {
+  return (await answerOf(port, request)).text.split('\r\n')[0];
 };
 
 test('@francisdesjardins/bead/ws-transport-server re-exports the WebSocket binary type', () => {
@@ -486,35 +593,45 @@ test.describe('WSTransportServer, on the wire', () => {
 });
 
 test.describe('WSTransportServer, its hosts and origins', () => {
-  test('refuses an upgrade 403 before its handshake, marked host-refused for a host it does not take and origin-refused for an origin neither its own nor among those it takes, its body empty, its date written', async () => {
-    const clock = createTestClock(Date.parse('2026-01-01T00:00:00Z'));
-    const server = createWSTransportServer({ clock, hosts: ['bead.test'], WebSocketServer });
-    const { port } = await server.start({ address: host, findOpenPort: true });
-    const refusalOf = (reason: string) => {
-      return {
-        isClosed: true,
-        text:
-          'HTTP/1.1 403 Forbidden\r\ndate: Thu, 01 Jan 2026 00:00:00 GMT\r\n' +
-          `bead-refusal: ${reason}\r\ncache-control: no-store\r\n` +
-          'x-content-type-options: nosniff\r\ncontent-length: 0\r\nconnection: close\r\n\r\n',
-      };
-    };
+  test('refuses an upgrade 403 before its handshake, marked host-refused for a host it does not take and origin-refused for an origin neither its own nor among those it takes, its body empty, its date written, whatever its method, its upgrade or its form', async () => {
+    await using started = await startDated({
+      hosts: ['bead.test'],
+      origins: ['https://bead.example'],
+    });
+    const { port, server } = started;
 
-    try {
-      expect(await answerOf(port, handshakeOf('elsewhere.test'))).toEqual(
-        refusalOf('host-refused')
-      );
-      expect(
-        await answerOf(port, handshakeOf('elsewhere.test', { origin: 'http://elsewhere.test' }))
-      ).toEqual(refusalOf('host-refused'));
-      expect(
-        await answerOf(port, handshakeOf('bead.test', { origin: 'https://elsewhere.test' }))
-      ).toEqual(refusalOf('origin-refused'));
-      expect(server.clients).toHaveLength(0);
-    } finally {
-      await server.stop();
-      await allClosed();
-    }
+    // a host not taken, whatever else the request holds: a page that rebinds its name reaches
+    // the address with any method and no upgrade
+    await expectAnswered(port, {
+      answer: refusedWith('403 Forbidden', { refusal: 'host-refused' }),
+      requests: [
+        requestOf('GET / HTTP/1.1', ['Host: elsewhere.test']),
+        requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', 'Origin: http://elsewhere.test']),
+        requestOf('POST / HTTP/1.1', ['Host: elsewhere.test']),
+        requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', ...NO_UPGRADE]),
+        requestOf('POST / HTTP/1.1', ['Host: elsewhere.test', ...NO_UPGRADE, 'Content-Length: 0']),
+        requestOf('PUT /bead HTTP/1.1', [
+          'Host: elsewhere.test',
+          ...NO_UPGRADE,
+          'Content-Length: 0',
+        ]),
+        requestOf('HEAD / HTTP/1.1', ['Host: elsewhere.test']),
+        requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', 'Sec-WebSocket-Key: dGVzdA==']),
+        requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', 'Sec-WebSocket-Version: 8']),
+        requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', 'Sec-WebSocket-Version: 14']),
+        requestOf('GET / HTTP/1.1', ['Host: ']),
+      ],
+    });
+
+    // a host taken, from an origin neither its own nor among those it takes
+    await expectAnswered(port, {
+      answer: refusedWith('403 Forbidden', { refusal: 'origin-refused' }),
+      requests: [
+        requestOf('GET / HTTP/1.1', ['Origin: https://elsewhere.test']),
+        requestOf('GET / HTTP/1.1', ['Origin: http://elsewhere.test:80']),
+      ],
+    });
+    expect(server.clients).toHaveLength(0);
   });
 
   test('takes an upgrade with no Origin, from its own origin, and from one among those it takes', async () => {
@@ -583,55 +700,180 @@ test.describe('WSTransportServer, its hosts and origins', () => {
       )
     ).toEqual([taken, taken, refused, refused]);
   });
+});
 
-  test('answers 426 to an upgrade of a version but 13, before its host and its origin are judged, naming version 13', async () => {
-    const clock = createTestClock(Date.parse('2026-01-01T00:00:00Z'));
-    const server = createWSTransportServer({ clock, hosts: ['bead.test'], WebSocketServer });
-    const { port } = await server.start({ address: host, findOpenPort: true });
-    const upgradeRequired = {
-      isClosed: true,
-      text:
-        'HTTP/1.1 426 Upgrade Required\r\ndate: Thu, 01 Jan 2026 00:00:00 GMT\r\n' +
-        'sec-websocket-version: 13\r\ncontent-length: 0\r\nconnection: close\r\n\r\n',
+test.describe('WSTransportServer, its handshake', () => {
+  test('refuses a method but GET or HEAD 405, after its host and before its upgrade is read, its Allow naming GET and HEAD, marked method-refused', async () => {
+    await using started = await startDated({ hosts: ['bead.test', 'bead.test:80'] });
+    const { port, server } = started;
+
+    // a handshake under another method, one of version 8 among them, or none at all; a CONNECT,
+    // which Node raises apart from a request
+    await expectAnswered(port, {
+      answer: refusedWith('405 Method Not Allowed', {
+        fields: ['allow: GET, HEAD'],
+        refusal: 'method-refused',
+      }),
+      requests: [
+        requestOf('POST / HTTP/1.1'),
+        requestOf('PUT / HTTP/1.1'),
+        requestOf('OPTIONS / HTTP/1.1'),
+        requestOf('POST / HTTP/1.1', ['Sec-WebSocket-Version: 8']),
+        requestOf('DELETE / HTTP/1.1', [...NO_UPGRADE]),
+        requestOf('POST / HTTP/1.1', [...NO_UPGRADE, 'Content-Length: 0']),
+        requestOf('CONNECT bead.test:80 HTTP/1.1', ['Host: bead.test:80']),
+      ],
+    });
+    expect(server.clients).toHaveLength(0);
+  });
+
+  test('answers a request that asks no WebSocket 426, marked upgrade-required, its Upgrade naming websocket, its Connection upgrade and close', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+
+    // no upgrade at all; an Upgrade missing or naming no websocket; a Connection missing or
+    // naming no upgrade; a HEAD, which cannot switch, its body none and its length 0; an
+    // HTTP/1.0 request, whose Upgrade is ignored
+    await expectAnswered(port, {
+      answer: refusedWith('426 Upgrade Required', {
+        fields: ['upgrade: websocket'],
+        refusal: 'upgrade-required',
+      }),
+      requests: [
+        requestOf('GET / HTTP/1.1', [...NO_UPGRADE]),
+        requestOf('GET / HTTP/1.1', ['Upgrade: h2c']),
+        requestOf('GET / HTTP/1.1', ['Upgrade']),
+        requestOf('GET / HTTP/1.1', ['Upgrade: websocket/13']),
+        requestOf('GET / HTTP/1.1', ['Connection']),
+        requestOf('GET / HTTP/1.1', ['Connection: keep-alive']),
+        requestOf('GET / HTTP/1.1', ['Connection: upgraded']),
+        requestOf('GET / HTTP/1.1', ['Upgrade: h2c', 'Sec-WebSocket-Version: 8']),
+        requestOf('GET / HTTP/1.1', ['Upgrade', 'Sec-WebSocket-Version: 8']),
+        requestOf('HEAD / HTTP/1.1'),
+        requestOf('HEAD / HTTP/1.1', [...NO_UPGRADE]),
+        requestOf('GET / HTTP/1.0'),
+        requestOf('GET / HTTP/1.0', ['Upgrade: websocket, h2c']),
+        requestOf('GET / HTTP/1.0', [...NO_UPGRADE]),
+      ],
+    });
+    expect(server.clients).toHaveLength(0);
+  });
+
+  test('refuses a malformed upgrade 400, marked malformed, before its origin is judged, its body empty', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+
+    // a key missing, not base64, of 4 or 17 bytes, twice, empty, or with a space inside; two
+    // versions; subprotocols that are no list of tokens, or none; content, by its length or in
+    // chunks; a bad key from an origin not taken
+    await expectAnswered(port, {
+      answer: refusedWith('400 Bad Request', { refusal: 'malformed' }),
+      requests: [
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: not a key at all!!!!!==']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: dGVzdA==']),
+        requestOf('GET / HTTP/1.1', [`Sec-WebSocket-Key: ${randomBytes(17).toString('base64')}`]),
+        requestOf('GET / HTTP/1.1', [`Sec-WebSocket-Key: ${KEY}`, `Sec-WebSocket-Key: ${KEY}`]),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: ']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: dGhlIHNhbXBs ZSBub25jZQ==']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 13', 'Sec-WebSocket-Version: 13']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Protocol: a b']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Protocol: ']),
+        `${requestOf('GET / HTTP/1.1', ['Content-Length: 5'])}hello`,
+        `${requestOf('GET / HTTP/1.1', ['Transfer-Encoding: chunked'])}5\r\nhello\r\n0\r\n\r\n`,
+        requestOf('GET / HTTP/1.1', [
+          'Sec-WebSocket-Key: dGVzdA==',
+          'Origin: https://elsewhere.test',
+        ]),
+      ],
+    });
+    expect(server.clients).toHaveLength(0);
+  });
+
+  test('answers 426 to an upgrade of a version but 13 or of none, marked version-refused, naming version 13 and websocket, before its key and its origin are judged', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+
+    // version 8, which RFC 6455 left behind and no browser sends, from an origin not taken, with
+    // its own origin's field, or with a bad key; any other, none, or a list in one field line
+    await expectAnswered(port, {
+      answer: refusedWith('426 Upgrade Required', {
+        fields: ['upgrade: websocket', 'sec-websocket-version: 13'],
+        refusal: 'version-refused',
+      }),
+      requests: [
+        requestOf('GET / HTTP/1.1', ['Origin: https://elsewhere.test', 'Sec-WebSocket-Version: 8']),
+        requestOf('GET / HTTP/1.1', [
+          'Sec-WebSocket-Origin: http://bead.test',
+          'Sec-WebSocket-Version: 8',
+        ]),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 8']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: dGVzdA==', 'Sec-WebSocket-Version: 8']),
+        requestOf('GET / HTTP/1.1', ['Origin: https://elsewhere.test', 'Sec-WebSocket-Version: 7']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 013']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 13, 8']),
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 8, 13']),
+      ],
+    });
+    expect(server.clients).toHaveLength(0);
+
+    // version 13, from the server's own origin, upgrades
+    expect(
+      await statusLineOf(port, requestOf('GET / HTTP/1.1', ['Origin: http://bead.test']))
+    ).toBe('HTTP/1.1 101 Switching Protocols');
+  });
+
+  test('answers a request without a Host, with two, or with one that is no host, 400 as HTTP does, unmarked', async () => {
+    // the status, the mark and the body of what the server answers `request`, its socket closed; a
+    // body in chunks read whole
+    const answeredOf = async (port: number, request: string) => {
+      const { isClosed, text } = await answerOf(port, request);
+      const [head = '', body = ''] = text.split(/\r\n\r\n(?<body>.*)/su);
+
+      return [
+        isClosed,
+        Number(head.split(' ')[1]),
+        /bead-refusal/iu.test(head),
+        /transfer-encoding: chunked/iu.test(head) && body === '0\r\n\r\n' ? '' : body,
+      ];
     };
 
-    try {
-      // ws reads a version 8 handshake's origin from Sec-WebSocket-Origin, never from Origin
-      for (const fields of [
-        { origin: 'https://elsewhere.test' },
-        { 'sec-websocket-origin': 'http://bead.test' },
-        {},
-      ]) {
-        expect(
-          await answerOf(
-            port,
-            handshakeOf('bead.test', { ...fields, 'sec-websocket-version': '8' })
-          )
-        ).toEqual(upgradeRequired);
-      }
-      expect(
-        await answerOf(port, handshakeOf('elsewhere.test', { 'sec-websocket-version': '8' }))
-      ).toEqual(upgradeRequired);
+    // its head is the HTTP server's own, Node's for a Host missing, whether the server takes every
+    // host or names some
+    for (const hosts of [undefined, ['bead.test']]) {
+      await using started = await startDated({ hosts });
+      const { port, server } = started;
 
-      // any other version, or none, which ws answers itself unless told
-      for (const head of [
-        handshakeOf('bead.test', {
-          origin: 'https://elsewhere.test',
-          'sec-websocket-version': '7',
-        }),
-        handshakeOf('elsewhere.test', { 'sec-websocket-version': '14' }),
-        handshakeOf('bead.test').replace('sec-websocket-version: 13\r\n', ''),
+      for (const request of [
+        requestOf('GET / HTTP/1.1', ['Host']),
+        requestOf('GET / HTTP/1.1', ['Host: bead.test', 'Host: elsewhere.test']),
+        requestOf('GET / HTTP/1.1', ['Host: elsewhere.test', 'Host: bead.test']),
+        requestOf('GET / HTTP/1.1', ['Host: bad host']),
       ]) {
-        expect(await answerOf(port, head)).toEqual(upgradeRequired);
+        expect(await answeredOf(port, request), request).toEqual([true, 400, false, '']);
       }
-      expect(
-        (await answerOf(port, handshakeOf('bead.test', { origin: 'http://bead.test' }))).text.split(
-          '\r\n'
-        )[0]
-      ).toBe('HTTP/1.1 101 Switching Protocols');
-    } finally {
-      await server.stop();
-      await allClosed();
+      expect(server.clients).toHaveLength(0);
+    }
+  });
+
+  test('takes an upgrade whose Upgrade lists websocket in any case, in one field line or several, whose Connection names upgrade among other tokens, with no content', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port } = started;
+
+    for (const request of [
+      requestOf('GET / HTTP/1.1', ['Upgrade: WebSocket']),
+      requestOf('GET / HTTP/1.1', ['Upgrade: h2c, websocket']),
+      requestOf('GET / HTTP/1.1', ['Upgrade: websocket, h2c']),
+      requestOf('GET / HTTP/1.1', ['Upgrade: h2c', 'Upgrade: websocket']),
+      requestOf('GET / HTTP/1.1', ['Connection: keep-alive, upgrade']),
+      requestOf('GET / HTTP/1.1', ['Connection: UPGRADE']),
+      requestOf('GET / HTTP/1.1', ['Connection: keep-alive', 'Connection: upgrade']),
+      requestOf('GET / HTTP/1.1', ['Content-Length: 0']),
+      requestOf('GET / HTTP/1.1', ['Content-Length: 00']),
+      requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==']),
+    ]) {
+      expect(await statusLineOf(port, request), request).toBe('HTTP/1.1 101 Switching Protocols');
     }
   });
 });
@@ -648,17 +890,18 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
         WebSocketServer: fake.FakeWebSocketServer,
       });
 
-      const starting = server.start({ port: 4_321 });
+      const starting = server.start(SCRIPTED);
       fake.instances[0]?.emit('listening');
       await starting;
 
-      const { verifyClient, ...options } = (fake.instances[0]?.options ?? {}) as Record<
+      const { server: given, ...options } = (fake.instances[0]?.options ?? {}) as Record<
         string,
         unknown
       >;
 
-      expect(options).toEqual({ host: '0.0.0.0', maxPayload: expected, port: 4_321 });
-      expect(typeof verifyClient).toBe('function');
+      // the transport's own HTTP server, which judges each request before ws reads it
+      expect(options).toEqual({ maxPayload: expected });
+      expect(given).toBeInstanceOf(Server);
       await server.stop();
     }
 
@@ -672,7 +915,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
         ...(secure === undefined ? {} : { secure }),
         WebSocketServer: fake.FakeWebSocketServer,
       });
-      const starting = server.start({ address, port: 4_321 });
+      const starting = server.start({ address, findOpenPort: true });
 
       fake.instances[0]?.emit('listening');
       await starting;
@@ -703,10 +946,10 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       const fake = createFakeWebSocketServer({ address });
       const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
 
-      const starting = server.start({ port: 4_321 });
+      const starting = server.start({ ...SCRIPTED, port: 4_321 });
       fake.instances[0]?.emit('listening');
 
-      expect(await starting).toEqual({ address: '0.0.0.0', port: 4_321 });
+      expect(await starting).toEqual({ address: host, port: 4_321 });
       expect(server.port).toBe(4_321);
       await server.stop();
     }
@@ -716,7 +959,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
 
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
 
@@ -734,7 +977,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
     const controller = new AbortController();
 
-    const starting = server.start({ signal: controller.signal });
+    const starting = server.start({ ...SCRIPTED, signal: controller.signal });
     controller.abort('why');
 
     await expect(starting).rejects.toBeInstanceOf(CancelError);
@@ -747,7 +990,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
 
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
     const failure = new Error('refused');
     fake.instances[0]?.emit('error', failure);
 
@@ -760,7 +1003,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
     const closes: unknown[] = [];
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
 
     fake.instances[0]?.emit('listening');
     await starting;
@@ -791,7 +1034,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
     const connections: unknown[] = [];
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
 
     fake.instances[0]?.emit('listening');
     await starting;
@@ -826,7 +1069,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       closeTimeout: 20,
       WebSocketServer: fake.FakeWebSocketServer,
     });
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
 
@@ -849,7 +1092,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       closeTimeout: Infinity,
       WebSocketServer: fake.FakeWebSocketServer,
     });
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
 
     fake.instances.at(-1)?.emit('listening');
     await starting;
@@ -875,7 +1118,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       closeTimeout: 20,
       WebSocketServer: fake.FakeWebSocketServer,
     });
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
 
@@ -898,7 +1141,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
   test('drops a connection whose close throws, and still resolves "close" to true', async () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
-    const starting = server.start();
+    const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
 
@@ -924,7 +1167,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     const closing = createFakeSocket();
     const closes: [wasClean: boolean, connectionHandle: string][] = [];
 
-    const starting = server.start({ port: 4_321 });
+    const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
     server.on('close', (wasClean, connectionHandle) => {
@@ -977,7 +1220,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
 
-    const starting = server.start({ port: 4_321 });
+    const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
     fake.connect(createFakeSocket());
@@ -1000,7 +1243,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     });
     const socket = createFakeSocket();
 
-    const starting = server.start({ port: 4_321 });
+    const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
     fake.connect(socket);

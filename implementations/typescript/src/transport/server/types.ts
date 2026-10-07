@@ -1,5 +1,6 @@
 // dependencies
 
+import type { Server } from 'node:http';
 import type { IClock } from '../shared/clock';
 import type {
   CLOSE_EVENT,
@@ -275,18 +276,27 @@ export interface IServerSocketLike {
 
 /**
  * The part of the request that opened a connection this transport reads — met by Node's: its
- * headers, its method, and its socket, on which a refused upgrade is answered.
+ * fields, as `headers` gives them and each line as it came, its method, its version, and its
+ * socket's address.
  */
 export interface IIncomingMessageLike {
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  readonly httpVersion: string;
   readonly method?: string | undefined;
-  socket: {
+  /** Its fields as they came, each name before its value: what counts a field given twice. */
+  readonly rawHeaders: readonly string[];
+  readonly socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
-    destroy(): unknown;
-    end(data: string): unknown;
-    once(event: 'finish', listener: () => void): unknown;
   };
+}
+
+/** The socket of a request the transport answers itself, raw: a `CONNECT`'s, or an upgrade's. */
+export interface IUpgradeSocketLike {
+  destroy(): unknown;
+  end(data: string): unknown;
+  on(event: 'error', listener: () => void): unknown;
+  once(event: 'finish', listener: () => void): unknown;
 }
 
 /** The part of a WebSocket server this transport touches — met by `ws`'s `WebSocketServer`. */
@@ -297,32 +307,24 @@ export interface IWebSocketServerLike {
     event: 'connection',
     listener: (socket: IServerSocketLike, request: IIncomingMessageLike) => void
   ): unknown;
+  /** Its HTTP server's error, which `ws` forwards. */
   on(event: 'error', listener: (error: Error) => void): unknown;
+  /** Its HTTP server's `listening`, which `ws` forwards. */
   on(event: 'listening', listener: () => void): unknown;
   /** An upgrade `ws` cannot read, which it leaves to the listener to answer. */
   on(
     event: 'wsClientError',
     // oxlint-disable-next-line bead/options-last -- ws's own, a `wsClientError` listener's
-    listener: (error: Error, socket: unknown, request: IIncomingMessageLike) => void
+    listener: (error: Error, socket: IUpgradeSocketLike, request: IIncomingMessageLike) => void
   ): unknown;
 }
 
 export interface IWebSocketServerConstructor {
-  new (options: {
-    host?: string | undefined;
-    maxPayload?: number | undefined;
-    port?: number | undefined;
-    /**
-     * `ws`'s asynchronous form: `origin` is the field the handshake's version gives,
-     * `Sec-WebSocket-Origin` for version 8, `Origin` for 13.
-     */
-    verifyClient?:
-      | ((
-          info: { origin: string | undefined; req: IIncomingMessageLike },
-          verified: (isTaken: boolean) => void
-        ) => void)
-      | undefined;
-  }): IWebSocketServerLike;
+  /**
+   * `server` is the transport's own HTTP server, which `ws` upgrades on and leaves open when it
+   * closes.
+   */
+  new (options: { maxPayload?: number | undefined; server: Server }): IWebSocketServerLike;
 }
 
 export interface IWSTransportServerOptions extends ITransportServerOptions {
@@ -344,10 +346,11 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   heartbeat?: number | undefined;
   /**
-   * The hosts — `Host` — an upgrade may name, checked on the upgrade, before its handshake; any
-   * other is refused 403, which a page that rebinds its name to this server's address cannot pass.
-   * Compared ASCII case-insensitively, in the form the field carries, an IDN host in punycode. Every
-   * host, when not given.
+   * The hosts — `Host` — a request at the server's address may name; any other is refused 403,
+   * whatever the request, before anything else of it is read, which a page that rebinds its name to
+   * this server's address cannot pass. Compared ASCII case-insensitively, in the form the field
+   * carries, an IDN host in punycode. Every host, when not given. A `Host` missing, repeated or no
+   * host is answered 400 before it, as HTTP answers it (RFC 9112 §3.2).
    */
   hosts?: readonly string[] | undefined;
   /**
@@ -359,9 +362,9 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
   /**
    * The origins an upgrade that sends an `Origin` may come from, besides the server's own —
    * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly,
-   * checked on the upgrade, before its handshake; any other is refused 403, since no same-origin
-   * policy guards an upgrade. `null` among them takes every upgrade that sends it; one with no
-   * `Origin` comes from anywhere. None, when not given.
+   * checked on the upgrade, after its version and its form; any other is refused 403, since no
+   * same-origin policy guards an upgrade. `null` among them takes every upgrade that sends it; one
+   * with no `Origin` comes from anywhere. None, when not given.
    */
   origins?: readonly string[] | undefined;
   /**
@@ -402,11 +405,13 @@ export interface IDrawingRequest {
 /** The part of a request this transport reads — met by Node's, and by HTTP/2's compatibility one. */
 export interface IHTTPRequestLike {
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  /** `1.0`, `1.1` or `2.0`: an HTTP/1.1 request names its host, which an HTTP/1.0 one may not. */
+  readonly httpVersion: string;
   readonly httpVersionMajor: number;
   readonly method?: string | undefined;
   /**
-   * Its fields as they came, each name before its value: what counts an `Authorization` given
-   * twice, which `headers` keeps once.
+   * Its fields as they came, each name before its value: what counts an `Authorization` or a
+   * `Host` given twice, which `headers` keeps once.
    */
   readonly rawHeaders: readonly string[];
   readonly socket: {
@@ -478,9 +483,10 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   exchangeTimeout?: number | undefined;
   /**
    * The hosts — `Host`, or HTTP/2's `:authority` — a request may name; any other is refused 403
-   * before anything is read, which a page that rebinds its name to this server's address cannot
-   * pass. Compared ASCII case-insensitively, in the form the field carries, an IDN host in punycode.
-   * Every host, when not given.
+   * before anything else is read, which a page that rebinds its name to this server's address
+   * cannot pass. Compared ASCII case-insensitively, in the form the field carries, an IDN host in
+   * punycode. Every host, when not given. An HTTP/1.1 request without a `Host`, with two, or with one
+   * that is no host is answered 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2).
    */
   hosts?: readonly string[] | undefined;
   /**

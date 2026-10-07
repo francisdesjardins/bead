@@ -23,7 +23,13 @@ import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import type { Data } from '../shared/types';
-import { HOST_REFUSAL, isTakenHost, isTakenOrigin, ORIGIN_REFUSAL } from './hosts-and-origins';
+import {
+  HOST_REFUSAL,
+  isTakenHost,
+  isTakenOrigin,
+  isWellFormedHost,
+  ORIGIN_REFUSAL,
+} from './hosts-and-origins';
 import { createTransportServer, generateDrawnHandle } from './transport-server';
 import type {
   HTTPRequestListener,
@@ -301,14 +307,14 @@ const hasBody = (request: IHTTPRequestLike): boolean => {
   );
 };
 
-// the values of every `Authorization` field a request carries, as they came: `headers` keeps the
-// first of two, so they are counted where each stands
-const authorizationsOf = (request: IHTTPRequestLike): string[] => {
+// the values of every line of the field `name` a request carries, as they came: `headers` keeps
+// the first of two, so they are counted where each stands
+const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
   const values: string[] = [];
   const { rawHeaders } = request;
 
   for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
-    if (rawHeaders[index]?.toLowerCase() === 'authorization') {
+    if (rawHeaders[index]?.toLowerCase() === name) {
       values.push(rawHeaders[index + 1] ?? '');
     }
   }
@@ -822,7 +828,7 @@ export const createHTTPTransportServer = (
         const { request, response } = exchange;
         const { connectionHandle } = connection;
         const declared = Number(headerOf(request, 'content-length') ?? Number.NaN);
-        const authorizations = authorizationsOf(request);
+        const authorizations = linesOf(request, 'authorization');
 
         // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
         // could be taken for the other
@@ -1066,6 +1072,20 @@ export const createHTTPTransportServer = (
 
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
+
+        // what HTTP refuses of its own (RFC 9112 §3.2), as HTTP answers it, unmarked; HTTP/2's
+        // authority is its server's to judge
+        if (
+          request.httpVersionMajor === 1 &&
+          !isWellFormedHost(linesOf(request, 'host'), {
+            isRequired: request.httpVersion === '1.1',
+          })
+        ) {
+          response.writeHead(400, { 'content-length': '0', connection: 'close' });
+
+          return (response.end(), undefined);
+        }
+
         if (!isTakenHost(hostOf(request), hosts)) {
           return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
         }
