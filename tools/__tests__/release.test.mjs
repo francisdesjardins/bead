@@ -480,6 +480,21 @@ describe('tag', () => {
     return root;
   };
 
+  test('its push deletes the release branch origin still holds, kept through the finish', () => {
+    const root = finished();
+    const logged = [];
+    git(root, 'update-ref', 'refs/remotes/origin/release/0.2.0', 'v0.2.0^{commit}');
+    tag(root, {
+      log: (line) => {
+        logged.push(line);
+      },
+    });
+    assert.equal(
+      logged.at(-1),
+      'push: git push --atomic origin main develop v0.2.0 spec-v0.2.0 :release/0.2.0'
+    );
+  });
+
   test("it sets spec-v0.2.0 at v0.2.0's commit, peeled, then nothing a second time", () => {
     const root = finished();
     const logged = [];

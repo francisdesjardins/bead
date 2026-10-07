@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
+  deletes it, so nothing reaches origin before that push.
+
 ## [0.2.0] - 2026-10-07
 
 ### Added

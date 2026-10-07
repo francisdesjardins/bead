@@ -276,9 +276,9 @@ git flow release publish 0.2.0                 # CI judges the release commit, e
 node tools/release.mjs prepare --python .venv/bin/python   # re-dates, regenerates, checks
 git commit -am "chore(release): 0.2.0, dated"   # only if it changed something
 # wait for ci-ok on release/0.2.0
-git flow release finish 0.2.0                  # without -p
+git flow release finish --keepremote 0.2.0     # without -p: origin's branch goes with the push
 node tools/release.mjs tag                     # spec-v… and debugging-v… at v0.2.0, then the gate on develop
-git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0
+git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
 ```
 
 A document whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must

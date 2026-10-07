@@ -419,7 +419,7 @@ export const prepare = (root, options = {}) => {
   } else {
     log(`next: git commit -am "chore(release): ${product}, dated", if git status shows a change`);
     log(`      wait for ci-ok on ${branch}`);
-    log(`      git flow ${kind} finish ${product}, without -p; then node tools/release.mjs tag`);
+    log(`      git flow ${kind} finish --keepremote ${product}, without -p; then node tools/release.mjs tag`);
   }
   return plan;
 };
@@ -507,7 +507,19 @@ export const tag = (root, options = {}) => {
       .filter((line) => line.split(' ').slice(1).includes(commit))
       .map((line) => line.split(' ')[0]);
   });
-  const push = `git push --atomic origin main develop ${[name, ...documentTags].join(' ')}`;
+  // ! a published release or hotfix branch stays on origin through the finish (--keepremote):
+  // the one push deletes it, so nothing reaches origin before the user's push
+  const published = ['release', 'hotfix']
+    .map((kind) => {
+      return `${kind}/${version}`;
+    })
+    .filter((branch) => {
+      return git(root, ['for-each-ref', '--format=%(refname)', `refs/remotes/origin/${branch}`]) !== '';
+    })
+    .map((branch) => {
+      return `:${branch}`;
+    });
+  const push = `git push --atomic origin main develop ${[name, ...documentTags, ...published].join(' ')}`;
   if (problems.length > 0) {
     throw new Error(
       [
