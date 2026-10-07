@@ -30,6 +30,7 @@ import {
 import {
   createWSTransportClient,
   HEARTBEAT,
+  MAXIMUM_MESSAGE_BYTES,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
   type WSTransportClient,
@@ -852,6 +853,41 @@ test.describe('WSTransportClient, what it carries', () => {
       [false, false],
       [false, false],
     ]);
+  });
+});
+
+test.describe('WSTransportClient, its message limit', () => {
+  test('closes with 1009 a message past an envelope’s limit, 16,778,240 bytes, over `ws` when told no bound', async () => {
+    const server = await startServer();
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const client = createWSTransportClient({ WebSocket: TrackedWsWebSocket });
+    const connection = nextConnection(server);
+
+    try {
+      await client.connect({ host, port: portOf(server) });
+
+      const { socket } = await connection;
+      const whole = nextEvent(client, 'message');
+
+      socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES));
+
+      const [{ data }] = await whole;
+
+      expect((data as ArrayBuffer).byteLength).toBe(16_778_240);
+
+      const closed = new Promise<number>((resolve) => {
+        socket.once('close', (code: number) => {
+          resolve(code);
+        });
+      });
+
+      socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES + 1));
+
+      expect(await closed).toBe(1009);
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
   });
 });
 

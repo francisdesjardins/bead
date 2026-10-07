@@ -41,6 +41,12 @@ heartbeat covers it; the client beats over `ws`. A heartbeat keeps nothing of a 
 session's timers count what the peer says, not that it answers. Bead has no ping of its own: whether
 a connection is alive is its transport's to know.
 
+Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
+its `maxPayload` says otherwise, and closes a larger one with 1009; over the global `WebSocket`, its
+platform's bound applies. A WebSocket server takes an upgrade from the hosts and origins its HTTP
+server would take, `hosts` and `origins`, and refuses any other 403 before its handshake; it speaks
+version 13 alone, and answers 426 to any other — see [HTTP](#http).
+
 ```ts
 import { WebSocketServer } from 'ws';
 
@@ -68,11 +74,13 @@ HTTP it is the `Authorization` of the `POST` that carries a request — see [HTT
 and a Web Worker carry none, either way. Each end says what it can carry, so its router fails before
 it goes a call whose credential it cannot: `carriesCredential`, and `isSecure`, judged by what the
 end was given, never by what a name resolves to — a client by the URL of its connect, under TLS
-(`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`); a
-server, per connection, by what it listens on — a loopback host, or, over HTTP, a server under TLS —
-unless its application tells it what stands in front of it, `secure`: `true` for TLS terminated
-before it, which makes each connection secure, `false` for a proxy that serves the network in the
-clear, which leaves each in the clear; a worker always, since it never leaves the machine.
+(`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`, the
+host as the WHATWG URL Standard's host parser reads it: `127.0.0.1.` is on the loopback, a host
+followed by a space is not); a server, per connection, by what it listens on — a loopback host, or,
+over HTTP, a server under TLS — unless its application tells it what stands in front of it,
+`secure`: `true` for TLS terminated before it, which makes each connection secure, `false` for a
+proxy that serves the network in the clear, which leaves each in the clear; a worker always, since
+it never leaves the machine.
 
 Each end takes its time from a `clock`: the part of the globals Bead calls — `setTimeout`,
 `clearTimeout`, `setInterval`, `clearInterval`, `Date.now` and `performance.now` — in their own
@@ -191,11 +199,12 @@ A default is withdrawn once a call that presented it is refused `SESSION_REQUIRE
 the refusal crossed: the router presents none by default from then on, and emits
 `credentialWithdrawn` with the credential's scheme alone, never its bytes, so the application renews
 it, and the call that renews it goes out without it. A refusal withdraws only the credential its
-call presented, never a default given anew since, and a failure that ends an answered subscription
-withdraws nothing. A call whose credential its transport cannot carry fails before it goes,
-`DESTINATION_UNREACHABLE`, nothing tried and its credential kept: an `ELSEWHERE` over a transport
-that carries none, a `JWT` or an `ELSEWHERE` over one that is not secure, since a bearer credential
-crosses only TLS off the machine (RFC 6750 §5.3).
+call presented, never a default given anew since, and a failure that ends a subscription its server
+had answered withdraws nothing, over HTTP even when it overtakes that answer in a listen's batch,
+which the failure says, `mayOvertake`. A call whose credential its transport cannot carry fails
+before it goes, `DESTINATION_UNREACHABLE`, nothing tried and its credential kept: an `ELSEWHERE`
+over a transport that carries none, a `JWT` or an `ELSEWHERE` over one that is not secure, since a
+bearer credential crosses only TLS off the machine (RFC 6750 §5.3).
 
 ```ts
 const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
@@ -330,7 +339,9 @@ credential the call presented, and its end, in milliseconds since the epoch; it 
 names alone, when no key of a token's issuer names its `kid`, once a minute at most for that issuer,
 with a signal its deadline aborts, its answer held ten minutes, a `kid` that comes while the minute
 runs waiting for the ask its deadline lets go, a token without a `kid` waiting on its issuer's keys
-while none serve, and `maximumWaitingCalls`, 64 by default, the calls that may wait for an issuer's
+while none serve, keys of one issuer and one material, by their RFC 7638 thumbprint, counting as one
+key, the first in the order searched — the application's keys as given, then a key set's as it
+answered them — and `maximumWaitingCalls`, 64 by default, the calls that may wait for an issuer's
 deadline at once, one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s
 `verify(carried, signal)`, given what the transport carried, which settles with `{ id, data, end }`,
 or with none when the credential does not hold. The server verifies a `JWT` one way, as an access
@@ -553,17 +564,17 @@ reserved as long, or for its timeout when longer — so a late copy of a chunk u
 granted is dropped in silence. A notification, a failure, and the result of a call
 that opens a subscription always go in one envelope.
 
-| Limit                       | By default  | Bounds                                                                                                         |
-| --------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------- |
-| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; `createWSServer`'s `maxPayload` follows it, never below        |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                    |
-| `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                 |
-| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                          |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                      |
-| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                      |
-| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                           |
-| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id |
-| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                             |
+| Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                     |
+| --------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWSServer` and `createWSClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                                                                                                                                                                                |
+| `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                             |
+| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                      |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                  |
+| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                                                                                                                                                                                  |
+| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                       |
+| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                             |
+| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                         |
 
 The limits are options of each router and each facade — `createClient(layers, { limits })`,
 `createWSClient({ limits })`, `createServer(layers, { limits })`, `createWSServer({ limits })` — and
@@ -710,7 +721,7 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 | 201    |                                      | a connection drawn, its token in `bead-connection-token`                                                                                                                                                         |
 | 204    |                                      | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                            |
 | 400    | `malformed`                          | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent |
-| 403    | `host-refused`, `origin-refused`     | a host not among `hosts`; a browser's exchange from an origin neither the server's nor among `origins`                                                                                                           |
+| 403    | `host-refused`, `origin-refused`     | a host not among `hosts`; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                                  |
 | 404    | `path-unknown`, `connection-unknown` | not the path; the connection is gone                                                                                                                                                                             |
 | 405    | `method-refused`                     | neither `GET`, `POST` nor `DELETE`, which `Allow` names                                                                                                                                                          |
 | 409    | `call-waiting`, `listen-undeclared`  | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                  |
@@ -721,13 +732,26 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
 `maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
-read at once across them all. `hosts` names the hosts a request may name, which a page that rebinds
-its name to the server's address cannot pass. `origins` names the origins a browser's exchange may
-come from besides the server's own, for a proxy that rewrites the host; it answers no CORS, so a
-page of another origin is not served yet, and a page presents `ELSEWHERE` to its own origin alone:
-`Authorization` is no field a browser sends across origins without a preflight. `isProxyTrusted`
-takes the address a proxy on the same machine forwards in `x-forwarded-for` for the client's, which
-the bound per address counts.
+read at once across them all. `hosts` names the hosts a request may name, every host when not given,
+compared in any ASCII case (RFC 9110 §4.2.3) with its `Host` as the field carries it: an IDN host is
+named in the punycode a browser sends. `origins` names the origins a request may come from besides
+the server's own, none when not given, compared exactly; a WebSocket server takes both alike, on an
+upgrade, before its handshake. Any client that sends an `Origin` is judged by it, a browser's page
+or not: it gets in by sending none, by sending the server's own, or by being named in `origins`. The
+server's own is `http://` or `https://` followed by the request's `Host`, compared in any ASCII
+case, the field read as the serialized origin it carries (RFC 6454 §6.2), never parsed as a URL: a
+browser writes both from one URL alike, and a client that writes a default port, a path or another
+form on one side alone is refused. Any other `Origin` is none of its own, whatever host it names:
+`null`, an extension's, a `blob:` URL's, any scheme but `http` and `https`. So `hosts` is what
+refuses a page that rebinds its name to the server's address, never the origin's test. Over HTTP,
+`origins` serves a proxy that rewrites the host: the server answers no CORS, so a page of another
+origin is not served yet, and a page presents `ELSEWHERE` to its own origin alone: `Authorization`
+is no field a browser sends across origins without a preflight. Over WebSocket no CORS stands in the
+way, so a listed origin's page is served outright, a page of another port of the same machine — a
+development server — among them. Naming `null` takes every request that sends it, from any site: a
+sandboxed frame's, a `file:` or a `data:` page's, and one whose origin a browser withholds, after a
+cross-origin redirect or under a referrer policy. `isProxyTrusted` takes the address a proxy on the
+same machine forwards in `x-forwarded-for` for the client's, which the bound per address counts.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,

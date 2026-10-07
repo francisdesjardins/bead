@@ -93,15 +93,23 @@ export const createFakeWebSocketServer = (options?: {
     });
   } as unknown as IWebSocketServerConstructor;
 
+  // the request's own socket, which a refused upgrade alone writes on
+  const requestSocket = () => {
+    return { destroy: () => {}, end: () => {}, once: () => {} };
+  };
+
   const connect = (socket: IServerSocketLike, remotePort = 40_000) => {
-    const request: IIncomingMessageLike = { socket: { remoteAddress: '10.0.0.1', remotePort } };
+    const request: IIncomingMessageLike = {
+      headers: {},
+      socket: { ...requestSocket(), remoteAddress: '10.0.0.1', remotePort },
+    };
     instances.at(-1)?.emit('connection', socket, request);
     return generateHandle({ ip: '10.0.0.1', port: remotePort, type: 'WS' });
   };
 
   /** A connection whose TCP socket was torn down before the server saw it: it reports no address. */
   const connectGone = (socket: IServerSocketLike) => {
-    const request: IIncomingMessageLike = { socket: {} };
+    const request: IIncomingMessageLike = { headers: {}, socket: requestSocket() };
     instances.at(-1)?.emit('connection', socket, request);
   };
 

@@ -40,6 +40,12 @@ const SET_KEY: IJwtSetKey = Object.freeze({
   algorithm: 'HS256',
   jwk: { k: SET_KEY_BYTES.toString('base64url'), kid: 'set-1', kty: 'oct' },
 });
+// the material of KEY, of the key set's issuer, under a kid of the application's
+const APP_KEY: IJwtKey = Object.freeze({
+  algorithm: 'HS256',
+  issuer: SET_ISSUER,
+  jwk: { k: KEY_BYTES.toString('base64url'), kid: 'app-1', kty: 'oct' },
+});
 // the same key under the kid the key set's first answer does not name
 const SET_KEY_2: IJwtSetKey = Object.freeze({
   algorithm: 'HS256',
@@ -654,6 +660,68 @@ test.describe('createCredentialResolver', () => {
         return next.current;
       })
       .toMatchObject({ identifier: { sub: 'grace' } });
+  });
+
+  test('takes the application’s copy of a key its key set answers again beside another, under its kid, and refuses a token without a kid there', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet, keys: [APP_KEY] },
+      { clock }
+    );
+    const signal = new AbortController().signal;
+    const first = resolver.resolve(
+      jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' })),
+      signal
+    );
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    // the application's key again, which does not serve, beside another of its issuer
+    asks[0]?.settle.resolve([{ algorithm: 'HS256', jwk: { ...APP_KEY.jwk, use: 'enc' } }, SET_KEY]);
+
+    expect(await first).toMatchObject({ identifier: { sub: 'grace' } });
+    expect(
+      await resolver.resolve(jwtOf(tokenOf(claimsOf(SET_ISSUER), { kid: 'app-1' })), signal)
+    ).toMatchObject({ identifier: { sub: 'grace' } });
+
+    // its issuer has keys of two materials: refused at once, waiting for nothing
+    expect(await resolver.resolve(jwtOf(tokenOf(claimsOf(SET_ISSUER))), signal)).toBeUndefined();
+    expect(asks).toHaveLength(1);
+  });
+
+  test('takes a token without a kid once its key set answers the application’s key alone again, under another kid', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const resolver = createCredentialResolver(
+      { audience: AUDIENCE, keySet, keys: [APP_KEY] },
+      { clock }
+    );
+    const signal = new AbortController().signal;
+    const first = resolver.resolve(jwtOf(tokenOf(claimsOf(SET_ISSUER), { kid: 'app-2' })), signal);
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    asks[0]?.settle.resolve([{ algorithm: 'HS256', jwk: { ...APP_KEY.jwk, kid: 'app-2' } }]);
+
+    expect(await first).toMatchObject({ identifier: { sub: 'grace' } });
+
+    for (const kid of ['app-1', 'app-2', undefined]) {
+      expect(
+        await resolver.resolve(
+          jwtOf(tokenOf(claimsOf(SET_ISSUER), kid === undefined ? {} : { kid })),
+          signal
+        )
+      ).toMatchObject({ identifier: { sub: 'grace' } });
+    }
+
+    expect(asks).toHaveLength(1);
   });
 
   test('refuses as it is built a key set whose maximumWaitingCalls is not a whole number from 1 to 2147483647, and takes either bound', () => {

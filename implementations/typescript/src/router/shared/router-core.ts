@@ -1690,7 +1690,7 @@ export const createRouterCore = <Handle extends string>(
 
   const receiveAnswer = (
     envelope: Extract<Envelope, { kind: typeof EnvelopeKind.FAILURE | typeof EnvelopeKind.RESULT }>,
-    connectionHandle: Handle
+    { connectionHandle, mayOvertake }: { connectionHandle: Handle; mayOvertake: boolean }
   ): void => {
     const { header } = envelope;
     const { callId } = header;
@@ -1735,6 +1735,7 @@ export const createRouterCore = <Handle extends string>(
           destinationId,
           failures,
           header: envelope.header,
+          mayOvertake,
           procedureAddress,
         })
       );
@@ -1816,7 +1817,7 @@ export const createRouterCore = <Handle extends string>(
   };
 
   const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
-    const { credential: transportCredential, data } = messageOf(message);
+    const { credential: transportCredential, data, mayOvertake = false } = messageOf(message);
     let bytes: Uint8Array;
     let prefix: IEnvelopePrefix;
 
@@ -1854,7 +1855,7 @@ export const createRouterCore = <Handle extends string>(
         return (receiveRequest(envelope, { connectionHandle, transportCredential }), undefined);
       case EnvelopeKind.FAILURE:
       case EnvelopeKind.RESULT:
-        return (receiveAnswer(envelope, connectionHandle), undefined);
+        return (receiveAnswer(envelope, { connectionHandle, mayOvertake }), undefined);
       case EnvelopeKind.NOTIFICATION:
         return (receiveNotification(envelope, connectionHandle), undefined);
       case EnvelopeKind.CHUNK:

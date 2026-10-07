@@ -286,8 +286,9 @@ export const createCredentialResolver = (
     return clock.performance.now() < answered + KEY_SET_HOLD;
   };
 
-  // the keys that serve: the application's, held for good, then those each issuer's key set
-  // answered, for their ten minutes
+  // the keys that serve, in the order 13.8's step 4 searches: the application's, held for good, in
+  // the order given, then those each issuer's key set answered, in its answer's order, for their ten
+  // minutes
   const keysServing = (): readonly IJwtKey[] => {
     return [
       ...keys,

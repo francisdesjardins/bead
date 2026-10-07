@@ -101,6 +101,11 @@ export interface ITransportMessage {
   /** None when nothing was carried: an empty field carries none. */
   readonly credential?: string | undefined;
   readonly data: Data;
+  /**
+   * Whether it came by a way that keeps no order with the answers to the requests its side sent,
+   * which it may overtake: over HTTP, a listen's batch (spec 15.9). None for any other.
+   */
+  readonly mayOvertake?: boolean | undefined;
 }
 
 /** A message as a port or a worker's scope delivers it: its data, and the ports it carried. */

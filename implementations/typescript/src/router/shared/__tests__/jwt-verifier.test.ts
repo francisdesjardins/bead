@@ -131,6 +131,17 @@ test.describe('verifyJwt', () => {
     ).rejects.toThrow(ProgrammerError);
   });
 
+  test('refuses at key a key whose key_ops holds verify with a lone surrogate', async () => {
+    const { audience, now, token } = HOLDING;
+    const [key] = HOLDING.keys as [IJwtKey];
+    const keys = [{ ...key, jwk: { ...key.jwk, key_ops: ['verify\ud800'] } }];
+
+    expect(await verifyJwt(token, { audience, keys, now: readingOf(now) })).toEqual({
+      holds: false,
+      reason: 'key',
+    });
+  });
+
   // ! the C# side's reading is a long, which holds no fraction: this side's type does not say so
   test('throw a ProgrammerError for a reading that is not a whole number of milliseconds', async () => {
     const { audience, keys, now, token } = HOLDING;

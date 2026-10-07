@@ -90,6 +90,12 @@ const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678
 // the media type of an access token (RFC 9068 §4), whole or without its `application/`
 const ACCESS_TOKEN_TYPES: ReadonlySet<unknown> = new Set(['at+jwt', 'application/at+jwt']);
 
+// the members RFC 7638 §3.2 hashes into a key's thumbprint, by its kty
+const THUMBPRINT_MEMBERS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  EC: Object.freeze(['crv', 'kty', 'x', 'y']),
+  oct: Object.freeze(['k', 'kty']),
+});
+
 // helpers
 
 const refused = (reason: JwtRefusal): JwtVerdict => {
@@ -98,6 +104,11 @@ const refused = (reason: JwtRefusal): JwtVerdict => {
 
 const isString = (value: unknown): value is string => {
   return typeof value === 'string';
+};
+
+/** Whether `value` is a string of well-formed Unicode, which JSON's escapes need not write. */
+const isWellFormedString = (value: unknown): value is string => {
+  return isString(value) && value.isWellFormed();
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => {
@@ -142,7 +153,7 @@ const fromBase64url = (text: string): Uint8Array<ArrayBuffer> | undefined => {
 const stringOf = (object: Record<string, unknown>, name: string): string | undefined => {
   const value = Object.hasOwn(object, name) ? object[name] : undefined;
 
-  return typeof value === 'string' && value.isWellFormed() ? value : undefined;
+  return isWellFormedString(value) ? value : undefined;
 };
 
 /** A header or a claims set: a JSON object in UTF-8 that names each member once; `undefined` for any other part. */
@@ -229,9 +240,44 @@ export const assertJwtKey = ({ algorithm, issuer, jwk }: IJwtKey): void => {
 };
 
 /**
+ * Whether two keys are one key: of one issuer, and of one material, their RFC 7638 thumbprints
+ * equal. Each passed {@link assertJwtKey}, so its members are strings, and a member's spelling its
+ * bytes: comparing them octet for octet compares what SHA-256 would hash.
+ */
+const isOneMaterial = (key: IJwtKey, other: IJwtKey): boolean => {
+  const jwk = key.jwk as Record<string, unknown>;
+  const otherJwk = other.jwk as Record<string, unknown>;
+  const kty = stringOf(jwk, 'kty');
+  const members =
+    kty !== undefined && Object.hasOwn(THUMBPRINT_MEMBERS, kty)
+      ? THUMBPRINT_MEMBERS[kty]
+      : undefined;
+
+  return (
+    key.issuer === other.issuer &&
+    members !== undefined &&
+    members.every((name) => {
+      return stringOf(jwk, name) === stringOf(otherJwk, name);
+    })
+  );
+};
+
+/** `keys`, the first of each material alone, in their order. */
+const firstOfEachMaterial = (keys: readonly IJwtKey[]): readonly IJwtKey[] => {
+  return keys.filter((key, index) => {
+    return (
+      keys.findIndex((other) => {
+        return isOneMaterial(other, key);
+      }) === index
+    );
+  });
+};
+
+/**
  * The key the token names among `keys` alone: by its `kid`, the one key of that `kid`, or of
- * several the one of its `iss`; without a `kid`, its `iss`'s one key. `iss` is read unverified, to
- * choose, and held to its key's issuer once the signature verifies.
+ * several the one of its `iss`; without a `kid`, its `iss`'s one key. Keys of one issuer and one
+ * material, by their RFC 7638 thumbprint, count as one, the first taken. `iss` is read unverified,
+ * to choose, and held to its key's issuer once the signature verifies.
  */
 const keyOf = (
   header: Record<string, unknown>,
@@ -243,7 +289,7 @@ const keyOf = (
   };
 
   if (!Object.hasOwn(header, 'kid')) {
-    const found = keys.filter(ofIssuer);
+    const found = firstOfEachMaterial(keys.filter(ofIssuer));
 
     return found.length === 1 ? found[0] : undefined;
   }
@@ -252,7 +298,7 @@ const keyOf = (
   const named = keys.filter((key) => {
     return kid !== undefined && key.jwk.kid === kid;
   });
-  const found = named.length > 1 ? named.filter(ofIssuer) : named;
+  const found = named.length > 1 ? firstOfEachMaterial(named.filter(ofIssuer)) : named;
 
   return found.length === 1 ? found[0] : undefined;
 };
@@ -318,14 +364,15 @@ const millisecondsOf = (value: unknown): number | undefined => {
 
 /**
  * The audiences a token's `aud` names (RFC 7519 §4.1.3): itself, a string; each of an array of
- * strings; none for anything else, an array holding what is not a string among it.
+ * strings; none for anything else. A string holding a surrogate alone is none, so an array holding
+ * one is no array of strings, as one holding a number is not.
  */
 export const audiencesOf = (aud: unknown): readonly string[] => {
-  if (typeof aud === 'string') {
+  if (isWellFormedString(aud)) {
     return [aud];
   }
 
-  return Array.isArray(aud) && aud.every(isString) ? aud : [];
+  return Array.isArray(aud) && aud.every(isWellFormedString) ? aud : [];
 };
 
 /** Whether a token's `aud` names one of `audiences`. */
@@ -436,12 +483,7 @@ export const verifyJwt = async (
 ): Promise<JwtVerdict> => {
   const audiences: readonly unknown[] = typeof audience === 'string' ? [audience] : audience;
 
-  if (
-    !Array.isArray(audiences) ||
-    !audiences.every((name) => {
-      return isString(name) && name.isWellFormed();
-    })
-  ) {
+  if (!Array.isArray(audiences) || !audiences.every(isWellFormedString)) {
     throw new ProgrammerError(
       'an audience is a string of well-formed Unicode, and a set of them each'
     );
@@ -502,5 +544,5 @@ export const verifyJwt = async (
     );
   }
 
-  return verdictOf(claims, { audiences: audiences as readonly string[], key, now: reading });
+  return verdictOf(claims, { audiences, key, now: reading });
 };

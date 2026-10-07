@@ -26,6 +26,7 @@ import {
 import {
   createWSTransportServer,
   HEARTBEAT,
+  MAXIMUM_MESSAGE_BYTES,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IIncomingMessageLike,
   type IServerSocketLike,
@@ -78,6 +79,48 @@ const openTcp = async (port: number) => {
   const socket = connectTcp(port, host);
   await once(socket, 'connect');
   return socket;
+};
+
+/** An opening handshake naming `authority`, with `fields` besides, of version 13 unless they say. */
+const handshakeOf = (authority: string, fields: Record<string, string> = {}) => {
+  const lines = Object.entries({ 'sec-websocket-version': '13', ...fields }).map(
+    ([name, value]) => {
+      return `${name}: ${value}\r\n`;
+    }
+  );
+
+  return (
+    `GET / HTTP/1.1\r\nHost: ${authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+    `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n${lines.join('')}\r\n`
+  );
+};
+
+/**
+ * What the server answers `head` on a socket of its own: all of it once the server closed the
+ * socket, or the head of a 101 once it came; the socket is closed then.
+ */
+const answerOf = async (port: number, head: string) => {
+  const socket = await openTcp(port);
+  const answer = { isClosed: false, text: '' };
+
+  socket.on('data', (chunk: Buffer) => {
+    answer.text += chunk.toString('latin1');
+  });
+  socket.on('close', () => {
+    answer.isClosed = true;
+  });
+  socket.write(head);
+  await expect
+    .poll(() => {
+      return (
+        answer.isClosed ||
+        (answer.text.startsWith('HTTP/1.1 101') && answer.text.includes('\r\n\r\n'))
+      );
+    })
+    .toBe(true);
+  socket.destroy();
+
+  return answer;
 };
 
 test('@francisdesjardins/bead/ws-transport-server re-exports the WebSocket binary type', () => {
@@ -364,6 +407,28 @@ test.describe('WSTransportServer, on the wire', () => {
     ]);
   });
 
+  test('closes with 1009 a message past an envelope’s limit, 16,778,240 bytes, when told no bound', async () => {
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const socket = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
+
+    socket.addEventListener('error', () => {});
+    await once(socket, 'open');
+
+    const whole = nextServerEvent(server, 'message');
+
+    socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES));
+
+    const [{ data }] = await whole;
+
+    expect((data as ArrayBuffer).byteLength).toBe(16_778_240);
+
+    const closed = once(socket, 'close');
+
+    socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES + 1));
+
+    expect((await closed)[0]).toBe(1009);
+  });
+
   test('emits "connection" before a frame that arrived with the upgrade request', async () => {
     const events: string[] = [];
     const message = nextServerEvent(server, 'message');
@@ -420,9 +485,163 @@ test.describe('WSTransportServer, on the wire', () => {
   });
 });
 
+test.describe('WSTransportServer, its hosts and origins', () => {
+  test('refuses an upgrade 403 before its handshake, marked host-refused for a host it does not take and origin-refused for an origin neither its own nor among those it takes, its body empty, its date written', async () => {
+    const clock = createTestClock(Date.parse('2026-01-01T00:00:00Z'));
+    const server = createWSTransportServer({ clock, hosts: ['bead.test'], WebSocketServer });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+    const refusalOf = (reason: string) => {
+      return {
+        isClosed: true,
+        text:
+          'HTTP/1.1 403 Forbidden\r\ndate: Thu, 01 Jan 2026 00:00:00 GMT\r\n' +
+          `bead-refusal: ${reason}\r\ncache-control: no-store\r\n` +
+          'x-content-type-options: nosniff\r\ncontent-length: 0\r\nconnection: close\r\n\r\n',
+      };
+    };
+
+    try {
+      expect(await answerOf(port, handshakeOf('elsewhere.test'))).toEqual(
+        refusalOf('host-refused')
+      );
+      expect(
+        await answerOf(port, handshakeOf('elsewhere.test', { origin: 'http://elsewhere.test' }))
+      ).toEqual(refusalOf('host-refused'));
+      expect(
+        await answerOf(port, handshakeOf('bead.test', { origin: 'https://elsewhere.test' }))
+      ).toEqual(refusalOf('origin-refused'));
+      expect(server.clients).toHaveLength(0);
+    } finally {
+      await server.stop();
+      await allClosed();
+    }
+  });
+
+  test('takes an upgrade with no Origin, from its own origin, and from one among those it takes', async () => {
+    const server = createWSTransportServer({ origins: ['https://bead.test'], WebSocketServer });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+    const authority = `${host}:${String(port)}`;
+
+    try {
+      for (const fields of [
+        {},
+        { origin: `http://${authority}` },
+        { origin: 'https://bead.test' },
+      ]) {
+        const { text } = await answerOf(port, handshakeOf(authority, fields));
+
+        expect(text.split('\r\n')[0]).toBe('HTTP/1.1 101 Switching Protocols');
+      }
+    } finally {
+      await server.stop();
+      await allClosed();
+    }
+  });
+
+  test('reads the Host of an upgrade as it came: an IDN page’s own in punycode, and one of invalid punycode taken, or refused host-refused, never a 500', async () => {
+    // the status line and the mark of an upgrade from each `[Host, Origin]`, on a server given `hosts`
+    const answersOf = async (
+      hosts: readonly string[] | undefined,
+      upgrades: readonly (readonly [string, string?])[]
+    ) => {
+      const server = createWSTransportServer({ hosts, WebSocketServer });
+      const { port } = await server.start({ address: host, findOpenPort: true });
+      const answers: [string | undefined, string | undefined][] = [];
+
+      try {
+        for (const [authority, origin] of upgrades) {
+          const { text } = await answerOf(
+            port,
+            handshakeOf(authority, origin === undefined ? {} : { origin })
+          );
+
+          answers.push([text.split('\r\n')[0], /bead-refusal: (.*)\r\n/u.exec(text)?.[1]]);
+        }
+      } finally {
+        await server.stop();
+        await allClosed();
+      }
+
+      return answers;
+    };
+    const taken = ['HTTP/1.1 101 Switching Protocols', undefined];
+    const refused = ['HTTP/1.1 403 Forbidden', 'host-refused'];
+
+    // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
+    // and a Host of punycode that decodes to none, taken where no host is named
+    const page = ['xn--bad-bma.test:8080', 'http://xn--bad-bma.test:8080'] as const;
+
+    expect(
+      await answersOf(undefined, [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
+    ).toEqual([taken, taken, taken, taken]);
+
+    // hosts name an IDN host as the field carries it, in punycode
+    expect(
+      await answersOf(
+        ['xn--bad-bma.test:8080'],
+        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test']]
+      )
+    ).toEqual([taken, taken, refused, refused]);
+  });
+
+  test('answers 426 to an upgrade of a version but 13, before its host and its origin are judged, naming version 13', async () => {
+    const clock = createTestClock(Date.parse('2026-01-01T00:00:00Z'));
+    const server = createWSTransportServer({ clock, hosts: ['bead.test'], WebSocketServer });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+    const upgradeRequired = {
+      isClosed: true,
+      text:
+        'HTTP/1.1 426 Upgrade Required\r\ndate: Thu, 01 Jan 2026 00:00:00 GMT\r\n' +
+        'sec-websocket-version: 13\r\ncontent-length: 0\r\nconnection: close\r\n\r\n',
+    };
+
+    try {
+      // ws reads a version 8 handshake's origin from Sec-WebSocket-Origin, never from Origin
+      for (const fields of [
+        { origin: 'https://elsewhere.test' },
+        { 'sec-websocket-origin': 'http://bead.test' },
+        {},
+      ]) {
+        expect(
+          await answerOf(
+            port,
+            handshakeOf('bead.test', { ...fields, 'sec-websocket-version': '8' })
+          )
+        ).toEqual(upgradeRequired);
+      }
+      expect(
+        await answerOf(port, handshakeOf('elsewhere.test', { 'sec-websocket-version': '8' }))
+      ).toEqual(upgradeRequired);
+
+      // any other version, or none, which ws answers itself unless told
+      for (const head of [
+        handshakeOf('bead.test', {
+          origin: 'https://elsewhere.test',
+          'sec-websocket-version': '7',
+        }),
+        handshakeOf('elsewhere.test', { 'sec-websocket-version': '14' }),
+        handshakeOf('bead.test').replace('sec-websocket-version: 13\r\n', ''),
+      ]) {
+        expect(await answerOf(port, head)).toEqual(upgradeRequired);
+      }
+      expect(
+        (await answerOf(port, handshakeOf('bead.test', { origin: 'http://bead.test' }))).text.split(
+          '\r\n'
+        )[0]
+      ).toBe('HTTP/1.1 101 Switching Protocols');
+    } finally {
+      await server.stop();
+      await allClosed();
+    }
+  });
+});
+
 test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
-  test('hands `maxPayload` to the WebSocketServer when given, and nothing of it otherwise', async () => {
-    for (const maxPayload of [256, undefined]) {
+  test('hands `maxPayload` to the WebSocketServer, an envelope’s limit when not given', async () => {
+    for (const [maxPayload, expected] of [
+      [256, 256],
+      [undefined, 16_778_240],
+    ] as const) {
       const fake = createFakeWebSocketServer();
       const server = createWSTransportServer({
         maxPayload,
@@ -433,16 +652,17 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       fake.instances[0]?.emit('listening');
       await starting;
 
-      expect(fake.instances[0]?.options).toEqual(
-        maxPayload === undefined
-          ? { host: '0.0.0.0', port: 4_321 }
-          : { host: '0.0.0.0', maxPayload, port: 4_321 }
-      );
-      expect(Object.hasOwn(fake.instances[0]?.options ?? {}, 'maxPayload')).toBe(
-        maxPayload !== undefined
-      );
+      const { verifyClient, ...options } = (fake.instances[0]?.options ?? {}) as Record<
+        string,
+        unknown
+      >;
+
+      expect(options).toEqual({ host: '0.0.0.0', maxPayload: expected, port: 4_321 });
+      expect(typeof verifyClient).toBe('function');
       await server.stop();
     }
+
+    expect(MAXIMUM_MESSAGE_BYTES).toBe(16_778_240);
   });
 
   test('is secure as its application says what stands in front of it, whatever it listens on, and by what it listens on when it says nothing', async () => {
