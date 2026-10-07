@@ -284,8 +284,9 @@ nothing.
 name each file and group, failing on one a side never names. It reads the tests' sources: it sees
 what a test names, not the entries it plays, so a report of what each side plays is a gate owed
 ([0006](0006-a-rule-has-its-gate.md)). The transports' harnesses check, on both sides, that they
-played every case but those excused for their language; the other harnesses skip what is excused
-in their loops, and check nothing more.
+played every case but those excused for their language, and so do the codecs' harnesses, and the C#
+side's identities', each checking that what it skips is what its language is excused from; the other
+harnesses skip what is excused in their loops, and check nothing more.
 
 **The interop needs both runtimes in one place.** In CI, only the `dotnet` job has both: it installs
 the TypeScript side for its interop server, runs the C# tests, the C# client's interop among them,
