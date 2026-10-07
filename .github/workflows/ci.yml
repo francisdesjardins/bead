@@ -153,8 +153,10 @@ jobs:
 
   # ── Builder ──────────────────────────────────────────────────────────────────
   # beadc's own gate, from builder/, its toolchain its own. On Linux: types, lint, format, buf's lint
-  # and format over its options, and the options' generated code held to its generator, none of
-  # which a platform moves. On every leg: its tests. On Windows, where buf is another binary, on the
+  # and format over its options and its fixtures, and the options' generated code held to its
+  # generator, none of which a platform moves. On every leg: its tests, the interop's .proto among
+  # them, whose blueprint is the spec's byte for byte in either line ending, then beadc itself over
+  # the interop's blueprint, its rules and its form. On Windows, where buf is another binary, on the
   # current line; on Linux, on the floor `engines.node` declares too.
   builder:
     name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
@@ -192,6 +194,10 @@ jobs:
       - if: runner.os == 'Linux'
         run: $YARN check
       - run: $YARN test
+      - name: The interop's blueprint, to beadc's rules
+        run: node src/cli.ts check ../spec/interop-blueprint.json
+      - name: The interop's blueprint, in its form
+        run: node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
