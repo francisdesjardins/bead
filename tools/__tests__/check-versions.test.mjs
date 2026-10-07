@@ -7,6 +7,7 @@ import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  BUILDER,
   MODES,
   PACKAGE,
   PROPS,
@@ -329,6 +330,18 @@ describe('every ref: each version agrees with itself, and a released section sta
   test('agreeing axes pass on a feature branch', () => {
     const { git, problems } = repository(released());
     git('checkout', '-q', '-b', 'feature/x');
+    assert.deepEqual(problems(), []);
+  });
+
+  test("the builder's package apart from the TypeScript package fails", () => {
+    const { write, problems } = repository(released());
+    write({ [BUILDER]: json({ name: 'beadc', version: '0.2.0', private: true }) });
+    assert.match(problems().join('\n'), /builder\/package\.json: version 0\.2\.0, where/);
+  });
+
+  test("the builder's package at the product's version passes", () => {
+    const { write, problems } = repository(released());
+    write({ [BUILDER]: json({ name: 'beadc', version: '0.1.0', private: true }) });
     assert.deepEqual(problems(), []);
   });
 

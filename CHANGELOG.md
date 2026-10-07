@@ -28,6 +28,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# interop's `logout` refuses a call in a credential's session with the TypeScript side's
   detail, "a call in a credential's session ends no connection's session", which the interop
   holds both ways.
+- `tools/check-versions.mjs` holds the builder's `package.json`, where the tree has one, at the
+  product's version, and `tools/release.mjs prepare` moves it with the product's (decision 0008).
 
 ### Removed
 

@@ -212,6 +212,7 @@ const LOCK = json({
 
 const TREE = {
   'implementations/typescript/package.json': json({ name: 'x', version: '0.1.0', private: true }),
+  'builder/package.json': json({ name: 'beadc', version: '0.1.0', private: true }),
   'implementations/dotnet/Directory.Build.props': PROPS,
   'implementations/dotnet/src/Http/packages.lock.json': LOCK,
   'implementations/dotnet/src/Core/packages.lock.json': json({ version: 2, dependencies: {} }),
@@ -366,6 +367,7 @@ describe('prepare', () => {
     assert.deepEqual(plan.documents, { spec: '0.2.0', debugging: '0.1.0' });
     assert.deepEqual(plan.written, [
       'implementations/typescript/package.json',
+      'builder/package.json',
       'implementations/dotnet/Directory.Build.props',
       'spec/spec.md',
       'spec/interop-blueprint.json',
@@ -391,6 +393,7 @@ describe('prepare', () => {
       /^## \[Unreleased\]\n\n## \[0\.2\.0\] - 2026-10-07\n\n### Added\n\n- A rule\.\n/m
     );
     assert.match(read(root, 'spec/vectors.json'), /"specVersion": "0\.2\.0"/);
+    assert.match(read(root, 'builder/package.json'), /"version": "0\.2\.0"/);
     // the blueprint's form is its own, which the move keeps: its key alone changes
     assert.equal(
       read(root, 'spec/interop-blueprint.json'),
@@ -450,6 +453,15 @@ describe('prepare', () => {
       /no project range, "Bead\.<Name>": "\[x\.y\.z, \)", in the 2 lock files/
     );
     assert.match(read(root, 'implementations/typescript/package.json'), /"version": "0\.1\.0"/);
+  });
+
+  test("a tree without the builder's package owes none, and prepare writes none", () => {
+    const root = releasing();
+    git(root, 'rm', '-q', 'builder/package.json');
+    git(root, 'commit', '-qm', 'chore: no builder');
+    const { plan } = prepared(root, { moves: { spec: 'minor' } });
+    assert.ok(!plan.written.includes('builder/package.json'));
+    assert.match(read(root, 'implementations/typescript/package.json'), /"version": "0\.2\.0"/);
   });
 
   test("its default date is the local day, not UTC's", () => {

@@ -7,14 +7,14 @@
 //   node tools/check-versions.mjs --ref <ref>       judged as that ref: a branch, or refs/tags/…
 //   node tools/check-versions.mjs --base <branch>   a pull request's base: one into main is a release
 //
-// On every ref: the TypeScript package's `version`, the C# side's `<Version>` and every project
-// range of its lock files agree; each conformance file repeats its document's version; and each
-// `## [x.y.z]` section of the CHANGELOG is the one its `vx.y.z` shipped. On a release branch, a
-// pull request into main and main, besides: the product and each document whose files changed move
-// one step past their last release, at least the minor where a file, a key or a property was added,
-// and a document whose files did not keeps its version; each document's tag stands at the first
-// `v*` that gives its version; and the CHANGELOG dates and links the release. Exit 1 on a problem,
-// one a line, then a summary; exit 2 on a usage error.
+// On every ref: the TypeScript package's `version`, the builder's where the tree has one, the C#
+// side's `<Version>` and every project range of its lock files agree; each conformance file repeats
+// its document's version; and each `## [x.y.z]` section of the CHANGELOG is the one its `vx.y.z`
+// shipped. On a release branch, a pull request into main and main, besides: the product and each
+// document whose files changed move one step past their last release, at least the minor where a
+// file, a key or a property was added, and a document whose files did not keeps its version; each
+// document's tag stands at the first `v*` that gives its version; and the CHANGELOG dates and links
+// the release. Exit 1 on a problem, one a line, then a summary; exit 2 on a usage error.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -134,6 +134,8 @@ const propertiesOf = (text) => {
 
 export const PACKAGE = 'implementations/typescript/package.json';
 export const PROPS = 'implementations/dotnet/Directory.Build.props';
+// the builder's package, which ships with the product's releases at its version (decision 0008)
+export const BUILDER = 'builder/package.json';
 export const CHANGELOG = 'CHANGELOG.md';
 
 // the C# side's lock files: every packages.lock.json git lists under implementations/dotnet
@@ -218,6 +220,8 @@ export const readVersions = (read, paths) => {
   const props = read(PROPS);
   const versions = {
     package: parseJson(read(PACKAGE))?.version ?? null,
+    builder: parseJson(read(BUILDER))?.version ?? null,
+    hasBuilder: read(BUILDER) !== null,
     props: props === null ? null : (/<Version>([^<]*)<\/Version>/.exec(props)?.[1] ?? null),
     locks: {},
     documents: {},
@@ -335,6 +339,12 @@ const judgeAxes = (versions) => {
   const problems = [];
   if (parseVersion(versions.package) === null) {
     problems.push(`${PACKAGE}: version ${versions.package}, where x.y.z is due`);
+  }
+  // a tree from before the builder holds none, and owes none
+  if (versions.hasBuilder && versions.builder !== versions.package) {
+    problems.push(
+      `${BUILDER}: version ${versions.builder}, where ${PACKAGE} states ${versions.package}`
+    );
   }
   if (versions.props !== versions.package) {
     problems.push(
@@ -636,7 +646,9 @@ const treeOf = (root, commit) => {
   load(
     paths.filter((path) => {
       return (
-        path.startsWith('spec/') || LOCKS.test(path) || [PACKAGE, PROPS, CHANGELOG].includes(path)
+        path.startsWith('spec/') ||
+        LOCKS.test(path) ||
+        [PACKAGE, BUILDER, PROPS, CHANGELOG].includes(path)
       );
     })
   );
