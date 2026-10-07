@@ -183,6 +183,11 @@ internal static class JwtVerifier
         "application/at+jwt",
     };
 
+    // the members RFC 7638 §3.2 hashes into a key's thumbprint, by its kty
+    private static readonly string[] EcThumbprintMembers = ["crv", "kty", "x", "y"];
+
+    private static readonly string[] OctThumbprintMembers = ["k", "kty"];
+
     // helpers
 
     private static JwtVerdict Refused(JwtRefusal reason)
@@ -246,12 +251,12 @@ internal static class JwtVerifier
     }
 
     /// <summary>
-    /// <paramref name="json"/>'s member <paramref name="name"/>, when it is a string of well-formed
-    /// Unicode, which JSON's escapes need not write; none otherwise.
+    /// A string of well-formed Unicode, which JSON's escapes need not write; none for any other
+    /// value, a string holding a surrogate alone among them.
     /// </summary>
-    internal static string? StringOf(JsonElement json, string name)
+    internal static string? TextOf(JsonElement value)
     {
-        if (!json.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
+        if (value.ValueKind != JsonValueKind.String)
         {
             return null;
         }
@@ -264,6 +269,15 @@ internal static class JwtVerifier
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// <paramref name="json"/>'s member <paramref name="name"/>, when it is a string of well-formed
+    /// Unicode, which JSON's escapes need not write; none otherwise.
+    /// </summary>
+    internal static string? StringOf(JsonElement json, string name)
+    {
+        return json.TryGetProperty(name, out var value) ? TextOf(value) : null;
     }
 
     // a header or a claims set: a JSON object in UTF-8 that names each member once; none for any
@@ -343,9 +357,42 @@ internal static class JwtVerifier
         return (value is null ? null : FromBase64Url(value))?.Length ?? -1;
     }
 
+    // whether two keys are of one issuer and one material: their RFC 7638 thumbprints equal, the
+    // members it hashes compared octet for octet, each a string the key's check found well-formed
+    private static bool IsOneMaterial(JwtKey key, JwtKey other)
+    {
+        var type = StringOf(key.Jwk, "kty");
+
+        if (!string.Equals(key.Issuer, other.Issuer, StringComparison.Ordinal)
+            || !string.Equals(type, StringOf(other.Jwk, "kty"), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return (type == "EC" ? EcThumbprintMembers : OctThumbprintMembers).All((member) =>
+        {
+            return string.Equals(StringOf(key.Jwk, member), StringOf(other.Jwk, member), StringComparison.Ordinal);
+        });
+    }
+
+    // the first key of each material, in the order given
+    private static List<JwtKey> FirstOfEachMaterial(List<JwtKey> keys)
+    {
+        return keys
+            .Where((key, index) =>
+            {
+                return keys.FindIndex((other) =>
+                {
+                    return IsOneMaterial(other, key);
+                }) == index;
+            })
+            .ToList();
+    }
+
     // the key the token names among the keys alone: by its kid, the one key of that kid, or of
-    // several the one of its iss; without a kid, its iss's one key. iss is read unverified, to
-    // choose, and held to its key's issuer once the signature verifies
+    // several the one of its iss; without a kid, its iss's one key; keys of one issuer and one
+    // material, by their RFC 7638 thumbprint, counting as one, the first taken. iss is read
+    // unverified, to choose, and held to its key's issuer once the signature verifies
     private static JwtKey? KeyOf(JsonElement header, (JsonElement Claims, IReadOnlyList<JwtKey> Keys) token)
     {
         var issuer = StringOf(token.Claims, "iss");
@@ -356,7 +403,7 @@ internal static class JwtVerifier
 
         if (!header.TryGetProperty("kid", out _))
         {
-            var ofItsIssuer = token.Keys.Where(ofIssuer).ToList();
+            var ofItsIssuer = FirstOfEachMaterial(token.Keys.Where(ofIssuer).ToList());
 
             return ofItsIssuer.Count == 1 ? ofItsIssuer[0] : null;
         }
@@ -368,7 +415,7 @@ internal static class JwtVerifier
                 return kid is not null && string.Equals(StringOf(key.Jwk, "kid"), kid, StringComparison.Ordinal);
             })
             .ToList();
-        var found = named.Count > 1 ? named.Where(ofIssuer).ToList() : named;
+        var found = named.Count > 1 ? FirstOfEachMaterial(named.Where(ofIssuer).ToList()) : named;
 
         return found.Count == 1 ? found[0] : null;
     }
@@ -383,7 +430,7 @@ internal static class JwtVerifier
             || (operations.ValueKind == JsonValueKind.Array
                 && operations.EnumerateArray().Any((operation) =>
                 {
-                    return operation.ValueKind == JsonValueKind.String && operation.ValueEquals("verify");
+                    return TextOf(operation) == "verify";
                 }));
 
         return (!jwk.TryGetProperty("alg", out _) || StringOf(jwk, "alg") == algorithm)
@@ -444,8 +491,9 @@ internal static class JwtVerifier
 
     /// <summary>
     /// Whether a claims set's <c>aud</c> names one of <paramref name="audiences"/>: a string, or an
-    /// array of strings, one of them (step 11 of section 13.8); read alike from a token a relay does
-    /// not verify.
+    /// array of strings, one of them (step 11 of section 13.8), each of well-formed Unicode, an array
+    /// holding a string with a surrogate alone being no array of strings; read alike from a token a
+    /// relay does not verify.
     /// </summary>
     internal static bool NamesAudience(JsonElement claims, IReadOnlyCollection<string> audiences)
     {
@@ -456,10 +504,7 @@ internal static class JwtVerifier
 
         var named = (JsonElement name) =>
         {
-            return audiences.Any((audience) =>
-            {
-                return name.ValueEquals(audience);
-            });
+            return TextOf(name) is { } text && audiences.Contains(text, StringComparer.Ordinal);
         };
 
         if (aud.ValueKind == JsonValueKind.String)
@@ -470,7 +515,7 @@ internal static class JwtVerifier
         return aud.ValueKind == JsonValueKind.Array
             && aud.EnumerateArray().All((name) =>
             {
-                return name.ValueKind == JsonValueKind.String;
+                return TextOf(name) is not null;
             })
             && aud.EnumerateArray().Any(named);
     }

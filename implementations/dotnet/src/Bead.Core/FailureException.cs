@@ -86,6 +86,13 @@ public sealed class FailureException : Exception
     /// <summary>What the call went to behind the peer, as the call named it.</summary>
     public uint? DestinationId { get; init; }
 
+    /// <summary>
+    /// Whether it came by a way that keeps no order with the call's own answer, which it may
+    /// overtake: over HTTP, a listen's batch (spec 15.9). Such a failure ends a subscription its
+    /// server had answered, and withdraws no credential (spec 13.4).
+    /// </summary>
+    public bool MayOvertake { get; init; }
+
     /// <inheritdoc/>
     public override string Message
     {

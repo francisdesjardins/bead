@@ -23,6 +23,7 @@ import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import type { Data } from '../shared/types';
+import { HOST_REFUSAL, isTakenHost, isTakenOrigin, ORIGIN_REFUSAL } from './hosts-and-origins';
 import { createTransportServer, generateDrawnHandle } from './transport-server';
 import type {
   HTTPRequestListener,
@@ -207,11 +208,11 @@ export const REFUSALS = Object.freeze({
   BUSY: 'busy',
   CALL_WAITING: 'call-waiting',
   CONNECTION_UNKNOWN,
-  HOST: 'host-refused',
+  HOST: HOST_REFUSAL,
   LISTEN_UNDECLARED: 'listen-undeclared',
   MALFORMED: 'malformed',
   METHOD: 'method-refused',
-  ORIGIN: 'origin-refused',
+  ORIGIN: ORIGIN_REFUSAL,
   PATH: 'path-unknown',
   TOO_LARGE: 'too-large',
   TYPE: 'type-refused',
@@ -512,20 +513,10 @@ export const createHTTPTransportServer = (
           : remoteAddress;
       };
 
-      // a browser's exchange from the server's own origin, or one it was told; any other client's
-      // has no `Origin`, and comes from anywhere
+      // an exchange from the server's own origin, or one it was told; one with no `Origin` comes from
+      // anywhere, and any client that sends one is judged by it
       const isAllowedOrigin = (request: IHTTPRequestLike): boolean => {
-        const origin = headerOf(request, 'origin');
-
-        if (origin === undefined || origins.includes(origin)) {
-          return true;
-        }
-
-        try {
-          return new URL(origin).host === hostOf(request);
-        } catch {
-          return false;
-        }
+        return isTakenOrigin(headerOf(request, 'origin'), { host: hostOf(request), origins });
       };
 
       // ends an exchange the transport answers itself; one whose body it will not read is closed
@@ -1075,9 +1066,7 @@ export const createHTTPTransportServer = (
 
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
-        const host = hostOf(request);
-
-        if (hosts !== undefined && (host === undefined || !hosts.includes(host))) {
+        if (!isTakenHost(hostOf(request), hosts)) {
           return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
         }
 

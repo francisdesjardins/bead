@@ -44,7 +44,7 @@ import {
 } from '../http-transport-server';
 import { generateHandle } from '../transport-server';
 import type { ITransportServer, TransportServerConnectionHandle } from '../types';
-import { HEARTBEAT } from '../ws-transport-server';
+import { createWSTransportServer, HEARTBEAT } from '../ws-transport-server';
 import { createFakeWebSocketServer } from './fake-websocket-server';
 import {
   closeFrameOf,
@@ -341,7 +341,7 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
  * case's options on the transport and its limits on the router, every layer on the transport's
  * `clock`, given the interop service's credentials. Over HTTP, its transport is given them as they
  * are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself; its server layer, its own
- * connection timeout.
+ * connection timeout. Over WebSocket, its transport takes the `hosts` and `origins` alike.
  */
 const serverOf = (
   { limits, options = {}, transport }: ICase,
@@ -353,7 +353,14 @@ const serverOf = (
     return createWSServer<string>({
       credentials: interopCredentialsOf(clock, limits),
       limits,
-      transport: { clock, heartbeat, maxPayload: maximumMessageBytes, WebSocketServer },
+      transport: {
+        clock,
+        heartbeat,
+        hosts: bounds.hosts,
+        maxPayload: maximumMessageBytes,
+        origins: bounds.origins,
+        WebSocketServer,
+      },
     });
   }
 
@@ -478,16 +485,17 @@ test.describe('the transports', () => {
   const played: string[] = [];
 
   test('the defaults are those of sections 15.3 and 15.12', async () => {
+    // the bound the WebSocket transport server takes when built alone and told none
     const fake = createFakeWebSocketServer();
-    const wsServer = createWSServer({ transport: { WebSocketServer: fake.FakeWebSocketServer } });
-    const starting = wsServer.transport.start({ port: 4_321 });
+    const wsTransport = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const starting = wsTransport.start({ port: 4_321 });
 
     fake.instances[0]?.emit('listening');
     await starting;
 
     const built = fake.instances[0]?.options as { maxPayload?: number } | undefined;
 
-    await wsServer[Symbol.asyncDispose]();
+    await wsTransport.stop();
 
     expect({
       bodyBytesBudget: BODY_BYTES_BUDGET,

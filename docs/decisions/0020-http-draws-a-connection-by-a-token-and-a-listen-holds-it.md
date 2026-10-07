@@ -55,7 +55,9 @@ that comes under it ([0001](0001-the-envelope-sits-at-fixed-offsets.md)).
 **A failure can come before the result its call waits for**: a failure that ends a subscription
 comes in a listen's batch, the result that answered its call in a `POST`'s body, and the two race.
 The client fails the call with the failure, and reports the result that follows as `CALL_UNKNOWN`
-(spec 15.9).
+(spec 15.9). The failure withdraws no default: a call's own answer comes in its `POST`'s body alone
+(spec 13.4, 15.9; the round in [0010](0010-a-request-presents-a-credential-of-a-scheme.md), Security
+for 0.2.0).
 
 **A connection lives as long as its client listens or speaks**: silence is counted between listens,
 never while one is held ([0012](0012-a-listen-held-is-not-silence.md)).
@@ -71,4 +73,6 @@ what it reads of an envelope, and what it gives of order and copies.
 
 The order of HTTP's outbox and of its exchanges, and a failure that comes before its call's result
 (spec 15.9), met the Tenth Man with a transport's order and copies, whose round
-[0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps.
+[0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps. That such a failure withdraws no default
+met it with the transport's security, whose round
+[0010](0010-a-request-presents-a-credential-of-a-scheme.md) keeps, Security for 0.2.0.

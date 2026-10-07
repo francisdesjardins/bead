@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 namespace Bead;
 
 /// <summary>
@@ -15,6 +18,23 @@ public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool 
     /// answer or what a listen brings back.
     /// </summary>
     public string? Credential { get; init; }
+
+    /// <summary>
+    /// Whether it came by a way that keeps no order with the answers to the requests its side sent,
+    /// which it may overtake: over HTTP, a listen's batch (spec 15.9). None for any other.
+    /// </summary>
+    public bool MayOvertake { get; init; }
+
+    // every member as the compiler writes it, but the credential, of which whether one was carried
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a credential's own string reaches no log, no exception's message and no debugger (spec
+        // 15.1): whether there is one, alone
+        builder.Append(CultureInfo.CurrentCulture, $"Bytes = {Bytes}, IsText = {IsText}, MayOvertake = {MayOvertake}, Credential = ");
+        builder.Append(Credential is null ? "none" : "carried");
+
+        return true;
+    }
 }
 
 /// <summary>

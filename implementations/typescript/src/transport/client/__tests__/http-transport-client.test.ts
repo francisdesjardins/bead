@@ -922,6 +922,51 @@ test.describe('createHTTPTransportClient, listening', () => {
     expect(WAIT).toBe(25_000);
   });
 
+  test('marks what a listen brings back as what may overtake, and never what a POST’s body brings', async () => {
+    const { client, fake } = await connectListening({ wait: 1_000 });
+    const marks: unknown[] = [];
+    const callBy = async (method: string) => {
+      await expect
+        .poll(() => {
+          return fake.calls.slice(1).some(({ init }) => {
+            return init.method === method;
+          });
+        })
+        .toBe(true);
+
+      return fake.calls.slice(1).find(({ init }) => {
+        return init.method === method;
+      });
+    };
+
+    client.on('message', ({ mayOvertake }) => {
+      marks.push(mayOvertake);
+    });
+
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+
+    (await callBy('POST'))?.answer({
+      body: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }),
+      headers: { 'content-type': BEAD_MEDIA_TYPE },
+      status: 200,
+    });
+    await sending;
+    await expect
+      .poll(() => {
+        return marks.length;
+      })
+      .toBe(1);
+    (await callBy('GET'))?.answer(batch(1, envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 })));
+    await expect
+      .poll(() => {
+        return marks.length;
+      })
+      .toBe(2);
+
+    expect(marks).toEqual([undefined, true]);
+    await client.disconnect({ isQuick: true });
+  });
+
   test('listens again from where it was when a listen is lost — at once, then later and later, drawn apart — and one that reaches the server ends the losses', async () => {
     const clock = createTestClock();
     const { callOf, client, fake, heard } = await connectListening({ clock });

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace Bead;
 
@@ -1745,8 +1746,9 @@ public sealed class RouterCore : IDisposable
         _receivings.Grant(receiving);
     }
 
-    private void ReceiveAnswer(Envelope envelope, string connectionHandle)
+    private void ReceiveAnswer(Envelope envelope, (string ConnectionHandle, bool MayOvertake) received)
     {
+        var (connectionHandle, mayOvertake) = received;
         var header = envelope.Header;
         var call = new CallAddress(header.CallId, connectionHandle);
 
@@ -1789,6 +1791,7 @@ public sealed class RouterCore : IDisposable
             {
                 DestinationId = pendingRequest.DestinationId,
                 Header = Redact(header),
+                MayOvertake = mayOvertake,
                 ProcedureAddress = pendingRequest.ProcedureAddress,
             });
             _port.Activity(RouterActivity.Response, connectionHandle);
@@ -2080,7 +2083,7 @@ public sealed class RouterCore : IDisposable
                 ReceiveRequest(request, (connectionHandle, envelope.Payload, message.Credential));
                 break;
             case ResultHeader or FailureHeader:
-                ReceiveAnswer(envelope, connectionHandle);
+                ReceiveAnswer(envelope, (connectionHandle, message.MayOvertake));
                 break;
             case NotificationHeader:
                 ReceiveNotification(envelope, connectionHandle);
@@ -2384,5 +2387,17 @@ public sealed class RouterCore : IDisposable
     private sealed record Arrival(AnswerTarget Target, AnsweringCall Answering, ReadOnlyMemory<byte> Payload)
     {
         public string? TransportCredential { get; init; }
+
+        // every member as the compiler writes it, but the credential, of which whether one was
+        // carried
+        private bool PrintMembers(StringBuilder builder)
+        {
+            // ! a credential's own string reaches no log, no exception's message and no debugger
+            // (spec 15.1): whether there is one, alone
+            builder.Append(CultureInfo.CurrentCulture, $"Target = {Target}, Answering = {Answering}, Payload = {Payload}, TransportCredential = ");
+            builder.Append(TransportCredential is null ? "none" : "carried");
+
+            return true;
+        }
     }
 }

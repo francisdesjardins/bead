@@ -40,6 +40,9 @@ export type {
 
 // constants
 
+/** The largest message by default: a router's largest envelope by default (spec 15.3). */
+export const MAXIMUM_MESSAGE_BYTES = 16_778_240;
+
 /** What an omitted connect option resolves to. */
 export const CONNECT_DEFAULTS = Object.freeze({
   host: 'localhost',
@@ -64,7 +67,9 @@ const errorOf = (event: unknown): unknown => {
  * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it. A
  * WebSocket carries no credential beside an envelope: one given to `send` is not carried, and its
  * router fails a call that presents an `ELSEWHERE` before it goes. It is secure under `wss`, or to a
- * loopback host.
+ * loopback host. Over `ws`, a message is an envelope at most by default,
+ * {@link MAXIMUM_MESSAGE_BYTES}, and a larger one closes the connection with 1009; over the global
+ * `WebSocket`, its platform's bound applies.
  *
  * @example
  * const client = createWSTransportClient();
@@ -78,6 +83,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
     heartbeat: givenHeartbeat = HEARTBEAT,
+    maxPayload = MAXIMUM_MESSAGE_BYTES,
     WebSocket = globalThis.WebSocket,
   } = {
     ...DEFAULTS(),
@@ -160,7 +166,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
               let socket: IWebSocketLike;
 
               try {
-                socket = opened = client.socket = new WebSocket(url, protocols);
+                socket = opened = client.socket = new WebSocket(url, protocols, { maxPayload });
               } catch (reason) {
                 return (reject(wrapReason(ConnectError, reason)), undefined);
               }

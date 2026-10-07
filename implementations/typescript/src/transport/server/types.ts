@@ -273,11 +273,19 @@ export interface IServerSocketLike {
   terminate(): void;
 }
 
-/** The part of the request that opened a connection this transport reads — met by Node's. */
+/**
+ * The part of the request that opened a connection this transport reads — met by Node's: its
+ * headers, its method, and its socket, on which a refused upgrade is answered.
+ */
 export interface IIncomingMessageLike {
+  readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  readonly method?: string | undefined;
   socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
+    destroy(): unknown;
+    end(data: string): unknown;
+    once(event: 'finish', listener: () => void): unknown;
   };
 }
 
@@ -291,6 +299,12 @@ export interface IWebSocketServerLike {
   ): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
   on(event: 'listening', listener: () => void): unknown;
+  /** An upgrade `ws` cannot read, which it leaves to the listener to answer. */
+  on(
+    event: 'wsClientError',
+    // oxlint-disable-next-line bead/options-last -- ws's own, a `wsClientError` listener's
+    listener: (error: Error, socket: unknown, request: IIncomingMessageLike) => void
+  ): unknown;
 }
 
 export interface IWebSocketServerConstructor {
@@ -298,6 +312,16 @@ export interface IWebSocketServerConstructor {
     host?: string | undefined;
     maxPayload?: number | undefined;
     port?: number | undefined;
+    /**
+     * `ws`'s asynchronous form: `origin` is the field the handshake's version gives,
+     * `Sec-WebSocket-Origin` for version 8, `Origin` for 13.
+     */
+    verifyClient?:
+      | ((
+          info: { origin: string | undefined; req: IIncomingMessageLike },
+          verified: (isTaken: boolean) => void
+        ) => void)
+      | undefined;
   }): IWebSocketServerLike;
 }
 
@@ -320,10 +344,26 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   heartbeat?: number | undefined;
   /**
+   * The hosts — `Host` — an upgrade may name, checked on the upgrade, before its handshake; any
+   * other is refused 403, which a page that rebinds its name to this server's address cannot pass.
+   * Compared ASCII case-insensitively, in the form the field carries, an IDN host in punycode. Every
+   * host, when not given.
+   */
+  hosts?: readonly string[] | undefined;
+  /**
    * The largest message a connection may send, in bytes; `ws` closes a connection that sends a
-   * larger one with 1009. `ws`'s own default when not given.
+   * larger one with 1009. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's limit: a
+   * router whose `maximumEnvelopeBytes` is raised needs it raised alike, as `createWSServer` does.
    */
   maxPayload?: number | undefined;
+  /**
+   * The origins an upgrade that sends an `Origin` may come from, besides the server's own —
+   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly,
+   * checked on the upgrade, before its handshake; any other is refused 403, since no same-origin
+   * policy guards an upgrade. `null` among them takes every upgrade that sends it; one with no
+   * `Origin` comes from anywhere. None, when not given.
+   */
+  origins?: readonly string[] | undefined;
   /**
    * What stands in front of it, which it cannot tell (spec 13.4): `true` for TLS terminated before
    * it, which makes each connection secure; `false` for a proxy that serves the network in the
@@ -439,7 +479,8 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   /**
    * The hosts — `Host`, or HTTP/2's `:authority` — a request may name; any other is refused 403
    * before anything is read, which a page that rebinds its name to this server's address cannot
-   * pass. Every host, when not given.
+   * pass. Compared ASCII case-insensitively, in the form the field carries, an IDN host in punycode.
+   * Every host, when not given.
    */
   hosts?: readonly string[] | undefined;
   /**
@@ -486,9 +527,11 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   maximumWaitingExchanges?: number | undefined;
   /**
-   * The origins a browser's exchange may come from, besides the server's own; one with no `Origin` —
-   * no browser's — comes from anywhere. It serves a proxy that rewrites the host: a page of another
-   * origin also needs CORS, which the transport does not answer yet.
+   * The origins an exchange that sends an `Origin` may come from, besides the server's own —
+   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly; any
+   * other is refused 403. `null` among them takes every exchange that sends it; one with no `Origin`
+   * comes from anywhere. It serves a proxy that rewrites the host: a page of another origin also
+   * needs CORS, which the transport does not answer yet. None, when not given.
    */
   origins?: readonly string[] | undefined;
   /** The path the transport answers on; anything else is 404. Defaults to {@link PATHNAME}. */

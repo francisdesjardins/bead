@@ -268,7 +268,12 @@ export interface IWebSocketLike {
 
 /** `CONNECTING` and `OPEN` are read from the injected constructor, so `ws` and the global agree. */
 export interface IWebSocketConstructor {
-  new (url: string, protocols?: string | string[]): IWebSocketLike;
+  /** `options` is `ws`'s alone; the global `WebSocket` takes two parameters, and still meets it. */
+  new (
+    url: string,
+    protocols?: string | string[],
+    options?: { maxPayload?: number }
+  ): IWebSocketLike;
   readonly CONNECTING: number;
   readonly OPEN: number;
 }
@@ -296,6 +301,14 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
    * beats — `ws`'s; a browser's cannot, and its server's pings stand for it.
    */
   heartbeat?: number | undefined;
+  /**
+   * The largest message it reads, in bytes, where its `WebSocket` takes a bound — `ws`'s, which
+   * closes a connection that sends a larger one with 1009; the global `WebSocket` takes none, its
+   * platform's bound applying. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's
+   * limit: a router whose `maximumEnvelopeBytes` is raised needs it raised alike, as
+   * `createWSClient` does.
+   */
+  maxPayload?: number | undefined;
   /** Defaults to the global `WebSocket`; pass `ws`'s where there is none. */
   WebSocket?: IWebSocketConstructor | undefined;
 }

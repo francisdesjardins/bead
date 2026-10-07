@@ -880,7 +880,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             // end — lost, or disconnecting — is no answer of this one's
             if (body.Length > 0 && _drawn == connection)
             {
-                Hear(body);
+                Hear(body, false);
             }
         }
     }
@@ -950,14 +950,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
-    // an envelope an answer or a listen brought back, which carry no credential; a listener that
-    // throws stops nothing: its throw is left to a task nobody waits on, told as an exception
-    // unobserved, and the client goes on
-    private void Hear(byte[] envelope)
+    // an envelope an answer or a listen brought back, which carry no credential, what a listen
+    // brought back marked as what may overtake an answer (spec 15.9); a listener that throws stops
+    // nothing: its throw is left to a task nobody waits on, told as an exception unobserved, and the
+    // client goes on
+    private void Hear(byte[] envelope, bool mayOvertake)
     {
         try
         {
-            Message?.Invoke(new TransportMessage(envelope, false));
+            Message?.Invoke(new TransportMessage(envelope, false) { MayOvertake = mayOvertake });
         }
         catch (Exception reason)
         {
@@ -1065,7 +1066,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                     cursor.After += 1;
                     heard += 1;
-                    Hear(envelope);
+                    Hear(envelope, true);
                 }
             }
             catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)

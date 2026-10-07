@@ -2198,6 +2198,174 @@
       }
     },
     {
+      "name": "two keys of one issuer under one kid, of one material, the first taken",
+      "clauses": [
+        "13.8",
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6ImsxIn0.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.uNSFantVBPPLuMnwy8WuYW93Iv6gpuamUCBDFyXJm3Q",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1",
+            "alg": "HS256"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
+      "name": "two keys of one issuer under one kid, of two materials",
+      "clauses": [
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6ImsxIn0.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.uNSFantVBPPLuMnwy8WuYW93Iv6gpuamUCBDFyXJm3Q",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+            "kid": "k1"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "kid"
+      }
+    },
+    {
+      "name": "two keys of one issuer under one kid, of one material, the first of which does not serve",
+      "clauses": [
+        "13.8",
+        "13.8.4",
+        "13.8.6"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6ImsxIn0.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.uNSFantVBPPLuMnwy8WuYW93Iv6gpuamUCBDFyXJm3Q",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1",
+            "use": "enc"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "key"
+      }
+    },
+    {
+      "name": "two keys of one issuer under one kid, of one material, the second of which does not serve",
+      "clauses": [
+        "13.8",
+        "13.8.4",
+        "13.8.6"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6ImsxIn0.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.uNSFantVBPPLuMnwy8WuYW93Iv6gpuamUCBDFyXJm3Q",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+            "kid": "k1",
+            "use": "enc"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
+      }
+    },
+    {
       "name": "a kid that names no key, while the issuer's one key would verify",
       "clauses": [
         "13.8.4"
@@ -2223,8 +2391,42 @@
       }
     },
     {
-      "name": "a token without a kid, whose issuer has two keys",
+      "name": "a token without a kid, whose issuer has keys of two materials",
       "clauses": [
+        "13.8.4"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        },
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "ES256",
+          "jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "kid"
+      }
+    },
+    {
+      "name": "a token without a kid, whose issuer's two keys are of one material, the first taken",
+      "clauses": [
+        "13.8",
         "13.8.4"
       ],
       "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.jjLq7I41HIVxFAW5OOjuXHvnoEoTkJTuKezv46PCBeE",
@@ -2250,8 +2452,21 @@
       "audience": "https://bead.example",
       "now": "2026-10-03T12:01:00.000Z",
       "verdict": {
-        "holds": false,
-        "reason": "kid"
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client"
+        },
+        "end": 1791032460000
       }
     },
     {
@@ -3126,6 +3341,52 @@
         "13.8.11"
       ],
       "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOlsiaHR0cHM6Ly9iZWFkLmV4YW1wbGUiLDddLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.PiBsoufZJPDNgcf39IS5RvzzSLvBz4Dv4fc9yRXCaRc",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "aud"
+      }
+    },
+    {
+      "name": "aud holding a lone surrogate after the audience, which names nothing",
+      "clauses": [
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZVx1ZDgwMCIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQifQ.rXH_rQKQ16NxtcRXNhRGWqpw2WaKmWQqYik3yCFwJ_I",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "aud"
+      }
+    },
+    {
+      "name": "aud an array holding a lone surrogate beside the audience, which is no array of strings",
+      "clauses": [
+        "13.8.11"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOlsiaHR0cHM6Ly9iZWFkLmV4YW1wbGVcdWQ4MDAiLCJodHRwczovL2JlYWQuZXhhbXBsZSJdLCJleHAiOjE3OTEwMzI0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.HG2SAFea-Ds_UdO7c7J_kf6ElQ_hZV3sOM0_vaSAD94",
       "keys": [
         {
           "issuer": "https://trust.example",

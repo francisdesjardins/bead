@@ -501,6 +501,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       isSameCredential(presented, defaultCredential) &&
       reason instanceof FailureError &&
       reason.origin !== 'local' &&
+      // ! a failure that overtook its result in a listen's batch ends a subscription the server
+      // had answered: it withdraws nothing (spec 13.4, 15.9)
+      !reason.mayOvertake &&
       reason.isProtocol(CLIENT_FAILURES.sessionRequired.code)
     ) {
       defaultCredential = undefined;

@@ -8,6 +8,10 @@ const IPV4 = /^(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u;
 // the schemes under TLS
 const SECURE_SCHEMES: ReadonlySet<string> = new Set(['https:', 'wss:']);
 
+// what the URL parser reads around a host, where the host parser refuses it: a tab or a newline,
+// which it removes, and what ends a host or opens its userinfo
+const AROUND_A_HOST = /[\t\n\r/?#\\@]/u;
+
 // helpers
 
 /** The host of `url` as a URL parses it, in ASCII lower case, an IPv6 one bracketed; none when it does not parse. */
@@ -37,13 +41,20 @@ const isLoopback = (host: string | undefined): boolean => {
 
 /**
  * Whether a host a server listens on is on the loopback, as the W3C's Secure Contexts judges an
- * origin potentially trustworthy, by what it is given, never by what a name resolves to: `localhost`
- * or a name that ends in `.localhost`, in ASCII lower case, an IPv4 address in 127.0.0.0/8, or `::1`.
+ * origin potentially trustworthy, by what it is given, never by what a name resolves to: the host as
+ * the WHATWG URL Standard's host parser reads it — `localhost` or a name that ends in `.localhost`,
+ * in ASCII lower case, an IPv4 address in 127.0.0.0/8, `127.0.0.1.` among them, or `::1`, bare or
+ * bracketed. A host the parser refuses, one followed by a space among them, is none.
  */
 export const isLoopbackHost = (host: string): boolean => {
   const bracketed = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 
-  return isLoopback(hostOf(`http://${bracketed}`));
+  if (AROUND_A_HOST.test(host) || (bracketed.startsWith('[') && !bracketed.endsWith(']'))) {
+    return false;
+  }
+
+  // ! a path after it, so that the URL parser trims nothing off the host's end
+  return isLoopback(hostOf(`http://${bracketed}/`));
 };
 
 /**

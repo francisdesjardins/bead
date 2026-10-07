@@ -60,6 +60,45 @@ public sealed class CredentialTests
         Assert.DoesNotContain("a.b.c", new RequestOptions { Credential = Credential.Jwt("a.b.c") }.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void A_transport_message_writes_whether_its_transport_carried_a_credential_never_the_credential()
+    {
+        var carrying = new TransportMessage(new byte[] { 1, 2, 3 }, false) { Credential = "Bearer SECRET", MayOvertake = true };
+
+        Assert.Equal(
+            "TransportMessage { Bytes = System.ReadOnlyMemory<Byte>[3], IsText = False, MayOvertake = True, Credential = carried }",
+            carrying.ToString());
+        Assert.DoesNotContain("SECRET", carrying.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith("MayOvertake = False, Credential = none }", new TransportMessage(new byte[] { 1 }, true).ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_session_request_writes_whether_its_transport_carried_a_credential_never_the_credential()
+    {
+        var request = new SessionRequest
+        {
+            ConnectionHandle = "first",
+            Header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Credential = Credential.Elsewhere() },
+            TransportCredential = "Bearer SECRET",
+        };
+
+        Assert.StartsWith("SessionRequest { ConnectionHandle = first, Header = ", request.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(", TransportCredential = carried }", request.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET", request.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(", TransportCredential = none }", (request with { TransportCredential = null }).ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_session_writes_whether_it_holds_a_token_never_the_token()
+    {
+        var session = new Session<string> { ConnectionHandle = "first", Data = "ada", SessionToken = Token };
+
+        Assert.StartsWith("Session { ConnectionHandle = first, ConnectionInactivityTimeout = , Data = ada, LastActivity = ", session.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(", SessionInactivityTimeout = , SessionToken = drawn }", session.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(Token.ToString(), session.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith(", SessionToken = none }", (session with { SessionToken = null }).ToString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(CredentialScheme.None)]
     [InlineData(CredentialScheme.Opaque)]

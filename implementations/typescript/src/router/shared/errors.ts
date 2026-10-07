@@ -114,6 +114,12 @@ export class FailureError extends GenericError {
   public readonly detail: string;
   /** The envelope that said it, redacted; none for a failure raised before any envelope. */
   public readonly header: RedactedHeader | undefined;
+  /**
+   * Whether it came by a way that keeps no order with the call's own answer, which it may overtake:
+   * over HTTP, a listen's batch (spec 15.9). Such a failure ends a subscription its server had
+   * answered, and withdraws no credential (spec 13.4).
+   */
+  public readonly mayOvertake: boolean;
   public readonly origin: FailureOrigin;
   /** The procedure the call asked for, which a failure envelope does not repeat. */
   public readonly procedureAddress: IProcedureAddress | undefined;
@@ -124,13 +130,22 @@ export class FailureError extends GenericError {
 
   public constructor(
     failure: IFailure & {
+      mayOvertake?: boolean | undefined;
       origin?: FailureOrigin | undefined;
       relays?: number | undefined;
       side?: RouterSide | undefined;
     },
     options?: IFailureErrorOptions
   ) {
-    const { code, detail = '', origin = 'local', relays = 0, scope, side } = failure;
+    const {
+      code,
+      detail = '',
+      mayOvertake = false,
+      origin = 'local',
+      relays = 0,
+      scope,
+      side,
+    } = failure;
     const { destinationId, header, procedureAddress, ...errorOptions } = options ?? {};
     const address =
       procedureAddress === undefined
@@ -146,6 +161,7 @@ export class FailureError extends GenericError {
     this.destinationId = destinationId;
     this.detail = detail;
     this.header = header === undefined ? undefined : redactHeader(header);
+    this.mayOvertake = mayOvertake;
     this.origin = origin;
     this.procedureAddress = address;
     this.relays = relays;
@@ -186,11 +202,13 @@ export const failureErrorOf = (
     destinationId,
     failures,
     header,
+    mayOvertake,
     procedureAddress,
   }: {
     destinationId?: DestinationId | undefined;
     failures: Pick<IRouterFailures, 'side'>;
     header: IFailureHeader;
+    mayOvertake?: boolean | undefined;
     procedureAddress?: IProcedureAddress | undefined;
   }
 ): FailureError => {
@@ -199,6 +217,7 @@ export const failureErrorOf = (
   return new FailureError(
     {
       ...received,
+      mayOvertake,
       origin: isRelayed ? 'relayed' : 'peer',
       side: isRelayed ? undefined : failures.side === 'client' ? 'server' : 'client',
     },

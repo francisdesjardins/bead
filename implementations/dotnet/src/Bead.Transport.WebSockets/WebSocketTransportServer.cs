@@ -53,6 +53,23 @@ public sealed record WebSocketTransportServerOptions
     /// whatever it listens on.
     /// </summary>
     public bool? Secure { get; init; }
+
+    /// <summary>
+    /// The hosts an upgrade may name, in any ASCII case, in the form the field carries, an IDN host
+    /// in punycode, checked before its handshake; any when none. The server judges its own origin by
+    /// the request's <c>Host</c>, so this is what refuses a page that rebinds its name to the
+    /// server's address.
+    /// </summary>
+    public IReadOnlyList<string>? Hosts { get; init; }
+
+    /// <summary>
+    /// The origins an upgrade that sends an <c>Origin</c> may come from besides the server's own,
+    /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly, checked
+    /// before its handshake: none by default. <c>null</c> among them takes every upgrade that sends
+    /// it. No same-origin policy guards an upgrade, so a page of an origin named here is served
+    /// outright.
+    /// </summary>
+    public IReadOnlyList<string> Origins { get; init; } = [];
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -139,6 +156,18 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// tests' way to give one a socket of theirs, or a handle another holds.
     /// </summary>
     internal Func<WebSocket, string, (WebSocket Socket, string ConnectionHandle)>? Accepted { get; init; }
+
+    /// <summary>
+    /// The largest message its connections read: the option given, or a router's largest envelope
+    /// by default, which a transport built alone takes, its router unknown to it.
+    /// </summary>
+    internal int MaximumMessageBytes
+    {
+        get
+        {
+            return _options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes;
+        }
+    }
 
     /// <summary>Where it is in its life: Uninitialized until its first start.</summary>
     public ReadyState ReadyState
@@ -380,8 +409,37 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
+    // whether a request asks a WebSocket of a version other than 13, which ASP.NET Core does not take
+    private static bool IsUpgradeOfAnotherVersion(HttpRequest request)
+    {
+        return request.Headers.Upgrade.ToString().Contains("websocket", StringComparison.OrdinalIgnoreCase)
+            && request.Headers.SecWebSocketVersion.ToString() != "13";
+    }
+
+    // the refusal of an upgrade from a host or an origin the server does not take, before its
+    // handshake, if it is one: 403, marked, never stored nor sniffed, its body empty (spec 15.2)
+    private string? RefusalOf(HttpRequest request)
+    {
+        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
+        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
+        var host = request.Headers.Host.ToString();
+        var origin = request.Headers.Origin;
+
+        if (!HostsAndOrigins.IsTakenHost(host, _options.Hosts))
+        {
+            return HostsAndOrigins.HostRefusal;
+        }
+
+        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (host, _options.Origins)))
+        {
+            return HostsAndOrigins.OriginRefusal;
+        }
+
+        return null;
+    }
+
     // a request: one that upgrades becomes a connection, until its socket closes; none is taken once
-    // a stop began
+    // a stop began, nor one from a host or an origin the server does not take
     private async Task Accept(HttpContext context)
     {
         var isStopping = _life.IsStopping;
@@ -389,6 +447,30 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         if (!context.WebSockets.IsWebSocketRequest || isStopping)
         {
             context.Response.StatusCode = isStopping ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status426UpgradeRequired;
+
+            // an upgrade of another version than 13, before its host and its origin are judged: the
+            // answer names the one version the transport speaks (RFC 6455 §4.4), and the connection
+            // goes with it, as the TypeScript side's does
+            if (!isStopping && IsUpgradeOfAnotherVersion(context.Request))
+            {
+                context.Response.Headers.SecWebSocketVersion = "13";
+                context.Response.Headers.Connection = "close";
+            }
+
+            return;
+        }
+
+        if (RefusalOf(context.Request) is { } refusal)
+        {
+            var response = context.Response;
+
+            // Kestrel writes its date and an empty length; the connection goes with the refusal, as
+            // the TypeScript side's does
+            response.StatusCode = StatusCodes.Status403Forbidden;
+            response.Headers[HostsAndOrigins.RefusalHeader] = refusal;
+            response.Headers.CacheControl = "no-store";
+            response.Headers.XContentTypeOptions = "nosniff";
+            response.Headers.Connection = "close";
 
             return;
         }
@@ -399,7 +481,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var port = context.Connection.RemotePort;
         var peerHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port}";
         var (socket, connectionHandle) = Accepted?.Invoke(accepted, peerHandle) ?? (accepted, peerHandle);
-        var connection = new WebSocketConnection(socket, (_options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes, _options.CloseTimeout));
+        var connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = new Held
         {

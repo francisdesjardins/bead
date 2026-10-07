@@ -292,11 +292,15 @@ export const createHTTPTransportClient = (
         }
       };
 
-      // an envelope an answer or a listen brought back, which carry no credential; a listener that
-      // throws stops nothing
-      const hear = (envelope: ArrayBuffer): void => {
+      // an envelope an answer or a listen brought back, which carry no credential, what a listen
+      // brought marked as what may overtake an answer; a listener that throws stops nothing
+      const hear = (envelope: ArrayBuffer, { mayOvertake }: { mayOvertake: boolean }): void => {
         try {
-          client.emit(MESSAGE_EVENT, { credential: undefined, data: envelope });
+          client.emit(MESSAGE_EVENT, {
+            credential: undefined,
+            data: envelope,
+            ...(mayOvertake ? { mayOvertake: true } : {}),
+          });
         } catch (reason) {
           rethrow(reason);
         }
@@ -331,7 +335,7 @@ export const createHTTPTransportClient = (
         // an exchange ended empty — cancelled — has nothing to say, and one past its connection's
         // end — lost, or disconnecting — is no answer of this one's
         if (body.byteLength > 0 && drawn === connection) {
-          hear(body);
+          hear(body, { mayOvertake: false });
         }
 
         return undefined;
@@ -407,7 +411,7 @@ export const createHTTPTransportClient = (
 
               cursor.after += 1;
               heard += 1;
-              hear(envelope.buffer);
+              hear(envelope.buffer, { mayOvertake: true });
             }
           }
         } catch {

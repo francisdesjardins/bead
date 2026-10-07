@@ -29,7 +29,11 @@ public sealed record HttpTransportServerOptions
     /// </summary>
     public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>The hosts a request may name; any when none — against a page that rebinds its name to the server's address.</summary>
+    /// <summary>
+    /// The hosts a request may name, in any ASCII case, in the form the field carries, an IDN host in
+    /// punycode; any when none. The server judges its own origin by the request's <c>Host</c>, so
+    /// this is what refuses a page that rebinds its name to the server's address.
+    /// </summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
     /// <summary>
@@ -67,7 +71,11 @@ public sealed record HttpTransportServerOptions
     /// <summary>The requests one connection has waiting at once: 64 by default; the exchanges under way on it, twice that.</summary>
     public int MaximumWaitingExchanges { get; init; } = 64;
 
-    /// <summary>The origins a browser's exchange may come from besides the server's own: no CORS is answered.</summary>
+    /// <summary>
+    /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
+    /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly: none by
+    /// default. <c>null</c> among them takes every exchange that sends it. No CORS is answered.
+    /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 
     /// <summary>The path the transport answers on.</summary>
@@ -730,18 +738,11 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return _options.IsProxyTrusted && Loopback.Contains(address) && isAddress ? forwarded : address;
     }
 
-    // a browser's exchange from the server's own origin, or one it was told; any other client's has
-    // no Origin, and comes from anywhere
+    // an exchange from the server's own origin, or one it was told; one with no Origin comes from
+    // anywhere, and any client that sends one is judged by it
     private bool IsAllowedOrigin(HttpRequest request)
     {
-        var origin = HeaderOf(request, HeaderNames.Origin);
-
-        if (origin is null || _options.Origins.Contains(origin))
-        {
-            return true;
-        }
-
-        return Uri.TryCreate(origin, UriKind.Absolute, out var uri) && string.Equals(uri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase);
+        return HostsAndOrigins.IsTakenOrigin(HeaderOf(request, HeaderNames.Origin), (request.Headers.Host.ToString(), _options.Origins));
     }
 
     // an exchange: what it is, as its method, its path, its host, its origin and its token say
@@ -771,7 +772,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private async Task Exchange(HttpContext context)
     {
         var request = context.Request;
-        var host = request.Host.Value;
+
+        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
+        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
+        var host = request.Headers.Host.ToString();
 
         if (_life.IsStopping)
         {
@@ -780,7 +784,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        if (_options.Hosts is { } hosts && (string.IsNullOrEmpty(host) || !hosts.Contains(host)))
+        if (!HostsAndOrigins.IsTakenHost(host, _options.Hosts))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Host));
 

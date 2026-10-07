@@ -25,6 +25,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     // a bearer credential, RFC 6750's own example, its auth-scheme included
     private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
 
+    // a router's largest envelope by default (spec 15.3)
+    private const int EnvelopeLimit = 16_778_240;
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private readonly WebSocketTransportServer _server = new();
@@ -754,6 +757,45 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             var received = await server.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled);
 
             Assert.Equal((WebSocketMessageType.Binary, "hello"), (received.MessageType, Encoding.ASCII.GetString(buffer, 0, received.Count)));
+        }
+    }
+
+    [Fact]
+    public async Task Closes_with_1009_a_message_past_an_envelope_s_limit_16778240_bytes_when_told_no_bound()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        var closes = ClosesOf(_client);
+
+        _client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            // an envelope's limit is taken whole, one byte more closes
+            await server.SendAsync(new byte[EnvelopeLimit], WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Equal(EnvelopeLimit, (await Next(messages)).Bytes.Length);
+
+            var sending = server.SendAsync(new byte[EnvelopeLimit + 1], WebSocketMessageType.Binary, true, Cancelled);
+            var received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.MessageTooBig), (received.MessageType, received.CloseStatus));
+
+            // what is left of the message goes, or fails as the socket goes: either way it is heard no more
+            server.Abort();
+            await Task.WhenAny(sending).WaitAsync(Patience, Cancelled);
+            await Next(closes);
+
+            Assert.True(messages.Reader.Count == 0);
         }
     }
 

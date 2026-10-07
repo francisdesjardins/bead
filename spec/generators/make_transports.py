@@ -239,6 +239,33 @@ cases = [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
         connect(fields={'origin': 'https://bead.test'}), expect('connect', 201)]),
+    ('a host and an origin are compared in any ASCII case', ['15.12'], {'hosts': ['bead.test']}, [
+        connect(host='Bead.Test', fields={'origin': 'http://bead.test'}), expect('connect', 201)]),
+    # 15.12: the field read as it came, a serialized origin, never parsed: a browser on an IDN host
+    # sends its Host and its Origin in punycode, and a Host of invalid punycode is a host as any other
+    ('a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken',
+     ['15.12'], None, [
+         connect('idn', host='xn--bad-bma.test', fields={'origin': 'http://xn--bad-bma.test'}), expect('idn', 201),
+         connect('port', host='xn--bad-bma.test:8443', fields={'origin': 'https://xn--bad-bma.test:8443'}),
+         expect('port', 201),
+         connect('invalid', host='xn--a', fields={'origin': 'http://xn--a'}), expect('invalid', 201),
+         connect('dotted', host='xn--a.test'), expect('dotted', 201),
+         connect('hyphen', host='xn---bad-cpa.test'), expect('hyphen', 201)]),
+    ('hosts names an IDN host in punycode, as the Host field carries it, and refuses a Host of invalid punycode, marked',
+     ['15.6.5', '15.12'], {'hosts': ['xn--bad-bma.test']}, [
+         connect('idn', host='xn--bad-bma.test', fields={'origin': 'http://xn--bad-bma.test'}), expect('idn', 201),
+         connect('invalid', host='xn--a'), refused('invalid', 403, 'host-refused'),
+         connect('dotted', host='xn--a.test'), refused('dotted', 403, 'host-refused'),
+         connect('hyphen', host='xn---bad-cpa.test'), refused('hyphen', 403, 'host-refused')]),
+    ('an Origin of null, of a blob: URL, of ws: or with a path, naming the server\'s host, is none of its own, refused 403, marked; https:// and its Host is its own',
+     ['15.6.5', '15.12'], None, [
+         connect('null', fields={'origin': 'null'}), refused('null', 403, 'origin-refused'),
+         connect('blob', fields={'origin': 'blob:http://{host}/'}), refused('blob', 403, 'origin-refused'),
+         connect('ws', fields={'origin': 'ws://{host}'}), refused('ws', 403, 'origin-refused'),
+         connect('path', fields={'origin': 'http://{host}/'}), refused('path', 403, 'origin-refused'),
+         connect('own', fields={'origin': 'https://{host}'}), expect('own', 201)]),
+    ('an Origin of null is taken when origins names it', ['15.12'], {'origins': ['null']}, [
+        connect(fields={'origin': 'null'}), expect('connect', 201)]),
     # 15.12: the bounds, past which the server answers 429 or 503
     ('past the connections a server holds, a connect is refused 503, with Retry-After',
      ['15.6.12', '15.12.1'], {'maximumConnections': 1}, [
@@ -427,14 +454,23 @@ CONTINUATION, BINARY = 0x0, 0x2
 NORMAL, GOING_AWAY, TOO_BIG = 1000, 1001, 1009
 
 
-def upgrade(on='socket', fields=None):
-    """An opening handshake, on a socket the exchange keeps as its WebSocket once answered 101, with the
-    fields given besides."""
-    head = (f'GET / HTTP/1.1\r\nhost: {{host}}\r\nupgrade: websocket\r\nconnection: Upgrade\r\n'
-            f'sec-websocket-key: {KEY}\r\nsec-websocket-version: 13\r\n'
+def handshake(on='socket', fields=None, host='{host}', version=13):
+    """An opening handshake, on a socket of its own, naming the host given, of the version given, or
+    of none when None, with the fields given besides."""
+    head = (f'GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\n'
+            f'sec-websocket-key: {KEY}\r\n'
+            + ('' if version is None else f'sec-websocket-version: {version}\r\n')
             + ''.join(f'{name}: {value}\r\n' for name, value in pairs(fields)) + '\r\n')
-    return [{'send': {'head': head}, 'on': on},
-            expect(on, 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT})]
+    return {'send': {'head': head}, 'on': on}
+
+
+def upgrade(on='socket', fields=None, host='{host}'):
+    """A handshake the server takes, its socket kept as its WebSocket once answered 101."""
+    return [handshake(on, fields, host), expect(on, 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT})]
+
+
+# what a WebSocket server's refusal of an upgrade carries besides its mark, as an HTTP exchange's
+UPGRADE_REFUSED = {'cache-control': 'no-store', 'x-content-type-options': 'nosniff'}
 
 
 def message(on, **sent):
@@ -464,6 +500,57 @@ websocket = [
      ['15.2'], {}, [
          *upgrade(fields={'authorization': 'Interop sub=ada'}), message('socket', binary=elsewhere(1)),
          heard('socket', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL))]),
+    # 15.2 and 15.12: an upgrade is taken from the hosts and origins an HTTP exchange is
+    ('an upgrade naming a host the server does not take is refused 403, marked, before its handshake',
+     ['15.2', '15.6.5', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         handshake('elsewhere', host='elsewhere.test'), refused('elsewhere', 403, 'host-refused', UPGRADE_REFUSED),
+         *upgrade('taken', host='bead.test'), message('taken', binary=ECHO), heard('taken', envelope=result(1, '"x"'))]),
+    ('an upgrade from an origin the server does not take is refused 403, marked, before its handshake; one from its own origin, or with none, is taken',
+     ['15.2', '15.6.5', '15.12'], {}, [
+         handshake('elsewhere', {'origin': 'https://elsewhere.test'}),
+         refused('elsewhere', 403, 'origin-refused', UPGRADE_REFUSED),
+         *upgrade('own', {'origin': 'http://{host}'}), message('own', binary=ECHO), heard('own', envelope=result(1, '"x"')),
+         *upgrade('none'), message('none', binary=ECHO), heard('none', envelope=result(1, '"x"'))]),
+    ('an upgrade from an origin the server takes is served', ['15.12'], {'options': {'origins': ['https://bead.test']}}, [
+        *upgrade(fields={'origin': 'https://bead.test'}), message('socket', binary=ECHO),
+        heard('socket', envelope=result(1, '"x"'))]),
+    ('an upgrade\'s host and origin are compared in any ASCII case', ['15.2', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+        *upgrade(host='Bead.Test', fields={'origin': 'http://bead.test'}), message('socket', binary=ECHO),
+        heard('socket', envelope=result(1, '"x"'))]),
+    ('an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken',
+     ['15.2', '15.12'], {}, [
+         *upgrade('idn', {'origin': 'http://xn--bad-bma.test'}, host='xn--bad-bma.test'),
+         message('idn', binary=ECHO), heard('idn', envelope=result(1, '"x"')),
+         *upgrade('port', {'origin': 'https://xn--bad-bma.test:8443'}, host='xn--bad-bma.test:8443'),
+         *upgrade('invalid', {'origin': 'http://xn--a'}, host='xn--a'),
+         *upgrade('dotted', host='xn--a.test'),
+         *upgrade('hyphen', host='xn---bad-cpa.test')]),
+    ('an upgrade naming an IDN host that hosts names in punycode is taken, and one naming a Host of invalid punycode refused, marked',
+     ['15.2', '15.6.5', '15.12'], {'options': {'hosts': ['xn--bad-bma.test']}}, [
+         *upgrade('idn', {'origin': 'http://xn--bad-bma.test'}, host='xn--bad-bma.test'),
+         message('idn', binary=ECHO), heard('idn', envelope=result(1, '"x"')),
+         handshake('invalid', host='xn--a'), refused('invalid', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('dotted', host='xn--a.test'), refused('dotted', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('hyphen', host='xn---bad-cpa.test'), refused('hyphen', 403, 'host-refused', UPGRADE_REFUSED)]),
+    ('an upgrade with an Origin of null, of a blob: URL, of ws: or with a path, naming the server\'s host, is refused 403, marked; one from https:// and its Host is taken',
+     ['15.2', '15.6.5', '15.12'], {}, [
+         handshake('null', {'origin': 'null'}), refused('null', 403, 'origin-refused', UPGRADE_REFUSED),
+         handshake('blob', {'origin': 'blob:http://{host}/'}), refused('blob', 403, 'origin-refused', UPGRADE_REFUSED),
+         handshake('ws', {'origin': 'ws://{host}'}), refused('ws', 403, 'origin-refused', UPGRADE_REFUSED),
+         handshake('path', {'origin': 'http://{host}/'}), refused('path', 403, 'origin-refused', UPGRADE_REFUSED),
+         *upgrade('own', {'origin': 'https://{host}'}), message('own', binary=ECHO),
+         heard('own', envelope=result(1, '"x"'))]),
+    ('an upgrade with an Origin of null is taken when origins names it', ['15.2', '15.12'], {'options': {'origins': ['null']}}, [
+        *upgrade(fields={'origin': 'null'}), message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
+    # 15.2: an upgrade is judged by its Origin, the field an exchange is, so one of another version,
+    # which may carry its origin elsewhere, is never taken
+    ('an upgrade of a version but 13 is answered 426, naming 13, whatever its Origin', ['15.2'], {}, [
+        handshake('foreign', {'origin': 'https://elsewhere.test'}, version=8),
+        expect('foreign', 426, fields={'sec-websocket-version': '13'}),
+        handshake('none', version=8), expect('none', 426, fields={'sec-websocket-version': '13'}),
+        handshake('seventh', {'origin': 'https://elsewhere.test'}, version=7),
+        expect('seventh', 426, fields={'sec-websocket-version': '13'}),
+        handshake('unversioned', version=None), expect('unversioned', 426, fields={'sec-websocket-version': '13'})]),
     ('a peer that closes with 1000 is answered 1000, the clean close', ['15.3'], {}, [
         *upgrade(), message('socket', close=NORMAL), heard('socket', close=NORMAL)]),
     ('a server that stops closes its connections with 1001', ['15.3'], {}, [
@@ -520,7 +607,7 @@ document = {
         'Before each send and close, and at the end, the server reported nothing a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
-        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, origins and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
+        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],

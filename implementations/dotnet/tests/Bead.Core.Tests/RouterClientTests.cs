@@ -1804,6 +1804,12 @@ public sealed partial class RouterClientTests
             Deliver(EnvelopeCodec.WriteEnvelope(envelope));
         }
 
+        // an envelope that came by a way that keeps no order with the answers, which it may overtake
+        public void Overtaking(Envelope envelope)
+        {
+            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { MayOvertake = true });
+        }
+
         // an envelope, with what the transport carried beside it
         public void Carrying(Envelope envelope, string carried)
         {

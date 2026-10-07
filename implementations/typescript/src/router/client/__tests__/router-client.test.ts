@@ -759,7 +759,10 @@ test.describe('createRouterClient', () => {
 
       scripted.deliver(sessionRequiredOf(1));
       scripted.deliver(sessionRequiredOf(3));
-      await expect(refused).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      await expect(refused).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        mayOvertake: false,
+      });
       await expect(alike).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
 
       const next = router.request(new Uint8Array(0), { options, procedure: service });
@@ -902,6 +905,40 @@ test.describe('createRouterClient', () => {
       expect(withdrawn).toEqual([]);
       expect(router.credential).toEqual(JWT);
       expect(router.hasNotification(notification)).toBe(false);
+    });
+
+    test('withdraws nothing when SESSION_REQUIRED that ends a subscription overtakes its result, the call failing with it marked', async () => {
+      const scripted = createScriptedTransport();
+      using router = createRouterClient(scripted.transport, { credential: JWT });
+      const errors = recordErrors(router);
+      const withdrawn: unknown[][] = [];
+      const notification = notificationOf([]);
+
+      router.on('credentialWithdrawn', (...told) => {
+        withdrawn.push(told);
+      });
+      await router.registerNotification(notification);
+
+      const subscribing = router.request(new Uint8Array(0), {
+        options,
+        procedure: service,
+        subscribes: notification,
+      });
+
+      // the server answered, then ended the subscription; a listen's batch brought the end first
+      scripted.emitter.emit('message', {
+        data: envelopeOf(sessionRequiredOf(1)),
+        mayOvertake: true,
+      });
+      await expect(subscribing).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        mayOvertake: true,
+      });
+      scripted.deliver(resultOf(1));
+
+      expect(withdrawn).toEqual([]);
+      expect(router.credential).toEqual(JWT);
+      expect(codesOf(errors)).toEqual([ProtocolCode.CALL_UNKNOWN]);
     });
 
     test('fails an ELSEWHERE over a transport that carries none before it goes, DESTINATION_UNREACHABLE: nothing sent, the default kept, no event', async () => {

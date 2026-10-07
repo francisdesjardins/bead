@@ -207,6 +207,20 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Takes_a_message_of_an_envelope_at_most_more_when_the_transport_says_so_and_never_less()
+    {
+        var limits = new RouterLimits { ChunkBytes = 128, MaximumEnvelopeBytes = 256, WindowBytes = 256 };
+        await using var byDefault = new WebSocketClient(new WebSocketClientOptions { Limits = limits });
+        await using var more = new WebSocketClient(new WebSocketClientOptions { Limits = limits, Transport = new WebSocketTransportClientOptions { MaximumMessageBytes = 257 } });
+
+        Assert.Equal((RouterLimits.Default.MaximumEnvelopeBytes, 256, 257), (_client.Transport.MaximumMessageBytes, byDefault.Transport.MaximumMessageBytes, more.Transport.MaximumMessageBytes));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketClient(new WebSocketClientOptions { Limits = limits, Transport = new WebSocketTransportClientOptions { MaximumMessageBytes = 255 } });
+        });
+    }
+
+    [Fact]
     public async Task Connects_disconnects_and_reconnects_through_its_transport_with_the_options_given()
     {
         var closes = Channel.CreateUnbounded<(bool WasClean, bool WasQuick)>();

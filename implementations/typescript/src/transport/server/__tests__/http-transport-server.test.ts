@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import {
   connect as connectHTTP2,
@@ -6,6 +6,7 @@ import {
   createServer as createHTTP2Server,
 } from 'node:http2';
 import { request as requestHTTPS } from 'node:https';
+import { connect as connectTcp } from 'node:net';
 import { expect, test } from '@playwright/test';
 import {
   EnvelopeKind,
@@ -582,6 +583,72 @@ test.describe('createHTTPTransportServer', () => {
     expect(namesOf(events, 'message')).toHaveLength(2);
     // the connection stays: a refusal ends its exchange alone
     expect(namesOf(events, 'close')).toEqual([]);
+  });
+
+  test('reads the Host as it came: an IDN page’s own in punycode, and one of invalid punycode taken, or refused host-refused, never a 500', async () => {
+    // the status and the mark of a connect from each `[Host, Origin]`, on a server given `hosts`
+    const answersOf = async (
+      hosts: readonly string[] | undefined,
+      connects: readonly (readonly [string, string?])[]
+    ) => {
+      await using started = await startTransport({ hosts });
+      const { port } = new URL(started.url);
+      const answers: [number, string | null][] = [];
+
+      for (const [authority, origin] of connects) {
+        const socket = connectTcp(Number(port), host);
+        let text = '';
+
+        socket.on('data', (chunk: Buffer) => {
+          text += chunk.toString('latin1');
+        });
+        await once(socket, 'connect');
+        socket.write(
+          `POST /bead HTTP/1.1\r\nHost: ${authority}\r\n` +
+            (origin === undefined ? '' : `Origin: ${origin}\r\n`) +
+            `Content-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
+        );
+        await expect
+          .poll(() => {
+            return text.includes('\r\n\r\n');
+          })
+          .toBe(true);
+        socket.destroy();
+
+        answers.push([
+          Number(text.split(' ')[1]),
+          new RegExp(`${REFUSAL_HEADER}: (.*)\r\n`, 'iu').exec(text)?.[1] ?? null,
+        ]);
+      }
+
+      return answers;
+    };
+
+    // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
+    // and a Host of punycode that decodes to none, taken where no host is named
+    const page = ['xn--bad-bma.test:8080', 'http://xn--bad-bma.test:8080'] as const;
+
+    expect(
+      await answersOf(undefined, [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
+    ).toEqual([
+      [201, null],
+      [201, null],
+      [201, null],
+      [201, null],
+    ]);
+
+    // hosts name an IDN host as the field carries it, in punycode
+    expect(
+      await answersOf(
+        ['xn--bad-bma.test:8080'],
+        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test']]
+      )
+    ).toEqual([
+      [201, null],
+      [201, null],
+      [403, REFUSALS.HOST],
+      [403, REFUSALS.HOST],
+    ]);
   });
 
   test('refuses a request on a call id already waiting, 409', async () => {

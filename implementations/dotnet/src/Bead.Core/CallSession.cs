@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 namespace Bead;
 
 /// <summary>
@@ -152,4 +155,16 @@ public sealed record SessionRequest
     /// relay's that verifies, those its destinations were registered with as the call came.
     /// </summary>
     internal IReadOnlyCollection<string>? Audiences { get; init; }
+
+    // every public member as the compiler writes it, its header's credential its scheme alone, but
+    // the transport's credential, of which whether one was carried
+    private bool PrintMembers(StringBuilder builder)
+    {
+        // ! a credential's own string reaches no log, no exception's message and no debugger (spec
+        // 15.1): whether there is one, alone
+        builder.Append(CultureInfo.CurrentCulture, $"ConnectionHandle = {ConnectionHandle}, Header = {Header}, TransportCredential = ");
+        builder.Append(TransportCredential is null ? "none" : "carried");
+
+        return true;
+    }
 }
