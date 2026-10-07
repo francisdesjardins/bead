@@ -1149,7 +1149,10 @@ that ends a subscription, in a batch, may come before the result that answered i
 (section 13.4): a request's own answer comes in its `POST`'s body alone (section 15.5), so a failure
 a batch brings for a call still waiting ends a subscription its server had answered. An outbox past
 its bound — two envelopes' worth by default — closes its connection, its client having fallen
-behind. A batch carries no credential beside its envelopes, nor does an answer: a command of the
+behind. An envelope that would take its outbox past that bound is one its transport had all the
+same, as a notification handed to it counts as sent (`debugging.md` section 10.1): it is lost with
+the connection, and a relay whose request is so lost answers leg A `DESTINATION_LOST` (section
+14.5). A batch carries no credential beside its envelopes, nor does an answer: a command of the
 server's that presents `ELSEWHERE` over HTTP fails before it goes, `DESTINATION_UNREACHABLE`.
 
 15.10. A client SHOULD listen from its connect on, asking a `wait` under the server's bound, and
