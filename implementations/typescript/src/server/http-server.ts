@@ -28,8 +28,13 @@ export type {
  * An HTTP server's layers and options: the transport's options, and the rest as a server takes them.
  */
 export interface IHTTPServerOptions<Data = unknown>
-  extends Omit<IServerLayers<HTTPTransportServer, Data>, 'transport'>, IServerOptions {
-  /** The transport's options; the largest body is the limits' envelope, which they set. */
+  extends
+    Omit<IServerLayers<HTTPTransportServer, Data>, 'transport'>,
+    Omit<IServerOptions, 'clock'> {
+  /**
+   * The transport's options; the largest body is the limits' envelope, which they set, and the
+   * clock is every layer's.
+   */
   transport: Omit<IHTTPTransportServerOptions, 'maximumBodyBytes'>;
 }
 
@@ -80,9 +85,11 @@ export const createHTTPServer = <Data = unknown>(
     },
     {
       closeOnCommandTimeout: options.closeOnCommandTimeout,
+      credentials: options.credentials,
       connectionInactivityTimeout:
         options.connectionInactivityTimeout ?? CONNECTION_INACTIVITY_TIMEOUT,
       limits,
+      metricsRegistry: options.metricsRegistry,
       pacing: options.pacing,
       relay: options.relay,
     }

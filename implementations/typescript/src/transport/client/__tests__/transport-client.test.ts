@@ -15,8 +15,10 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../transport-client';
+import * as clocks from '../../shared/clock';
 import * as constants from '../../shared/constants';
 import { createPromise } from '../../shared/create-promise';
+import { createTestClock, delaysOn, type TestClock } from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
@@ -27,13 +29,15 @@ const drop = (client: ITransportClient<object, never>): void => {
 };
 
 /** A transport with no socket: it records its calls, fails `failures` times, and opens otherwise. */
-const createStubClient = (options?: { failures?: number; hang?: boolean }) => {
+const createStubClient = (options?: { clock?: TestClock; failures?: number; hang?: boolean }) => {
   const calls: string[] = [];
   let failuresLeft = options?.failures ?? 0;
   let failureCount = 0;
 
   const client = createTransportClient<object, ITransportClientAddressOptions>((client) => {
     return {
+      clock: options?.clock,
+
       connect: (connectOptions) => {
         calls.push(`connect:${String(connectOptions.port)}`);
 
@@ -113,6 +117,11 @@ test.describe('@francisdesjardins/bead/transport-client', () => {
     ] as const) {
       expect(entry[name]).toBe(readyState[name]);
     }
+
+    expect([entry.LONGEST_TIMER, entry.PLATFORM_CLOCK]).toEqual([
+      clocks.LONGEST_TIMER,
+      clocks.PLATFORM_CLOCK,
+    ]);
   });
 });
 
@@ -127,7 +136,7 @@ test.describe('createTransportClient', () => {
     const { calls, client } = createStubClient();
 
     await client.connect(target);
-    await client.send('x');
+    await client.send({ data: 'x' });
     await client.disconnect();
     drop(client);
 
@@ -188,6 +197,24 @@ test.describe('createTransportClient', () => {
     const fresh = createStubClient();
     await fresh.client[Symbol.asyncDispose]();
     expect(fresh.calls).toEqual(['dispose']);
+  });
+
+  test('a connect refused after a close keeps the target before it, which a reconnection replays', async () => {
+    const { calls, client } = createStubClient();
+
+    await client.connect({ host: 'h', port: 7 });
+    await client.disconnect();
+    await expect(client.connect({ host: 'h', port: 8, timeout: 0.5 })).rejects.toThrow(
+      new ProgrammerError(
+        "a connect's timeout is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 0.5"
+      )
+    );
+
+    expect(client.isClosed()).toBe(true);
+
+    await client.reconnect({ delay: 0 });
+
+    expect([calls, client.isOpen()]).toEqual([['connect:7', 'disconnect', 'connect:7'], true]);
   });
 
   test('the drop leaves an open client CLOSED', async () => {
@@ -286,8 +313,9 @@ test.describe('createTransportClient #reconnect', () => {
     await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
   });
 
-  test('passes on what "tap" throws, ending CLOSED, with no attempt after it', async () => {
-    const { calls, client } = createStubClient({ failures: 2 });
+  test('passes on what "tap" throws, ending CLOSED, with no attempt after it and no wait left armed', async () => {
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 2 });
     const failure = new Error('tap_error');
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
@@ -300,7 +328,7 @@ test.describe('createTransportClient #reconnect', () => {
       })
     ).rejects.toBe(failure);
     expect(client.isClosed()).toBe(true);
-    expect(calls).toEqual(['connect:1', 'connect:1']);
+    expect([calls, delaysOn(clock)]).toEqual([['connect:1', 'connect:1'], []]);
   });
 
   test('rejects with a ProgrammerError, ending CLOSED, when "delay" throws', async () => {
@@ -348,16 +376,44 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isOpen()).toBe(true);
   });
 
-  test('waits its delay after each failed attempt, connecting once per attempt', async () => {
-    const { calls, client } = createStubClient({ failures: 2 });
+  test('waits its delay after each failed attempt on the clock its transport runs on, connecting once per attempt', async () => {
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 2 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
 
-    const started = Date.now();
-    await client.reconnect({ delay: 60 });
+    const reconnecting = client.reconnect({ delay: 60 });
 
-    expect(Date.now() - started).toBeGreaterThanOrEqual(50);
+    await expect
+      .poll(() => {
+        return delaysOn(clock);
+      })
+      .toEqual([60]);
+    await clock.tickAsync(59);
+
+    expect(calls).toEqual(['connect:1', 'connect:1']);
+
+    await clock.tickAsync(1);
+    await reconnecting;
+
     expect(calls).toEqual(['connect:1', 'connect:1', 'connect:1']);
+    expect(client.clock).toBe(clock);
+    expect(createStubClient().client.clock).toBe(clocks.PLATFORM_CLOCK);
+  });
+
+  test('arms its wait before "tap" hears it, so a tap that moves the clock by the wait lets the next attempt follow with no other move', async () => {
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 2 });
+
+    await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+    await client.reconnect({
+      delay: 60,
+      tap: (nextDelay) => {
+        clock.tick(nextDelay);
+      },
+    });
+
+    expect([calls, client.isOpen()]).toEqual([['connect:1', 'connect:1', 'connect:1'], true]);
   });
 
   test('tells "tap" the wait and the attempt that failed, and nothing when the first one succeeds', async () => {

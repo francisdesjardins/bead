@@ -7,19 +7,26 @@
 // dependencies
 
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
-import { JSON_SERIALIZER, offerInteropClient, procedureOf } from '../../../interop/offer';
+import {
+  INTEROP_SERVICE,
+  JSON_SERIALIZER,
+  offerInteropClient,
+  procedureOf,
+} from '../../../interop/offer';
 import type { FetchLike } from '../../transport/client/types';
 import { noop } from '../../transport/shared/noop';
 import { createHTTPClient, type HTTPClient } from '../http-client';
 import {
   CancelError,
   createWSClient,
+  CredentialScheme,
   FailureScope,
   ProtocolCode,
   TimeoutError,
@@ -54,6 +61,34 @@ const HOST = '127.0.0.1';
 
 /** Whether .NET answers, to build and start the C# server. */
 const HAS_DOTNET = spawnSync('dotnet', ['--version'], { stdio: 'ignore' }).status === 0;
+
+/**
+ * An access token of the interop service's HS256 issuer for `sub`, holding an hour on the platform's
+ * clock, signed with its published test key: the server verifies it with the same.
+ */
+const interopTokenOf = (sub: string): string => {
+  const key = INTEROP_SERVICE.credentials.jwt.keys.find(({ algorithm }) => {
+    return algorithm === 'HS256';
+  });
+  const part = (value: object): string => {
+    return Buffer.from(JSON.stringify(value)).toString('base64url');
+  };
+  const now = Math.floor(Date.now() / 1_000);
+  const signingInput = `${part({ alg: 'HS256', typ: 'at+jwt' })}.${part({
+    aud: INTEROP_SERVICE.credentials.jwt.audience,
+    client_id: 'bead-interop-client',
+    exp: now + 3_600,
+    iat: now,
+    iss: key?.issuer,
+    jti: 'at-interop-0001',
+    sub,
+  })}`;
+  const signature = createHmac('sha256', Buffer.from(key?.jwk.k ?? '', 'base64url'))
+    .update(signingInput)
+    .digest('base64url');
+
+  return `${signingInput}.${signature}`;
+};
 
 /** Whether the interop must run: a path to the other side gone wrong then fails, not skips. */
 const REQUIRED = process.env['BEAD_INTEROP_REQUIRED'] === '1';
@@ -224,6 +259,13 @@ test.describe('the C# server of the interop service', () => {
         });
       });
 
+      // the two codecs read each other's bytes: each side writes its members sorted, in UTF-8
+      test('a value outside ASCII, its members in another order, echoed equal', async () => {
+        const value = { z: `José ${String.fromCodePoint(0x1f600)}`, a: [1e21, 0.000001] };
+
+        await expect(requesterOf('echo')(value)()).resolves.toStrictEqual(value);
+      });
+
       test('bytes answers a string of the length asked', async () => {
         await expect(requesterOf('bytes')({ length: 1_000 })()).resolves.toBe('x'.repeat(1_000));
       });
@@ -360,6 +402,87 @@ test.describe('the C# server of the interop service', () => {
         await expect(requesterOf('whoami')(null)()).resolves.toBe('ada');
         await expect(requesterOf('logout')(null)()).resolves.toBeNull();
         expect(client.router.sessionToken).toBeUndefined();
+      });
+
+      test('a call presenting the session it learned runs in it, the session opened anew presented anew, and none presented once it ended', async () => {
+        const presenting = { credential: { scheme: CredentialScheme.OPAQUE } } as const;
+
+        await expect(requesterOf('login')({ name: 'ada' })(presenting)).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+          origin: 'local',
+        });
+        await expect(requesterOf('login')({ name: 'ada' })()).resolves.toBe('ada');
+        await expect(requesterOf('whoami')(null)(presenting)).resolves.toBe('ada');
+        await expect(requesterOf('login')({ name: 'bob' })(presenting)).resolves.toBe('bob');
+        await expect(requesterOf('whoami')(null)(presenting)).resolves.toBe('bob');
+        await expect(requesterOf('logout')(null)(presenting)).resolves.toBeNull();
+        await expect(requesterOf('whoami')(null)(presenting)).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+          origin: 'local',
+        });
+      });
+
+      test('a JWT presented by default runs in its credential’s session: whoami answers its sub, and logout is refused ACCESS_DENIED', async () => {
+        client.router.credential = { scheme: CredentialScheme.JWT, token: interopTokenOf('grace') };
+
+        await expect(requesterOf('login')({ name: 'ada' })()).resolves.toBe('ada');
+        await expect(requesterOf('whoami')(null)()).resolves.toBe('grace');
+        await expect(requesterOf('logout')(null)()).rejects.toMatchObject({
+          code: ProtocolCode.ACCESS_DENIED,
+        });
+        // the connection's session stays, a call presenting none running in it
+        await expect(
+          requesterOf('whoami')(null)({ credential: { scheme: CredentialScheme.NONE } })
+        ).resolves.toBe('ada');
+      });
+
+      test('an ELSEWHERE goes over HTTP alone, its Authorization what the verifier reads: whoami answers the sub it names; over a WebSocket it fails before it goes', async () => {
+        const whoami = requesterOf('whoami')(null)({
+          credential: { carried: 'Interop sub=ada', scheme: CredentialScheme.ELSEWHERE },
+        });
+
+        await (label === 'HTTP'
+          ? expect(whoami).resolves.toBe('ada')
+          : expect(whoami).rejects.toMatchObject({
+              code: ProtocolCode.DESTINATION_UNREACHABLE,
+              origin: 'local',
+            }));
+      });
+
+      test('login and register hold a duration as section 1.4 does: a fraction rounded, one under a millisecond or past 2³¹ − 1 refused with PROCEDURE_FAILED, nothing opened or registered', async () => {
+        const failed = { code: ProtocolCode.PROCEDURE_FAILED };
+
+        for (const refused of [
+          { name: 'ada', sessionTimeout: 0.4 },
+          { connectionTimeout: 2 ** 31, name: 'ada' },
+          { name: 'ada', sessionTimeout: -1 },
+        ]) {
+          await expect(requesterOf('login')(refused)()).rejects.toMatchObject(failed);
+        }
+
+        await expect(requesterOf('whoami')(null)()).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+        });
+        await expect(
+          requesterOf('register')({ destination: 41, timeout: 0 })()
+        ).rejects.toMatchObject(failed);
+        await expect(requesterOf('register')({ destination: 41, timeout: 1.5 })()).resolves.toBe(
+          41
+        );
+        await expect(requesterOf('unregister')(null)()).resolves.toBe(true);
+
+        // a session timeout given ends its session once past, rounded; silence counts it alone
+        await expect(
+          requesterOf('login')({
+            connectionTimeout: 2 ** 31 - 1,
+            name: 'ada',
+            sessionTimeout: 99.6,
+          })()
+        ).resolves.toBe('ada');
+        await sleep(400);
+        await expect(requesterOf('whoami')(null)()).rejects.toMatchObject({
+          code: ProtocolCode.SESSION_REQUIRED,
+        });
       });
 
       // HTTP carries no transfer: a payload is what one envelope holds

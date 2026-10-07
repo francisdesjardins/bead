@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's identities, spec/identities.json",
+  "type": "object",
+  "required": ["$comment", "specVersion", "ways", "names", "ids", "folds", "procedureKinds"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/identities.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "specVersion": { "$ref": "common.schema.json#/$defs/specVersion" },
+    "ways": {
+      "description": "The six ways a side declares, each by an id its harness keys its table by: a resolver registered on a client's router; one registered on a server's that notifies nothing, and one there that notifies; a requester made on each router; and a notification registered on a client's.",
+      "const": [
+        "client-resolver",
+        "server-resolver",
+        "server-notification-resolver",
+        "client-requester",
+        "server-requester",
+        "client-notification"
+      ]
+    },
+    "names": {
+      "description": "A procedure's name, declared at service 1, procedure 1, revision 1, and whether it is taken.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/name" }
+    },
+    "ids": {
+      "description": "A service id, a procedure id and a revision, declared under the name echo or the one given, and whether they are taken.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "folds": {
+      "description": "Two names, and whether they are one by spec 16.6.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fold" }
+    },
+    "procedureKinds": {
+      "description": "A procedure naming its kind, or none, declared each way, and the ways that take it (spec 16.11).",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/procedureKind" }
+    }
+  },
+  "$defs": {
+    "refused": {
+      "description": "The first reason of spec 16.10 that applies, derived and held by the regeneration alone; absent, the declaration is taken.",
+      "enum": ["out of its range", "off its form", "against its kind"]
+    },
+    "name": {
+      "type": "object",
+      "required": ["name", "clauses", "procedureName"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "procedureName": {
+          "description": "The procedure's name declared, any string.",
+          "type": "string"
+        },
+        "refused": { "$ref": "#/$defs/refused" },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      }
+    },
+    "id": {
+      "type": "object",
+      "required": ["name", "clauses", "serviceId", "procedureId", "serviceRevision"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "serviceId": {
+          "description": "The service id declared, any JSON value, as a value read from JSON may be."
+        },
+        "procedureId": {
+          "description": "The procedure id declared, any JSON value, as a value read from JSON may be."
+        },
+        "serviceRevision": {
+          "description": "The service's revision declared, any JSON value, as a value read from JSON may be."
+        },
+        "procedureName": {
+          "description": "The procedure's name declared, where it is not echo.",
+          "type": "string"
+        },
+        "refused": { "$ref": "#/$defs/refused" },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      }
+    },
+    "fold": {
+      "type": "object",
+      "required": ["name", "clauses", "names", "one"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "names": {
+          "description": "Two names, any strings.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "string" }
+        },
+        "one": {
+          "description": "Whether the two are one name: equal once each ASCII upper-case letter is read as its lower-case one, and nothing else changed.",
+          "type": "boolean"
+        }
+      }
+    },
+    "procedureKind": {
+      "type": "object",
+      "required": ["name", "clauses"],
+      "additionalProperties": false,
+      "dependentRequired": { "refusedAt": ["refused"] },
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "procedureKind": {
+          "description": "The procedure's kind, how it is called (spec 16.11); absent, it names no kind.",
+          "enum": ["request", "notifies", "command"]
+        },
+        "serviceId": {
+          "description": "The service id declared, where it is not 1.",
+          "type": "integer"
+        },
+        "procedureName": {
+          "description": "The procedure's name declared, where it is not echo.",
+          "type": "string"
+        },
+        "refused": { "$ref": "#/$defs/refused" },
+        "refusedAt": {
+          "description": "The ways that refuse it, where others take it; absent, refused applies at every way.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "client-resolver",
+              "server-resolver",
+              "server-notification-resolver",
+              "client-requester",
+              "server-requester",
+              "client-notification"
+            ]
+          }
+        },
+        "differs": { "$ref": "common.schema.json#/$defs/differs" }
+      }
+    }
+  }
+}

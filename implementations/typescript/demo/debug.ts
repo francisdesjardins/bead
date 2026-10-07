@@ -182,11 +182,11 @@ export const watchDebug = (client: IClient, { quiet }: { quiet: readonly IProced
   };
 
   const onCall = filterDebug((error: unknown, event: IDebugEvent) => {
-    const { direction, procedureName, rx, timestamp, tx, type } = event;
+    const { direction, duration, procedureName, rx, tx, type } = event;
 
     if (!quietNames.has(procedureName)) {
       write(`bead ${direction} ${type} ${procedureName}`, {
-        duration: timestamp.duration,
+        duration,
         error,
         rx,
         tx,

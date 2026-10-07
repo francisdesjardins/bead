@@ -10,7 +10,8 @@ public sealed class ReceivingTransfersTests
 {
     // helpers
 
-    // receiving transfers under limits, chunks of a byte at least, which record each credit they send
+    // receiving transfers under limits, their chunks before the last of a byte, exactly, which record
+    // each credit they send
     private static (List<string> Credits, ReceivingTransfers Receiving, FakeTimeProvider Time) ReceivingOf(RouterLimits limits)
     {
         var credits = new List<string>();
@@ -27,7 +28,7 @@ public sealed class ReceivingTransfersTests
             {
                 credits.Add($"{call.ConnectionHandle} {call.CallId} {creditEnd}");
             },
-            Time = time,
+            Clock = time,
         });
 
         return (credits, receiving, time);
@@ -135,7 +136,8 @@ public sealed class ReceivingTransfersTests
         var opened = OpenedOf(receiving.Open(new byte[] { 1, 2 }, (CallOf(1, "a"), null, 4)));
 
         receiving.Grant(opened);
-        Assert.Equal(ChunkOutcome.Complete, receiving.Place(opened, new Chunk(new byte[] { 3, 4 }, true, 2)).Outcome);
+        Assert.Equal(ChunkOutcome.Placed, receiving.Place(opened, new Chunk(new byte[] { 3 }, false, 2)).Outcome);
+        Assert.Equal(ChunkOutcome.Complete, receiving.Place(opened, new Chunk(new byte[] { 4 }, true, 3)).Outcome);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, receiving.Complete(opened).ToArray());
         Assert.Equal(100, receiving.Available);
 
@@ -156,18 +158,18 @@ public sealed class ReceivingTransfersTests
     [Fact]
     public void Grants_a_transfer_the_budget_starved_once_another_gives_its_bytes_back()
     {
-        var (credits, receiving, _) = ReceivingOf(LimitsOf() with { BufferedBytesBudget = 20, MaximumPayloadBytes = 20 });
+        var (credits, receiving, _) = ReceivingOf(LimitsOf() with { BufferedBytesBudget = 21, MaximumPayloadBytes = 20 });
         var first = OpenedOf(receiving.Open(new byte[4], (CallOf(1, "a"), null, 20)));
 
         receiving.Grant(first);
 
-        var second = OpenedOf(receiving.Open(ReadOnlyMemory<byte>.Empty, (CallOf(1, "b"), null, 20)));
+        var second = OpenedOf(receiving.Open(new byte[1], (CallOf(1, "b"), null, 20)));
 
         receiving.Grant(second);
         Assert.Equal(["a 1 20"], credits);
         Assert.Equal(0, receiving.Available);
         receiving.Close(first);
-        Assert.Equal(["a 1 20", "b 1 16"], credits);
+        Assert.Equal(["a 1 20", "b 1 17"], credits);
         Assert.Equal(4, receiving.Available);
     }
 
@@ -263,7 +265,7 @@ public sealed class ReceivingTransfersTests
             SendCredit = (_, _) =>
             {
             },
-            Time = time,
+            Clock = time,
         });
         var stalled = 0;
         var opened = OpenedOf(receiving.Open(new byte[1], (CallOf(1, "a"), () =>

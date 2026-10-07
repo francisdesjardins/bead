@@ -5,7 +5,7 @@ export const CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT = 'connectionInactivity
 export const CREATED_EVENT = 'created';
 export const DATA_CHANGED_EVENT = 'dataChanged';
 export const DELETED_EVENT = 'deleted';
-export const LAST_ACTIVITY_TIMESTAMP_CHANGED_EVENT = 'lastActivityTimestampChanged';
+export const LAST_ACTIVITY_CHANGED_EVENT = 'lastActivityChanged';
 export const SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT = 'sessionInactivityTimeoutChanged';
 export const SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT = 'sessionInactivityTimeoutReached';
 export const UPDATED_EVENT = 'updated';
@@ -19,7 +19,7 @@ export type CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT =
 export type CREATED_EVENT = typeof CREATED_EVENT;
 export type DATA_CHANGED_EVENT = typeof DATA_CHANGED_EVENT;
 export type DELETED_EVENT = typeof DELETED_EVENT;
-export type LAST_ACTIVITY_TIMESTAMP_CHANGED_EVENT = typeof LAST_ACTIVITY_TIMESTAMP_CHANGED_EVENT;
+export type LAST_ACTIVITY_CHANGED_EVENT = typeof LAST_ACTIVITY_CHANGED_EVENT;
 export type SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT =
   typeof SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT;
 export type SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT =

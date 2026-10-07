@@ -1,15 +1,18 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
-import { CLIENT_FAILURES, SERVER_FAILURES } from '../constants';
+import { CLIENT_FAILURES, CredentialScheme, SERVER_FAILURES } from '../constants';
 import { FailureError } from '../errors';
 import { headerBytesOf, readHeader, readPrefix, writeHeader } from '../header';
-import type { EnvelopeHeader, SessionToken } from '../types';
+import type { Credential, EnvelopeHeader, SessionToken } from '../types';
 import { fromHexadecimal, VECTORS } from './vectors';
 
 // helpers
 
 // 00 01 02 … 0f, as a token
 const TOKEN = 'AAECAwQFBgcICQoLDA0ODw' as SessionToken;
+// 16 zero bytes, which no token is
+const ZERO_TOKEN = 'AAAAAAAAAAAAAAAAAAAAAA' as SessionToken;
+const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 
 /** The failure `read` throws, for its code and its side. */
 const failureOf = (read: () => unknown): FailureError => {
@@ -27,6 +30,9 @@ const failureOf = (read: () => unknown): FailureError => {
 };
 
 // definition
+
+// the vectors play once, as the C# side plays them: a retry would hide what fails there
+test.describe.configure({ retries: 0 });
 
 test.describe('writeHeader and readHeader', () => {
   for (const { bytes, header, name } of VECTORS.headers) {
@@ -52,18 +58,20 @@ test.describe('writeHeader and readHeader', () => {
       [
         request,
         { ...request, destinationId: 1 },
-        { ...request, sessionToken: TOKEN },
-        { ...request, destinationId: 1, sessionToken: TOKEN },
+        { ...request, credential: OPAQUE },
+        { ...request, credential: OPAQUE, destinationId: 1 },
+        { ...request, credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } },
+        { ...request, credential: { scheme: CredentialScheme.ELSEWHERE } },
       ].map(headerBytesOf)
-    ).toEqual([12, 16, 28, 32]);
+    ).toEqual([12, 16, 32, 36, 24, 16]);
     expect(
       [
         result,
-        { ...result, sessionToken: TOKEN },
+        { ...result, credential: OPAQUE },
         { ...result, total: 4_096 },
-        { ...result, sessionToken: null, total: 4_096 },
+        { ...result, credential: { scheme: CredentialScheme.NONE }, total: 4_096 },
       ].map(headerBytesOf)
-    ).toEqual([8, 24, 16, 32]);
+    ).toEqual([8, 28, 16, 20]);
     expect(headerBytesOf({ callId: 1, kind: 0x13 })).toBe(8);
     expect(headerBytesOf({ callId: 1, kind: 0x16 })).toBe(8);
   });
@@ -201,36 +209,110 @@ test.describe('writeHeader', () => {
     expect(bytes).toEqual(new Uint8Array(16));
   });
 
-  test('refuses a token that is not one, and the end of a session on a request', () => {
-    const bytes = new Uint8Array(32);
+  test('refuses a credential its kind does not take, or its scheme does not hold', () => {
+    // room for any header, so what is refused is the header, never the room
+    const bytes = new Uint8Array(1_024);
+    const requestOf = (credential: unknown): EnvelopeHeader => {
+      return { callId: 1, credential, kind: 0x10, procedureId: 1, serviceId: 1 } as EnvelopeHeader;
+    };
 
-    for (const sessionToken of [
-      '',
-      'AAECAwQFBgcICQoLDA0OD',
-      'AAECAwQFBgcICQoLDA0ODx',
-      'AAAAAAAAAAAAAAAAAAAAAA',
-    ]) {
+    // a token that is no session token's 16 bytes in base64url, which the C# side's types rule out
+    for (const token of ['', 'AAECAwQFBgcICQoLDA0OD', 'AAECAwQFBgcICQoLDA0ODx']) {
       expect(() => {
         return writeHeader(
-          { callId: 2, kind: 0x11, sessionToken: sessionToken as SessionToken },
+          {
+            callId: 2,
+            credential: { scheme: CredentialScheme.OPAQUE, token: token as SessionToken },
+            kind: 0x11,
+          },
           bytes
         );
-      }).toThrow(ProgrammerError);
+      }, token).toThrow(ProgrammerError);
     }
 
-    expect(() => {
-      return writeHeader(
+    for (const [name, header] of [
+      [
+        'an OPAQUE token of 16 zero bytes on a request',
+        requestOf({ scheme: CredentialScheme.OPAQUE, token: ZERO_TOKEN }),
+      ],
+      [
+        'an OPAQUE token of 16 zero bytes on a result',
         {
-          callId: 1,
-          kind: 0x10,
-          procedureId: 1,
-          serviceId: 1,
-          sessionToken: null as unknown as SessionToken,
+          callId: 2,
+          credential: { scheme: CredentialScheme.OPAQUE, token: ZERO_TOKEN },
+          kind: 0x11,
         },
-        bytes
-      );
-    }).toThrow(ProgrammerError);
-    expect(bytes).toEqual(new Uint8Array(32));
+      ],
+      ['NONE on a request', requestOf({ scheme: CredentialScheme.NONE })],
+      [
+        'a JWT on a result',
+        { callId: 2, credential: { scheme: CredentialScheme.JWT, token: 'a' }, kind: 0x11 },
+      ],
+      [
+        'ELSEWHERE on a failure',
+        { callId: 2, credential: { scheme: CredentialScheme.ELSEWHERE }, kind: 0x12 },
+      ],
+      [
+        'a scheme to come on a result',
+        { callId: 2, credential: { bytes: new Uint8Array(0), scheme: 4 }, kind: 0x11 },
+      ],
+      ['a JWT of no character', requestOf({ scheme: CredentialScheme.JWT, token: '' })],
+      [
+        'a JWT of a character past U+00FF',
+        requestOf({ scheme: CredentialScheme.JWT, token: 'a\u0100' }),
+      ],
+      [
+        'a JWT of 1,005 characters',
+        requestOf({ scheme: CredentialScheme.JWT, token: 'a'.repeat(1_005) }),
+      ],
+      // from here, what the C# side's types rule out: its twin says how
+      [
+        'bytes beside ELSEWHERE',
+        requestOf({ bytes: new Uint8Array(4), scheme: CredentialScheme.ELSEWHERE }),
+      ],
+      ['a scheme to come without its bytes', requestOf({ scheme: 4 })],
+      ['a scheme past 65535', requestOf({ bytes: new Uint8Array(0), scheme: 0x10000 })],
+      ['a scheme that is no integer', requestOf({ bytes: new Uint8Array(0), scheme: 4.5 })],
+      ['no credential at all', requestOf(null)],
+    ] as const) {
+      expect(() => {
+        return writeHeader(header as EnvelopeHeader, bytes);
+      }, name).toThrow(ProgrammerError);
+      expect(() => {
+        return headerBytesOf(header as EnvelopeHeader);
+      }, name).toThrow(ProgrammerError);
+    }
+
+    expect(bytes).toEqual(new Uint8Array(1_024));
+  });
+
+  test('reads a JWT byte 0xE9 as U+00E9, and writes it back as the same byte', () => {
+    const bytes = fromHexadecimal(
+      'A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  E9 00 00 00'
+    );
+    const header: EnvelopeHeader = {
+      callId: 3,
+      credential: { scheme: CredentialScheme.JWT, token: '\u00e9' },
+      kind: 0x10,
+      procedureId: 1,
+      serviceId: 2,
+    };
+    const written = new Uint8Array(bytes.length);
+
+    expect(readHeader(bytes, SERVER_FAILURES)).toEqual({ header, headerBytes: bytes.length });
+    expect(writeHeader(header, written)).toBe(bytes.length);
+    expect(written).toEqual(bytes);
+  });
+
+  test('writes the padding over whatever the bytes held', () => {
+    const credential: Credential = { scheme: CredentialScheme.JWT, token: 'a' };
+    const bytes = new Uint8Array(20).fill(0xff);
+
+    writeHeader({ callId: 3, credential, kind: 0x10, procedureId: 1, serviceId: 2 }, bytes);
+
+    expect(bytes).toEqual(
+      fromHexadecimal('A1 10 08 05  00 00 00 03  00 02 00 01  00 02 00 01  61 00 00 00')
+    );
   });
 
   test('carries a 64-bit field whole, its high word first, from 0 to 2⁵³ − 1', () => {
@@ -306,8 +388,8 @@ test.describe('writeHeader', () => {
     }).toThrow(ProgrammerError);
     expect(() => {
       return writeHeader(
-        { callId: 1, kind: 0x16, sessionToken: TOKEN } as EnvelopeHeader,
-        new Uint8Array(24)
+        { callId: 1, credential: OPAQUE, kind: 0x16 } as EnvelopeHeader,
+        new Uint8Array(28)
       );
     }).toThrow(ProgrammerError);
     expect(() => {

@@ -12,6 +12,14 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <!-- the proto rows of the codecs, read and written by the platform's stock library and the code its generator writes -->
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the fixed message of the proto rows, Bead.Codecs.V1.Probe, generated as each build runs -->
+    <Protobuf Include="../../../../spec/codecs.proto" ProtoRoot="../../../../spec" GrpcServices="None" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,8 +32,21 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- the conformance vectors and the conversations: the files both implementations' tests read -->
+    <!-- the conformance vectors, the conversations, the clock cases, the durations, the debug filters, the metrics, the identities and the codecs: the files both implementations' tests read -->
     <Content Include="../../../../spec/vectors.json" Link="vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../../spec/conversations.json" Link="conversations.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/clocks.json" Link="clocks.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/durations.json" Link="durations.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/debug-filters.json" Link="debug-filters.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/metrics.json" Link="metrics.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/identities.json" Link="identities.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/codecs.json" Link="codecs.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the clock the conformance files' harnesses give the side under test, shared with the transports' -->
+    <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
+    <!-- what reads the durations, for the twins of the assertions that hold them -->
+    <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
   </ItemGroup>
 </Project>

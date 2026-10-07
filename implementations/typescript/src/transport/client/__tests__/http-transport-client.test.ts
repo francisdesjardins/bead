@@ -1,5 +1,4 @@
 import { createServer } from 'node:http';
-import { setImmediate as nextTurn } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import {
   createHTTPTransportServer,
@@ -14,8 +13,7 @@ import {
   ReadyStateError,
   TimeoutError,
 } from '../../shared/errors';
-import { spyTimers } from '../../../router/shared/__tests__/fixtures';
-import { tcpSocketsClosed } from '../../shared/__tests__/fixtures';
+import { createTestClock, tcpSocketsClosed, timersUntil } from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -34,12 +32,16 @@ import {
   type IHTTPTransportClientOptions,
 } from '../http-transport-client';
 import { dispose } from '../transport-client';
+import type { ITransportMessage } from '../../shared/types';
 import type { ITransportClientInternal } from '../types';
 import { createFakeFetch, responseOf } from './fake-fetch';
 
 // helpers
 
 const host = '127.0.0.1';
+
+/** A bearer credential, RFC 6750's own example, its auth-scheme included. */
+const BEARER = 'Bearer mF_9.B5f-4.1JqM';
 
 /** An envelope as the transports read it: its layout, its kind, its call id, and `extra` bytes. */
 const envelopeOf = (kind: number, { callId, extra = 0 }: { callId: number; extra?: number }) => {
@@ -79,10 +81,27 @@ const startServer = async () => {
 
 const nextEvent = (client: HTTPTransportClient, event: 'close' | 'message') => {
   return new Promise<unknown[]>((resolve) => {
-    client.once(event, (...params: unknown[]) => {
+    client.once(event, (...params) => {
       resolve(params);
     });
   });
+};
+
+/**
+ * Whether a client carries a credential, and is secure, once a connect to `target` was tried — the
+ * judgement made from the URL it was given, the network down.
+ */
+const judgedOf = async (target: { host: string; secured?: boolean }) => {
+  const client = createHTTPTransportClient({
+    fetch: () => {
+      return Promise.reject(new Error('the network is down'));
+    },
+    isListening: false,
+  });
+
+  await client.connect({ ...target, port: 8_080 }).catch(() => {});
+
+  return [client.carriesCredential, client.isSecure];
 };
 
 const handleOf = (server: HTTPTransportServer) => {
@@ -106,6 +125,29 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test.describe('createHTTPTransportClient, what it carries', () => {
+  test('carries a credential beside an envelope, in its POST’s Authorization, and is secure under https or to a loopback host, judged by the URL it was given', async () => {
+    expect(createHTTPTransportClient().isSecure).toBe(false);
+    expect(
+      await Promise.all([
+        judgedOf({ host: 'bead.example', secured: true }),
+        judgedOf({ host: 'localhost' }),
+        judgedOf({ host: '127.0.0.1' }),
+        judgedOf({ host: '::1' }),
+        judgedOf({ host: 'bead.example' }),
+        judgedOf({ host: '192.0.2.1' }),
+      ])
+    ).toEqual([
+      [true, true],
+      [true, true],
+      [true, true],
+      [true, true],
+      [true, false],
+      [true, false],
+    ]);
+  });
+});
+
 test.describe('createHTTPTransportClient', () => {
   test.afterAll(async () => {
     await tcpSocketsClosed();
@@ -117,7 +159,7 @@ test.describe('createHTTPTransportClient', () => {
     const client = createHTTPTransportClient({ isListening: false });
     const heard: unknown[] = [];
 
-    client.on('message', (data) => {
+    client.on('message', ({ data }) => {
       heard.push([...new Uint8Array(data as ArrayBuffer)]);
     });
     await client.connect({ host, port });
@@ -127,19 +169,22 @@ test.describe('createHTTPTransportClient', () => {
     expect(JSON.stringify(client.socket)).not.toContain(CONNECTION_TOKEN_HEADER);
 
     // settled once the server has it, before any answer
-    await client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    await client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     expect(heard).toEqual([]);
 
     const message = nextEvent(client, 'message');
 
-    await server.send(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 }), handleOf(server));
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 }) },
+      handleOf(server)
+    );
     await message;
 
     expect(heard).toEqual([[...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 2 })]]);
 
     // a cancel ends empty: nothing is heard
-    await client.send(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }));
+    await client.send({ data: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }) });
     await client.disconnect();
 
     expect(heard).toHaveLength(1);
@@ -152,11 +197,69 @@ test.describe('createHTTPTransportClient', () => {
     await client.connect({ host, port: started.port });
 
     // a request on the server's own parity
-    await expect(client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 2 }))).rejects.toThrow(
-      new GenericError('the server refused the exchange: 400 malformed')
-    );
+    await expect(
+      client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 2 }) })
+    ).rejects.toThrow(new GenericError('the server refused the exchange: 400 malformed'));
     expect(client.isOpen()).toBe(true);
     await client.disconnect();
+  });
+
+  test('carries its credential in the Authorization of its POST, which the server hands on with the request, and hears the answer with none', async () => {
+    await using started = await startServer();
+    const { port, server } = started;
+    const client = createHTTPTransportClient({ isListening: false });
+    const taken: unknown[] = [];
+
+    server.on('message', ({ credential }, connectionHandle) => {
+      taken.push(credential);
+      void server.send(
+        { credential: BEARER, data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) },
+        connectionHandle
+      );
+    });
+    await client.connect({ host, port });
+
+    const message = nextEvent(client, 'message');
+
+    await client.send({
+      credential: BEARER,
+      data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+    });
+
+    const [{ credential }] = (await message) as [ITransportMessage];
+
+    expect([taken, credential]).toEqual([[BEARER], undefined]);
+    await client.disconnect();
+  });
+
+  test('writes Authorization only with a credential, and refuses one no field carries before it goes, its connection kept', async () => {
+    const { client, fake } = await connectFake();
+    const carrying = client.send({
+      credential: BEARER,
+      data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+    });
+
+    fake.calls[1]?.answer({ status: 204 });
+    await carrying;
+
+    const bare = client.send({ data: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }) });
+
+    fake.calls[2]?.answer({ status: 204 });
+    await bare;
+
+    expect(fake.calls[1]?.init.headers).toMatchObject({ authorization: BEARER });
+    expect(fake.calls[2]?.init.headers).not.toHaveProperty('authorization');
+
+    for (const credential of ['Bearer a\r\nb', 'Bearer é', 'Bearer \u0000']) {
+      await expect(
+        client.send({ credential, data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) }),
+        JSON.stringify(credential)
+      ).rejects.toThrow(
+        new ProgrammerError('a credential holds visible ASCII, spaces and tabs alone')
+      );
+    }
+
+    expect([fake.calls.length, client.isOpen()]).toEqual([3, true]);
   });
 
   test('disconnects by a DELETE, the server closing first, and closes clean', async () => {
@@ -176,7 +279,7 @@ test.describe('createHTTPTransportClient', () => {
     expect(client.isClosed()).toBe(true);
     expect(client.socket).toBeNull();
     await expect(client.disconnect()).rejects.toBeInstanceOf(ReadyStateError);
-    await expect(client.send(new Uint8Array(8))).rejects.toBeInstanceOf(ReadyStateError);
+    await expect(client.send({ data: new Uint8Array(8) })).rejects.toBeInstanceOf(ReadyStateError);
   });
 
   test('closes once the server says the connection is gone, after rejecting the exchange that learned it', async () => {
@@ -192,7 +295,7 @@ test.describe('createHTTPTransportClient', () => {
     await server.close(handleOf(server));
 
     await client
-      .send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }))
+      .send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
       .catch((reason: unknown) => {
         order.push(`rejected ${(reason as Error).message}`);
       });
@@ -210,7 +313,7 @@ test.describe('createHTTPTransportClient', () => {
   test('closes, and tells the server, when the server is lost under an exchange, which counts as handed over', async () => {
     const { client, fake } = await connectFake();
     const closed = nextEvent(client, 'close');
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     fake.calls[1]?.fail();
 
@@ -231,7 +334,7 @@ test.describe('createHTTPTransportClient', () => {
     for (const status of [404, 502, 504]) {
       const { client, fake } = await connectFake();
       const closed = nextEvent(client, 'close');
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ status });
 
@@ -244,7 +347,7 @@ test.describe('createHTTPTransportClient', () => {
 
   test('rejects a refusal the server marked, and keeps its connection', async () => {
     const { client, fake } = await connectFake();
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     fake.calls[1]?.answer({ headers: { [REFUSAL_HEADER]: 'busy' }, status: 429 });
 
@@ -275,13 +378,13 @@ test.describe('createHTTPTransportClient', () => {
         status: 201,
       });
       await connecting;
-      client.on('message', (data) => {
+      client.on('message', ({ data }) => {
         heard.push(data);
       });
 
       const closed = nextEvent(client, 'close');
 
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ ...answer, status: 200 });
       await sending;
@@ -320,14 +423,14 @@ test.describe('createHTTPTransportClient', () => {
         status: 201,
       });
       await connecting;
-      client.on('message', (data) => {
+      client.on('message', ({ data }) => {
         heard.push(new Uint8Array(data as ArrayBuffer)[0] ?? 0);
       });
       client.on('close', () => {
         isClosed = true;
       });
 
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ ...answer, status: 200 });
       await sending;
@@ -345,25 +448,25 @@ test.describe('createHTTPTransportClient', () => {
     const { client, fake } = await connectFake();
     const heard: unknown[] = [];
 
-    client.on('message', (data) => {
+    client.on('message', ({ data }) => {
       heard.push(data);
     });
 
     // cancelled: its exchange ends with no body
-    const cancelled = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const cancelled = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     fake.calls[1]?.answer({ headers: { 'content-type': BEAD_MEDIA_TYPE }, status: 200 });
     await cancelled;
 
     const { promise: later, resolve: bodyCame } = Promise.withResolvers<Uint8Array>();
-    const coming = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }));
+    const coming = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) });
 
     fake.calls[2]?.answer({ headers: { 'content-type': BEAD_MEDIA_TYPE }, later, status: 200 });
     await coming;
 
     // another exchange lost: the connection goes, and the answer still coming with it
     const closed = nextEvent(client, 'close');
-    const lost = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 }));
+    const lost = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 }) });
 
     fake.calls[3]?.fail();
     await lost;
@@ -389,7 +492,7 @@ test.describe('createHTTPTransportClient', () => {
     };
 
     try {
-      const sent = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sent = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({
         body: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }),
@@ -419,8 +522,8 @@ test.describe('createHTTPTransportClient', () => {
       closes.push(params);
     });
 
-    const first = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
-    const second = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }));
+    const first = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+    const second = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) });
 
     fake.calls[1]?.fail();
     fake.calls[2]?.fail();
@@ -434,7 +537,7 @@ test.describe('createHTTPTransportClient', () => {
 
     const told = await connectFake();
     const closed = nextEvent(told.client, 'close');
-    const refused = told.client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const refused = told.client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     told.fake.calls[1]?.answer({
       headers: { [REFUSAL_HEADER]: CONNECTION_UNKNOWN },
@@ -457,7 +560,7 @@ test.describe('createHTTPTransportClient', () => {
     ]) {
       const { client, fake } = await connectFake();
       const closed = nextEvent(client, 'close');
-      const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
       fake.calls[1]?.answer({ ...answer, status: 200 });
       await sending;
@@ -509,6 +612,29 @@ test.describe('createHTTPTransportClient', () => {
     expect([connected.isClosed(), delays]).toEqual([true, [DISCONNECT_TIMEOUT]]);
   });
 
+  test('bounds its disconnect on the real clock, whatever its own: a server that never answers the DELETE is let go once DISCONNECT_TIMEOUT has passed', async () => {
+    // played in real time, as a platform's own bound is: no clock given moves it
+    test.setTimeout(DISCONNECT_TIMEOUT * 4);
+
+    const clock = createTestClock();
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+    const connecting = client.connect({ host, port: 8_080 });
+
+    fake.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    await connecting;
+
+    const started = performance.now();
+    const { armed } = await timersUntil(clock, () => {
+      return client.disconnect();
+    });
+
+    expect(fake.calls[1]?.init.method).toBe('DELETE');
+    expect(fake.calls[1]?.init.signal?.aborted).toBe(true);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(DISCONNECT_TIMEOUT - 50);
+    expect([client.isClosed(), armed]).toEqual([true, []]);
+  });
+
   test('settles its send on the head of the answer, before its body is in, and hears the answer once it is', async () => {
     const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
     const { promise: later, resolve: bodyCame } = Promise.withResolvers<Uint8Array>();
@@ -523,9 +649,11 @@ test.describe('createHTTPTransportClient', () => {
       heard.push('message');
     });
 
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })).then(() => {
-      heard.push('settled');
-    });
+    const sending = client
+      .send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+      .then(() => {
+        heard.push('settled');
+      });
 
     heard.push('sent');
     await sending;
@@ -594,7 +722,7 @@ test.describe('createHTTPTransportClient', () => {
 
   test('a drop aborts what is in flight, tells the server, and a dispose while connecting rejects the connect', async () => {
     const { client, fake } = await connectFake();
-    const sending = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     (client as ITransportClientInternal<object, never>)[dispose]();
 
@@ -668,7 +796,7 @@ const connectListening = async (options?: Partial<IHTTPTransportClientOptions>) 
     status: 201,
   });
   await connecting;
-  client.on('message', (data) => {
+  client.on('message', ({ data }) => {
     heard.push([...new Uint8Array(data as ArrayBuffer)]);
   });
 
@@ -737,75 +865,26 @@ const methodsOf = (fake: ReturnType<typeof createFakeFetch>) => {
 const closesOf = (client: HTTPTransportClient) => {
   const closes: unknown[][] = [];
 
-  client.on('close', (...params: unknown[]) => {
+  client.on('close', (...params) => {
     closes.push(params);
   });
 
   return closes;
 };
 
-interface IClockTimer {
-  readonly at: number;
-  readonly fire: () => void;
-}
-
 /**
- * The timers armed from now on, on a clock of the test's own that only `advance` moves: it fires, in
- * order, each timer due by then, a turn after each so what it set going settles. Real time fires
- * none, so a loaded machine changes nothing of what a test sees. `isHasty` ends each timer a
- * millisecond before it is due, as a timer can against a clock read on a loaded machine.
+ * A test clock whose timers end a millisecond before they are due, as a timer can against a clock
+ * read on a loaded machine.
  */
-const clockOf = ({ isHasty = false }: { isHasty?: boolean } = {}) => {
-  const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
-  const timers = new Map<number, IClockTimer>();
-  let now = 0;
-  let lastId = 0;
+const hastyClockOf = () => {
+  const clock = createTestClock();
+  const { setTimeout: onTime } = clock;
 
-  // the timer due first by `until`; of those due together, the first armed
-  const dueBy = (until: number): [number, IClockTimer] | undefined => {
-    let due: [number, IClockTimer] | undefined;
-
-    for (const entry of timers) {
-      if (entry[1].at <= until && (due === undefined || entry[1].at < due[1].at)) {
-        due = entry;
-      }
-    }
-
-    return due;
+  clock.setTimeout = (callback, delay = 0) => {
+    return onTime(callback, delay > 0 ? delay - 1 : delay);
   };
 
-  globalThis.setTimeout = ((fire: () => void, delay = 0) => {
-    lastId += 1;
-    timers.set(lastId, { at: now + (isHasty && delay > 0 ? delay - 1 : delay), fire });
-
-    return lastId;
-  }) as unknown as typeof realSet;
-  globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-    timers.delete(timeoutId as unknown as number);
-  };
-
-  return {
-    advance: async (by: number) => {
-      const until = now + by;
-
-      await nextTurn();
-
-      for (let due = dueBy(until); due !== undefined; due = dueBy(until)) {
-        const [timeoutId, { at, fire }] = due;
-
-        timers.delete(timeoutId);
-        now = at;
-        fire();
-        await nextTurn();
-      }
-
-      now = until;
-    },
-    restore: () => {
-      globalThis.setTimeout = realSet;
-      globalThis.clearTimeout = realClear;
-    },
-  };
+  return clock;
 };
 
 test.describe('createHTTPTransportClient, listening', () => {
@@ -813,6 +892,12 @@ test.describe('createHTTPTransportClient, listening', () => {
     const { callOf, client, fake, heard } = await connectListening({ wait: 1_000 });
     const first = envelopeOf(0x13, { callId: 1 });
     const second = envelopeOf(0x10, { callId: 2, extra: 2 });
+    const credentials: unknown[] = [];
+
+    // what a listen brings back carries no credential
+    client.on('message', ({ credential }) => {
+      credentials.push(credential);
+    });
 
     expect(fake.calls[0]?.init.headers).toMatchObject({ [LISTEN_HEADER]: '?1' });
     expect([(await callOf(1))?.url, (await callOf(1))?.init]).toMatchObject([
@@ -823,7 +908,10 @@ test.describe('createHTTPTransportClient, listening', () => {
     (await callOf(1))?.answer(batch(1, first, second));
 
     expect((await callOf(2))?.url).toContain('?after=2&');
-    expect(heard).toEqual([[...first], [...second]]);
+    expect([heard, credentials]).toEqual([
+      [[...first], [...second]],
+      [undefined, undefined],
+    ]);
 
     // nothing, and it listens again at the same point
     (await callOf(2))?.answer({ status: 204 });
@@ -834,79 +922,129 @@ test.describe('createHTTPTransportClient, listening', () => {
     expect(WAIT).toBe(25_000);
   });
 
-  test('listens again from where it was when a listen is lost — at once, then later and later, drawn apart — and one that reaches the server ends the losses', async () => {
-    const { callOf, client, fake, heard } = await connectListening();
-    const tick = globalThis.setTimeout;
-    const settle = () => {
-      return new Promise((resolve) => {
-        tick(resolve, 5);
+  test('marks what a listen brings back as what may overtake, and never what a POST’s body brings', async () => {
+    const { client, fake } = await connectListening({ wait: 1_000 });
+    const marks: unknown[] = [];
+    const callBy = async (method: string) => {
+      await expect
+        .poll(() => {
+          return fake.calls.slice(1).some(({ init }) => {
+            return init.method === method;
+          });
+        })
+        .toBe(true);
+
+      return fake.calls.slice(1).find(({ init }) => {
+        return init.method === method;
       });
     };
-    const { random } = Math;
-    // the first listen, before the timers are watched: `expect.poll` arms its own
-    const first = await callOf(1);
-    const { armed, restore } = spyTimers();
-    const envelope = envelopeOf(0x13, { callId: 1 });
 
-    // each drawn at half of what it may be
-    Math.random = () => {
-      return 0;
+    client.on('message', ({ mayOvertake }) => {
+      marks.push(mayOvertake);
+    });
+
+    const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+
+    (await callBy('POST'))?.answer({
+      body: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }),
+      headers: { 'content-type': BEAD_MEDIA_TYPE },
+      status: 200,
+    });
+    await sending;
+    await expect
+      .poll(() => {
+        return marks.length;
+      })
+      .toBe(1);
+    (await callBy('GET'))?.answer(batch(1, envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 })));
+    await expect
+      .poll(() => {
+        return marks.length;
+      })
+      .toBe(2);
+
+    expect(marks).toEqual([undefined, true]);
+    await client.disconnect({ isQuick: true });
+  });
+
+  test('listens again from where it was when a listen is lost — at once, then later and later, drawn apart — and one that reaches the server ends the losses', async () => {
+    const clock = createTestClock();
+    const { callOf, client, fake, heard } = await connectListening({ clock });
+    // what the connect armed, its timeout, stays out of what the listens arm
+    const connected = clock.armed.length;
+    const first = await callOf(1);
+    const envelope = envelopeOf(0x13, { callId: 1 });
+    // each wait drawn between half of what it may be and all of it: short of its half, no listen;
+    // at all of it, the next
+    const waitOut = async (wait: number) => {
+      const calls = fake.calls.length;
+
+      await clock.tickAsync(wait / 2 - 1);
+
+      expect(fake.calls.length).toBe(calls);
+
+      await clock.tickAsync(wait / 2 + 1);
+      await callOf(calls);
     };
 
-    try {
-      first?.fail();
-      await settle();
+    first?.fail();
+    await callOf(2);
 
-      for (let losses = 2; losses <= 8; losses += 1) {
-        // a batch cut before anything came whole is a loss as well
-        if (losses === 3) {
-          fake.calls.at(-1)?.answer({ ...batch(1, envelope), isBodyLost: true });
-        } else {
-          fake.calls.at(-1)?.fail();
-        }
-
-        await settle();
-        armed.at(-1)?.fire();
-        await settle();
+    for (const [losses, wait] of [
+      [2, 1_000],
+      [3, 2_000],
+      [4, 4_000],
+      [5, 8_000],
+      [6, 16_000],
+      [7, 30_000],
+      [8, 30_000],
+    ] as const) {
+      // a batch cut before anything came whole is a loss as well
+      if (losses === 3) {
+        fake.calls.at(-1)?.answer({ ...batch(1, envelope), isBodyLost: true });
+      } else {
+        fake.calls.at(-1)?.fail();
       }
 
-      // a 200 of another type — a proxy's page — is lost too, its body unread
-      fake.calls.at(-1)?.answer({
-        body: new TextEncoder().encode('<html>'),
-        headers: { 'content-type': 'text/html' },
-        status: 200,
-      });
-      await settle();
-      armed.at(-1)?.fire();
-      await settle();
-
-      // it reaches the server: the losses end, and the next is listened again at once
-      fake.calls.at(-1)?.answer({ status: 204 });
-      await settle();
-      fake.calls.at(-1)?.fail();
-      await settle();
-    } finally {
-      restore();
-      Math.random = random;
+      await waitOut(wait);
     }
 
-    // the inactivity timeout armed at the first loss of each count, then the waits between
-    expect(
-      armed.map(({ delay }) => {
-        return delay;
-      })
-    ).toEqual([
+    // a 200 of another type — a proxy's page — is lost too, its body unread
+    fake.calls.at(-1)?.answer({
+      body: new TextEncoder().encode('<html>'),
+      headers: { 'content-type': 'text/html' },
+      status: 200,
+    });
+    await waitOut(30_000);
+
+    // it reaches the server: the losses end, and the next is listened again at once
+    fake.calls.at(-1)?.answer({ status: 204 });
+    await callOf(11);
+    fake.calls.at(-1)?.fail();
+    await callOf(12);
+
+    // the inactivity timeout armed at the first loss of each count, then the waits between, each
+    // within its bounds
+    const delays = clock.armed.slice(connected).map(({ delay }) => {
+      return delay;
+    });
+
+    expect([delays[0], delays.at(-1), delays.length]).toEqual([
       INACTIVITY_TIMEOUT,
-      500,
-      1_000,
-      2_000,
-      4_000,
-      8_000,
-      15_000,
-      15_000,
-      15_000,
       INACTIVITY_TIMEOUT,
+      10,
     ]);
+    expect(
+      delays.slice(1, -1).map((delay, index) => {
+        const wait = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000][index] ?? 0;
+
+        return delay >= wait / 2 && delay <= wait;
+      })
+    ).toEqual(
+      Array.from({ length: 8 }, () => {
+        return true;
+      })
+    );
     expect([client.isOpen(), fake.calls.length]).toEqual([true, 13]);
 
     // what was cut on its way comes whole at last, and is heard once
@@ -920,115 +1058,73 @@ test.describe('createHTTPTransportClient, listening', () => {
 
   test('counts its connection lost once its listens were lost for its inactivity timeout, and tells the server', async () => {
     const fake = losingFetch();
-    const clock = clockOf();
+    const clock = createTestClock();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, inactivityTimeout: 40 });
+    const closes = closesOf(client);
 
-    try {
-      const client = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 40 });
+    await client.connect({ host, port: 80 });
+
+    // its last wait ends at its timeout, never after it
+    await clock.tickAsync(39);
+
+    expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
+
+    await clock.tickAsync(1);
+
+    expect(closes).toEqual([[false, false]]);
+    // at once, then no later than its timeout, then no more
+    expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
+    expect(INACTIVITY_TIMEOUT).toBe(300_000);
+
+    // a timeout within the second wait's range: whichever is drawn, it ends at its timeout
+    for (let draws = 0; draws < 20; draws += 1) {
+      const drawn = createHTTPTransportClient({
+        clock,
+        fetch: fake.fetch,
+        inactivityTimeout: 700,
+      });
+      const closesDrawn = closesOf(drawn);
+
+      await drawn.connect({ host, port: 80 });
+      await clock.tickAsync(699);
+
+      expect(drawn.isOpen()).toBe(true);
+
+      await clock.tickAsync(1);
+
+      expect(closesDrawn).toEqual([[false, false]]);
+    }
+  });
+
+  test('times its inactivity on a timer, never on a reading of the wall clock: whether that leaps or goes back, the connection is lost at its timeout', async () => {
+    for (const leap of [3_600_000, -3_600_000]) {
+      // a wall clock moved an hour at each step — a machine woken from sleep, a clock set — buys
+      // nothing and costs nothing: three listens, the last at its timeout
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const leaping = losingFetch();
+      const client = createHTTPTransportClient({
+        clock,
+        fetch: leaping.fetch,
+        inactivityTimeout: 40,
+      });
       const closes = closesOf(client);
 
       await client.connect({ host, port: 80 });
 
-      // its last wait ends at its timeout, never after it
-      await clock.advance(39);
-
-      expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
-
-      await clock.advance(1);
-
-      expect(closes).toEqual([[false, false]]);
-      // at once, then no later than its timeout, then no more
-      expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
-      expect(INACTIVITY_TIMEOUT).toBe(300_000);
-
-      // a timeout within the second wait's range: whichever is drawn, it ends at its timeout
-      for (let draws = 0; draws < 20; draws += 1) {
-        const drawn = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 700 });
-        const closesDrawn = closesOf(drawn);
-
-        await drawn.connect({ host, port: 80 });
-        await clock.advance(699);
-
-        expect(drawn.isOpen()).toBe(true);
-
-        await clock.advance(1);
-
-        expect(closesDrawn).toEqual([[false, false]]);
+      for (let step = 0; step < 39; step += 1) {
+        clock.setSystemTime(clock.Date.now() + leap);
+        await clock.tickAsync(1);
       }
 
-      // none at all: lost at its first loss
-      const at = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 0 });
-      const closedAt = closesOf(at);
-      const listensBefore = methodsOf(fake).listens;
+      expect([client.isOpen(), methodsOf(leaping).listens]).toEqual([true, 2]);
 
-      await at.connect({ host, port: 80 });
-      await clock.advance(0);
+      clock.setSystemTime(clock.Date.now() + leap);
+      await clock.tickAsync(1);
 
-      expect([closedAt, methodsOf(fake).listens - listensBefore]).toEqual([[[false, false]], 1]);
-    } finally {
-      clock.restore();
-    }
-  });
-
-  test('times its inactivity on a timer, never on its clock: whether the clock leaps or stands still, the connection is lost at its timeout', async () => {
-    const clock = clockOf();
-    const { now } = Date;
-    const { random } = Math;
-
-    try {
-      // a clock that leaps an hour at each reading — a machine woken from sleep, a clock set — buys
-      // nothing and costs nothing: three listens, the last at its timeout
-      const leaping = losingFetch();
-      const onLeaps = createHTTPTransportClient({ fetch: leaping.fetch, inactivityTimeout: 40 });
-      const closesOnLeaps = closesOf(onLeaps);
-      let readings = 0;
-
-      Date.now = () => {
-        readings += 1;
-
-        return now() + readings * 3_600_000;
-      };
-
-      await onLeaps.connect({ host, port: 80 });
-      await clock.advance(39);
-
-      expect([onLeaps.isOpen(), methodsOf(leaping).listens]).toEqual([true, 2]);
-
-      await clock.advance(1);
-
-      expect([closesOnLeaps, methodsOf(leaping)]).toEqual([
+      expect([closes, methodsOf(leaping)]).toEqual([
         [[false, false]],
         { last: 'DELETE', listens: 3 },
       ]);
-
-      // one that stands still, and a second wait drawn short of the timeout: the third wait is cut
-      // at the timeout, and the listen after it is the last
-      const standing = losingFetch();
-      const onStill = createHTTPTransportClient({ fetch: standing.fetch, inactivityTimeout: 700 });
-      const closesOnStill = closesOf(onStill);
-      const stood = now();
-
-      Date.now = () => {
-        return stood;
-      };
-      Math.random = () => {
-        return 0;
-      };
-
-      await onStill.connect({ host, port: 80 });
-      await clock.advance(699);
-
-      expect([onStill.isOpen(), methodsOf(standing).listens]).toEqual([true, 3]);
-
-      await clock.advance(1);
-
-      expect([closesOnStill, methodsOf(standing)]).toEqual([
-        [[false, false]],
-        { last: 'DELETE', listens: 4 },
-      ]);
-    } finally {
-      clock.restore();
-      Date.now = now;
-      Math.random = random;
     }
   });
 
@@ -1037,64 +1133,54 @@ test.describe('createHTTPTransportClient, listening', () => {
   test('listens three times within its inactivity timeout, even on timers that end early, and never a fourth', async () => {
     // a fourth is one too many: told gone, so that a burst ends there
     const fake = losingFetch(3);
-    const clock = clockOf({ isHasty: true });
+    const clock = hastyClockOf();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, inactivityTimeout: 40 });
+    const closes = closesOf(client);
 
-    try {
-      const client = createHTTPTransportClient({ fetch: fake.fetch, inactivityTimeout: 40 });
-      const closes = closesOf(client);
+    await client.connect({ host, port: 80 });
+    await clock.tickAsync(38);
 
-      await client.connect({ host, port: 80 });
-      await clock.advance(38);
+    expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
 
-      expect([client.isOpen(), methodsOf(fake).listens]).toEqual([true, 2]);
+    await clock.tickAsync(1);
 
-      await clock.advance(1);
+    expect(closes).toEqual([[false, false]]);
 
-      expect(closes).toEqual([[false, false]]);
+    // and nothing after it
+    await clock.tickAsync(60_000);
 
-      // and nothing after it
-      await clock.advance(60_000);
-
-      expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
-    } finally {
-      clock.restore();
-    }
+    expect(methodsOf(fake)).toEqual({ last: 'DELETE', listens: 3 });
   });
 
   test('a listen heard ends the count, and its inactivity timeout runs again from the next first loss', async () => {
-    const { callOf, client, fake } = await connectListening({ inactivityTimeout: 40 });
-    // the first listen, before the clock is the test's: `expect.poll` arms timers of its own
+    const clock = createTestClock();
+    const { callOf, client, fake } = await connectListening({ clock, inactivityTimeout: 40 });
     const first = await callOf(1);
-    const clock = clockOf();
     const closes = closesOf(client);
 
-    try {
-      // lost, listened again at once, and heard 30 ms later
-      first?.fail();
-      await clock.advance(30);
-      fake.calls[2]?.answer(batch(1, envelopeOf(0x13, { callId: 1 })));
-      await clock.advance(0);
+    // lost, listened again at once, and heard 30 ms later
+    first?.fail();
+    await clock.tickAsync(30);
+    fake.calls[2]?.answer(batch(1, envelopeOf(0x13, { callId: 1 })));
+    await clock.tickAsync(0);
 
-      // past where the first count would have ended, lost twice again
-      await clock.advance(20);
-      fake.calls[3]?.fail();
-      await clock.advance(0);
-      fake.calls[4]?.fail();
+    // past where the first count would have ended, lost twice again
+    await clock.tickAsync(20);
+    fake.calls[3]?.fail();
+    await clock.tickAsync(0);
+    fake.calls[4]?.fail();
 
-      // 40 ms from this first loss, not from the one before
-      await clock.advance(39);
+    // 40 ms from this first loss, not from the one before
+    await clock.tickAsync(39);
 
-      expect([client.isOpen(), fake.calls.length]).toEqual([true, 5]);
+    expect([client.isOpen(), fake.calls.length]).toEqual([true, 5]);
 
-      await clock.advance(1);
-      fake.calls[5]?.fail();
-      await clock.advance(0);
+    await clock.tickAsync(1);
+    fake.calls[5]?.fail();
+    await clock.tickAsync(0);
 
-      expect(closes).toEqual([[false, false]]);
-      expect(fake.calls[6]?.init.method).toBe('DELETE');
-    } finally {
-      clock.restore();
-    }
+    expect(closes).toEqual([[false, false]]);
+    expect(fake.calls[6]?.init.method).toBe('DELETE');
   });
 
   test('loses the connection on a batch that does not read, and on a refusal of its listen; told it is gone, it tells the server nothing', async () => {
@@ -1156,6 +1242,13 @@ test.describe('createHTTPTransportClient, listening', () => {
     await atLimit.client.disconnect({ isQuick: true });
   });
 
+  test('asks the server to wait its wait held, a fraction rounded to the nearest whole millisecond', async () => {
+    const { callOf, client } = await connectListening({ wait: 1.5 });
+
+    expect((await callOf(1))?.url).toMatch(/&wait=2$/u);
+    await client.disconnect({ isQuick: true });
+  });
+
   test('pauses between listens that bring nothing, and listens no more once its connection went', async () => {
     const { callOf, client, fake } = await connectListening({ pause: 60, wait: 0 });
 
@@ -1171,7 +1264,7 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     // gone while it listens: what its listen brings back is heard by nobody, and it listens no more
     const closed = nextEvent(client, 'close');
-    const lost = client.send(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+    const lost = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
     (await callOf(3))?.fail();
     await lost;
@@ -1317,26 +1410,6 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     expect([fake.calls[0]?.init.headers[LISTEN_HEADER], fake.calls.length]).toEqual(['?1', 1]);
     await client.disconnect({ isQuick: true });
-  });
-
-  test('refuses a wait, a pause or an inactivity timeout no timer holds', () => {
-    for (const option of ['inactivityTimeout', 'pause', 'wait'] as const) {
-      for (const value of [-1, 1.5, 2 ** 31, Number.NaN]) {
-        expect(
-          () => {
-            return createHTTPTransportClient({ [option]: value });
-          },
-          `${option} ${String(value)}`
-        ).toThrow(ProgrammerError);
-      }
-    }
-
-    expect(() => {
-      return createHTTPTransportClient({ inactivityTimeout: Infinity, pause: 0, wait: 0 });
-    }).not.toThrow();
-    expect(() => {
-      return createHTTPTransportClient({ wait: Infinity });
-    }).toThrow('wait is a whole number from 0 a timer holds, not Infinity');
   });
 
   test('says nothing of listening, and never listens, when told not to', async () => {

@@ -19,7 +19,7 @@ public static class HttpTransport
     public const string SequenceHeader = "bead-sequence";
 
     /// <summary>The header each refusal of the transport's own is marked in.</summary>
-    public const string RefusalHeader = "bead-refusal";
+    public const string RefusalHeader = HostsAndOrigins.RefusalHeader;
 
     /// <summary>The path the transport answers on, by default.</summary>
     public const string Pathname = "/bead";
@@ -45,7 +45,7 @@ public static class HttpRefusals
     public const string ConnectionUnknown = "connection-unknown";
 
     /// <summary>A host the server does not take: 403.</summary>
-    public const string Host = "host-refused";
+    public const string Host = HostsAndOrigins.HostRefusal;
 
     /// <summary>A listen whose client did not say at connect it listens: 409.</summary>
     public const string ListenUndeclared = "listen-undeclared";
@@ -57,7 +57,7 @@ public static class HttpRefusals
     public const string Method = "method-refused";
 
     /// <summary>A browser's exchange from an origin the server does not take: 403.</summary>
-    public const string Origin = "origin-refused";
+    public const string Origin = HostsAndOrigins.OriginRefusal;
 
     /// <summary>Not the path: 404.</summary>
     public const string Path = "path-unknown";

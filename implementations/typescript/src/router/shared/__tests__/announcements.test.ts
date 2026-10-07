@@ -1,12 +1,17 @@
 import { expect, test } from '@playwright/test';
 import { createAnnouncements } from '../announcements';
-import { EnvelopeKind } from '../constants';
-import type { OutgoingEnvelope, SessionToken } from '../types';
+import { CredentialScheme, EnvelopeKind } from '../constants';
+import type { Announcement, OutgoingEnvelope, SessionToken } from '../types';
 
 // helpers
 
 const TOKEN = 'AAECAwQFBgcICQoLDA0ODw' as SessionToken;
 const OTHER_TOKEN = 'DwAOAQ0CDAMLBAoFCQYIBw' as SessionToken;
+
+// what an answer announces: the session, by its token; another; its end
+const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
+const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });
+const ENDED = Object.freeze({ scheme: CredentialScheme.NONE });
 
 const resultOf = (callId: number): OutgoingEnvelope => {
   return {
@@ -33,14 +38,13 @@ const createAnnouncing = () => {
     },
   });
 
-  // the session an answer carries: the token, `null` for its end, `undefined` for nothing said
+  // what an answer announces of the session: its token, its end, `undefined` for nothing said
   const told = (envelope: OutgoingEnvelope, connectionHandle = 'a') => {
     const announced = announcements.announce(envelope, connectionHandle);
 
     return {
+      credential: (announced.envelope.header as { credential?: Announcement }).credential,
       restore: announced.restore,
-      sessionToken: (announced.envelope.header as { sessionToken?: SessionToken | null })
-        .sessionToken,
     };
   };
 
@@ -53,14 +57,14 @@ test.describe('createAnnouncements', () => {
   test('an answer carries the session when it changed, a result or a failure alike', () => {
     const { session, told } = createAnnouncing();
 
-    expect(told(resultOf(1)).sessionToken).toBe(TOKEN);
-    expect(told(failureOf(3)).sessionToken).toBeUndefined();
-    expect(told(resultOf(5), 'b').sessionToken).toBe(TOKEN);
+    expect(told(resultOf(1)).credential).toEqual(OPAQUE);
+    expect(told(failureOf(3)).credential).toBeUndefined();
+    expect(told(resultOf(5), 'b').credential).toEqual(OPAQUE);
 
     session.current = undefined;
 
-    expect(told(failureOf(7)).sessionToken).toBeNull();
-    expect(told(resultOf(9)).sessionToken).toBeUndefined();
+    expect(told(failureOf(7)).credential).toEqual(ENDED);
+    expect(told(resultOf(9)).credential).toBeUndefined();
   });
 
   test('a connection never told of a session hears nothing of none, and nothing but an answer says one', () => {
@@ -73,12 +77,12 @@ test.describe('createAnnouncements', () => {
 
     session.current = undefined;
 
-    expect(told(resultOf(1)).sessionToken).toBeUndefined();
+    expect(told(resultOf(1)).credential).toBeUndefined();
 
     session.current = TOKEN;
 
     expect(announcements.announce(request, 'a').envelope).toBe(request);
-    expect(told(resultOf(3)).sessionToken).toBe(TOKEN);
+    expect(told(resultOf(3)).credential).toEqual(OPAQUE);
   });
 
   test('announce nothing without a session to ask for', () => {
@@ -96,7 +100,7 @@ test.describe('createAnnouncements', () => {
 
     const first = told(resultOf(3));
 
-    expect(first.sessionToken).toBe(TOKEN);
+    expect(first.credential).toEqual(OPAQUE);
 
     session.current = OTHER_TOKEN;
 
@@ -107,7 +111,7 @@ test.describe('createAnnouncements', () => {
     second.restore();
     session.current = TOKEN;
 
-    expect(told(resultOf(7)).sessionToken).toBeUndefined();
+    expect(told(resultOf(7)).credential).toBeUndefined();
 
     session.current = OTHER_TOKEN;
 
@@ -116,7 +120,7 @@ test.describe('createAnnouncements', () => {
     announcements.forget('a');
     forgotten.restore();
 
-    expect(told(resultOf(11)).sessionToken).toBe(OTHER_TOKEN);
+    expect(told(resultOf(11)).credential).toEqual(OTHER_OPAQUE);
   });
 
   test('forget what a connection was told, or every connection', () => {
@@ -126,16 +130,16 @@ test.describe('createAnnouncements', () => {
     told(resultOf(1), 'b');
     announcements.forget('a');
 
-    expect([told(resultOf(3), 'a').sessionToken, told(resultOf(3), 'b').sessionToken]).toEqual([
-      TOKEN,
+    expect([told(resultOf(3), 'a').credential, told(resultOf(3), 'b').credential]).toEqual([
+      OPAQUE,
       undefined,
     ]);
 
     announcements.forget();
 
-    expect([told(resultOf(5), 'a').sessionToken, told(resultOf(5), 'b').sessionToken]).toEqual([
-      TOKEN,
-      TOKEN,
+    expect([told(resultOf(5), 'a').credential, told(resultOf(5), 'b').credential]).toEqual([
+      OPAQUE,
+      OPAQUE,
     ]);
   });
 

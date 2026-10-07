@@ -19,5 +19,7 @@
   "jsxSingleQuote": false,
   "proseWrap": "preserve",
   "sortPackageJson": true,
-  "ignorePatterns": [".yarn/**", "**/*.min.js", "**/*.min.css"]
+  // `_pb.ts` is protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to
+  // its generator instead.
+  "ignorePatterns": [".yarn/**", "**/*.min.js", "**/*.min.css", "**/*_pb.ts"]
 }

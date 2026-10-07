@@ -45,14 +45,14 @@ public sealed class DebugFilterTests
             ProcedureName = procedureName,
             ServiceId = 2,
             ServiceRevision = 1,
-            Timestamp = new DebugTimestamp(null, 0),
+            StartedAt = DateTimeOffset.UnixEpoch,
             Type = step?.Type ?? DebugType.Request,
         };
     }
 
     private static (DebugDirection, TracedEnvelope) EnvelopeOf(IEnvelopeHeader header, DebugDirection direction)
     {
-        return (direction, new TracedEnvelope("a", header, false));
+        return (direction, new TracedEnvelope("a", header));
     }
 
     // what a listener the filter made hears of the events given: each one's name, direction and type
@@ -158,15 +158,64 @@ public sealed class DebugFilterTests
     }
 
     [Fact]
-    public void Refuses_a_direction_or_a_type_letter_that_is_not_one_a_type_in_full_and_a_selector_that_names_none()
+    public void Refuses_a_direction_or_a_type_that_is_not_one_and_a_selector_that_names_none()
     {
-        foreach (var spec in new[] { "d(up)", "t(p)", "t(request)", "t(n|r|x)", "t(constructor)", "d()", "t()" })
+        foreach (var spec in new[] { "d(up)", "t(p)", "t(n|r|x)", "t(constructor)", "d()", "t()" })
         {
             Assert.Throws<ArgumentException>(() =>
             {
                 return DebugFilter.Parse(spec);
             });
         }
+
+        Assert.Equal([DebugType.Request, DebugType.Request], DebugFilter.Parse("t(request|R)").Types);
+    }
+
+    [Fact]
+    public void Refuses_a_filter_in_sentences_that_name_the_word_or_the_value_as_it_was_written_quoted_as_JSON()
+    {
+        string RefusalOf(string spec)
+        {
+            return Assert.Throws<ArgumentException>(() =>
+            {
+                return DebugFilter.Parse(spec);
+            }).Message;
+        }
+
+        Assert.Equal("a debug filter's selector names a value, not \"E()\"", RefusalOf("ping E()"));
+        Assert.Equal("a debug filter's selector leaves no value empty, not \"d(rx|)\"", RefusalOf("d(rx|)"));
+        Assert.Equal("a debug filter takes a direction among rx, tx, not \"UP\"", RefusalOf("d(UP)"));
+        Assert.Equal("a debug filter takes a type among request, command, notification, r, c, n, not \"r\\\\n\"", RefusalOf("t(r\\n)"));
+        Assert.Equal(
+            "a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not \"\\\"fail\\\"\"",
+            RefusalOf("e(\"fail\")"));
+        Assert.Equal("a debug filter holds a parenthesis in a selector alone, d(…), t(…) or e(…), not \"d(rx\"", RefusalOf("d(rx,tx)"));
+
+        // a control character and a lone surrogate escaped as JSON.stringify writes them
+        Assert.Equal("a debug filter takes a direction among rx, tx, not \"a\\u0001\\ud800\"", RefusalOf("d(a\u0001\ud800)"));
+    }
+
+    [Fact]
+    public void Refuses_a_filter_given_whole_in_the_grammar_s_names_as_it_is_made()
+    {
+        string RefusalOf(DebugFilter filter)
+        {
+            return Assert.Throws<ArgumentException>(() =>
+            {
+                return DebugFilters.FilterEnvelopeDebug(UnheardEnvelope, filter);
+            }).Message;
+        }
+
+        Assert.Equal("a debug filter takes a direction among rx, tx, not \"7\"", RefusalOf(new DebugFilter { Directions = [(DebugDirection)7] }));
+        Assert.Equal(
+            "a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not \"9\"",
+            RefusalOf(new DebugFilter { Kinds = [(EnvelopeKind)9] }));
+        Assert.Equal(
+            "a debug filter takes a type among request, command, notification, not \"5\"",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return DebugFilters.FilterDebug(Unheard, new DebugFilter { Types = [(DebugType)5] });
+            }).Message);
     }
 
     [Fact]
@@ -221,9 +270,9 @@ public sealed class DebugFilterTests
     [Fact]
     public void Matches_a_whole_name_and_takes_every_other_character_literally()
     {
-        DebugEvent[] names = [EventOf("get(status"), EventOf("a.b"), EventOf("axb"), EventOf("getStatusNow")];
+        DebugEvent[] names = [EventOf("get+status"), EventOf("a.b"), EventOf("axb"), EventOf("getStatusNow")];
 
-        Assert.Equal(["get(status tx request"], HeardOf("get(status", names));
+        Assert.Equal(["get+status tx request"], HeardOf("get+status", names));
         Assert.Equal(["a.b tx request"], HeardOf("a.b", names));
         Assert.Empty(HeardOf("getStatus, a+b, [x], ^a", names));
 

@@ -5,8 +5,8 @@ namespace Bead;
 /// <summary>
 /// A failure, thrown: whose code it is, the code, why, and — deduced, never sent — which side raised
 /// it and where. Raised here, it is <see cref="FailureOrigin.Local"/>, of this router's side;
-/// received with no hop, it is the peer's; received through a relay, whose side raised it is not
-/// known.
+/// received through no relay, it is the peer's; received through a relay, whose side raised it is
+/// not known.
 /// </summary>
 public sealed class FailureException : Exception
 {
@@ -54,11 +54,11 @@ public sealed class FailureException : Exception
     }
 
     /// <summary>The relays it crossed: 0 when the peer raised it.</summary>
-    public byte Hops
+    public byte Relays
     {
         get
         {
-            return Failure.Hops;
+            return Failure.Relays;
         }
     }
 
@@ -77,7 +77,7 @@ public sealed class FailureException : Exception
     /// <summary>The side that raised it; none through a relay.</summary>
     public RouterSide? Side { get; }
 
-    /// <summary>The envelope that said it, its token left out; none for a failure raised before any.</summary>
+    /// <summary>The envelope that said it, its credential left out; none for a failure raised before any.</summary>
     public IEnvelopeHeader? Header { get; init; }
 
     /// <summary>The procedure the call asked for, which a failure envelope does not repeat.</summary>
@@ -86,6 +86,13 @@ public sealed class FailureException : Exception
     /// <summary>What the call went to behind the peer, as the call named it.</summary>
     public uint? DestinationId { get; init; }
 
+    /// <summary>
+    /// Whether it came by a way that keeps no order with the call's own answer, which it may
+    /// overtake: over HTTP, a listen's batch (spec 15.9). Such a failure ends a subscription its
+    /// server had answered, and withdraws no credential (spec 13.4).
+    /// </summary>
+    public bool MayOvertake { get; init; }
+
     /// <inheritdoc/>
     public override string Message
     {
@@ -93,6 +100,45 @@ public sealed class FailureException : Exception
         {
             return MessageOf(this);
         }
+    }
+
+    /// <summary>Whether this is the procedure's own failure, whatever its code.</summary>
+    public bool IsApplication()
+    {
+        return Scope == FailureScope.Application;
+    }
+
+    /// <summary>Whether this is the procedure's own failure <paramref name="code"/>, never a protocol code of the same number.</summary>
+    public bool IsApplication(ushort code)
+    {
+        return Scope == FailureScope.Application && Code == code;
+    }
+
+    /// <summary>Whether this is the procedure's own failure, one of <paramref name="codes"/>.</summary>
+    public bool IsApplication(IReadOnlyCollection<ushort> codes)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        return Scope == FailureScope.Application && codes.Contains(Code);
+    }
+
+    /// <summary>
+    /// Whether this is the protocol's <paramref name="code"/> — raised by the peer, here, or behind a
+    /// relay — and by <paramref name="side"/>, when given. A failure through a relay has no side
+    /// known, so it never passes with one: its scope, which travels, is what tells the protocol's
+    /// codes from a procedure's.
+    /// </summary>
+    public bool IsProtocol(ProtocolCode code, RouterSide? side = null)
+    {
+        return Scope == FailureScope.Protocol && Code == (ushort)code && (side is null || side == Side);
+    }
+
+    /// <summary>As <see cref="IsProtocol(ProtocolCode, RouterSide?)"/>, for one of <paramref name="codes"/>.</summary>
+    public bool IsProtocol(IReadOnlyCollection<ProtocolCode> codes, RouterSide? side = null)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        return Scope == FailureScope.Protocol && codes.Contains((ProtocolCode)Code) && (side is null || side == Side);
     }
 
     /// <summary>
@@ -122,7 +168,7 @@ public sealed class FailureException : Exception
     {
         ArgumentNullException.ThrowIfNull(failure);
 
-        return failure.Hops > 0
+        return failure.Relays > 0
             ? new Raised(FailureOrigin.Relayed, null)
             : new Raised(FailureOrigin.Peer, CallIds.PeerOf(side));
     }
@@ -144,11 +190,11 @@ public sealed class FailureException : Exception
         var address = isProtocol || exception.ProcedureAddress is not { } procedure
             ? ""
             : $" (service {procedure.ServiceId}, procedure {procedure.ProcedureId})";
-        var hops = failure.Hops switch
+        var relays = failure.Relays switch
         {
             0 => "",
-            1 => ", relayed 1 hop",
-            _ => $", relayed {failure.Hops} hops",
+            1 => ", through 1 relay",
+            _ => $", through {failure.Relays} relays",
         };
 
         return string.Concat(
@@ -156,7 +202,7 @@ public sealed class FailureException : Exception
             $"{side} {(isProtocol ? "protocol" : "application")} failure {failure.Code}",
             name,
             address,
-            hops,
+            relays,
             failure.Detail.Length == 0 ? "" : $": {failure.Detail}");
     }
 

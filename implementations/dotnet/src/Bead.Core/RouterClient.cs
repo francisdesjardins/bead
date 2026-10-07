@@ -4,11 +4,17 @@ namespace Bead;
 
 /// <summary>
 /// What a client's router needs of its transport: what its one connection delivers, its close, its
-/// replacement when it reconnects, and a way to send on it.
+/// replacement when it reconnects, a way to send on it, and the clock it runs on.
 /// </summary>
 public interface IRouterClientTransport
 {
-    /// <summary>The connection delivered a message.</summary>
+    /// <summary>What its timers run on: the clock of the stack built on it.</summary>
+    TimeProvider Clock { get; }
+
+    /// <summary>
+    /// The connection delivered a message: an envelope, and the credential carried beside it, which
+    /// no client is ever given.
+    /// </summary>
     event Action<TransportMessage>? Message;
 
     /// <summary>
@@ -34,10 +40,39 @@ public interface IRouterClientTransport
     }
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> to the connection: at once, in order, without blocking; the
-    /// task settles once they were sent, or could not be.
+    /// Hands <paramref name="message"/> to the connection: at once, in order, without blocking; the
+    /// task settles once it was sent, or could not be. Its credential goes over HTTP alone, in the
+    /// <c>Authorization</c> of its <c>POST</c>; a socket carries none.
     /// </summary>
-    Task Send(ReadOnlyMemory<byte> bytes);
+    Task Send(TransportMessage message);
+
+    /// <summary>
+    /// Whether it carries a credential beside an envelope it sends (spec 15.1): HTTP does, in its
+    /// <c>Authorization</c>; a WebSocket does not. A call presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> over one that does not fails before it goes. None
+    /// does by default.
+    /// </summary>
+    bool CarriesCredential
+    {
+        get
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether it is secure, judged from what it was given, never from what a name resolves to (spec
+    /// 13.4): its URL's scheme <c>wss</c> or <c>https</c>, its host on the loopback, or a transport
+    /// that never leaves the machine. A call presenting a bearer credential over one that is not fails
+    /// before it goes. None is by default.
+    /// </summary>
+    bool IsSecure
+    {
+        get
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>How a client's router is built.</summary>
@@ -46,8 +81,33 @@ public sealed record RouterClientOptions
     /// <summary>What it reads, writes and holds by; <see cref="RouterLimits.Default"/> when none.</summary>
     public RouterLimits? Limits { get; init; }
 
-    /// <summary>What its timers run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What its timers run on: its transport's clock when none; another is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// The credential every call presents but one that gives its own (spec 13.4): a
+    /// <see cref="Credential.Jwt"/>, or an <see cref="Credential.Elsewhere(string)"/> with what its
+    /// transport carries; <see cref="RouterClient.Credential"/> reads it and gives it anew. OPAQUE,
+    /// which a call asks for alone, is an <see cref="ArgumentException"/>.
+    /// </summary>
+    public Credential? Credential { get; init; }
+
+    /// <summary>
+    /// What it resolves a command's <see cref="CredentialScheme.Jwt"/> and
+    /// <see cref="CredentialScheme.Elsewhere"/> with, as a server does a request's; it takes no other
+    /// when none. JWT keys or a key set come with their audience, or they are an
+    /// <see cref="ArgumentException"/> (spec 13.8).
+    /// </summary>
+    public Credentials? Credentials { get; init; }
+
+    /// <summary>
+    /// What it counts its calls, its commands answered and its notifications heard into, at its
+    /// gates (spec/debugging.md 7.1); none counts nothing.
+    /// </summary>
+    public MetricsRegistry? MetricsRegistry { get; init; }
 
     /// <summary>
     /// Where resolvers run, and notifications' callbacks: the thread pool for the first, one
@@ -63,7 +123,12 @@ public sealed record RouterClientOptions
 /// The client side of a router, over any transport that meets <see cref="IRouterClientTransport"/>.
 /// The request itself — its call id, its pairing, its timeout and its cancel — is the core's: this
 /// router binds the notifications to the calls that subscribe them, learns the session the server
-/// announces, and answers the server's own requests, its commands, with the resolvers registered.
+/// announces, which a call presents when its options ask for it, and answers the server's own
+/// requests, its commands, with the resolvers registered, each in the session its credential
+/// resolves to against the one learned, or by its credentials. A call presents its own credential,
+/// or the client's by default, which a SESSION_REQUIRED answering a call that presented it withdraws,
+/// telling <see cref="CredentialWithdrawn"/>; one its transport cannot carry, or would carry off
+/// the machine in the clear, fails before it goes, DESTINATION_UNREACHABLE.
 /// A notification's callbacks run in the order the notifications came, never on the router's
 /// scheduler. A connection that closes, or that a reconnection replaces, takes with it what still
 /// waits, the session and the notifications.
@@ -76,8 +141,16 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     private readonly RouterCore _core;
     private readonly TaskScheduler _callbacks;
 
+    // what it counts its calls and its notifications through, attached to the registry it was
+    // given; none when it was given none
+    private readonly RouterSeries? _metrics;
+
     // the notification registered for each procedure, until it is unregistered or dropped
     private readonly ConcurrentDictionary<ProcedureAddress, INotificationLike> _notifications = new();
+
+    // the series of each procedure a notification was registered for, as the side that hears: kept
+    // once declared, as its registry keeps them
+    private readonly Dictionary<ProcedureAddress, HearingSeries> _hearing = [];
 
     // each subscription by the call id that opened it, and each notification's call id: the
     // router's scheduler alone touches them
@@ -87,13 +160,26 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     // the session the server announced last, boxed, so a read from any thread sees it whole
     private volatile object? _sessionToken;
 
-    /// <summary>A client's router over <paramref name="transport"/>.</summary>
+    // what resolves a command's JWT and ELSEWHERE, from its credentials
+    private readonly CredentialResolver _resolver;
+
+    // the credential presented by default, read and given anew from any thread, and withdrawn
+    private readonly Lock _credentialGate = new();
+    private Credential? _credential;
+
+    /// <summary>
+    /// A client's router over <paramref name="transport"/>, on its transport's clock: one given that
+    /// differs is an <see cref="ArgumentException"/>.
+    /// </summary>
     public RouterClient(IRouterClientTransport transport, RouterClientOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(transport);
 
+        var clock = Clocks.Of((options?.Clock, transport.Clock), ("a client's router", "its transport"));
+
         Transport = transport;
         _callbacks = options?.ResolverScheduler ?? new SerialScheduler();
+        _metrics = options?.MetricsRegistry?.Give(RouterSide.Client);
         _core = new RouterCore(
             new Port(this),
             new RouterCoreOptions
@@ -101,8 +187,14 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 Limits = options?.Limits,
                 ResolverScheduler = options?.ResolverScheduler,
                 Scheduler = options?.Scheduler,
-                Time = options?.Time,
+                Clock = clock,
+                Metrics = _metrics,
             });
+
+        // * what a key set's deadline does goes on the router's scheduler, as its other timers' work
+        _resolver = new CredentialResolver(options?.Credentials, (clock, _core.Post));
+        CredentialResolver.AssertLimits(_core.Limits, _resolver.TakesJwt);
+        Credential = options?.Credential;
         transport.Message += OnMessage;
         transport.Close += OnClose;
         transport.Reconnect += OnReconnect;
@@ -114,8 +206,20 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     /// <summary>What the router did: sent a request, took a response, took a notification.</summary>
     public event Action<RouterActivity>? Activity;
 
-    /// <summary>Each envelope, out or in, its token left out; nothing is built while none listens.</summary>
+    /// <summary>
+    /// Each envelope, out or in, on its connection, <see cref="ServerConnectionHandle"/>, its
+    /// credential's scheme alone in place of its credential; nothing is built while none listens. A
+    /// listener that throws is reported through <see cref="Error"/>, and changes nothing.
+    /// </summary>
     public event Action<DebugDirection, TracedEnvelope>? Debug;
+
+    /// <summary>
+    /// A credential presented by default was withdrawn (spec 13.4): a call that presented it was
+    /// refused SESSION_REQUIRED, whatever relays the refusal crossed, while it was still the default.
+    /// Calls present none by default from then on, so the call that renews it goes out without it.
+    /// It carries the credential's scheme alone, never its bytes.
+    /// </summary>
+    public event Action<CredentialScheme>? CredentialWithdrawn;
 
     /// <inheritdoc/>
     public RouterSide Side
@@ -135,9 +239,20 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         }
     }
 
+    /// <inheritdoc/>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _core.Clock;
+        }
+    }
+
     /// <summary>
-    /// The session the server announced last, which the connection is: the client never presents
-    /// it. None before any, once ended, or once the connection closed or a reconnection replaced it.
+    /// The session the server announced last, which the connection is: the client presents it only
+    /// on a call whose options ask for it, <see cref="Credential.Opaque()"/>, never by default, and
+    /// resolves a command's credential against it. None before any, once ended, or once the
+    /// connection closed or a reconnection replaced it.
     /// </summary>
     public SessionToken? SessionToken
     {
@@ -149,6 +264,62 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
     /// <summary>Its transport.</summary>
     public IRouterClientTransport Transport { get; }
+
+    /// <summary>
+    /// The credential every call presents but one that gives its own: a
+    /// <see cref="Bead.Credential.Jwt"/>, or an <see cref="Bead.Credential.Elsewhere(string)"/> with
+    /// what its transport carries; none presents none. Given anew, it renews it. OPAQUE, which a call
+    /// asks for alone, is an <see cref="ArgumentException"/>, and so is a JWT under limits that hold
+    /// a chunk's envelope or an envelope under 1,024 bytes (spec 12.2).
+    /// </summary>
+    public Credential? Credential
+    {
+        get
+        {
+            lock (_credentialGate)
+            {
+                return _credential;
+            }
+        }
+
+        set
+        {
+            if (value is { } given)
+            {
+                if (given.Scheme is not (CredentialScheme.Jwt or CredentialScheme.Elsewhere) || given is { Scheme: CredentialScheme.Elsewhere, Carried: null })
+                {
+                    throw new ArgumentException(
+                        $"a client presents a JWT, or an ELSEWHERE with what its transport carries, by default, not {given.Scheme}",
+                        nameof(value));
+                }
+
+                CredentialResolver.AssertLimits(_core.Limits, given.Scheme == CredentialScheme.Jwt);
+            }
+
+            lock (_credentialGate)
+            {
+                _credential = value;
+            }
+        }
+    }
+
+    /// <summary>Whether its transport carries a credential beside an envelope, as a relay's leg B asks.</summary>
+    public bool CarriesCredential
+    {
+        get
+        {
+            return Transport.CarriesCredential;
+        }
+    }
+
+    /// <summary>Whether its transport is secure, as a relay's leg B asks.</summary>
+    public bool IsSecure
+    {
+        get
+        {
+            return Transport.IsSecure;
+        }
+    }
 
     /// <summary>Its core, for the tests to know when it settled.</summary>
     internal RouterCore Core
@@ -177,6 +348,12 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         return Task.FromException(new InvalidOperationException("only a server notifies; a client asks with a request"));
     }
 
+    /// <summary>Only a server notifies, even what did not write: an <see cref="InvalidOperationException"/>.</summary>
+    public Task Notify(Exception unwritten, NotifyRequest request)
+    {
+        return Task.FromException(new InvalidOperationException("only a server notifies; a client asks with a request"));
+    }
+
     /// <summary>Only a server subscribes a connection: an <see cref="InvalidOperationException"/>.</summary>
     public Task<uint> Subscribe(AnswerTarget target)
     {
@@ -192,15 +369,69 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     /// <inheritdoc/>
+    public void Report(Exception reason, string? connectionHandle)
+    {
+        ArgumentNullException.ThrowIfNull(reason);
+
+        _core.Post(() =>
+        {
+            Error?.Invoke(reason);
+        });
+    }
+
+    /// <inheritdoc/>
+    public ProcedureSeries? DeclareRequester(Procedure procedure)
+    {
+        ArgumentNullException.ThrowIfNull(procedure);
+        Identity.Check(procedure, (DeclarationWay.ClientRequester, nameof(procedure)));
+
+        return _metrics is { } metrics ? new ProcedureSeries(metrics.DeclareRequester(procedure)) : null;
+    }
+
+    /// <summary>
+    /// Holds a notification for its procedure, declared to its registry as the side that hears
+    /// (spec/debugging.md 7.2): one out of its range, off its form or against its kind (spec 16.10),
+    /// first, is an <see cref="ArgumentException"/>; a second for the same procedure an
+    /// <see cref="InvalidOperationException"/>; and one its registry refuses an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
     public Task RegisterNotification(INotificationLike notification)
     {
         ArgumentNullException.ThrowIfNull(notification);
 
+        try
+        {
+            Identity.Check(notification.Procedure, (DeclarationWay.ClientNotification, nameof(notification)));
+        }
+        catch (ArgumentException refused)
+        {
+            return Task.FromException(refused);
+        }
+
         return _core.Loop.Run(() =>
         {
-            return _notifications.TryAdd(notification.Procedure.Address, notification)
+            var procedure = notification.Procedure;
+
+            if (_notifications.ContainsKey(procedure.Address))
+            {
+                return Task.FromException(new InvalidOperationException($"{procedure.ProcedureName} is already a registered notification"));
+            }
+
+            try
+            {
+                if (_metrics?.DeclareNotification(procedure) is { } hearing)
+                {
+                    _hearing[procedure.Address] = hearing;
+                }
+            }
+            catch (ArgumentException refused)
+            {
+                return Task.FromException(refused);
+            }
+
+            return _notifications.TryAdd(procedure.Address, notification)
                 ? Task.CompletedTask
-                : Task.FromException(new InvalidOperationException($"{notification.Procedure.ProcedureName} is already a registered notification"));
+                : Task.FromException(new InvalidOperationException($"{procedure.ProcedureName} is already a registered notification"));
         });
     }
 
@@ -245,25 +476,84 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var core = new CoreRequest { ConnectionHandle = ServerConnectionHandle, Procedure = request.Procedure, Options = request.Options, OnSent = request.OnSent };
+        // a call that gives no credential of its own presents the default, as it is now
+        var byDefault = request.Options.Credential is null ? Credential : null;
+        var options = byDefault is null ? request.Options : request.Options with { Credential = byDefault };
+        var core = new CoreRequest
+        {
+            ConnectionHandle = ServerConnectionHandle,
+            OnCallId = request.OnCallId,
+            OnSent = request.OnSent,
+            Options = options,
+            Procedure = request.Procedure,
+            Series = request.Series,
+        };
 
         if (request.Subscribes is not { } subscribes)
         {
-            return _core.Request(payload, core);
+            return Withdrawing(_core.Request(payload, core), byDefault);
         }
 
-        return _core.Loop.Run(() =>
-        {
-            // only the notification held for the procedure is bound, or its notifications would reach
-            // none that is listening
-            if (!_notifications.TryGetValue(request.Procedure.Address, out var held) || !ReferenceEquals(held, subscribes))
+        return Withdrawing(
+            _core.Loop.Run(() =>
             {
-                return Task.FromException<RouterResult>(new InvalidOperationException(
-                    $"{subscribes.Procedure.ProcedureName} is not the notification this router holds for {request.Procedure.ProcedureName}"));
+                // only the notification held for the procedure is bound, or its notifications would
+                // reach none that is listening
+                if (!_notifications.TryGetValue(request.Procedure.Address, out var held) || !ReferenceEquals(held, subscribes))
+                {
+                    return Task.FromException<RouterResult>(new InvalidOperationException(
+                        $"{subscribes.Procedure.ProcedureName} is not the notification this router holds for {request.Procedure.ProcedureName}"));
+                }
+
+                return Subscribing(payload, (core, subscribes));
+            }),
+            byDefault);
+    }
+
+    // a call that presented the default, answered SESSION_REQUIRED whatever relays it crossed,
+    // withdraws it while it is still the default: calls present none by default from then on, and
+    // the application is told its scheme, once
+    private async Task<RouterResult> Withdrawing(Task<RouterResult> call, Credential? presented)
+    {
+        if (presented is not { } byDefault)
+        {
+            return await call;
+        }
+
+        try
+        {
+            return await call;
+        }
+        // ! a failure that overtook its result in a listen's batch ends a subscription the server had
+        // answered: it withdraws nothing (spec 13.4, 15.9)
+        catch (FailureException refused) when (refused is { Origin: not FailureOrigin.Local, Scope: FailureScope.Protocol, Code: (ushort)ProtocolCode.SessionRequired, MayOvertake: false })
+        {
+            bool isWithdrawn;
+
+            lock (_credentialGate)
+            {
+                isWithdrawn = _credential == byDefault;
+
+                if (isWithdrawn)
+                {
+                    _credential = null;
+                }
             }
 
-            return Subscribing(payload, (core, subscribes));
-        });
+            if (isWithdrawn)
+            {
+                try
+                {
+                    CredentialWithdrawn?.Invoke(byDefault.Scheme);
+                }
+                catch (Exception reason)
+                {
+                    Error?.Invoke(reason);
+                }
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -281,8 +571,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     // the call that subscribes, bound as its call id is drawn: before the request goes out, so a
-    // notification right behind its result is heard; one that did not take is unbound, whatever
-    // ended it; once answered, the window of a paced one opens
+    // notification right behind its result is heard, and before whoever hears the id is told it;
+    // one that did not take is unbound, whatever ended it; once answered, the window of a paced one
+    // opens
     private async Task<RouterResult> Subscribing(ReadOnlyMemory<byte> payload, (CoreRequest Request, INotificationLike Subscribes) call)
     {
         var (request, notification) = call;
@@ -309,9 +600,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                             callId,
                             notification,
                             notification.Window is { } window ? new Pacing(window) : null,
-                            request.Options.Timeout);
+                            request.Options.Timeout)
+                        {
+                            Hearing = _hearing.GetValueOrDefault(notification.Procedure.Address),
+                        };
                         _callIds[notification] = callId;
                         bound = callId;
+                        request.OnCallId?.Invoke(callId);
                     },
                 });
         }
@@ -325,9 +620,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             throw;
         }
 
-        // the server paces nothing before its answer: the window opens once it came, unless the
-        // server ended the subscription since
-        Renew(_subscriptions.GetValueOrDefault(result.Header.CallId));
+        // answered, it is a subscription, which its end drops; the server paces nothing before its
+        // answer: the window opens once it came, unless the server ended the subscription since
+        if (_subscriptions.GetValueOrDefault(result.Header.CallId) is { } answered)
+        {
+            answered.IsAnswered = true;
+            Renew(answered);
+        }
 
         return result;
     }
@@ -416,10 +715,19 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 _core.Loop);
     }
 
-    // the server forgets a connection's subscriptions with it: so does the client, and tells each
+    // the server forgets a connection's subscriptions with it: so does the client, and tells each;
+    // each answered is dropped, with no code (spec/debugging.md 10.3)
     private void DropNotifications()
     {
         var dropped = _notifications.Values.ToList();
+
+        foreach (var subscription in _subscriptions.Values)
+        {
+            if (subscription.IsAnswered)
+            {
+                subscription.Hearing?.Dropped.Drop(null);
+            }
+        }
 
         // emptied first, so what a drop registers again is the next connection's
         _notifications.Clear();
@@ -451,7 +759,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             return;
         }
 
-        _core.Receive(message.Bytes, ServerConnectionHandle);
+        _core.Receive(message, ServerConnectionHandle);
     }
 
     // in its turn, behind what the connection delivered before it closed
@@ -478,8 +786,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     // a notification bound to the call that subscribed it, how long that call was given, and its
-    // pacing when it asked for one
-    private sealed record Bound(uint CallId, INotificationLike Notification, Pacing? Pacing, TimeSpan Timeout);
+    // pacing when it asked for one; the series it is heard in, and whether its call was answered
+    private sealed record Bound(uint CallId, INotificationLike Notification, Pacing? Pacing, TimeSpan Timeout)
+    {
+        public HearingSeries? Hearing { get; init; }
+
+        public bool IsAnswered { get; set; }
+    }
 
     // a paced subscription, as its client counts it: the notifications credited, those whose
     // callbacks settled, and how many may be under way
@@ -536,6 +849,8 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 return;
             }
 
+            // * heard as it is paired with a subscription it holds, whether it decodes or not
+            subscription.Hearing?.Heard();
             client.Trigger(subscription, notification.Payload);
             client.Activity?.Invoke(RouterActivity.Notification);
         }
@@ -551,6 +866,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
             var notification = subscription.Notification;
             var call = client.Unbind(notification);
+
+            // * dropped at the side that hears, by the failure's code (spec/debugging.md 10.3)
+            subscription.Hearing?.Dropped.Drop(envelope.Failure);
 
             client._notifications.TryRemove(new KeyValuePair<ProcedureAddress, INotificationLike>(notification.Procedure.Address, notification));
 
@@ -573,31 +891,94 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             return true;
         }
 
-        // the session is the server's to give: an answer announces it when it changes, and carries
-        // none otherwise. Only a result or a failure comes here
+        // the session is the server's to give: an answer announces it when it changes — OPAQUE,
+        // its token, NONE, its end — and carries none otherwise. Only a result or a failure comes here
         public void OnAnswerReceived(IEnvelopeHeader header, string connectionHandle)
         {
-            var session = header is ResultHeader result ? result.Session : ((FailureHeader)header).Session;
+            var announced = header is ResultHeader result ? result.Credential : ((FailureHeader)header).Credential;
 
-            if (session is { } announced)
+            if (announced is { } credential)
             {
-                client._sessionToken = announced.Token is { } token ? token : null;
+                client._sessionToken = credential.SessionToken is { } token ? token : null;
             }
         }
 
-        public void Report(Exception reason, string connectionHandle)
+        public void Report(Exception reason, string? connectionHandle)
         {
             client.Error?.Invoke(reason);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        // the session it learned stands for its connection's: a call presenting OPAQUE presents it,
+        // and a command presenting none or OPAQUE resolves against it
+        public SessionToken? KnownSessionTokenOf(string connectionHandle)
         {
-            return client.Transport.Send(bytes);
+            return client.SessionToken;
         }
 
+        public IReadOnlyList<CredentialScheme> CredentialSchemes
+        {
+            get
+            {
+                return client._resolver.Schemes;
+            }
+        }
+
+        public bool CarriesCredential(string connectionHandle)
+        {
+            return client.Transport.CarriesCredential;
+        }
+
+        public bool IsSecure(string connectionHandle)
+        {
+            return client.Transport.IsSecure;
+        }
+
+        // a command's JWT and ELSEWHERE by its credentials; none and OPAQUE against the session it
+        // learned, in the turn they came
+        public ValueTask<CallSession?> SessionOf(SessionRequest request, CancellationToken signal)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            if (request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere)
+            {
+                return client._resolver.Resolve(request, signal);
+            }
+
+            return ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (client.SessionToken, null)));
+        }
+
+        public Task Send(TransportMessage message, string connectionHandle)
+        {
+            return client.Transport.Send(message);
+        }
+
+        public bool IsTracing
+        {
+            get
+            {
+                return client.Debug is not null;
+            }
+        }
+
+        // each listener within a guard: what one throws is reported, and changes nothing
         public void Trace(DebugDirection direction, TracedEnvelope envelope)
         {
-            client.Debug?.Invoke(direction, envelope);
+            if (client.Debug is not { } debug)
+            {
+                return;
+            }
+
+            foreach (var listener in debug.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<DebugDirection, TracedEnvelope>)listener)(direction, envelope);
+                }
+                catch (Exception reason)
+                {
+                    client.Error?.Invoke(reason);
+                }
+            }
         }
     }
 }

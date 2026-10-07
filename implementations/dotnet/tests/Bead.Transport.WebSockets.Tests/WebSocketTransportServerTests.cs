@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -23,7 +24,31 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     // a handle the tests give every connection, as a port given again would
     private const string Shared = "type=WS;ip=127.0.0.1;port=1";
 
+    // a bearer credential, RFC 6750's own example, its auth-scheme included
+    private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
+
+    // a router's largest envelope by default (spec 15.3)
+    private const int EnvelopeLimit = 16_778_240;
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    // RFC 6455 §1.3's key, 16 bytes in base64
+    private const string Key = "dGhlIHNhbXBsZSBub25jZQ==";
+
+    // RFC 6455 §1.3's handshake, at a host the tests' servers take
+    private static readonly string[] Handshake =
+    [
+        "Host: bead.test",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        $"Sec-WebSocket-Key: {Key}",
+        "Sec-WebSocket-Version: 13",
+    ];
+
+    // where the tests' clock stands, and the date a refusal carries from it
+    private static readonly DateTimeOffset Now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private const string Today = "Thu, 01 Jan 2026 00:00:00 GMT";
 
     private static readonly WebSocketTransportStartOptions Loopback = new() { Address = "127.0.0.1", FindOpenPort = true };
 
@@ -148,6 +173,130 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         return Encoding.ASCII.GetBytes(
             "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
             $"Sec-WebSocket-Key: {Convert.ToBase64String(RandomNumberGenerator.GetBytes(16))}\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    }
+
+    // an opening handshake naming a host, from a page of an origin when given one
+    private static byte[] UpgradeRequest((string Host, string? Origin) from)
+    {
+        var origin = from.Origin is { } given ? $"Origin: {given}\r\n" : "";
+
+        return Encoding.ASCII.GetBytes(
+            $"GET / HTTP/1.1\r\nHost: {from.Host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n{origin}" +
+            $"Sec-WebSocket-Key: {Convert.ToBase64String(RandomNumberGenerator.GetBytes(16))}\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    }
+
+    // what the server answers a handshake on a socket of its own, read until it lets go of the
+    // socket: its status, its fields by their names in lower case, and its body
+    private Task<(int Status, Dictionary<string, string> Fields, string Body)> AnswerOf((string Host, string? Origin) from)
+    {
+        return AnswerOf(UpgradeRequest(from));
+    }
+
+    private async Task<(int Status, Dictionary<string, string> Fields, string Body)> AnswerOf(byte[] request)
+    {
+        using var tcp = await OpenTcp();
+        var stream = tcp.GetStream();
+        var answer = new MemoryStream();
+
+        await stream.WriteAsync(request, Cancelled);
+        await stream.CopyToAsync(answer, Cancelled).WaitAsync(Patience, Cancelled);
+
+        var text = Encoding.ASCII.GetString(answer.ToArray());
+        var end = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        var lines = text[..end].Split("\r\n");
+        var fields = lines[1..].ToDictionary(
+            (line) =>
+            {
+                return line[..line.IndexOf(':', StringComparison.Ordinal)].ToLowerInvariant();
+            },
+            (line) =>
+            {
+                return line[(line.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim();
+            });
+
+        return (int.Parse(lines[0].Split(' ')[1], CultureInfo.InvariantCulture), fields, text[(end + 4)..]);
+    }
+
+    // RFC 6455 §1.3's handshake at bead.test, under the start line given: each field line given in
+    // place of those of its name, which a name alone leaves out
+    private static byte[] HandshakeOf(string start, params string[] fields)
+    {
+        var named = fields.Select(NameOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var lines = Handshake.Where((line) =>
+        {
+            return !named.Contains(NameOf(line));
+        }).Concat(fields.Where((field) =>
+        {
+            return field.Contains(':', StringComparison.Ordinal);
+        }));
+
+        return Encoding.ASCII.GetBytes($"{start}\r\n{string.Concat(lines.Select((line) =>
+        {
+            return $"{line}\r\n";
+        }))}\r\n");
+    }
+
+    // a field line's name, or the name given alone
+    private static string NameOf(string field)
+    {
+        var colon = field.IndexOf(':', StringComparison.Ordinal);
+
+        return colon < 0 ? field : field[..colon];
+    }
+
+    // the whole head of a refusal of the transport's own: marked, never stored nor sniffed, dated by
+    // the tests' clock, its body empty, its connection closed, and the fields given beside or in
+    // place of those
+    private static Dictionary<string, string> RefusedWith(string reason, params (string Name, string Value)[] beside)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["bead-refusal"] = reason,
+            ["cache-control"] = "no-store",
+            ["x-content-type-options"] = "nosniff",
+            ["content-length"] = "0",
+            ["connection"] = "close",
+            ["date"] = Today,
+        };
+
+        foreach (var (name, value) in beside)
+        {
+            fields[name] = value;
+        }
+
+        return fields;
+    }
+
+    // a server started on the tests' clock, which dates its refusals
+    private async Task StartDated(WebSocketTransportServerOptions options)
+    {
+        await Start(options with { Clock = new FakeTimeProvider(Now) });
+    }
+
+    // that the server answers each request with the status and the whole head given, its body empty,
+    // and lets go of its socket; each told by its own octets
+    private async Task AssertAnswered(IEnumerable<byte[]> requests, (int Status, Dictionary<string, string> Fields) expected)
+    {
+        static string FieldsOf(Dictionary<string, string> fields)
+        {
+            return string.Join("; ", fields.OrderBy((field) =>
+            {
+                return field.Key;
+            }, StringComparer.Ordinal).Select((field) =>
+            {
+                return $"{field.Key}: {field.Value}";
+            }));
+        }
+
+        foreach (var request in requests)
+        {
+            var asked = Encoding.ASCII.GetString(request).Replace("\r\n", " | ", StringComparison.Ordinal);
+            var answer = await AnswerOf(request);
+
+            Assert.Equal(
+                (asked, expected.Status, FieldsOf(expected.Fields), ""),
+                (asked, answer.Status, FieldsOf(answer.Fields), answer.Body));
+        }
     }
 
     // reads an answer's head, byte by byte, so nothing after it is taken with it
@@ -278,13 +427,289 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Answers_a_request_that_does_not_upgrade_with_426()
+    public async Task Carries_no_credential_toward_a_connection_and_is_secure_on_a_loopback_host_it_listens_on_or_as_its_transport_says()
     {
-        // the TypeScript side's ws library answers the same to a request that asks no WebSocket
-        using var http = new HttpClient();
-        using var answered = await http.GetAsync(new Uri($"http://127.0.0.1:{_port}/"), Cancelled);
+        await using var unstarted = new WebSocketTransportServer();
 
-        Assert.Equal(426, (int)answered.StatusCode);
+        // bound to the loopback, it never leaves the machine; nothing bound, nothing is
+        Assert.Equal((false, true), (_server.CarriesCredential("any"), _server.IsSecure("any")));
+        Assert.Equal((false, false), (unstarted.CarriesCredential("any"), unstarted.IsSecure("any")));
+    }
+
+    [Fact]
+    public async Task Is_secure_as_its_application_says_what_stands_in_front_of_it_whatever_it_listens_on_and_by_what_it_listens_on_when_it_says_nothing()
+    {
+        // whether one bound to the loopback is secure, and one bound to nothing, which no listener
+        // makes secure
+        async Task<(bool Bound, bool Unbound)> SecuredBy(bool? secure)
+        {
+            await using var bound = new WebSocketTransportServer(new WebSocketTransportServerOptions { Secure = secure });
+            await using var unbound = new WebSocketTransportServer(new WebSocketTransportServerOptions { Secure = secure });
+
+            await bound.Start(Loopback, Cancelled);
+
+            return (bound.IsSecure("any"), unbound.IsSecure("any"));
+        }
+
+        // nothing said, by its listener; TLS terminated before it, on another host; a proxy on the
+        // machine that serves the network in the clear
+        Assert.Equal((true, false), await SecuredBy(null));
+        Assert.Equal((true, true), await SecuredBy(true));
+        Assert.Equal((false, false), await SecuredBy(false));
+    }
+
+    [Fact]
+    public async Task Refuses_an_upgrade_403_before_its_handshake_marked_host_refused_for_a_host_it_does_not_take_and_origin_refused_for_an_origin_neither_its_own_nor_among_those_it_takes_its_body_empty_its_date_written_whatever_its_method_its_upgrade_or_its_form()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"], Origins = ["https://bead.example"] });
+
+        // a host not taken, whatever else the request holds: a page that rebinds its name reaches
+        // the address with any method and no upgrade
+        await AssertAnswered(
+            [
+                UpgradeRequest(("elsewhere.test", null)),
+                UpgradeRequest(("elsewhere.test", "http://elsewhere.test")),
+                HandshakeOf("POST / HTTP/1.1", "Host: elsewhere.test"),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("POST / HTTP/1.1", "Host: elsewhere.test", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Content-Length: 0"),
+                HandshakeOf("PUT /bead HTTP/1.1", "Host: elsewhere.test", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Content-Length: 0"),
+                HandshakeOf("HEAD / HTTP/1.1", "Host: elsewhere.test"),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Sec-WebSocket-Key: dGVzdA=="),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Sec-WebSocket-Version: 14"),
+                HandshakeOf("GET / HTTP/1.1", "Host: "),
+            ],
+            (403, RefusedWith(WebSocketRefusals.Host)));
+
+        // a host taken, from an origin neither its own nor among those it takes
+        await AssertAnswered(
+            [UpgradeRequest(("bead.test", "https://elsewhere.test")), UpgradeRequest(("bead.test", "http://elsewhere.test:80"))],
+            (403, RefusedWith(WebSocketRefusals.Origin)));
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Takes_an_upgrade_with_no_Origin_from_its_own_origin_and_from_one_among_those_it_takes()
+    {
+        await Start(new WebSocketTransportServerOptions { Origins = ["https://bead.example"] });
+
+        foreach (var origin in new[] { null, $"http://127.0.0.1:{_port}", $"https://127.0.0.1:{_port}", "https://bead.example" })
+        {
+            using var client = new ClientWebSocket();
+
+            if (origin is not null)
+            {
+                client.Options.SetRequestHeader("Origin", origin);
+            }
+
+            await client.ConnectAsync(UriOf(_port), Cancelled);
+
+            Assert.Equal(WebSocketState.Open, client.State);
+            Assert.StartsWith("type=WS;", await Next(_connections), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task Reads_the_Host_of_an_upgrade_as_it_came_an_IDN_page_s_own_in_punycode_and_one_of_invalid_punycode_taken_or_refused_host_refused_never_a_500()
+    {
+        // an upgrade taken: its 101, then its connection
+        async Task Upgraded((string Host, string? Origin) from)
+        {
+            using var tcp = await OpenTcp();
+            var stream = tcp.GetStream();
+
+            await stream.WriteAsync(UpgradeRequest(from), Cancelled);
+            await ReadHead(stream);
+
+            Assert.StartsWith("type=WS;", await Next(_connections), StringComparison.Ordinal);
+        }
+
+        // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
+        // and a Host of punycode that decodes to none, taken where no host is named
+        var page = ("xn--bad-bma.test:8080", "http://xn--bad-bma.test:8080");
+
+        foreach (var from in new (string Host, string? Origin)[] { page, ("xn--a", null), ("xn--a.test", null), ("xn---bad-cpa.test", null) })
+        {
+            await Upgraded(from);
+        }
+
+        // hosts name an IDN host as the field carries it, in punycode
+        await Start(new WebSocketTransportServerOptions { Hosts = ["xn--bad-bma.test:8080"] });
+        await Upgraded(page);
+        await Upgraded(("XN--BAD-BMA.test:8080", null));
+
+        var refusals = new[] { await AnswerOf(("xn--a.test", null)), await AnswerOf(("xn---bad-cpa.test", null)) };
+
+        Assert.Equal([(403, "host-refused"), (403, "host-refused")], refusals.Select((refusal) =>
+        {
+            return (refusal.Status, refusal.Fields["bead-refusal"]);
+        }));
+    }
+
+    [Fact]
+    public async Task Refuses_a_method_but_GET_or_HEAD_405_after_its_host_and_before_its_upgrade_is_read_its_Allow_naming_GET_and_HEAD_marked_method_refused()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test", "bead.test:80"] });
+
+        // a handshake under another method, one of version 8 among them, or none at all; a CONNECT,
+        // whose Host Kestrel holds to its target
+        await AssertAnswered(
+            [
+                HandshakeOf("POST / HTTP/1.1"),
+                HandshakeOf("PUT / HTTP/1.1"),
+                HandshakeOf("OPTIONS / HTTP/1.1"),
+                HandshakeOf("POST / HTTP/1.1", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("DELETE / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("POST / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Content-Length: 0"),
+                HandshakeOf("CONNECT bead.test:80 HTTP/1.1", "Host: bead.test:80"),
+            ],
+            (405, RefusedWith(WebSocketRefusals.Method, ("allow", "GET, HEAD"))));
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Answers_a_request_that_asks_no_WebSocket_426_marked_upgrade_required_its_Upgrade_naming_websocket_its_Connection_upgrade_and_close()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // no upgrade at all; an Upgrade missing or naming no websocket; a Connection missing or
+        // naming no upgrade; a HEAD, which cannot switch, its body none and its length 0; an
+        // HTTP/1.0 request, whose Upgrade is ignored
+        await AssertAnswered(
+            [
+                HandshakeOf("GET / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade: websocket/13"),
+                HandshakeOf("GET / HTTP/1.1", "Connection"),
+                HandshakeOf("GET / HTTP/1.1", "Connection: keep-alive"),
+                HandshakeOf("GET / HTTP/1.1", "Connection: upgraded"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("HEAD / HTTP/1.1"),
+                HandshakeOf("HEAD / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("GET / HTTP/1.0"),
+                HandshakeOf("GET / HTTP/1.0", "Upgrade: websocket, h2c"),
+                HandshakeOf("GET / HTTP/1.0", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+            ],
+            (426, RefusedWith(WebSocketRefusals.Upgrade, ("connection", "upgrade, close"), ("upgrade", "websocket"))));
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Refuses_a_malformed_upgrade_400_marked_malformed_before_its_origin_is_judged_its_body_empty()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // a key missing, not base64, of 4 or 17 bytes, twice, empty, or with a space inside; two
+        // versions; subprotocols that are no list of tokens, or none; content, by its length or in
+        // chunks; a bad key from an origin not taken
+        await AssertAnswered(
+            [
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: not a key at all!!!!!=="),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGVzdA=="),
+                HandshakeOf("GET / HTTP/1.1", $"Sec-WebSocket-Key: {Convert.ToBase64String(new byte[17])}"),
+                HandshakeOf("GET / HTTP/1.1", $"Sec-WebSocket-Key: {Key}", $"Sec-WebSocket-Key: {Key}"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: "),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGhlIHNhbXBs ZSBub25jZQ=="),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 13", "Sec-WebSocket-Version: 13"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Protocol: a b"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Protocol: "),
+                [.. HandshakeOf("GET / HTTP/1.1", "Content-Length: 5"), .. "hello"u8],
+                [.. HandshakeOf("GET / HTTP/1.1", "Transfer-Encoding: chunked"), .. "5\r\nhello\r\n0\r\n\r\n"u8],
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGVzdA==", "Origin: https://elsewhere.test"),
+            ],
+            (400, RefusedWith(WebSocketRefusals.Malformed)));
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Answers_426_to_an_upgrade_of_a_version_but_13_or_of_none_marked_version_refused_naming_version_13_and_websocket_before_its_key_and_its_origin_are_judged()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // version 8, which RFC 6455 left behind and no browser sends, from an origin not taken, with
+        // its own origin's field, or with a bad key; any other, none, or a list in one field line
+        await AssertAnswered(
+            [
+                HandshakeOf("GET / HTTP/1.1", "Origin: https://elsewhere.test", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Origin: http://bead.test", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGVzdA==", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Origin: https://elsewhere.test", "Sec-WebSocket-Version: 7"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 013"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 13, 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 8, 13"),
+            ],
+            (426, RefusedWith(WebSocketRefusals.Version, ("connection", "upgrade, close"), ("upgrade", "websocket"), ("sec-websocket-version", "13"))));
+        Assert.True(_connections.Reader.Count == 0);
+
+        // version 13, from the server's own origin, upgrades
+        using var tcp = await OpenTcp();
+        var stream = tcp.GetStream();
+
+        await stream.WriteAsync(UpgradeRequest(("bead.test", "http://bead.test")), Cancelled);
+        await ReadHead(stream);
+
+        Assert.StartsWith("type=WS;", await Next(_connections), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Answers_a_request_without_a_Host_with_two_or_with_one_that_is_no_host_400_as_HTTP_does_unmarked()
+    {
+        var requests = new[]
+        {
+            HandshakeOf("GET / HTTP/1.1", "Host"),
+            HandshakeOf("GET / HTTP/1.1", "Host: bead.test", "Host: elsewhere.test"),
+            HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Host: bead.test"),
+            HandshakeOf("GET / HTTP/1.1", "Host: bad host"),
+        };
+
+        // its head is the HTTP server's own, whether the server takes every host or names some
+        foreach (var hosts in new[] { null, new[] { "bead.test" } })
+        {
+            await Start(new WebSocketTransportServerOptions { Hosts = hosts });
+
+            foreach (var request in requests)
+            {
+                var answer = await AnswerOf(request);
+
+                Assert.Equal((400, false, ""), (answer.Status, answer.Fields.ContainsKey("bead-refusal"), answer.Body));
+            }
+        }
+
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Takes_an_upgrade_whose_Upgrade_lists_websocket_in_any_case_in_one_field_line_or_several_whose_Connection_names_upgrade_among_other_tokens_with_no_content()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        foreach (var request in new[]
+        {
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: WebSocket"),
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c, websocket"),
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: websocket, h2c"),
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c", "Upgrade: websocket"),
+            HandshakeOf("GET / HTTP/1.1", "Connection: keep-alive, upgrade"),
+            HandshakeOf("GET / HTTP/1.1", "Connection: UPGRADE"),
+            HandshakeOf("GET / HTTP/1.1", "Connection: keep-alive", "Connection: upgrade"),
+            HandshakeOf("GET / HTTP/1.1", "Content-Length: 0"),
+            HandshakeOf("GET / HTTP/1.1", "Content-Length: 00"),
+            HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA=="),
+        })
+        {
+            using var tcp = await OpenTcp();
+            var stream = tcp.GetStream();
+
+            await stream.WriteAsync(request, Cancelled);
+            await ReadHead(stream);
+
+            Assert.StartsWith("type=WS;", await Next(_connections), StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -311,13 +736,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     {
         var time = new FakeTimeProvider();
 
-        await Start(new WebSocketTransportServerOptions { Time = time });
+        await Start(new WebSocketTransportServerOptions { Clock = time });
 
         var (client, _) = await Connect();
 
         using (client)
         {
-            Assert.Null(Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Null(Assert.Single(_server.Clients).LastActivity);
 
             time.Advance(TimeSpan.FromSeconds(1));
             await client.SendAsync("hi"u8.ToArray(), WebSocketMessageType.Text, true, Cancelled);
@@ -325,7 +750,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             var (text, _) = await Next(_messages);
 
             Assert.True(text.IsText);
-            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivity);
 
             // each message stamps it again
             time.Advance(TimeSpan.FromSeconds(1));
@@ -335,7 +760,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.False(binary.IsText);
             Assert.Equal("bytes"u8.ToArray(), binary.Bytes.ToArray());
-            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivityTimestamp);
+            Assert.Equal(time.GetUtcNow(), Assert.Single(_server.Clients).LastActivity);
         }
     }
 
@@ -348,7 +773,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             await Task.WhenAll(Enumerable.Range(1, 20).Select((index) =>
             {
-                return _server.Send(new[] { (byte)index }, connectionHandle);
+                return _server.Send(new TransportMessage(new[] { (byte)index }, false), connectionHandle);
             }));
 
             for (var index = 1; index <= 20; index += 1)
@@ -398,6 +823,30 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Closes_with_1009_a_message_past_an_envelope_s_limit_16778240_bytes_when_told_no_bound()
+    {
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            // an envelope's limit is taken whole, one byte more closes
+            await client.SendAsync(new byte[EnvelopeLimit], WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Equal(EnvelopeLimit, (await Next(_messages)).Message.Bytes.Length);
+
+            var sending = client.SendAsync(new byte[EnvelopeLimit + 1], WebSocketMessageType.Binary, true, Cancelled);
+            var (result, _) = await ReceiveOf(client);
+
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.MessageTooBig), (result.MessageType, result.CloseStatus));
+            // what is left of the message goes, or fails as the socket goes: either way it is heard no more
+            client.Abort();
+            await Task.WhenAny(sending).WaitAsync(Patience, Cancelled);
+            Assert.Equal(connectionHandle, (await Next(_closes)).ConnectionHandle);
+            Assert.True(_messages.Reader.Count == 0);
+        }
+    }
+
+    [Fact]
     public async Task Drops_a_connection_that_never_answers_its_close_once_the_timeout_passed()
     {
         await Start(new WebSocketTransportServerOptions { CloseTimeout = TimeSpan.FromMilliseconds(200) });
@@ -411,6 +860,26 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await _server.CloseConnection(connectionHandle).WaitAsync(TimeSpan.FromSeconds(2), Cancelled);
 
             Assert.Equal((false, connectionHandle), await Next(_closes, TimeSpan.FromSeconds(2)));
+        }
+    }
+
+    // what a close timeout holds or refuses is the durations' file's to play: infinite arms no
+    // timer, and a peer that does not answer its close is waited on without end
+    [Fact]
+    public async Task Waits_on_its_peer_without_end_for_a_close_timeout_of_infinity_arming_no_timer()
+    {
+        await Start(new WebSocketTransportServerOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            var closing = _server.CloseConnection(connectionHandle);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+            Assert.False(closing.IsCompleted);
+            Assert.Equal(WebSocketCloseStatus.NormalClosure, await AnswerClose(client));
+            await closing.WaitAsync(Patience, Cancelled);
         }
     }
 
@@ -432,9 +901,28 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Carries_no_credential_either_way()
+    {
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            await client.SendAsync("up"u8.ToArray(), WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Null((await Next(_messages)).Message.Credential);
+
+            await _server.Send(new TransportMessage("down"u8.ToArray(), false) { Credential = Bearer }, connectionHandle).WaitAsync(Patience, Cancelled);
+
+            var (result, bytes) = await ReceiveOf(client);
+
+            Assert.Equal((WebSocketMessageType.Binary, "down"), (result.MessageType, Encoding.ASCII.GetString(bytes)));
+        }
+    }
+
+    [Fact]
     public async Task Resolves_a_send_for_a_handle_nobody_holds()
     {
-        await _server.Send(new byte[] { 1 }, "type=WS;ip=127.0.0.1;port=1").WaitAsync(Patience, Cancelled);
+        await _server.Send(new TransportMessage(new byte[] { 1 }, false), "type=WS;ip=127.0.0.1;port=1").WaitAsync(Patience, Cancelled);
     }
 
     [Fact]
@@ -871,8 +1359,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // a heartbeat refused is the durations' file's to play
     [Fact]
-    public async Task Pings_nothing_with_a_heartbeat_of_infinity_and_refuses_one_no_timer_holds()
+    public async Task Pings_nothing_with_a_heartbeat_of_infinity()
     {
         foreach (var (heartbeat, isPinging) in new[] { (TimeSpan.FromMilliseconds(200), true), (Timeout.InfiniteTimeSpan, false) })
         {
@@ -902,12 +1391,23 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                 Assert.Single(_server.ConnectionHandles);
             }
         }
+    }
 
-        foreach (var heartbeat in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(1.5), TimeSpan.FromMilliseconds(int.MaxValue + 1L), TimeSpan.FromSeconds(-1) })
+    [Fact]
+    public async Task Refuses_a_close_timeout_past_the_longest_timer_and_runs_on_the_clock_it_is_given()
+    {
+        var time = new FakeTimeProvider();
+        await using var given = new WebSocketTransportServer(new WebSocketTransportServerOptions { Clock = time });
+        await using var none = new WebSocketTransportServer();
+
+        Assert.Equal((time, TimeProvider.System), (given.Clock, none.Clock));
+
+        // 2³¹ ms, one past what JavaScript's timers hold
+        foreach (var closeTimeout in new[] { TimeSpan.FromMilliseconds(-2), Clocks.LongestTimer + TimeSpan.FromMilliseconds(1) })
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>
             {
-                return new WebSocketTransportServer(new WebSocketTransportServerOptions { Heartbeat = heartbeat });
+                return new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = closeTimeout });
             });
         }
     }
@@ -919,7 +1419,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         _server.Connection += (connectionHandle) =>
         {
-            seen.TrySetResult((_server.ConnectionHandles.Contains(connectionHandle), _server.Send("hi"u8.ToArray(), connectionHandle)));
+            seen.TrySetResult((_server.ConnectionHandles.Contains(connectionHandle), _server.Send(new TransportMessage("hi"u8.ToArray(), false), connectionHandle)));
         };
 
         var (client, _) = await Connect();
@@ -1062,7 +1562,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal(Shared, connectionHandle);
             await older.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
             // a round trip on the newer: the older's end, which came first, is told by now
-            await _server.Send(new byte[] { 1 }, Shared).WaitAsync(Patience, Cancelled);
+            await _server.Send(new TransportMessage(new byte[] { 1 }, false), Shared).WaitAsync(Patience, Cancelled);
             await ReceiveOf(newer);
 
             Assert.Equal([Shared], _server.ConnectionHandles);

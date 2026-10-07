@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's metrics, spec/metrics.json",
+  "type": "object",
+  "required": ["$comment", "debuggingVersion", "mediaType", "wallClock", "expositions", "exits"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "const": "schemas/metrics.schema.json" },
+    "$comment": { "$ref": "common.schema.json#/$defs/comment" },
+    "debuggingVersion": { "$ref": "common.schema.json#/$defs/debuggingVersion" },
+    "mediaType": {
+      "description": "The media type an exposition is given with (spec/debugging.md 12.1).",
+      "const": "text/plain; version=0.0.4; charset=utf-8"
+    },
+    "wallClock": { "$ref": "common.schema.json#/$defs/wallClock" },
+    "expositions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/exposition" }
+    },
+    "exits": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/exit" }
+    }
+  },
+  "$defs": {
+    "exposition": {
+      "description": "A registry played on its own: the routers it is given, what is declared to it, what it counts, and the text it writes then.",
+      "type": "object",
+      "required": ["name", "clauses", "routers", "declarations", "counts", "exposition"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "maximumProcedures": {
+          "description": "The registry's ceiling (spec/debugging.md 7.4); absent, its default.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "routers": {
+          "description": "The routers the registry is given, each by its side, in their order.",
+          "type": "array",
+          "items": { "enum": ["client", "server"] }
+        },
+        "declarations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/declaration" }
+        },
+        "counts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/count" }
+        },
+        "exposition": { "$ref": "#/$defs/lines" }
+      }
+    },
+    "router": {
+      "description": "A router the registry is given, by its index among routers.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "declaration": {
+      "description": "A procedure declared on a router (spec/debugging.md 7.2): as its resolver is registered, notifying or not; as a requester is made; as a notification is registered, on the side that hears. serviceRevision is its service's revision, 1 when left out. refused is the reason it is refused (7.3), when it is.",
+      "type": "object",
+      "required": ["router", "as", "serviceId", "procedureId", "procedureName"],
+      "additionalProperties": false,
+      "properties": {
+        "router": { "$ref": "#/$defs/router" },
+        "as": { "enum": ["resolver", "requester", "notification"] },
+        "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
+        "procedureId": { "$ref": "common.schema.json#/$defs/u16" },
+        "procedureName": { "type": "string" },
+        "serviceRevision": { "$ref": "common.schema.json#/$defs/serviceRevision" },
+        "notifies": { "const": true },
+        "refused": {
+          "enum": [
+            "another name at its address",
+            "its name at another address",
+            "another revision of its service",
+            "past the ceiling"
+          ]
+        }
+      },
+      "dependentSchemas": {
+        "notifies": { "properties": { "as": { "const": "resolver" } } }
+      }
+    },
+    "count": {
+      "description": "What a router counts: a call answered or made, whole or under way; a notification sent, failed or heard; a subscription dropped at one of its ends. With no serviceId and procedureId, a call is _OTHER's.",
+      "type": "object",
+      "required": ["router"],
+      "oneOf": [
+        { "required": ["call"] },
+        { "required": ["notification"] },
+        { "required": ["dropped"] }
+      ],
+      "dependentRequired": {
+        "serviceId": ["procedureId"],
+        "procedureId": ["serviceId"],
+        "outcome": ["call", "microseconds"],
+        "microseconds": ["outcome"],
+        "notification": ["serviceId"],
+        "dropped": ["serviceId"]
+      },
+      "additionalProperties": false,
+      "properties": {
+        "router": { "$ref": "#/$defs/router" },
+        "call": { "enum": ["answered", "made"] },
+        "notification": { "enum": ["sent", "failed", "heard"] },
+        "dropped": {
+          "description": "The end of the subscription dropped: the side that notifies, or the side that hears.",
+          "enum": ["notifies", "hears"]
+        },
+        "serviceId": { "$ref": "common.schema.json#/$defs/u16" },
+        "procedureId": { "$ref": "common.schema.json#/$defs/u16" },
+        "outcome": { "enum": ["result", "failure", "timeout", "cancelled", "closed", "error"] },
+        "code": { "$ref": "#/$defs/code" },
+        "microseconds": {
+          "description": "How long the call took, in whole microseconds, held exactly by every side.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["outcome"], "properties": { "outcome": { "const": "failure" } } },
+          "then": { "required": ["code"] }
+        },
+        {
+          "if": { "required": ["code"] },
+          "then": {
+            "anyOf": [
+              { "required": ["dropped"] },
+              { "required": ["outcome"], "properties": { "outcome": { "const": "failure" } } }
+            ]
+          }
+        }
+      ]
+    },
+    "code": {
+      "description": "A failure's code as a label holds it (spec/debugging.md 8.4): a code of section 8 of spec/spec.md by its name, application, or _OTHER.",
+      "enum": [
+        "ENVELOPE_MALFORMED",
+        "LAYOUT_UNSUPPORTED",
+        "KIND_UNSUPPORTED",
+        "ENVELOPE_TOO_LARGE",
+        "DESTINATION_UNKNOWN",
+        "DESTINATION_UNREACHABLE",
+        "SERVICE_UNKNOWN",
+        "PROCEDURE_UNKNOWN",
+        "CALL_UNKNOWN",
+        "SUBSCRIPTION_UNKNOWN",
+        "SUBSCRIPTION_UNSUPPORTED",
+        "SESSION_REQUIRED",
+        "ACCESS_DENIED",
+        "PAYLOAD_TOO_LARGE",
+        "CAPACITY_EXCEEDED",
+        "CREDENTIAL_UNSUPPORTED",
+        "CHUNK_INVALID",
+        "CREDIT_EXCEEDED",
+        "PAYLOAD_UNDECODABLE",
+        "TRANSFER_STALLED",
+        "PROCEDURE_FAILED",
+        "DESTINATION_LOST",
+        "application",
+        "_OTHER"
+      ]
+    },
+    "lines": {
+      "description": "Lines of the Prometheus text exposition format 0.0.4, each without the line feed that ends it.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[^\\n]*$" }
+    },
+    "exit": {
+      "description": "A conversation of the interop service's server, its server given a registry, with the series each step it takes moved.",
+      "type": "object",
+      "required": ["name", "clauses", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/name" },
+        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "limits": { "$ref": "conversations.schema.json#/$defs/limits" },
+        "pacing": { "$ref": "conversations.schema.json#/$defs/pacing" },
+        "relay": { "$ref": "conversations.schema.json#/$defs/relay" },
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "anyOf": [
+              { "$ref": "conversations.schema.json#/$defs/step" },
+              { "$ref": "#/$defs/counted" }
+            ]
+          }
+        }
+      }
+    },
+    "counted": {
+      "description": "The series that moved since the case began or since the last counted, each by the line the exposition writes for it, with its value, in the exposition's order.",
+      "type": "object",
+      "required": ["counted"],
+      "additionalProperties": false,
+      "properties": {
+        "counted": { "$ref": "#/$defs/lines" }
+      }
+    }
+  }
+}

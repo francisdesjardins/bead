@@ -9,10 +9,14 @@ import type {
 /**
  * A `WebSocketServer` a test scripts by hand, for the branches a real one does not take on demand:
  * an error after listening, one before it, a peer that never answers a close, a close that throws.
+ * The transport's HTTP server, which it is given, listens for real; its `listening` and its `error`
+ * are what the test scripts, as `ws` forwards them.
  */
 
 export interface IFakeSocket extends IServerSocketLike {
   closeCodes: number[];
+  /** What the peer sends, or does: `message`, `pong`, `close`. */
+  hear(event: string, ...params: unknown[]): void;
   /** The pings the socket was asked to send. */
   pings: number;
   wasTerminated: boolean;
@@ -29,6 +33,9 @@ export const createFakeSocket = (behaviour?: {
     closeCodes: [],
     readyState: 1,
     wasTerminated: false,
+    hear: (event, ...params) => {
+      emitter.emit(event, ...params);
+    },
     close: (code) => {
       socket.closeCodes.push(code ?? 1005);
       if (behaviour?.onClose === 'throw') {
@@ -88,15 +95,20 @@ export const createFakeWebSocketServer = (options?: {
     });
   } as unknown as IWebSocketServerConstructor;
 
+  // the request of an upgrade taken, from `socket`
+  const requestOf = (socket: IIncomingMessageLike['socket']): IIncomingMessageLike => {
+    return { headers: {}, httpVersion: '1.1', rawHeaders: [], socket };
+  };
+
   const connect = (socket: IServerSocketLike, remotePort = 40_000) => {
-    const request: IIncomingMessageLike = { socket: { remoteAddress: '10.0.0.1', remotePort } };
+    const request = requestOf({ remoteAddress: '10.0.0.1', remotePort });
     instances.at(-1)?.emit('connection', socket, request);
     return generateHandle({ ip: '10.0.0.1', port: remotePort, type: 'WS' });
   };
 
   /** A connection whose TCP socket was torn down before the server saw it: it reports no address. */
   const connectGone = (socket: IServerSocketLike) => {
-    const request: IIncomingMessageLike = { socket: {} };
+    const request = requestOf({});
     instances.at(-1)?.emit('connection', socket, request);
   };
 

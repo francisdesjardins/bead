@@ -1,5 +1,8 @@
 # Bead
 
+[![CI](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml?query=branch%3Amain)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
 relays, and transfers of large payloads under credit. Each envelope is written at fixed big-endian
@@ -23,10 +26,11 @@ Nothing is published yet.
 
 A client and its server talk in more ways than requests and answers. The server pushes changes the
 client must keep up with. A large file goes up while other calls carry on. A call is cancelled
-halfway. A session outlives a dropped connection, and the server sometimes has to ask the client
-something. Bead carries all of it in one small binary envelope, whatever carries the envelope:
-WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and a publish/subscribe
-broker (coming).
+halfway. A call presents its own credential — a signed token, say — which outlives a dropped
+connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
+the client something. Bead carries all of it in one small binary envelope, whatever carries the
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and a
+publish/subscribe broker (coming).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -36,11 +40,11 @@ broker (coming).
   one. A queue past its bound ends the subscription out loud, never in silence.
 - **Large payloads under credit.** A transfer goes in chunks, as fast as its receiver credits them,
   beside the calls still under way.
-- **Everything a conversation needs**: cancel, sessions, relays, and commands, the server's own
-  calls to the client.
-- **One behaviour in every language.** The spec, its 123 vectors and 72 conversations are the
-  contract. The TypeScript and C# implementations both play them, and call each other in CI over
-  both transports.
+- **Everything a conversation needs**: cancel, sessions, a credential on each call — a JWT, or
+  what its transport carries — relays that forward it to the destination that verifies it, and
+  commands, the server's own calls to the client.
+- **One behaviour in every language.** The spec and its conformance files are the contract. The
+  TypeScript and C# implementations both play them, and call each other in CI over both transports.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
@@ -55,15 +59,16 @@ keep the same API, whatever carries the envelopes.
 ## Layout
 
 ```
-spec/                         spec.md, and the conformance files both sides read
+spec/                         spec.md, debugging.md, the conformance files both sides read, and check.py
   generators/                 the Python scripts that write them
+  schemas/                    their JSON Schemas
 implementations/
-  typescript/                 a Yarn project of its own: src/, interop/, demo/, tools/
+  typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks and the coverage report, Node without dependencies
+tools/                        repository checks, the release and the coverage report, Node without dependencies
 .githooks/                    the repository checks before each commit, opt-in
 .github/workflows/ci.yml      the CI
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
@@ -75,34 +80,65 @@ share, above all `spec/`, which both read in their tests.
 
 ## The specification and its conformance files
 
-[`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each of
-its sections names the vector groups that check it. Beside it:
+[`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each
+file of entries is named by a section whose clauses it plays, and each entry cites the units it
+checks. Its companion, [`spec/debugging.md`](spec/debugging.md), states what a side traces, filters
+and counts beside the wire, under a version of its own. Beside them:
 
-| File                                                | What it holds                                                                                                                   |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                 | 123 named vectors in 9 groups: headers and envelopes read and written back to their bytes, and the refusals, each with its code |
-| [`conversations.json`](spec/conversations.json)     | 72 conversations: envelopes in and out of a server, step by step, under the limits and pacing each one sets                     |
-| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, and its procedures                                                                   |
+| File                                                | What it holds                                                                                                                                                                                         |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`vectors.json`](spec/vectors.json)                 | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
+| [`conversations.json`](spec/conversations.json)     | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
+| [`transports.json`](spec/transports.json)           | 80 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                              |
+| [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
+| [`durations.json`](spec/durations.json)             | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
+| [`identities.json`](spec/identities.json)           | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
+| [`codecs.json`](spec/codecs.json)                   | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
+| [`codecs.proto`](spec/codecs.proto)                 | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
+| [`debug-filters.json`](spec/debug-filters.json)     | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                   |
+| [`metrics.json`](spec/metrics.json)                 | 24 expositions, the text a registry writes for what it counts, byte for byte, and 50 exits of the interop service's server, the series each step moved                                                |
+| [`interop-service.json`](spec/interop-service.json) | the interop service: its id, its revision, its procedures, what its relay admits and forwards, and the credentials it verifies                                                                        |
 
-Both implementations read these files from `spec/` in their tests; neither keeps a copy. The two
+Both implementations read these files from `spec/` in their tests; neither keeps a copy. Nine
 generators write them, and regenerating must give the same bytes:
 
 ```sh
 python spec/generators/make_vectors.py
 python spec/generators/make_conversations.py
+python spec/generators/make_transports.py
+python spec/generators/make_clocks.py
+python spec/generators/make_durations.py
+python spec/generators/make_debug_filters.py
+python spec/generators/make_metrics.py
+python spec/generators/make_codecs.py
+python spec/generators/make_identities.py
 git diff --exit-code -- spec
+```
+
+Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repeats the version
+`spec.md` states as its `specVersion`, or, for `debug-filters.json` and `metrics.json`, the version
+`debugging.md` states as its `debuggingVersion`. `spec/check.py` holds both, that the spec's sections
+and the groups of vectors name each other, that every unit an entry cites is its document's, and
+that every exposition reads as the Prometheus text format 0.0.4; then it reports
+which groups and files each side's tests read, and fails on one a side does not. It runs on Python
+3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
+
+```sh
+python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts\Activate.ps1
+python -m pip install --require-hashes --only-binary=:all: -r spec/requirements.txt
+python spec/check.py
 ```
 
 ## TypeScript
 
-In `implementations/typescript`. Node 24 or later. Yarn 4 is vendored under `.yarn/releases/`, and
+In `implementations/typescript`. Node 24.9 or later. Yarn 4 is vendored under `.yarn/releases/`, and
 `.yarnrc.yml` points every `yarn` there; where no `yarn` is installed,
 `node .yarn/releases/yarn-4.18.1.cjs` stands for it.
 
 ```sh
 cd implementations/typescript
 yarn install --immutable
-yarn check        # types, lint, format, comment budget, the doc examples
+yarn check        # types, lint and its plugin's cases, format, comment budget, the doc examples, the generated Probe
 yarn test         # the unit tests, and the interop against the C# server
 ```
 
@@ -113,7 +149,8 @@ The package is `@francisdesjardins/bead`, private for now; its `exports` point a
 
 In `implementations/dotnet`. The .NET 10 SDK, as `global.json` pins it; tests run on
 Microsoft.Testing.Platform. Every warning is an error, the recommended analyzers are on, and every
-public member has its doc comment.
+public member has its doc comment. Its [README](implementations/dotnet/README.md) describes its
+layout and its modules.
 
 ```sh
 cd implementations/dotnet
@@ -121,7 +158,9 @@ dotnet format Bead.slnx --verify-no-changes
 dotnet test --solution Bead.slnx
 ```
 
-With `CI=true`, a restore that would change a `packages.lock.json` fails.
+With `CI=true`, a restore that would change a `packages.lock.json` fails. The core's test project
+generates `Probe` from `spec/codecs.proto` at each build, with Grpc.Tools, beside Google.Protobuf;
+nothing it generates is committed.
 
 ## Interop, both ways
 
@@ -145,8 +184,8 @@ cd implementations/dotnet && BEAD_INTEROP_REQUIRED=1 dotnet test --project tests
 ## The demo
 
 A page with a button per kind of call — a read, a write, a subscription, a transfer either way, a
-cancel, a failure, a command — and the calls and envelopes logged as the client sees them, over
-WebSocket, HTTP or a Web Worker.
+cancel, a failure, a command — the calls and envelopes logged as the client sees them, and what the
+client's and the server's metrics registries count, over WebSocket, HTTP or a Web Worker.
 
 ```sh
 cd implementations/typescript
@@ -156,6 +195,18 @@ yarn playground:build:file   # the static build, into demo/dist/playground/
 
 The static build runs its server in a Web Worker of the page, every path relative, so any static
 host serves it as files.
+
+## The DevTools extension
+
+A Bead panel in Chrome's DevTools: the calls, envelopes and metrics of each client a page builds,
+which announces itself to the extension unless its options say `devtools: false`, a server in a Web
+Worker of the page included, whose messages the Network panel does not show.
+
+```sh
+cd implementations/typescript
+yarn devtools:build   # unpacked, into devtools/dist/: chrome://extensions, then Load unpacked
+yarn test:devtools    # its tests, once it and the demo's static build are built
+```
 
 ## Coverage
 
@@ -190,28 +241,80 @@ there only until it closes.
 - `node tools/check-commits.mjs <range>`: every commit subject in the range is a Conventional
   Commit; merges are left out. With `--message <file>`, the message git is about to record, which
   must also be UTF-8 without a byte order mark.
+- `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
+  or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
+- `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
+  package's, the C# side's and its lock files' project ranges, and each conformance file's with its
+  document's — and each released section of the CHANGELOG stays as its tag shipped it. On a release
+  branch, a pull request into `main` and `main`, the product and each changed document also move
+  one step past their last release, the CHANGELOG is dated and linked, and each document's tag
+  stands where it belongs. `--ref` and `--base` judge the tree as another ref, as CI does.
+- `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
+  repositories it makes under the system's temporary folder.
 
-It also runs before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
+The first also runs before each commit, once a clone opts in with `git config core.hooksPath .githooks`:
 `commit-msg` holds the subject to Conventional Commits, merges aside. Both hooks also run the
 checks a clone keeps for itself in `.claude/local/`, when it has them.
+
+## Releasing
+
+A release moves every version in one commit, on a `release/*` branch or a `hotfix/*` one, and CI
+judges that commit, every job, before any tag exists. `tools/release.mjs prepare` moves the
+product's version in both manifests and in the C# lock files' project ranges, and each changed
+document's a step past its last release; it runs the generators, dates the CHANGELOG's version and
+links it, then runs the gate as a release, `spec/check.py` and the root's format check, naming any
+whose tool is absent with the CI job that holds it. `tools/release.mjs tag`, after the finish, tags
+each document whose version no tag names yet at the release's `v*`, runs the gate as `main`'s run
+will, and prints the one push:
+
+```sh
+git flow release start 0.2.0
+node tools/release.mjs prepare --spec minor --python .venv/bin/python
+git add -A && git commit -m "chore(release): 0.2.0"
+git flow release publish 0.2.0                 # CI judges the release commit, every job, as a release
+# fixes, if any, each with its line under [0.2.0]; then, right before the finish:
+node tools/release.mjs prepare --python .venv/bin/python   # re-dates, regenerates, checks
+git commit -am "chore(release): 0.2.0, dated"   # only if it changed something
+# wait for ci-ok on release/0.2.0
+git flow release finish 0.2.0                  # without -p
+node tools/release.mjs tag                     # spec-v… and debugging-v… at v0.2.0, then the gate on develop
+git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0
+```
+
+A document whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
+change to keep passing, `patch` when a conforming one passes unchanged, and `minor` at least when a
+file, a key or a property was added
+([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)). Nothing is
+staged, committed, tagged or pushed except by these commands. If `tag` reports an entry the
+back-merge filed under the released version, it goes back under `[Unreleased]` in a commit on
+`develop` before the push.
 
 ## CI
 
 [`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on a pinned
-runner image, `ubuntu-26.04`: `spec` (regenerate, then diff), `typescript` on Node 26 and on the
-floor, 24 (install, check, test, the demo's static build, and the root's files under the same
-formatter), `dotnet` (format, test, and the interop both ways with `BEAD_INTEROP_REQUIRED=1`), and
-`commits` (the subjects). `ci-ok` needs them all and is the only required check.
+runner image, `ubuntu-26.04`: `spec` (regenerate, then diff, then `spec/check.py`), `typescript` on
+Node 26 and on the floor, 24.9 (install, check, test, the demo's static build, and the root's
+files under the same formatter), `dotnet` (format, test, and the interop both ways with
+`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects, the links, the versions, then the root's
+tools' own tests). `ci-ok` needs them all, so one check stands for every job; branch protection,
+which would make it the one check a branch requires, waits on GitHub Pro or a public repository.
 
 ## Contributing
 
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 - Branches follow git-flow: `main`, `develop`, `feature/*`, `release/*`, `hotfix/*`.
 - [`CHANGELOG.md`](CHANGELOG.md) follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/):
-  a change worth telling goes under `[Unreleased]` with the commit that makes it.
+  a change worth telling goes under `[Unreleased]` with the commit that makes it; on a release
+  branch, once its version is dated, under that version.
 - [`docs/decisions/`](docs/decisions/README.md) holds why Bead is shaped as it is, one record a
   decision, changed rather than appended to; the CHANGELOG says what changed, a record says why
   ([0009](docs/decisions/0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+- A comment a reader must not miss opens with its tag, after its marker (`//`, `#`), as the
+  [Better Comments](https://marketplace.visualstudio.com/items?itemName=aaron-bond.better-comments)
+  extension shows them: `!` an alert, a trap or an invariant that breaks something when changed;
+  `?` an open question; `TODO` work to do beside the code; `*` the key point of a block. Every other
+  comment stays plain, and doc comments carry no tag. In an editor without the extension, the tags
+  read as they are.
 
 ## Licence
 

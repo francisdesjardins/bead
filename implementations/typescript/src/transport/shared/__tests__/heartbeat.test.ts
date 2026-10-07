@@ -6,18 +6,24 @@ import { spyIntervals } from './fixtures';
 // definition
 
 test.describe('heartbeat', () => {
-  test('takes a whole number of milliseconds a timer holds, or Infinity for none, and nothing else', () => {
-    for (const heartbeat of [1, HEARTBEAT, 2 ** 31 - 1, Infinity]) {
-      expect(() => {
-        assertHeartbeat(heartbeat);
-      }, String(heartbeat)).not.toThrow();
+  test('takes a number of milliseconds a timer holds, rounded to the nearest whole one, or Infinity for none, and refuses -Infinity, which the durations file holds no input of', () => {
+    for (const [heartbeat, held] of [
+      [1, 1],
+      [1.5, 2],
+      [HEARTBEAT, HEARTBEAT],
+      [2 ** 31 - 1, 2 ** 31 - 1],
+      [Infinity, Infinity],
+    ] as const) {
+      expect(assertHeartbeat(heartbeat), String(heartbeat)).toBe(held);
     }
 
-    for (const heartbeat of [0, -1, 1.5, Number.NaN, 2 ** 31, -Infinity]) {
-      expect(() => {
-        assertHeartbeat(heartbeat);
-      }, String(heartbeat)).toThrow(ProgrammerError);
-    }
+    expect(() => {
+      assertHeartbeat(-Infinity);
+    }).toThrow(
+      new ProgrammerError(
+        'a heartbeat is a number of milliseconds from 1 to 2147483647, or Infinity for never, not -Infinity'
+      )
+    );
 
     expect(HEARTBEAT).toBe(30_000);
   });

@@ -2,6 +2,7 @@
 
 // dependencies
 
+import { PLATFORM_CLOCK } from '../shared/clock';
 import { createEmitter } from '../shared/emitter';
 import { ProgrammerError } from '../shared/errors';
 import { gaugesOf, mergeGauges } from '../shared/gauges';
@@ -13,6 +14,7 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../shared/ready-state';
+import { isLoopbackHost } from '../shared/secure';
 import type {
   ITransportServer,
   ITransportServerClientHandleInfo,
@@ -24,10 +26,13 @@ import type {
   TransportServerResolvedStartOptions,
 } from './types';
 
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
+export type { IClock, TimeoutId } from '../shared/clock';
 export {
   CLOSE_EVENT,
   CONNECTION_EVENT,
   ERROR_EVENT,
+  LISTEN_EVENT,
   MESSAGE_EVENT,
   TRANSPORT_HTTP,
   TRANSPORT_WS,
@@ -59,8 +64,7 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export { timestamp } from '../shared/timestamp';
-export type { Data, IEventIteratorOptions, ITimestamp } from '../shared/types';
+export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
 export type {
   ITransportServer,
   ITransportServerAddress,
@@ -69,6 +73,7 @@ export type {
   ITransportServerClientHandleInfo,
   ITransportServerDrawnHandleInfo,
   ITransportServerImplementation,
+  ITransportServerOptions,
   ITransportServerStartOptions,
   TRANSPORT_SERVER_EVENTS,
   TransportServerConnectionHandle,
@@ -107,7 +112,8 @@ export const generateDrawnHandle = (
  * `clients`, `closeAll`, and the guards around `start` and `stop`.
  *
  * `define` receives the server being built and the registry its transport fills, and returns what
- * only that transport knows — how to listen, stop, close one connection and send to one.
+ * only that transport knows — the clock it runs on, how to listen, stop, close one connection and
+ * send to one.
  *
  * @example
  * const server = createTransportServer((server, connections) => {
@@ -153,10 +159,13 @@ export const createTransportServer = <Socket extends object, Request>(
     get clients() {
       return connections
         .values()
-        .map(({ address, connectionHandle, lastActivityTimestamp, port, type }) => {
-          return { address, connectionHandle, lastActivityTimestamp, port, type };
+        .map(({ address, connectionHandle, lastActivity, port, type }) => {
+          return { address, connectionHandle, lastActivity, port, type };
         })
         .toArray();
+    },
+    get clock() {
+      return implementation.clock ?? PLATFORM_CLOCK;
     },
     get port() {
       return startOptions.port;
@@ -165,6 +174,10 @@ export const createTransportServer = <Socket extends object, Request>(
       return implementation.type;
     },
 
+    // none carries one toward its client: an answer, a batch, a message or a worker's alike
+    carriesCredential: () => {
+      return false;
+    },
     close: async (connectionHandle) => {
       const connection = connections.get(connectionHandle);
 
@@ -186,6 +199,13 @@ export const createTransportServer = <Socket extends object, Request>(
           .toArray()
       );
     },
+    // what its application says stands in front of it is believed first, whatever it listens on
+    isSecure: () => {
+      return (
+        implementation.secure ??
+        (implementation.isSecure === true || isLoopbackHost(startOptions.address))
+      );
+    },
     gauges: () => {
       return mergeGauges([
         gaugesOf({
@@ -195,11 +215,11 @@ export const createTransportServer = <Socket extends object, Request>(
         ...(implementation.gauges === undefined ? [] : [implementation.gauges()]),
       ]);
     },
-    send: async (data, connectionHandle) => {
+    send: async (message, connectionHandle) => {
       const connection = connections.get(connectionHandle);
 
       if (connection !== undefined) {
-        await implementation.send(data, connection);
+        await implementation.send(message, connection);
       }
     },
     start: async (options) => {

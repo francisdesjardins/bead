@@ -12,8 +12,8 @@ import {
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
-  TIMER_MAX,
 } from '../shared/constants';
+import { assertHeld, assertHeldDelay, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
   ConnectError,
@@ -23,6 +23,7 @@ import {
   wrapReason,
 } from '../shared/errors';
 import { noop } from '../shared/noop';
+import { isSecureUrl } from '../shared/secure';
 import {
   getReadyState,
   ReadyState,
@@ -118,6 +119,10 @@ export const WAIT = 25_000;
 // the length before each envelope of a batch
 const LENGTH_BYTES = 4;
 
+// what a field's value holds, and so a credential the `Authorization` field carries: visible ASCII,
+// spaces and tabs (RFC 9110 §5.5)
+const FIELD_VALUE = /^[\t\x20-\x7e]*$/u;
+
 // helpers
 
 // the media type of a response, parameters aside
@@ -183,7 +188,8 @@ const rethrow = (reason: unknown): void => {
 };
 
 // how long to wait before listening again after `losses` listens lost in a row, drawn apart so the
-// clients one restart dropped together come back apart, as EventSource's do
+// clients one restart dropped together come back apart, as EventSource's do; in whole
+// milliseconds, as every wait of Bead's
 const retryDelayOf = (losses: number): number => {
   if (losses === 1) {
     return 0;
@@ -191,21 +197,7 @@ const retryDelayOf = (losses: number): number => {
 
   const delay = Math.min(RETRY_DELAYS.ceiling, RETRY_DELAYS.first * 2 ** (losses - 2));
 
-  return delay / 2 + (Math.random() * delay) / 2;
-};
-
-// a whole number from 0 a timer holds; or, when it may be, Infinity
-const assertDelay = (
-  name: string,
-  { isUnbounded = false, value }: { isUnbounded?: boolean; value: number }
-): void => {
-  const isHeld = Number.isInteger(value) && value >= 0 && value <= TIMER_MAX;
-
-  if (!isHeld && !(isUnbounded && value === Infinity)) {
-    throw new ProgrammerError(
-      `${name} is a whole number from 0 a timer holds${isUnbounded ? ', or Infinity' : ''}, not ${String(value)}`
-    );
-  }
+  return Math.floor(delay / 2 + (Math.random() * delay) / 2);
 };
 
 // definition
@@ -214,6 +206,10 @@ const assertDelay = (
  * A transport client over HTTP, on a connection the server draws for it: `connect` posts no envelope
  * and takes the connection token the server answers 201 with, each `send` posts one envelope with
  * that token, and `disconnect` deletes the connection. The token is kept here, never on `socket`.
+ *
+ * Each `send` carries its credential, when it has one, in the `Authorization` field of its `POST`,
+ * as it is given; one that is no field's value — anything but visible ASCII, spaces and tabs — is
+ * refused before it goes. An answer, and what a listen brings back, carry none.
  *
  * `send` settles on the head of its answer, so a caller knows whether the server had its envelope: a
  * 2xx resolves — the router has it, and an answer comes as a `message` when it does; a refusal the
@@ -233,35 +229,38 @@ const assertDelay = (
  *
  * @example
  * const client = createHTTPTransportClient();
- * client.on('message', (data) => {});
+ * client.on('message', ({ data }) => {});
  * await client.connect({ host, port });
- * await client.send(envelope);
+ * await client.send({ credential: 'Bearer mF_9.B5f-4.1JqM', data: envelope });
  * await client.disconnect();
  */
 export const createHTTPTransportClient = (
   options?: IHTTPTransportClientOptions
 ): HTTPTransportClient => {
   const {
+    clock,
     fetch: fetchImpl = globalThis.fetch as FetchLike,
-    inactivityTimeout = INACTIVITY_TIMEOUT,
+    inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
     isListening = true,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
-    pause = 0,
-    wait = WAIT,
+    pause: givenPause = 0,
+    wait: givenWait = WAIT,
   } = {
     ...DEFAULTS(),
     ...options,
   };
-
-  assertDelay('inactivityTimeout', { isUnbounded: true, value: inactivityTimeout });
-  assertDelay('pause', { value: pause });
-  assertDelay('wait', { value: wait });
+  const inactivityTimeout = assertHeld('inactivityTimeout', givenInactivityTimeout);
+  // 0 is at once: a listen again at once, and a listen the server answers at once, which polls
+  const pause = assertHeldDelay('pause', givenPause);
+  const wait = assertHeldDelay('wait', givenWait);
 
   return createTransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>(
     (client) => {
       let drawn: IDrawn | undefined;
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
+      // whether the URL of the last connect is secure
+      let isSecure = false;
 
       // a DELETE nobody waits on, which outlives a page that is closing
       const release = ({ connectionToken, url }: IDrawn): void => {
@@ -293,10 +292,15 @@ export const createHTTPTransportClient = (
         }
       };
 
-      // an envelope an answer or a listen brought back; a listener that throws stops nothing
-      const hear = (envelope: ArrayBuffer): void => {
+      // an envelope an answer or a listen brought back, which carry no credential, what a listen
+      // brought marked as what may overtake an answer; a listener that throws stops nothing
+      const hear = (envelope: ArrayBuffer, { mayOvertake }: { mayOvertake: boolean }): void => {
         try {
-          client.emit(MESSAGE_EVENT, envelope);
+          client.emit(MESSAGE_EVENT, {
+            credential: undefined,
+            data: envelope,
+            ...(mayOvertake ? { mayOvertake: true } : {}),
+          });
         } catch (reason) {
           rethrow(reason);
         }
@@ -331,7 +335,7 @@ export const createHTTPTransportClient = (
         // an exchange ended empty — cancelled — has nothing to say, and one past its connection's
         // end — lost, or disconnecting — is no answer of this one's
         if (body.byteLength > 0 && drawn === connection) {
-          hear(body);
+          hear(body, { mayOvertake: false });
         }
 
         return undefined;
@@ -407,7 +411,7 @@ export const createHTTPTransportClient = (
 
               cursor.after += 1;
               heard += 1;
-              hear(envelope.buffer);
+              hear(envelope.buffer, { mayOvertake: true });
             }
           }
         } catch {
@@ -428,22 +432,18 @@ export const createHTTPTransportClient = (
           (resolve) => {
             resolve();
           },
-          { delay, signal }
+          { clock: client.clock, delay, signal }
         ).catch(noop);
       };
 
       // the inactivity timeout of a count of losses, armed at its first, which aborts `expiry` as it
-      // ends: at once when it is 0, and never when it is Infinity, which a timer would take for 1 ms
-      const expireAfter = (expiry: AbortController): ReturnType<typeof setTimeout> | undefined => {
-        if (inactivityTimeout === 0) {
-          return (expiry.abort(), undefined);
-        }
-
+      // ends: never when it is Infinity, which a timer would take for 1 ms
+      const expireAfter = (expiry: AbortController): TimeoutId | undefined => {
         if (inactivityTimeout === Infinity) {
           return undefined;
         }
 
-        return setTimeout(() => {
+        return client.clock.setTimeout(() => {
           expiry.abort();
         }, inactivityTimeout);
       };
@@ -454,10 +454,10 @@ export const createHTTPTransportClient = (
       const listen = async (connection: IDrawn): Promise<void> => {
         const cursor = { after: 0 };
         let losses = 0;
-        // a timer measures the timeout, never a reading of the clock, which a clock set or a machine
-        // woken from sleep moves: the listens it allows are the same on any machine, however loaded
+        // a timer measures the timeout, never a reading of the wall clock, which a clock set or a
+        // machine woken from sleep moves: the listens it allows are the same on any machine
         let expiry: AbortController | undefined;
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        let timeoutId: TimeoutId | undefined;
 
         try {
           while (drawn === connection) {
@@ -493,7 +493,7 @@ export const createHTTPTransportClient = (
             }
 
             // it reached the server: the count ends, and its timeout with it
-            clearTimeout(timeoutId);
+            client.clock.clearTimeout(timeoutId);
             expiry = undefined;
             losses = 0;
 
@@ -503,11 +503,17 @@ export const createHTTPTransportClient = (
           }
         } finally {
           // the connection's end disarms it, so nothing fires after
-          clearTimeout(timeoutId);
+          client.clock.clearTimeout(timeoutId);
         }
       };
 
       return {
+        carriesCredential: true,
+        clock,
+        get isSecure() {
+          return isSecure;
+        },
+
         connect: async (connectOptions) => {
           const {
             host,
@@ -521,6 +527,8 @@ export const createHTTPTransportClient = (
           // an IPv6 literal is bracketed, or its colons would read as the port's
           const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
           const url = `${secured ? 'https' : 'http'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/u, '/$1')}`;
+
+          isSecure = isSecureUrl(url);
           const attempt = new AbortController();
           let connection: IDrawn | undefined;
           let opened: IDrawn;
@@ -571,7 +579,7 @@ export const createHTTPTransportClient = (
                   }
                 );
               },
-              { signal, timeout }
+              { clock: client.clock, signal, timeout }
             );
           } catch (reason) {
             // given up — timed out, cancelled, disposed — as it came: the connection drawn meanwhile
@@ -616,7 +624,9 @@ export const createHTTPTransportClient = (
             connection.controller.abort();
             release(connection);
           } else {
-            // the server ends it first, so what waits there learns it; then what waits here goes
+            // the server ends it first, so what waits there learns it; then what waits here goes. Its
+            // bound is the platform's, on the real clock, as a close handshake's: it bounds the
+            // platform's own exchange with a server that does not answer (decision 0011)
             try {
               drain(
                 await fetchImpl(connection.url, {
@@ -624,6 +634,7 @@ export const createHTTPTransportClient = (
                   keepalive: true,
                   method: 'DELETE',
                   redirect: 'error',
+                  // oxlint-disable-next-line no-restricted-properties -- a disconnect's bound is the platform's
                   signal: AbortSignal.timeout(DISCONNECT_TIMEOUT),
                 })
               );
@@ -639,17 +650,25 @@ export const createHTTPTransportClient = (
           client.emit(CLOSE_EVENT, isClean, isQuick);
         },
 
-        send: (data) => {
+        send: ({ credential, data }) => {
           const connection = drawn;
 
           if (!client.isOpen() || connection === undefined) {
             return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
           }
 
+          // refused before it goes, the connection kept: a field could not carry it as it is
+          if (credential !== undefined && !FIELD_VALUE.test(credential)) {
+            return Promise.reject(
+              new ProgrammerError('a credential holds visible ASCII, spaces and tabs alone')
+            );
+          }
+
           return createPromise((resolve, reject) => {
             fetchImpl(connection.url, {
               body: data as BodyInit,
               headers: {
+                ...(credential === undefined ? {} : { authorization: credential }),
                 'content-type': BEAD_MEDIA_TYPE,
                 [CONNECTION_TOKEN_HEADER]: connection.connectionToken,
               },
@@ -686,9 +705,12 @@ export const createHTTPTransportClient = (
                 // its connection gone: told after the refusal is heard, so its caller learns first
                 // that it was never tried
                 if (refusal === CONNECTION_UNKNOWN) {
-                  setTimeout(() => {
+                  const loseIt = (): void => {
                     lose(connection, { isReleased: false });
-                  }, 0);
+                  };
+
+                  // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
+                  globalThis.setTimeout(loseIt, 0);
                 }
 
                 return undefined;

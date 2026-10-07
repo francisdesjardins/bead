@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { GenericError } from '../../../transport/shared/errors';
-import { CLIENT_FAILURES, FailureScope, ProtocolCode, SERVER_FAILURES } from '../constants';
+import {
+  CLIENT_FAILURES,
+  CredentialScheme,
+  FailureScope,
+  ProtocolCode,
+  SERVER_FAILURES,
+} from '../constants';
 import { DisconnectError, FailureError, failureErrorOf, redactHeader } from '../errors';
 import { toSessionToken } from '../identifiers';
 import type { IFailureHeader, IResultHeader } from '../types';
@@ -20,7 +26,11 @@ test.describe('FailureError', () => {
   const token = toSessionToken(new Uint8Array(16).fill(7));
 
   test('carries the failure and where it belongs, and keeps a redacted copy of the header', () => {
-    const header: IFailureHeader = { callId: 3, kind: 0x12, sessionToken: token };
+    const header: IFailureHeader = {
+      callId: 3,
+      credential: { scheme: CredentialScheme.OPAQUE, token },
+      kind: 0x12,
+    };
     const cause = new Error('underneath');
     const error = new FailureError(
       {
@@ -39,19 +49,23 @@ test.describe('FailureError', () => {
       code: 19,
       destinationId: 5,
       detail: 'no procedure 1 in service 2',
-      hops: 0,
       origin: 'peer',
       procedureAddress: { procedureId: 1, serviceId: 2 },
+      relays: 0,
       scope: FailureScope.PROTOCOL,
       side: 'server',
     });
-    expect(error.header).toEqual({ callId: 3, hasSessionToken: true, kind: 0x12 });
-    expect(error.header).not.toHaveProperty('sessionToken');
+    expect(error.header).toEqual({
+      callId: 3,
+      credentialScheme: CredentialScheme.OPAQUE,
+      kind: 0x12,
+    });
+    expect(error.header).not.toHaveProperty('credential');
     expect(JSON.stringify(error)).not.toContain(token);
     expect(error.cause).toBe(cause);
   });
 
-  test('is local, with no hop, no detail and nothing it belongs to, when not told', () => {
+  test('is local, through no relay, with no detail and nothing it belongs to, when not told', () => {
     const error = new FailureError(CLIENT_FAILURES.payloadTooLarge);
 
     expect(error).toMatchObject({
@@ -59,9 +73,9 @@ test.describe('FailureError', () => {
       destinationId: undefined,
       detail: '',
       header: undefined,
-      hops: 0,
       origin: 'local',
       procedureAddress: undefined,
+      relays: 0,
       side: 'client',
     });
     expect(error.message).toBe('local client protocol failure 34 PAYLOAD_TOO_LARGE');
@@ -96,18 +110,18 @@ test.describe('FailureError', () => {
       }).message
     ).toBe('client application failure 21');
     expect(
-      new FailureError({ code: 18, hops: 1, origin: 'relayed', scope: FailureScope.PROTOCOL })
+      new FailureError({ code: 18, origin: 'relayed', relays: 1, scope: FailureScope.PROTOCOL })
         .message
-    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, relayed 1 hop');
+    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, through 1 relay');
     expect(
       new FailureError({
         code: 18,
         detail: 'gone',
-        hops: 2,
         origin: 'relayed',
+        relays: 2,
         scope: FailureScope.PROTOCOL,
       }).message
-    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, relayed 2 hops: gone');
+    ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, through 2 relays: gone');
     // a code no name is known for stays a number
     expect(
       new FailureError({ code: 23, origin: 'peer', scope: FailureScope.PROTOCOL, side: 'server' })
@@ -133,8 +147,8 @@ test.describe('FailureError', () => {
 
     const relayed = new FailureError({
       code: 18,
-      hops: 1,
       origin: 'relayed',
+      relays: 1,
       scope: FailureScope.PROTOCOL,
     });
 
@@ -164,9 +178,9 @@ test.describe('FailureError', () => {
 test.describe('failureErrorOf', () => {
   const header: IFailureHeader = { callId: 3, kind: 0x12 };
 
-  test('is the peer’s, of the other side, with no hop', () => {
+  test('is the peer’s, of the other side, through no relay', () => {
     const fromServer = failureErrorOf(
-      { code: 19, detail: '', hops: 0, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: '', relays: 0, scope: FailureScope.PROTOCOL },
       {
         destinationId: 4,
         failures: CLIENT_FAILURES,
@@ -181,10 +195,10 @@ test.describe('failureErrorOf', () => {
       procedureAddress: { procedureId: 1, serviceId: 2 },
       side: 'server',
     });
-    expect(fromServer.header).toEqual({ callId: 3, hasSessionToken: false, kind: 0x12 });
+    expect(fromServer.header).toStrictEqual({ callId: 3, kind: 0x12 });
     expect(
       failureErrorOf(
-        { code: 19, detail: '', hops: 0, scope: FailureScope.PROTOCOL },
+        { code: 19, detail: '', relays: 0, scope: FailureScope.PROTOCOL },
         { failures: SERVER_FAILURES, header }
       ).side
     ).toBe('client');
@@ -192,38 +206,44 @@ test.describe('failureErrorOf', () => {
 
   test('is of no known side through a relay, and names where its call went', () => {
     const relayed = failureErrorOf(
-      { code: 18, detail: '', hops: 1, scope: FailureScope.PROTOCOL },
+      { code: 18, detail: '', relays: 1, scope: FailureScope.PROTOCOL },
       { destinationId: 4, failures: CLIENT_FAILURES, header }
     );
 
     expect(relayed).toMatchObject({
       destinationId: 4,
-      hops: 1,
       origin: 'relayed',
+      relays: 1,
       side: undefined,
     });
   });
 });
 
 test.describe('redactHeader', () => {
-  test('leaves the token out and says whether there was one', () => {
+  test('leaves the credential out and says its scheme alone, when there was one', () => {
     const token = toSessionToken(new Uint8Array(16).fill(9));
-    const result: IResultHeader = { callId: 2, kind: 0x11, sessionToken: token };
-
-    expect(redactHeader(result)).toEqual({ callId: 2, hasSessionToken: true, kind: 0x11 });
-    // an ended session is announced, but names none
-    expect(redactHeader({ ...result, sessionToken: null })).toEqual({
+    const result: IResultHeader = {
       callId: 2,
-      hasSessionToken: false,
+      credential: { scheme: CredentialScheme.OPAQUE, token },
+      kind: 0x11,
+    };
+    const request = { callId: 1, kind: 0x10, procedureId: 1, serviceId: 2 } as const;
+
+    expect(redactHeader(result)).toStrictEqual({
+      callId: 2,
+      credentialScheme: CredentialScheme.OPAQUE,
       kind: 0x11,
     });
-    expect(redactHeader({ callId: 3, kind: 0x13 })).toEqual({
-      callId: 3,
-      hasSessionToken: false,
-      kind: 0x13,
-    });
+    // an ended session is announced, and names none
     expect(
-      redactHeader({ callId: 1, kind: 0x10, procedureId: 1, serviceId: 2, sessionToken: token })
-    ).toEqual({ callId: 1, hasSessionToken: true, kind: 0x10, procedureId: 1, serviceId: 2 });
+      redactHeader({ ...result, credential: { scheme: CredentialScheme.NONE } })
+    ).toStrictEqual({ callId: 2, credentialScheme: CredentialScheme.NONE, kind: 0x11 });
+    expect(redactHeader({ callId: 3, kind: 0x13 })).toStrictEqual({ callId: 3, kind: 0x13 });
+    expect(
+      redactHeader({ ...request, credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } })
+    ).toStrictEqual({ ...request, credentialScheme: CredentialScheme.JWT });
+    expect(
+      redactHeader({ ...request, credential: { bytes: new Uint8Array([1, 2]), scheme: 7 } })
+    ).toStrictEqual({ ...request, credentialScheme: 7 });
   });
 });

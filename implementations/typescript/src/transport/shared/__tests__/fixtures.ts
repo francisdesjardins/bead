@@ -1,7 +1,9 @@
 import { once } from 'node:events';
 import { expect } from '@playwright/test';
+import { createClock } from '@sinonjs/fake-timers';
 import type { AddressInfo } from 'node:net';
 import { WebSocket as WsWebSocket, WebSocketServer, type ServerOptions } from 'ws';
+import { type IClock, LONGEST_TIMER, type TimeoutId } from '../clock';
 
 /**
  * What the client and server suites share: a loopback host, raw `ws` servers with a clean stop, and
@@ -82,6 +84,162 @@ export const IMPLEMENTATIONS = [
   ['the global WebSocket', track(WebSocket)],
   ['ws', track(WsWebSocket)],
 ] as const;
+
+/** A timer armed on a test clock: its delay, and the handle it gave. */
+export interface IArmedTimer {
+  delay: number;
+  handle: TimeoutId;
+}
+
+// a timer's delay or period as Bead arms one: from a millisecond to the longest a timer waits
+const armedDelayOf = (delay: number | undefined): number => {
+  if (delay === undefined || !Number.isFinite(delay) || delay < 1 || delay > LONGEST_TIMER) {
+    throw new Error(
+      `a test clock arms a timer for 1 to ${String(LONGEST_TIMER)} milliseconds, as Bead does, not ${String(delay)}`
+    );
+  }
+
+  return delay;
+};
+
+/**
+ * A test's clock: `@sinonjs/fake-timers`' `createClock()`, never installed on the globals, which Bead
+ * runs on once given it as `clock`, and which the test advances with `tickAsync`, from due to due.
+ * A timer is due in whole milliseconds, a fraction dropped, as `fake-timers` counts it.
+ *
+ * It refuses what Bead never arms, with an `Error` that names it: a timer or a period that is not a
+ * finite number of milliseconds from 1 to {@link LONGEST_TIMER}, and a `tickAsync` while another is
+ * under way, which would move the clock back. It keeps each timer armed in `armed`, each handle
+ * cleared in `cleared`, and counts each reading Bead takes, wall and monotonic, in `readings`.
+ */
+export const createTestClock = (now?: number) => {
+  const clock = createClock(now);
+  const armed: IArmedTimer[] = [];
+  const cleared: unknown[] = [];
+  const readings = { monotonic: 0, wall: 0 };
+  // the clock as Bead reads it, its two readings counted
+  const read: Pick<IClock, 'Date' | 'performance'> = clock;
+  const wallNow = read.Date.now.bind(read.Date);
+  const monotonicNow = read.performance.now.bind(read.performance);
+
+  read.Date.now = () => {
+    readings.wall += 1;
+
+    return wallNow();
+  };
+  read.performance.now = () => {
+    readings.monotonic += 1;
+
+    return monotonicNow();
+  };
+  const {
+    clearInterval: clearEvery,
+    clearTimeout: clear,
+    setInterval: every,
+    setTimeout: set,
+    tickAsync: tick,
+  } = clock;
+  let isAdvancing = false;
+
+  clock.setTimeout = (callback, given) => {
+    const delay = armedDelayOf(given);
+    const handle = set(callback, delay);
+
+    armed.push({ delay, handle });
+
+    return handle;
+  };
+  clock.setInterval = (callback, given) => {
+    const delay = armedDelayOf(given);
+    const handle = every(callback, delay);
+
+    armed.push({ delay, handle });
+
+    return handle;
+  };
+  clock.tickAsync = async (time) => {
+    if (isAdvancing) {
+      throw new Error(
+        'a test clock advances once at a time: an advance within another would move it back'
+      );
+    }
+
+    isAdvancing = true;
+
+    try {
+      return await tick(time);
+    } finally {
+      isAdvancing = false;
+    }
+  };
+  // a clear of none, which Bead makes of a timer it never armed, clears nothing to read
+  clock.clearTimeout = (handle) => {
+    if (handle !== undefined) {
+      cleared.push(handle);
+    }
+
+    clear(handle);
+  };
+  clock.clearInterval = (handle) => {
+    if (handle !== undefined) {
+      cleared.push(handle);
+    }
+
+    clearEvery(handle);
+  };
+
+  return Object.assign(clock, { armed, cleared, readings });
+};
+
+export type TestClock = ReturnType<typeof createTestClock>;
+
+/** The delays of the timers armed on `clock` and neither fired nor cleared, by when they are due. */
+export const delaysOn = (clock: TestClock): number[] => {
+  return [...(clock.timers?.values() ?? [])]
+    .toSorted((a, b) => {
+      return (a.callAt ?? 0) - (b.callAt ?? 0) || (a.id ?? 0) - (b.id ?? 0);
+    })
+    .map(({ delay }) => {
+      return delay ?? 0;
+    });
+};
+
+/**
+ * When the timers armed on `clock` and neither fired nor cleared are due, in milliseconds from its
+ * reading, soonest first: a periodic timer's next due, which `until` waits for before an advance.
+ */
+export const duesOn = (clock: TestClock): number[] => {
+  return [...(clock.timers?.values() ?? [])]
+    .map(({ callAt = clock.now }) => {
+      return callAt - clock.now;
+    })
+    .toSorted((a, b) => {
+      return a - b;
+    });
+};
+
+/** The timers `run` arms on `clock`, and the handles it clears there, as it runs. */
+export const timersBy = (clock: TestClock, run: () => void) => {
+  const [armedFrom, clearedFrom] = [clock.armed.length, clock.cleared.length];
+
+  run();
+
+  return { armed: clock.armed.slice(armedFrom), cleared: clock.cleared.slice(clearedFrom) };
+};
+
+/** As {@link timersBy}, for a `run` that waits: the timers until it settles. */
+export const timersUntil = async (clock: TestClock, run: () => Promise<unknown>) => {
+  const [armedFrom, clearedFrom] = [clock.armed.length, clock.cleared.length];
+
+  await run();
+
+  return { armed: clock.armed.slice(armedFrom), cleared: clock.cleared.slice(clearedFrom) };
+};
+
+/** Whether a handle a test clock gave keeps a process alive: an `unref`ed one does not. */
+export const hasRef = (handle: TimeoutId): boolean => {
+  return (handle as { hasRef: () => boolean }).hasRef();
+};
 
 export interface ISpiedInterval {
   beat: () => void;

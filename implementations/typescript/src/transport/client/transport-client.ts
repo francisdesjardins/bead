@@ -2,10 +2,17 @@
 
 // dependencies
 
+import { assertHeld, assertHeldDelay, type IClock, PLATFORM_CLOCK } from '../shared/clock';
 import { RECONNECT_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
-import { ProgrammerError, ReconnectError, toCancelError, wrapReason } from '../shared/errors';
+import {
+  ProgrammerError,
+  ReconnectError,
+  toCancelError,
+  toError,
+  wrapReason,
+} from '../shared/errors';
 import { createEventMethods, createReadyStateMethods } from '../shared/lifecycle';
 import { noop } from '../shared/noop';
 import {
@@ -25,6 +32,8 @@ import type {
   TransportClientEventMap,
 } from './types';
 
+export { LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
+export type { IClock, TimeoutId } from '../shared/clock';
 export { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constants';
 export {
   CancelError,
@@ -52,7 +61,7 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export type { Data, IEventIteratorOptions } from '../shared/types';
+export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
 export { dispose } from './symbols';
 export type {
   ITransportClient,
@@ -84,7 +93,7 @@ export type RECONNECT_DEFAULTS = typeof RECONNECT_DEFAULTS;
 
 /** What an omitted transport option resolves to. */
 export const DEFAULTS = (): ITransportClientOptions => {
-  return { TBD: undefined };
+  return { clock: PLATFORM_CLOCK };
 };
 
 /** What an omitted disconnect option resolves to. */
@@ -101,12 +110,15 @@ export const RECONNECT_DEFAULTS = Object.freeze({
 
 // helpers
 
-const sleep = (delay: number, signal?: AbortSignal): Promise<void> => {
+const sleep = (
+  delay: number,
+  { clock, signal }: { clock: IClock; signal: AbortSignal | undefined }
+) => {
   return createPromise(
     (resolve) => {
       resolve();
     },
-    { delay, signal }
+    { clock, delay, signal }
   );
 };
 
@@ -114,13 +126,14 @@ const sleep = (delay: number, signal?: AbortSignal): Promise<void> => {
 
 /**
  * The shared half of every transport client: the events, the ready state around `reconnect` and
- * `[dispose]`, and `reconnect` itself.
+ * `[dispose]`, and `reconnect` itself, which waits between its attempts on the clock its transport
+ * runs on.
  *
- * `define` receives the client being built and returns what only its transport knows — `connect`,
- * `disconnect`, `send` and `[dispose]`. Those are reached through the client, never captured, so
- * `reconnect` calls whatever `client.connect` is at the time, as a subclass override would; a
- * replacement must call the original before its first `await`, which is when `reconnect` lets it
- * past the state guard.
+ * `define` receives the client being built and returns what only its transport knows — its clock,
+ * `connect`, `disconnect`, `send` and `[dispose]`. Those are reached through the client, never
+ * captured, so `reconnect` calls whatever `client.connect` is at the time, as a subclass override
+ * would; a replacement must call the original before its first `await`, which is when `reconnect`
+ * lets it past the state guard.
  *
  * @example
  * const client = createTransportClient((client) => {
@@ -166,7 +179,30 @@ export const createTransportClient = <
       return client;
     }),
 
-    connect: (options) => {
+    get carriesCredential() {
+      return implementation.carriesCredential === true;
+    },
+    get clock() {
+      return implementation.clock ?? PLATFORM_CLOCK;
+    },
+    get isSecure() {
+      return implementation.isSecure === true;
+    },
+
+    connect: (given) => {
+      // held here, so by every transport, before anything moves or is kept for a reconnection, which
+      // connects again with the timeout held
+      let options: ConnectOptions;
+
+      try {
+        options =
+          given.timeout === undefined
+            ? given
+            : { ...given, timeout: assertHeld("a connect's timeout", given.timeout) };
+      } catch (reason) {
+        return Promise.reject(toError(reason));
+      }
+
       if (!isAttempting && !client.isUninitialized() && !client.isClosed()) {
         return Promise.reject(
           new ProgrammerError(
@@ -190,8 +226,8 @@ export const createTransportClient = <
     disconnect: (options) => {
       return implementation.disconnect(options);
     },
-    send: (data) => {
-      return implementation.send(data);
+    send: (message) => {
+      return implementation.send(message);
     },
     [dispose]: () => {
       const wasOpen = client.isOpen();
@@ -290,11 +326,29 @@ export const createTransportClient = <
             throw wrapReason(ProgrammerError, reason);
           }
 
-          tap?.(nextDelay, attempt);
+          // held before "tap" hears it: 0 waits none, and never would wait for ever
+          nextDelay = assertHeldDelay('a delay', nextDelay);
+
+          // armed before "tap" is told, so whoever moves the clock once told moves it past the wait
+          const pausing = new AbortController();
+          const waiting = sleep(nextDelay, {
+            clock: client.clock,
+            signal:
+              signal === undefined ? pausing.signal : AbortSignal.any([signal, pausing.signal]),
+          });
+
+          try {
+            tap?.(nextDelay, attempt);
+          } catch (reason) {
+            pausing.abort();
+            await waiting.catch(noop);
+
+            throw reason;
+          }
 
           previousDelay = nextDelay;
 
-          await sleep(nextDelay, signal);
+          await waiting;
         }
 
         if (signal?.aborted) {

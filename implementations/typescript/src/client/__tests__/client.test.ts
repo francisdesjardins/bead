@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { createEmitter } from '../../transport/shared/emitter';
-import type { Data } from '../../transport/shared/types';
+import type { ITransportMessage } from '../../transport/shared/types';
 import { createRouterClient } from '../../router/client/router-client';
 import { EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
@@ -8,9 +9,15 @@ import { createServiceManager } from '../../router/shared/service-manager';
 import {
   createClient,
   DisconnectError,
+  PLATFORM_CLOCK,
+  ProgrammerError,
   SERVER_FAILURES,
   type IClientTransportLike,
+  type IClock,
 } from '../client';
+import { createHTTPClient } from '../http-client';
+import { createWorkerClient } from '../worker-client';
+import { createWSClient } from '../ws-client';
 
 // helpers
 
@@ -36,7 +43,7 @@ interface IEchoTransport extends IClientTransportLike {
 const createEchoTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
-    message: [data: Data];
+    message: [message: ITransportMessage];
   }>();
   const calls: unknown[][] = [];
 
@@ -70,7 +77,7 @@ const createEchoTransport = () => {
         });
       });
     },
-    send: (data) => {
+    send: ({ data }) => {
       const request = readEnvelope(bytesOf(data), {
         failures: SERVER_FAILURES,
         maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
@@ -79,14 +86,13 @@ const createEchoTransport = () => {
       // a result on the request's own call id, with its own payload
       if (request?.kind === EnvelopeKind.REQUEST) {
         queueMicrotask(() => {
-          emitter.emit(
-            'message',
-            writeEnvelope({
+          emitter.emit('message', {
+            data: writeEnvelope({
               header: { callId: request.header.callId, kind: EnvelopeKind.RESULT },
               kind: EnvelopeKind.RESULT,
               payload: request.payload,
-            })
-          );
+            }),
+          });
         });
       }
 
@@ -94,7 +100,7 @@ const createEchoTransport = () => {
     },
     [Symbol.asyncDispose]: () => {
       calls.push(['asyncDispose']);
-      emitter.emit('message', new Uint8Array(0));
+      emitter.emit('message', { data: new Uint8Array(0) });
 
       return Promise.resolve();
     },
@@ -132,6 +138,44 @@ test.describe('createClient', () => {
     );
 
     await expect(echo('hello')()).resolves.toBe('hello');
+  });
+
+  test("runs its router on its transport's clock, which a façade is given through its transport's options, and refuses a router on another", async () => {
+    const clock = createTestClock();
+    const worker = { postMessage: () => {} };
+
+    for (const client of [
+      createWSClient({ transport: { clock } }),
+      createHTTPClient({ transport: { clock } }),
+      createWorkerClient({ transport: { clock, worker } }),
+      createClient({ transport: { ...createEchoTransport().transport, clock } }),
+    ]) {
+      expect([client.transport.clock, client.router.clock]).toEqual([clock, clock]);
+      await client[Symbol.asyncDispose]();
+    }
+
+    // a transport with no clock leaves its router its own
+    expect(createClient({ transport: createEchoTransport().transport }).router.clock).toBe(
+      PLATFORM_CLOCK
+    );
+    // a router a builder made on another clock is refused
+    const clocked: IEchoTransport & { clock: IClock } = {
+      ...createEchoTransport().transport,
+      clock,
+    };
+
+    expect(() => {
+      return createClient({
+        router: () => {
+          return createRouterClient({ ...clocked, clock: PLATFORM_CLOCK });
+        },
+        transport: clocked,
+      });
+    }).toThrow(
+      new ProgrammerError(
+        "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's"
+      )
+    );
   });
 
   test('"await using" takes the layers apart in reverse: the router lets go, then the transport closes', async () => {

@@ -50,8 +50,16 @@ public sealed class ServiceManagerTests
         return Task.CompletedTask;
     };
 
-    // when a test's clock starts: a trace's timestamps are read from it
+    // where a test's wall clock starts: a call traced at once starts there
     private static readonly DateTimeOffset Started = DateTimeOffset.FromUnixTimeMilliseconds(1_000);
+
+    // ! what a call made, a request answered, a notification sent and one heard allocate while
+    // nobody listens, in bytes: the allocation gate's pin, which sees a field, a copy or a closure
+    // added to a step's path. Measured on .NET 10.0.12, the runtime of the SDK global.json names,
+    // x64, in the Debug build `dotnet test` makes, on Windows and on Linux alike. A runtime that
+    // moves them is pinned anew, by hand: run the gate, take the bytes its failure prints, and name
+    // the runtime, and why each step moved, in the commit
+    private static readonly long[] AllocatedWhileNobodyListens = [1256, 984, 560, 768];
 
     // helpers
 
@@ -188,6 +196,21 @@ public sealed class ServiceManagerTests
     // definition
 
     [Fact]
+    public void Runs_on_its_router_s_clock_and_refuses_another()
+    {
+        var time = new FakeTimeProvider();
+        var router = new RecordingRouter { Clock = time };
+
+        Assert.NotNull(new ServiceManager(router, new ServiceManagerOptions { Clock = time }));
+        Assert.Equal(
+            "a service manager runs on the clock of its router, a FakeTimeProvider, and was given another, the system's",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new ServiceManager(router, new ServiceManagerOptions { Clock = TimeProvider.System });
+            }).Message);
+    }
+
+    [Fact]
     public async Task Fills_what_the_options_leave_out_and_passes_a_destination_as_it_is()
     {
         var router = new RecordingRouter();
@@ -222,7 +245,9 @@ public sealed class ServiceManagerTests
         var (payload, request) = Assert.Single(router.Requests);
 
         Assert.Equal(new Text("hello"), payload);
-        Assert.Equal(new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromMilliseconds(100) }), request);
+        Assert.Equal(
+            new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromMilliseconds(100) }) { Series = Assert.Single(router.Declared).Series },
+            request);
     }
 
     // a destination is a call's own, never a default: RequestDefaults has none
@@ -279,7 +304,7 @@ public sealed class ServiceManagerTests
         var seen = RecordDebug(manager);
         var requester = manager.GetRequest(Echo, Asked);
         var failure = new FailureException(
-            Failure.OfProtocol(ProtocolCode.AccessDenied, "no"),
+            Failure.OfProtocol(ProtocolCode.AccessDenied, "no") with { Relays = 2 },
             new FailureException.Raised(FailureOrigin.Peer, RouterSide.Server));
 
         // what is not a failure goes on as it is as well
@@ -299,6 +324,7 @@ public sealed class ServiceManagerTests
             {
                 return told.Error;
             }));
+        // its code, its scope and its detail, the relays it crossed left out
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied, "no"), seen[1].Event.Rx);
         router.Answer = (_) =>
         {
@@ -310,6 +336,29 @@ public sealed class ServiceManagerTests
         }));
         Assert.Same(reset, seen[3].Error);
         Assert.Null(seen[3].Event.Rx);
+    }
+
+    [Fact]
+    public async Task Makes_no_call_of_a_request_whose_value_does_not_write_tracing_deprecating_and_sending_nothing()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var deprecated = new List<Procedure>();
+        var requester = manager.GetRequest(
+            Echo with { Deprecation = new ProcedureDeprecation() },
+            new RequestDependencies<Text, Text> { Serializer = new Unwritable() });
+
+        manager.Deprecated += deprecated.Add;
+
+        // * written before its trace and its deprecation: no call is made (spec 17.2, item 4)
+        Assert.Equal("cannot write", (await Assert.ThrowsAsync<FormatException>(() =>
+        {
+            return requester(new Text("x"))().WaitAsync(Patience, Cancelled);
+        })).Message);
+        Assert.Empty(seen);
+        Assert.Empty(deprecated);
+        Assert.Empty(router.Requests);
     }
 
     [Fact]
@@ -335,6 +384,41 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_its_calls_the_series_it_gave()
+    {
+        var router = new RecordingRouter();
+        var requester = new ServiceManager(router).GetRequest(Echo, Asked);
+
+        // declared once, as it is made, before any call
+        var (procedureName, series) = Assert.Single(router.Declared);
+
+        Assert.Equal("echo", procedureName);
+        await requester(new Text("a"))().WaitAsync(Patience, Cancelled);
+        await requester(new Text("b"))().WaitAsync(Patience, Cancelled);
+        Assert.Single(router.Declared);
+        Assert.All(router.Requests, (sent) =>
+        {
+            Assert.Same(series, sent.Request.Series);
+        });
+    }
+
+    [Fact]
+    public void Registers_its_resolver_with_its_notify_for_its_router_to_declare_it_as_the_side_that_notifies()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+
+        manager.GetRequestResolver(Echo, Answered())(Unanswering);
+        manager.GetNotificationResolver(Echo with { ProcedureId = 2, ProcedureName = "news" }, Notifying)(UnansweringNotified);
+
+        // a router tells a procedure that notifies by its resolver, which notifies
+        Assert.Equal([false, true], router.RegisteredResolvers.Select((resolver) =>
+        {
+            return resolver is INotificationResolver;
+        }));
+    }
+
+    [Fact]
     public void Is_debugging_only_while_someone_listens()
     {
         var manager = new ServiceManager(new RecordingRouter());
@@ -350,11 +434,40 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Tells_each_step_with_its_payloads_as_they_are_the_call_s_own_and_no_copy()
+    {
+        var manager = new ServiceManager(new RecordingRouter());
+        var seen = RecordDebug(manager);
+        var asked = new Text("hello");
+        var answer = new Text("hi!");
+        Text? received = null;
+        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        {
+            received = request.Payload;
+
+            return response.Answer(answer);
+        });
+
+        await manager.GetRequest(Echo, Asked)(asked)().WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        // the call made's value, the request its resolver received and the answer it gave: the
+        // same objects, which a listener that changed one would change for its call too
+        Assert.Equal(4, seen.Count);
+        Assert.Same(asked, seen[0].Event.Tx);
+        Assert.Same(asked, seen[1].Event.Tx);
+        Assert.NotNull(received);
+        Assert.Same(received, seen[2].Event.Rx);
+        Assert.Same(received, seen[3].Event.Rx);
+        Assert.Same(answer, seen[3].Event.Tx);
+    }
+
+    [Fact]
     public async Task Tells_each_step_of_a_request_and_once_answered_its_duration()
     {
         var time = new FakeTimeProvider(Started);
-        var router = new RecordingRouter();
-        var manager = new ServiceManager(router, new ServiceManagerOptions { Time = time });
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
 
         router.Answer = (payload) =>
@@ -367,19 +480,20 @@ public sealed class ServiceManagerTests
 
         var sent = new DebugEvent
         {
+            CallId = 7,
             Direction = DebugDirection.Tx,
             Options = new ResolvedRequestOptions { Timeout = TimeoutDefault },
             ProcedureId = 1,
             ProcedureName = "echo",
             ServiceId = 2,
             ServiceRevision = 3,
-            Timestamp = new DebugTimestamp(null, 1_000),
+            StartedAt = Started,
             Tx = new Text("hello"),
             Type = DebugType.Request,
         };
 
         Assert.Equal(
-            [sent, sent with { Direction = DebugDirection.Rx, Rx = new Text("hello"), Timestamp = new DebugTimestamp(30, 1_000) }],
+            [sent, sent with { Direction = DebugDirection.Rx, Duration = TimeSpan.FromMilliseconds(30), Rx = new Text("hello") }],
             seen.Select((told) =>
             {
                 return told.Event;
@@ -393,10 +507,254 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public async Task A_debug_listener_that_throws_on_the_answer_fails_the_call_once_with_no_second_trace()
+    public async Task Tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_their_connection()
+    {
+        var client = new RecordingRouter(RouterSide.Client);
+        var server = new RecordingRouter();
+        var asking = new ServiceManager(client);
+        var commanding = new ServiceManager(server);
+        var seen = RecordDebug(asking);
+        var commanded = RecordDebug(commanding);
+
+        // how many calls the router took as each step is told
+        var taken = new List<int>();
+
+        asking.Debug += (_, _) =>
+        {
+            taken.Add(client.Requests.Count);
+        };
+
+        await asking.GetRequest(Echo, Asked)(new Text("a"))().WaitAsync(Patience, Cancelled);
+        await commanding.GetCommand(Echo, Asked)(new Text("b"))(new RequestOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, uint?, string?)>(
+            [
+                (DebugDirection.Tx, 7, RouterClient.ServerConnectionHandle),
+                (DebugDirection.Rx, 7, RouterClient.ServerConnectionHandle),
+                (DebugDirection.Tx, 7, Handle),
+                (DebugDirection.Rx, 7, Handle),
+            ],
+            seen.Concat(commanded).Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.CallId, told.Event.ConnectionHandle);
+            }));
+
+        // * the tx step comes once the router took the call, which drew its id
+        Assert.Equal([1, 1], taken);
+    }
+
+    [Fact]
+    public async Task Tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_step_then_its_rx_step()
+    {
+        var router = new RecordingRouter(RouterSide.Client) { CallId = null };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var refusal = new FailureException(
+            Failure.OfProtocol(ProtocolCode.SessionRequired),
+            new FailureException.Raised(FailureOrigin.Local, RouterSide.Client));
+
+        router.Answer = (_) =>
+        {
+            return Task.FromException<RouterResult>(refusal);
+        };
+
+        Assert.Same(refusal, await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled);
+        }));
+        Assert.Equal<(DebugDirection, uint?, string?, Exception?)>(
+            [(DebugDirection.Tx, null, null, null), (DebugDirection.Rx, null, null, refusal)],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.CallId, told.Event.ConnectionHandle, told.Error);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_a_call_made_over_a_router_that_draws_no_id_with_none_its_tx_step_then_its_rx_step()
+    {
+        var manager = new ServiceManager(new RecordingRouter { CallId = null });
+        var seen = RecordDebug(manager);
+
+        Assert.Equal(new Text("x"), await manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled));
+        Assert.Equal<(DebugDirection, uint?, object?)>(
+            [(DebugDirection.Tx, null, null), (DebugDirection.Rx, null, new Text("x"))],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.CallId, told.Event.Rx);
+            }));
+    }
+
+    [Fact]
+    public async Task Raises_deprecated_before_the_call_s_tx_step()
     {
         var manager = new ServiceManager(new RecordingRouter());
+        var heard = new List<string>();
+
+        manager.Deprecated += (_) =>
+        {
+            heard.Add("deprecated");
+        };
+        manager.Debug += (_, told) =>
+        {
+            heard.Add(told.Direction.ToString());
+        };
+
+        await manager.GetRequest(Echo with { Deprecation = new ProcedureDeprecation { Message = "use echo2" } }, Asked)(new Text("a"))()
+            .WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["deprecated", nameof(DebugDirection.Tx), nameof(DebugDirection.Rx)], heard);
+    }
+
+    // the C# side's alone, as its router client's test of the scheduler is: a router that hears a
+    // call's id on the thread pool, under no scheduler of its own, where the runtime would run an
+    // await inline, and the task source's continuations alone keep the tx step out of its OnCallId
+    [Fact]
+    public async Task Tells_a_call_s_tx_step_off_the_thread_its_router_hears_its_call_id_on()
+    {
+        var router = new RecordingRouter { CallId = null };
+        var manager = new ServiceManager(router);
+        var told = new List<(uint? CallId, bool IsAnswered)>();
+
+        using var answered = new ManualResetEventSlim();
+
+        // the id heard, then the answer given, by one work item: a listener run inside its OnCallId
+        // would wait for an answer that work item never gets to give
+        router.Answer = (payload) =>
+        {
+            var request = router.Requests[^1].Request;
+
+            return Task.Run(() =>
+            {
+                request.OnCallId?.Invoke(7);
+                answered.Set();
+
+                return ResultOf(payload);
+            });
+        };
+        manager.Debug += (_, step) =>
+        {
+            if (step.Direction == DebugDirection.Tx)
+            {
+                var isAnswered = answered.Wait(Patience);
+
+                lock (told)
+                {
+                    told.Add((step.CallId, isAnswered));
+                }
+            }
+        };
+
+        Assert.Equal(new Text("x"), await manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled));
+        Assert.Equal<(uint?, bool)>([(7, true)], told);
+    }
+
+    [Fact]
+    public async Task Reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_on_the_monotonic_reading()
+    {
+        var clock = new SteppingClock(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+
+        router.Answer = async (payload) =>
+        {
+            // a wall clock set back by hand moves no duration
+            clock.Wall(TimeSpan.FromDays(-1));
+            await clock.Advance(TimeSpan.FromMilliseconds(250));
+
+            return await EchoOf(payload);
+        };
+        await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DateTimeOffset, TimeSpan?)>(
+            [(Started, null), (Started, TimeSpan.FromMilliseconds(250))],
+            seen.Select((told) =>
+            {
+                return (told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_a_duration_in_whole_milliseconds_its_fraction_dropped()
+    {
+        var clock = new SteppingClock(Started);
+        var router = new RecordingRouter { Clock = clock };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var before = clock.GetTimestamp();
+
+        router.Answer = async (payload) =>
+        {
+            await clock.Advance(TimeSpan.FromMicroseconds(30_600));
+
+            return await EchoOf(payload);
+        };
+        await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
+
+        // the call took 30.6 ms of the monotonic reading, and is told as 30
+        Assert.Equal(TimeSpan.FromMicroseconds(30_600), clock.GetElapsedTime(before));
+        Assert.Equal<TimeSpan?>(
+            [null, TimeSpan.FromMilliseconds(30)],
+            seen.Select((told) =>
+            {
+                return told.Event.Duration;
+            }));
+    }
+
+    [Fact]
+    public async Task A_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_its_failure_at_that_same_start()
+    {
+        var time = new FakeTimeProvider(Started);
+        var client = new RecordingRouter(RouterSide.Client) { Clock = time };
+        var server = new RecordingRouter { Clock = time };
+        var hearing = new ServiceManager(client);
+        var notifying = new ServiceManager(server);
+        var notification = hearing.GetNotification(Echo, Notified());
+        var resolver = notifying.GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
+        var failure = new IOException("gone");
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
+
+        var heard = RecordDebug(hearing);
+        var sent = RecordDebug(notifying);
+
+        time.Advance(TimeSpan.FromMilliseconds(10));
+        await client.Deliver(Echo.Address, new Text("news")).WaitAsync(Patience, Cancelled);
+        time.Advance(TimeSpan.FromMilliseconds(10));
+
+        // the router fails the notify 30 ms after it was sent
+        server.NotifyError = failure;
+        server.NotifyGate = gate.Task;
+
+        var failing = resolver.Notify(new Text("late"));
+
+        time.Advance(TimeSpan.FromMilliseconds(30));
+        gate.SetResult();
+        await failing.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, DateTimeOffset, TimeSpan?)>(
+            [(DebugDirection.Rx, Started.AddMilliseconds(10), null)],
+            heard.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.StartedAt, told.Event.Duration);
+            }));
+        Assert.Equal<(Exception?, DateTimeOffset, TimeSpan?)>(
+            [(null, Started.AddMilliseconds(20), null), (failure, Started.AddMilliseconds(20), null)],
+            sent.Select((told) =>
+            {
+                return (told.Error, told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task A_debug_listener_that_throws_on_the_answer_is_reported_through_the_router_and_the_call_resolves_with_its_result_each_step_told()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
         var seen = new List<DebugDirection>();
+        var heard = new List<DebugDirection>();
         var failure = new InvalidOperationException("listener bug");
 
         manager.Debug += (_, told) =>
@@ -409,11 +767,203 @@ public sealed class ServiceManagerTests
             }
         };
 
-        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        // a listener after it hears each step all the same
+        manager.Debug += (_, told) =>
         {
-            return manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled);
-        }));
+            heard.Add(told.Direction);
+        };
+
+        Assert.Equal(new Text("x"), await manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled));
         Assert.Equal([DebugDirection.Tx, DebugDirection.Rx], seen);
+        Assert.Equal([DebugDirection.Tx, DebugDirection.Rx], heard);
+        Assert.Equal([(failure, (string?)null)], router.Reports.Select((report) =>
+        {
+            return ((Exception)report.Reason, report.ConnectionHandle);
+        }));
+    }
+
+    [Fact]
+    public async Task A_request_is_answered_as_a_debug_listener_throws_on_its_rx_step_the_error_reported_through_the_router_with_its_connection()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var failure = new InvalidOperationException("listener bug");
+
+        manager.Debug += (_, told) =>
+        {
+            if (told.Direction == DebugDirection.Rx)
+            {
+                throw failure;
+            }
+        };
+
+        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(new Responded(Target, new Text("hi"), null), Assert.Single(router.Responses));
+        Assert.Equal([(failure, (string?)Handle)], router.Reports.Select((report) =>
+        {
+            return ((Exception)report.Reason, report.ConnectionHandle);
+        }));
+    }
+
+    [Fact]
+    public async Task Reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_and_one_heard_while_nobody_listens_and_three_for_a_call_with_a_listener()
+    {
+        var clock = new SteppingClock(Started);
+        var client = new RecordingRouter(RouterSide.Client) { Clock = clock };
+        var server = new RecordingRouter { Clock = clock };
+        var hearing = new ServiceManager(client);
+        var notifying = new ServiceManager(server);
+        var notification = hearing.GetNotification(Echo, Notified());
+        var resolver = notifying.GetNotificationResolver(Echo, Notifying)((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        var asking = hearing.GetRequest(Echo, Asked);
+
+        // the readings `run` takes of the wall clock and of the monotonic one, each apart
+        async Task<(int Wall, int Monotonic)> ReadingsOf(Func<Task> run)
+        {
+            var before = clock.Readings;
+
+            await run().WaitAsync(Patience, Cancelled);
+
+            return (clock.Readings.Wall - before.Wall, clock.Readings.Monotonic - before.Monotonic);
+        }
+
+        async Task<(int Wall, int Monotonic)[]> ReadEach()
+        {
+            return
+            [
+                await ReadingsOf(() =>
+                {
+                    return asking(new Text("x"))();
+                }),
+                await ReadingsOf(() =>
+                {
+                    return resolver.Handle(PropsOf(Encode(new Text("hi"))));
+                }),
+                await ReadingsOf(() =>
+                {
+                    return resolver.Notify(new Text("news"));
+                }),
+                await ReadingsOf(() =>
+                {
+                    return client.Deliver(Echo.Address, new Text("news"));
+                }),
+            ];
+        }
+
+        await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
+        var unheard = await ReadEach();
+
+        Assert.Equal([(0, 0), (0, 0), (0, 0), (0, 0)], unheard);
+
+        foreach (var manager in new[] { hearing, notifying })
+        {
+            manager.Debug += (_, _) =>
+            {
+            };
+        }
+
+        // a call's start on both clocks, and its end on the monotonic one; a notification's on the
+        // wall clock alone (spec/debugging.md 3.2)
+        var listened = await ReadEach();
+
+        Assert.Equal([(1, 2), (1, 2), (1, 0), (1, 0)], listened);
+    }
+
+    [Fact]
+    public async Task Allocates_for_a_call_made_a_request_answered_and_a_notification_sent_or_heard_the_same_while_nobody_listens_whoever_listened_before_and_less_than_with_a_listener()
+    {
+        var client = new RecordingRouter(RouterSide.Client);
+        var server = new RecordingRouter();
+        var hearing = new ServiceManager(client);
+        var notifying = new ServiceManager(server);
+        var notification = hearing.GetNotification(Echo, Notified());
+        var resolver = notifying.GetNotificationResolver(Echo, Notifying)((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        var asking = hearing.GetRequest(Echo, Asked)(new Text("x"));
+        var props = PropsOf(Encode(new Text("hi")));
+        Action<Exception?, DebugEvent> listener = (_, _) =>
+        {
+        };
+
+        // what each step allocates on this thread, the router drawing its call id and answering at
+        // once, so nothing awaits: the least of eight rounds, since what else runs on the thread only
+        // ever adds bytes, and the first rounds allocate what is allocated once and for all
+        long[] AllocatedOf()
+        {
+            Func<Task>[] steps =
+            [
+                () =>
+                {
+                    return asking();
+                },
+                () =>
+                {
+                    return resolver.Handle(props);
+                },
+                () =>
+                {
+                    return resolver.Notify(new Text("news"));
+                },
+                () =>
+                {
+                    return client.Deliver(Echo.Address, new Text("news"));
+                },
+            ];
+
+            return [.. steps.Select((step) =>
+            {
+                var allocated = long.MaxValue;
+
+                for (var round = 0; round < 8; round += 1)
+                {
+                    // what the routers record, emptied, so a list that grows allocates nothing more
+                    client.Requests.Clear();
+                    server.Responses.Clear();
+                    server.Notified.Clear();
+
+                    var before = GC.GetAllocatedBytesForCurrentThread();
+                    var stepped = step();
+
+                    allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+                    Assert.True(stepped.IsCompletedSuccessfully);
+                }
+
+                return allocated;
+            })];
+        }
+
+        await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
+
+        var unheard = AllocatedOf();
+
+        // * each step's bytes while nobody listens, pinned: what the comparisons below let pass, a
+        // field or a closure that moves every side alike, shows here
+        Assert.Equal(AllocatedWhileNobodyListens, unheard);
+
+        hearing.Debug += listener;
+        notifying.Debug += listener;
+
+        var listened = AllocatedOf();
+
+        hearing.Debug -= listener;
+        notifying.Debug -= listener;
+
+        Assert.Equal(unheard, AllocatedOf());
+        Assert.All(unheard.Zip(listened), (each) =>
+        {
+            Assert.True(each.First < each.Second, $"{each.First} bytes while nobody listens, {each.Second} with a listener");
+        });
     }
 
     [Fact]
@@ -588,6 +1138,38 @@ public sealed class ServiceManagerTests
         Assert.Equal(["allowed"], reached);
         Assert.Equal([new AdmissionRequest(Handle, Header), new AdmissionRequest(Handle, Header with { CallId = 9 })], seen);
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), router.Responses[0].Failure);
+    }
+
+    [Fact]
+    public void Keeps_its_refusal_SESSION_REQUIRED_whatever_the_call_presented_for_its_router_to_answer()
+    {
+        BeforeRequest Refusing(Failure? refusal)
+        {
+            return new BeforeRequest(
+                (_) =>
+                {
+                    return false;
+                },
+                refusal);
+        }
+
+        var plain = Refusing(Failure.OfProtocol(ProtocolCode.SessionRequired));
+        var detailed = Refusing(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"));
+        var request = new AdmissionRequest(Handle, Header);
+
+        // the router answers a call that presented a credential ACCESS_DENIED, whatever the
+        // admission
+        foreach (var presenting in new Credential?[] { null, (Credential)SessionToken.FromBytes([.. Enumerable.Repeat((byte)1, SessionToken.Bytes)]), Credential.Jwt("a.b.c"), Credential.Elsewhere() }.Select((credential) =>
+        {
+            return request with { Header = Header with { Credential = credential } };
+        }))
+        {
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), plain.RefusalOf(presenting));
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first"), detailed.RefusalOf(presenting));
+
+            // ACCESS_DENIED when it gives none
+            Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), Refusing(null).RefusalOf(presenting));
+        }
     }
 
     // a failure carries no side here — the router writes it as its own — so what is left to show is
@@ -793,10 +1375,10 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public async Task Tells_debug_the_request_it_received_and_the_answer_it_sent()
+    public async Task Tells_the_request_it_received_and_the_answer_it_sent_with_that_request_s_call_id_and_connection()
     {
         var time = new FakeTimeProvider(Started);
-        var manager = new ServiceManager(new RecordingRouter(), new ServiceManagerOptions { Time = time });
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
         var seen = RecordDebug(manager);
         var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
         {
@@ -809,21 +1391,182 @@ public sealed class ServiceManagerTests
 
         var received = new DebugEvent
         {
+            CallId = 7,
+            ConnectionHandle = Handle,
             Direction = DebugDirection.Rx,
             ProcedureId = 1,
             ProcedureName = "echo",
             Rx = new Text("hi"),
             ServiceId = 2,
             ServiceRevision = 3,
-            Timestamp = new DebugTimestamp(null, 1_000),
+            StartedAt = Started,
             Type = DebugType.Request,
         };
 
         Assert.Equal(
-            [received, received with { Direction = DebugDirection.Tx, Timestamp = new DebugTimestamp(30, 1_000), Tx = new Text("hi!") }],
+            [received, received with { Direction = DebugDirection.Tx, Duration = TimeSpan.FromMilliseconds(30), Tx = new Text("hi!") }],
             seen.Select((told) =>
             {
                 return told.Event;
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not_go_with_why_beside_it_nothing_more_for_one_that_fails_once_it_answered_nor_for_an_admission_that_fails()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+        var thrown = new InvalidOperationException("thrown");
+        var rejected = new InvalidOperationException("rejected");
+        var after = new InvalidOperationException("after");
+        var throwing = manager.GetRequestResolver(Echo, Answered())((_, _) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+
+            throw thrown;
+        });
+        var rejecting = manager.GetRequestResolver(Echo with { ProcedureId = 2 }, Answered())((_, _) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(20));
+
+            return Task.FromException(rejected);
+        });
+        var refusing = manager.GetRequestResolver(Echo with { ProcedureId = 3 }, Answered(new BeforeRequest((_) =>
+        {
+            throw thrown;
+        })))(Unanswering);
+        var answering = manager.GetRequestResolver(Echo with { ProcedureId = 4 }, Answered())(async (_, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(5));
+            await response.Answer(new Text("hi"));
+            time.Advance(TimeSpan.FromMilliseconds(5));
+
+            throw after;
+        });
+        var request = PropsOf(Encode(new Text("hi")));
+
+        foreach (var resolver in new[] { throwing, rejecting, refusing, answering })
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return resolver.Handle(request).WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        // each pair shares its start; the step of no answer carries the request and why, timed
+        Assert.Equal<(DebugDirection, ushort, Exception?, object?, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, 1, null, new Text("hi"), null, Started, null),
+                (DebugDirection.Tx, 1, thrown, new Text("hi"), null, Started, TimeSpan.FromMilliseconds(10)),
+                (DebugDirection.Rx, 2, null, new Text("hi"), null, Started.AddMilliseconds(10), null),
+                (DebugDirection.Tx, 2, rejected, new Text("hi"), null, Started.AddMilliseconds(10), TimeSpan.FromMilliseconds(20)),
+                (DebugDirection.Rx, 4, null, new Text("hi"), null, Started.AddMilliseconds(30), null),
+                (DebugDirection.Tx, 4, null, new Text("hi"), new Text("hi"), Started.AddMilliseconds(30), TimeSpan.FromMilliseconds(5)),
+            ],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.ProcedureId, told.Error, told.Event.Rx, told.Event.Tx, told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_beside_it()
+    {
+        var time = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var tooLarge = FailureException.OfProtocol(ProtocolCode.PayloadTooLarge, RouterSide.Server);
+        Exception? heard = null;
+
+        // the payload answer goes nowhere, 5 ms after it was told; a failure goes out
+        router.RespondError = (answer) =>
+        {
+            if (answer.Failure is not null)
+            {
+                return null;
+            }
+
+            time.Advance(TimeSpan.FromMilliseconds(5));
+
+            return tooLarge;
+        };
+
+        var resolver = manager.GetRequestResolver(Echo, Answered())(async (request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+            heard = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return response.Answer(request.Payload);
+            });
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Same(tooLarge, heard);
+        Assert.Equal<(DebugDirection, Exception?, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, null, null, Started, null),
+                (DebugDirection.Tx, null, new Text("hi"), Started, TimeSpan.FromMilliseconds(10)),
+                (DebugDirection.Tx, tooLarge, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
+            ],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Error, told.Event.Tx, told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    [Fact]
+    public async Task Tells_nothing_more_than_its_request_for_a_callback_that_fails_on_its_signal_its_call_cancelled_or_gone_with_its_connection()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+        using var source = new CancellationTokenSource();
+
+        // its requester cancels, or its connection goes: either way its router aborts its signal
+        var resolver = manager.GetRequestResolver(Echo, Answered())(async (request, _) =>
+        {
+            await source.CancelAsync();
+            request.Signal.ThrowIfCancellationRequested();
+        });
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        {
+            return resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Signal = source.Token }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal([(DebugDirection.Rx, DebugType.Request)], StepsOf(seen));
+    }
+
+    [Fact]
+    public async Task A_received_call_starts_as_it_arrives_its_admission_and_its_decoding_count_in_its_duration()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+
+        // its admission takes 20 ms, and its callback 10 more
+        var resolver = manager.GetRequestResolver(Echo, Answered(new BeforeRequest((_) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(20));
+
+            return true;
+        })))((request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, DateTimeOffset, TimeSpan?)>(
+            [(DebugDirection.Rx, Started, null), (DebugDirection.Tx, Started, TimeSpan.FromMilliseconds(30))],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Event.StartedAt, told.Event.Duration);
             }));
     }
 
@@ -971,7 +1714,31 @@ public sealed class ServiceManagerTests
         var (payload, request) = Assert.Single(router.Notified);
 
         Assert.Equal(new Text("news"), payload);
-        Assert.Equal(new NotifyRequest(Echo.Address, null, null), request);
+        Assert.Equal(new NotifyRequest { Procedure = Echo.Address }, request);
+    }
+
+    [Fact]
+    public async Task A_notification_whose_value_does_not_write_goes_to_its_router_in_its_payload_s_place_its_failure_told_at_its_start_and_resolves()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var resolver = manager.GetNotificationResolver(
+            Echo,
+            new NotificationResolverDependencies<Text, Text, Text> { Serializer = new UnwritableNotification() })(UnansweringNotified);
+
+        await resolver.Notify(new Text("news")).WaitAsync(Patience, Cancelled);
+
+        var refusal = Assert.Single(router.Unwritten);
+
+        Assert.Equal("cannot write", refusal.Message);
+        Assert.Empty(router.Notified);
+        Assert.Equal<(Exception?, DebugDirection, DateTimeOffset)>(
+            [(null, DebugDirection.Tx, seen[0].Event.StartedAt), (refusal, DebugDirection.Tx, seen[0].Event.StartedAt)],
+            seen.Select((told) =>
+            {
+                return (told.Error, told.Event.Direction, told.Event.StartedAt);
+            }));
     }
 
     [Fact]
@@ -1008,17 +1775,17 @@ public sealed class ServiceManagerTests
         await resolver.Notify(new Text("news"), new NotifyOptions { Exclude = "b" }).WaitAsync(Patience, Cancelled);
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
-            Filter = (handle) =>
+            Filter = (subscriber) =>
             {
-                return handle != "a";
+                return subscriber.ConnectionHandle != "a";
             },
         }).WaitAsync(Patience, Cancelled);
         await resolver.Notify(new Text("news"), new NotifyOptions
         {
             Exclude = "c",
-            Filter = (handle) =>
+            Filter = (subscriber) =>
             {
-                return handle != "a";
+                return subscriber.ConnectionHandle != "a";
             },
         }).WaitAsync(Patience, Cancelled);
 
@@ -1026,7 +1793,12 @@ public sealed class ServiceManagerTests
             ["each", "a c", "b c", "b"],
             router.Notified.Select((notified) =>
             {
-                return notified.Request.Filter is { } filter ? string.Join(' ', handles.Where(filter)) : "each";
+                return notified.Request.Filter is { } filter
+                    ? string.Join(' ', handles.Where((handle) =>
+                    {
+                        return filter(new Subscriber { ConnectionHandle = handle });
+                    }))
+                    : "each";
             }));
     }
 
@@ -1093,9 +1865,11 @@ public sealed class ServiceManagerTests
         await notification.Register(new Text("s"), Unheard)(new RequestOptions { DestinationId = 3, Timeout = TimeSpan.FromMilliseconds(50) })
             .WaitAsync(Patience, Cancelled);
 
+        // its series, a requester's of the procedure, declared as the notification was made
         Assert.Equal(
             new RouterRequest(Echo, new ResolvedRequestOptions { DestinationId = 3, Timeout = TimeSpan.FromMilliseconds(50) })
             {
+                Series = Assert.Single(router.Declared).Series,
                 Subscribes = notification,
             },
             Assert.Single(router.Requests).Request);
@@ -1346,6 +2120,31 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public void Refuses_a_notification_asked_for_again_at_another_window_none_against_one_among_them_and_gives_the_same_at_the_same()
+    {
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
+        var paced = manager.GetNotification(Echo, Notified(window: 4));
+        var unpaced = manager.GetNotification(Echo with { ProcedureId = 9 }, Notified());
+
+        Assert.Same(paced, manager.GetNotification(Echo, Notified(window: 4)));
+        Assert.Same(unpaced, manager.GetNotification(Echo with { ProcedureId = 9 }, Notified()));
+        Assert.Equal("2/1 is already a notification with window 4, not window 1", Assert.Throws<InvalidOperationException>(() =>
+        {
+            return manager.GetNotification(Echo, Notified(window: 1));
+        }).Message);
+
+        // * unpaced and paced are two windows, one of them none
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            return manager.GetNotification(Echo, Notified());
+        });
+        Assert.Equal("2/9 is already a notification with no window, not window 1", Assert.Throws<InvalidOperationException>(() =>
+        {
+            return manager.GetNotification(Echo with { ProcedureId = 9 }, Notified(window: 1));
+        }).Message);
+    }
+
+    [Fact]
     public async Task A_registration_under_way_when_its_notification_is_dropped_fails_with_a_disconnect_exception()
     {
         var router = new RecordingRouter();
@@ -1569,23 +2368,31 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
-    public async Task Tells_debug_each_notification_it_hears()
+    public async Task Tells_a_notification_sent_or_heard_with_no_call_id()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
+        var notifying = new ServiceManager(new RecordingRouter());
         var notification = manager.GetNotification(Echo, Notified());
+        var resolver = notifying.GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
 
         await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled);
 
         var seen = RecordDebug(manager);
+        var sent = RecordDebug(notifying);
 
         await router.Deliver(Echo.Address, new Text("news")).WaitAsync(Patience, Cancelled);
+        await resolver.Notify(new Text("more news")).WaitAsync(Patience, Cancelled);
 
-        Assert.Equal(
-            [(DebugDirection.Rx, DebugType.Notification, (object?)new Text("news"))],
-            seen.Select((told) =>
+        // * a notification names no call: no id, and no connection
+        Assert.Equal<(DebugDirection, DebugType, object?, uint?, string?)>(
+            [
+                (DebugDirection.Rx, DebugType.Notification, new Text("news"), null, null),
+                (DebugDirection.Tx, DebugType.Notification, new Text("more news"), null, null),
+            ],
+            seen.Concat(sent).Select((told) =>
             {
-                return (told.Event.Direction, told.Event.Type, told.Event.Rx);
+                return (told.Event.Direction, told.Event.Type, told.Event.Rx ?? told.Event.Tx, told.Event.CallId, told.Event.ConnectionHandle);
             }));
     }
 
@@ -1729,6 +2536,89 @@ public sealed class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Admission_reads_the_call_s_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it()
+    {
+        var router = new RecordingRouter();
+        var admitted = new List<object?>();
+        var received = new List<object?>();
+        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
+        {
+            admitted.Add(request.Session?.Data);
+
+            return true;
+        })))((request, response) =>
+        {
+            received.Add(request.Session?.Data);
+
+            return response.Answer(request.Payload);
+        });
+
+        // asked here, then by its router, which hands the callback the session it resolved
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Session = new CallSession { Data = "ada" } }).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = new CallSession { Data = "bob" } }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["ada", null], admitted);
+        Assert.Equal(["ada", null, "bob"], received);
+    }
+
+    [Fact]
+    public async Task Hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_its_trace()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+
+        await manager.GetRequest(Echo, Asked)(new Text("a"))(new RequestOptions { Credential = Credential.Opaque() }).WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("b"))().WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("c"))(new RequestOptions { Credential = Credential.Jwt("a.b.c") }).WaitAsync(Patience, Cancelled);
+        await manager.GetRequest(Echo, Asked)(new Text("d"))(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(
+            [Credential.Opaque(), null, Credential.Jwt("a.b.c"), Credential.Elsewhere("Interop sub=ada")],
+            router.Requests.Select((sent) =>
+            {
+                return sent.Request.Options.Credential;
+            }));
+        Assert.All(seen, (told) =>
+        {
+            Assert.Null(told.Event.Options!.Credential);
+        });
+    }
+
+    [Fact]
+    public async Task Hands_the_filter_one_subscriber_its_connection_and_its_session_s_identifier()
+    {
+        var router = new RecordingRouter();
+        var resolver = new ServiceManager(router).GetNotificationResolver(Echo, Notifying)(UnansweringNotified);
+        var grace = new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = "https://a.example", Sub = "grace" };
+        var heard = new List<(string ConnectionHandle, SessionIdentifier? Identifier)>();
+
+        await resolver.Notify(new Text("news"), new NotifyOptions
+        {
+            Exclude = "b",
+            Filter = (subscriber) =>
+            {
+                heard.Add((subscriber.ConnectionHandle, subscriber.Identifier));
+
+                return subscriber.Identifier == grace;
+            },
+        }).WaitAsync(Patience, Cancelled);
+
+        var filter = Assert.Single(router.Notified).Request.Filter!;
+
+        Assert.Equal(
+            [true, false, false],
+            new[]
+            {
+                filter(new Subscriber { ConnectionHandle = "a", Identifier = grace }),
+                filter(new Subscriber { ConnectionHandle = "a" }),
+                filter(new Subscriber { ConnectionHandle = "b", Identifier = grace }),
+            });
+        Assert.Equal([("a", (SessionIdentifier?)grace), ("a", null)], heard);
+    }
+
+    [Fact]
     public async Task Is_not_asked_again_of_a_request_its_router_admitted()
     {
         var router = new RecordingRouter();
@@ -1863,13 +2753,49 @@ public sealed class ServiceManagerTests
         }
     }
 
-    // a router that records every call, answers each request as a test scripts it — its own payload
-    // unless told otherwise — and holds notifications; it raises the failures of its side, a
-    // server's unless given, and subscribes a request under its own call id
+    // a requester's serializer that cannot write its request
+    private sealed class Unwritable : IRequestSerializerClient<Text, Text>
+    {
+        public ReadOnlyMemory<byte> Encode(Text request)
+        {
+            throw new FormatException("cannot write");
+        }
+
+        public Text Decode(ReadOnlyMemory<byte> response)
+        {
+            return Json.Decode(response);
+        }
+    }
+
+    // a notifying side's serializer that reads a request and writes an answer, and cannot write its
+    // notification
+    private sealed class UnwritableNotification : INotificationSerializerServer<Text, Text, Text>
+    {
+        public Text Decode(ReadOnlyMemory<byte> request)
+        {
+            return Json.Decode(request);
+        }
+
+        public ReadOnlyMemory<byte> Encode(Text response)
+        {
+            return Json.Encode(response);
+        }
+
+        public ReadOnlyMemory<byte> EncodeNotification(Text notification)
+        {
+            throw new FormatException("cannot write");
+        }
+    }
+
+    // a router that records every call, draws call 7 for each request and answers it as a test
+    // scripts it — its own payload unless told otherwise — and holds notifications; it raises the
+    // failures of its side, a server's unless given, and subscribes a request under its own call id
     private sealed class RecordingRouter(RouterSide side = RouterSide.Server) : IRouterLike
     {
         private readonly Lock _gate = new();
         private readonly Dictionary<ProcedureAddress, INotificationLike> _held = [];
+
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public List<IRequestResolver> RegisteredResolvers { get; } = [];
 
@@ -1879,12 +2805,24 @@ public sealed class ServiceManagerTests
 
         public List<(Text Payload, NotifyRequest Request)> Notified { get; } = [];
 
+        // why each notification whose value did not write was handed on with no payload
+        public List<Exception> Unwritten { get; } = [];
+
         public List<AnswerTarget> Subscribed { get; } = [];
+
+        // each requester declared, by its procedure's name, and the series each was given
+        public List<(string ProcedureName, ProcedureSeries Series)> Declared { get; } = [];
+
+        // what was reported through it, with its connection
+        public List<(Exception Reason, string? ConnectionHandle)> Reports { get; } = [];
 
         public List<string> RegisteredNotifications { get; } = [];
 
         // each notification unregistered, and whether the router was told to cancel its call
         public List<(string ProcedureName, bool Cancel)> UnregisteredNotifications { get; } = [];
+
+        // the call id each request draws, heard through its OnCallId; none, a router that draws none
+        public uint? CallId { get; set; } = 7;
 
         // what a request settles with
         public Func<ReadOnlyMemory<byte>, Task<RouterResult>> Answer { get; set; } = EchoOf;
@@ -1894,6 +2832,9 @@ public sealed class ServiceManagerTests
         {
             return null;
         };
+
+        // what a notify waits on once recorded, before it settles, and what it then fails with
+        public Task NotifyGate { get; set; } = Task.CompletedTask;
 
         public Exception? NotifyError { get; set; }
 
@@ -1936,22 +2877,73 @@ public sealed class ServiceManagerTests
 
         public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
         {
+            ArgumentNullException.ThrowIfNull(request);
+
             lock (_gate)
             {
                 Requests.Add((Json.Decode(payload), request));
             }
 
+            if (CallId is { } drawn)
+            {
+                request.OnCallId?.Invoke(drawn);
+            }
+
             return Answer(payload);
         }
 
-        public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
+        public ProcedureSeries? DeclareRequester(Procedure procedure)
+        {
+            ArgumentNullException.ThrowIfNull(procedure);
+
+            // a series of its own, which the requests it hands over are told apart by
+            var series = new ProcedureSeries(new CallSeries(CallTable.Client, procedure.ProcedureName));
+
+            lock (_gate)
+            {
+                Declared.Add((procedure.ProcedureName, series));
+            }
+
+            return series;
+        }
+
+        public void Report(Exception reason, string? connectionHandle)
+        {
+            lock (_gate)
+            {
+                Reports.Add((reason, connectionHandle));
+            }
+        }
+
+        public async Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
         {
             lock (_gate)
             {
                 Notified.Add((Json.Decode(payload), request));
             }
 
-            return NotifyError is { } error ? Task.FromException(error) : Task.CompletedTask;
+            await Notifying();
+        }
+
+        public async Task Notify(Exception unwritten, NotifyRequest request)
+        {
+            lock (_gate)
+            {
+                Unwritten.Add(unwritten);
+            }
+
+            await Notifying();
+        }
+
+        // a notification handed on settles as the test lets it, with the error it gives
+        private async Task Notifying()
+        {
+            await NotifyGate;
+
+            if (NotifyError is { } error)
+            {
+                throw error;
+            }
         }
 
         public Task<uint> Subscribe(AnswerTarget target)

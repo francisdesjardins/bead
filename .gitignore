@@ -16,9 +16,10 @@ coverage/
 playwright-report/
 test-results/
 
-# Python: the spec's generators leave their bytecode beside them
+# Python: the spec's generators leave their bytecode beside them, and the check its environment
 __pycache__/
 *.py[cod]
+.venv/
 
 # Editors and systems
 .idea/

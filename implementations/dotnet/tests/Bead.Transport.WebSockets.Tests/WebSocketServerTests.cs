@@ -415,6 +415,20 @@ public sealed class WebSocketServerTests
     // definition
 
     [Fact]
+    public async Task Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    {
+        await using var server = new WebSocketServer<string>();
+
+        var beadServer = Assert.IsAssignableFrom<IBeadServer<string>>(server);
+
+        Assert.Same(server.Transport, beadServer.Transport);
+        Assert.Same(server.Router, beadServer.Router);
+        Assert.Same(server.RequireSession, beadServer.RequireSession);
+        Assert.NotNull(server.RequireSessionOrCredential);
+        Assert.Same(server.RequireSessionOrCredential, beadServer.RequireSessionOrCredential);
+    }
+
+    [Fact]
     public async Task WebSocketServer_builds_on_a_WebSocket_transport_server_not_yet_started_with_its_layers_and_the_limits_given()
     {
         // the TypeScript side takes a factory for each layer; this side builds its own
@@ -427,6 +441,20 @@ public sealed class WebSocketServerTests
         Assert.Empty(server.Sessions.GetAll());
         // the router is built with the server's limits
         Assert.Equal(limits, server.Router.Limits);
+    }
+
+    [Fact]
+    public async Task WebSocketServer_runs_every_layer_on_its_transport_s_clock_and_refuses_another()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+
+        await using var server = new WebSocketServer<string>(new WebSocketServerOptions { Transport = new WebSocketTransportServerOptions { Clock = time } });
+
+        Assert.Equal((time, time, time), (server.Transport.Clock, server.Router.Clock, server.Sessions.Clock));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Clock = time } });
+        });
     }
 
     [Fact]
@@ -681,14 +709,14 @@ public sealed class WebSocketServerTests
 
         var device = ends.Device!;
         var seven = new RequestOptions { DestinationId = 7 };
-        // whether each envelope the device took presented a session
-        var presented = new ConcurrentQueue<bool>();
+        // the scheme of the credential each envelope the device took presented, none for none
+        var presented = new ConcurrentQueue<CredentialScheme?>();
 
         device.Router.Debug += (direction, envelope) =>
         {
             if (direction == DebugDirection.Rx)
             {
-                presented.Enqueue(envelope.HasSessionToken);
+                presented.Enqueue(envelope.Header is RequestHeader { Credential: { } credential } ? credential.Scheme : null);
             }
         };
         device.Services.GetRequestResolver(Echo, TextAnswered)((request, response) =>
@@ -704,7 +732,7 @@ public sealed class WebSocketServerTests
             return echoing("hi")(seven).WaitAsync(Patience, Cancelled);
         });
 
-        Assert.Equal(((ushort)ProtocolCode.SessionRequired, (byte)0, FailureOrigin.Peer), (shut.Code, shut.Hops, shut.Origin));
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, (byte)0, FailureOrigin.Peer), (shut.Code, shut.Relays, shut.Origin));
         Assert.Empty(presented);
 
         await ends.Client.Services.GetRequest(OpenSession, TextAsked)("me")().WaitAsync(Patience, Cancelled);
@@ -719,12 +747,12 @@ public sealed class WebSocketServerTests
 
         Assert.Equal(
             ((ushort)ProtocolCode.ProcedureUnknown, (uint?)7, (byte)1, FailureOrigin.Relayed, (RouterSide?)null),
-            (refused.Code, refused.DestinationId, refused.Hops, refused.Origin, refused.Side));
+            (refused.Code, refused.DestinationId, refused.Relays, refused.Origin, refused.Side));
         // the protocol's code, from behind the relay, whose side no one knows
         Assert.Equal(FailureScope.Protocol, refused.Scope);
         Assert.NotEqual(RouterSide.Server, refused.Side);
         // the client's session stays on leg A: none crosses to the device
-        Assert.Equal([false, false], presented);
+        Assert.Equal([null, null], presented);
     }
 
     [Fact]

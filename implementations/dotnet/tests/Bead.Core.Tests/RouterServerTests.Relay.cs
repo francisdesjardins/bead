@@ -17,6 +17,14 @@ public sealed partial class RouterServerTests
 
     private static readonly Procedure Held = new() { ServiceId = 2, ProcedureId = 3, ProcedureName = "held", ServiceRevision = 3 };
 
+    // requireSession, as a server gives it: a call in none is refused SESSION_REQUIRED
+    private static readonly BeforeRequest RequiringSession = new(
+        (request) =>
+        {
+            return request.Session is not null;
+        },
+        Failure.OfProtocol(ProtocolCode.SessionRequired));
+
     private static readonly RelayOptions Admitting = new()
     {
         BeforeRoute = new BeforeRequest((_) =>
@@ -47,16 +55,15 @@ public sealed partial class RouterServerTests
     // cancelled
     private Device DeviceOf(Setup setup)
     {
-        var pipe = new Pipe(DeviceHandle, setup.IsDeferred ? _scheduler : null);
-        var time = setup.Time ?? _time;
+        var pipe = new Pipe(DeviceHandle, setup.IsDeferred ? _scheduler : null) { Clock = setup.Clock ?? _time, IsSecure = setup.IsSecure };
         var device = new Device(
             pipe,
             (new RouterServer(
                 pipe.Server,
-                new RouterServerOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = time }),
+                new RouterServerOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler }),
             new RouterClient(
                 pipe.Client,
-                new RouterClientOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = time })));
+                new RouterClientOptions { Limits = setup.DeviceLimits, ResolverScheduler = _scheduler, Scheduler = _scheduler })));
         var services = new ServiceManager(device.Router);
         var answering = new RequestResolverDependencies<string, string> { Serializer = Text };
 
@@ -92,7 +99,13 @@ public sealed partial class RouterServerTests
         var given = setup ?? new Setup();
         var device = DeviceOf(given);
 
-        Start(new RouterServerOptions { Relay = given.Relay, Time = given.Time });
+        Start(new RouterServerOptions
+        {
+            Relay = given.Relay,
+            Clock = given.Clock,
+            SessionOf = given.SessionOf,
+            CredentialSchemes = given.CredentialSchemes,
+        });
         _transport.Open(First);
         Router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7, Label = "the device" });
 
@@ -137,8 +150,8 @@ public sealed partial class RouterServerTests
             [
                 // an answer names its call alone
                 new ResultHeader { CallId = 1 },
-                Failure.OfApplication(21, "nothing to echo") with { Hops = 1 },
-                Failure.OfProtocol(ProtocolCode.ProcedureUnknown, "no procedure 9 in service 2") with { Hops = 1 },
+                Failure.OfApplication(21, "nothing to echo") with { Relays = 1 },
+                Failure.OfProtocol(ProtocolCode.ProcedureUnknown, "no procedure 9 in service 2") with { Relays = 1 },
             ],
             answers);
         Assert.Equal(3, admissions);
@@ -178,6 +191,203 @@ public sealed partial class RouterServerTests
             ],
             SentSince());
         Assert.Empty(device.Pipe.ClientSent);
+    }
+
+    [Fact]
+    public async Task Hands_beforeRoute_a_JWT_unresolved_refusing_a_scheme_to_come_CREDENTIAL_UNSUPPORTED_and_an_ELSEWHERE_that_carried_nothing_SESSION_REQUIRED_before_it_OPAQUE_resolves_to_leg_A_s_connection_s_session_which_beforeRoute_reads()
+    {
+        var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
+        var admitted = new List<object?>();
+
+        using var device = StartRelayed(new Setup
+        {
+            SessionOf = (request, _) =>
+            {
+                return ValueTask.FromResult(CallSession.ConnectionSessionOf(request.Header.Credential, (token, "ada")));
+            },
+            Relay = new RelayOptions
+            {
+                BeforeRoute = new BeforeRequest((request) =>
+                {
+                    admitted.Add(request.Session?.Data);
+
+                    return true;
+                }),
+            },
+        });
+
+        // a JWT read from its scheme alone reaches beforeRoute in no session, and its destination,
+        // registered with no audience, cannot take it; one at a time, as each settles in its turn
+        Deliver(First, To(7, Presenting(RequestOf(1), Credential.Jwt("a.b.c"))));
+        await Settle();
+        Deliver(First, To(7, Presenting(RequestOf(3), Credential.Elsewhere())));
+        await Settle();
+        Deliver(First, To(8, Presenting(RequestOf(5), Credential.Of((CredentialScheme)7, []))));
+        await Settle();
+
+        Assert.Equal(
+            ["no credential came", "OPAQUE, JWT, ELSEWHERE"],
+            _transport.Sent.Skip(1).Select((entry) =>
+            {
+                return entry.Envelope.Failure!.Detail;
+            }));
+        Assert.Equal(
+            ["first failure 1 DestinationUnreachable", "first failure 3 SessionRequired", "first failure 5 CredentialUnsupported"],
+            SentSince());
+        Assert.Equal([null], admitted);
+        Assert.Empty(device.Pipe.ClientSent);
+        admitted.Clear();
+
+        // none and its OPAQUE run in leg A's connection's session; another token does not hold.
+        // One at a time: the TypeScript side answers each within its delivery, over its pipe
+        Deliver(First, To(7, RequestOf(7, payload: "hi")));
+        await Settle();
+        Deliver(First, To(7, Presenting(RequestOf(9, payload: "ho"), token)));
+        await Settle();
+        Deliver(First, To(7, Presenting(RequestOf(11), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA"))));
+        await Settle();
+
+        Assert.Equal(["first result 7 HI", "first result 9 HO", "first failure 11 SessionRequired"], SentSince());
+        Assert.Equal(["ada", "ada"], admitted);
+
+        // leg B presents nothing
+        Assert.All(device.Pipe.ClientSent, (bytes) =>
+        {
+            var header = EnvelopeCodec.ReadEnvelope(bytes, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = int.MaxValue })!.Header;
+
+            Assert.Null(Assert.IsType<RequestHeader>(header).Credential);
+        });
+    }
+
+    [Fact]
+    public async Task Answers_a_JWT_and_an_ELSEWHERE_it_forwards_without_verifying_ACCESS_DENIED_once_beforeRoute_is_requireSession_a_call_in_none_SESSION_REQUIRED_and_relays_an_OPAQUE_that_holds()
+    {
+        using var device = StartRelayed(new Setup
+        {
+            SessionOf = (request, _) =>
+            {
+                return ValueTask.FromResult(request.Header.Credential is null ? null : CallSession.ConnectionSessionOf(request.Header.Credential, (Token, "leg A")));
+            },
+            Relay = new RelayOptions { BeforeRoute = RequiringSession },
+        });
+
+        Deliver(First, To(7, Presenting(RequestOf(1), Credential.Jwt("a.b.c"))));
+        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(To(7, Presenting(RequestOf(3), Credential.Elsewhere()))), "Bearer mF_9.B5f-4.1JqM"));
+        Deliver(First, To(7, RequestOf(5)));
+        Deliver(First, To(7, Presenting(RequestOf(7, payload: "hi"), Token)));
+        await Settle();
+
+        Assert.Equal(
+            ["1 AccessDenied 0", "3 AccessDenied 0", "5 SessionRequired 0", "7 result"],
+            _transport.Sent
+                .Select((entry) =>
+                {
+                    return entry.Envelope.Failure is { } failure
+                        ? $"{entry.Envelope.Header.CallId} {CodeOf(failure)} {failure.Relays}"
+                        : $"{entry.Envelope.Header.CallId} result";
+                })
+                .Order(StringComparer.Ordinal));
+
+        // leg B carried the OPAQUE call alone
+        Assert.Single(device.Pipe.ClientSent);
+        Assert.Empty(Reported());
+    }
+
+    [Fact]
+    public async Task Keeps_the_default_JWT_a_client_presents_through_a_relay_whose_beforeRoute_is_requireSession_its_ACCESS_DENIED_withdraws_nothing()
+    {
+        var credential = Credential.Jwt("a.b.c");
+        var legA = new Pipe(First, null) { Clock = _time, IsSecure = true };
+        var withdrawn = new List<CredentialScheme>();
+
+        using var device = DeviceOf(new Setup());
+        using var router = new RouterServer(
+            legA.Server,
+            new RouterServerOptions { Relay = new RelayOptions { BeforeRoute = RequiringSession }, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+        using var requester = new RouterClient(legA.Client, new RouterClientOptions { Credential = credential, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+
+        router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7 });
+        requester.CredentialWithdrawn += (scheme) =>
+        {
+            withdrawn.Add(scheme);
+        };
+        legA.Open();
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return requester.Request(
+                BytesOf("hi"),
+                new RouterRequest(Echo, new ResolvedRequestOptions { DestinationId = 7, Timeout = TimeSpan.FromSeconds(5) })).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.AccessDenied, (byte)0), (refused.Code, refused.Relays));
+        Assert.Empty(withdrawn);
+        Assert.Equal(credential, requester.Credential);
+        Assert.Empty(device.Pipe.ClientSent);
+    }
+
+    [Fact]
+    public async Task Answers_a_JWT_past_the_calls_its_key_set_lets_wait_CAPACITY_EXCEEDED_at_its_first_step_reporting_nothing_as_a_relay_that_verifies()
+    {
+        var answers = new List<TaskCompletionSource<IReadOnlyList<JwtSetKey>>>();
+
+        // leg B secure, so a bearer token crosses it
+        using var device = DeviceOf(new Setup { IsSecure = true });
+
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Audience = Audience,
+                KeySet = new JwtKeySet
+                {
+                    Issuers = [Issuer],
+                    Ask = (_, _) =>
+                    {
+                        var answer = new TaskCompletionSource<IReadOnlyList<JwtSetKey>>();
+
+                        answers.Add(answer);
+
+                        return new ValueTask<IReadOnlyList<JwtSetKey>>(answer.Task);
+                    },
+                    MaximumWaitingCalls = 1,
+                },
+            },
+            Relay = Admitting with { Verifies = true },
+        });
+        _transport.Open(First);
+        Router.RegisterDestination(device.ToDevice, new DestinationOptions { DestinationId = 7, Audience = Audience });
+
+        var token = Credential.Jwt(JwtOf(_time.GetUtcNow().ToUnixTimeSeconds() + 3_600));
+
+        // the ask its one call left answers no key: within the minute, a token waits for the deadline
+        Deliver(First, To(7, Presenting(RequestOf(1, payload: "hi"), token)));
+        await Settle();
+        Deliver(First, CancelOf(1));
+        await Settle();
+        answers[0].SetResult([]);
+        await Settle();
+
+        // one waits for the deadline; the other would wait past the one the relay lets
+        Deliver(First, To(7, Presenting(RequestOf(3, payload: "ho"), token)));
+        Deliver(First, To(7, Presenting(RequestOf(5, payload: "hu"), token)));
+        await Settle();
+
+        Assert.Equal(["first failure 5 CapacityExceeded"], SentSince());
+        Assert.Single(answers);
+        Assert.Empty(device.Pipe.ClientSent);
+
+        // at the deadline, the ask then names its kid: verified, the other goes on through leg B,
+        // whatever the device answers it
+        _time.Advance(TimeSpan.FromMinutes(1));
+        await Settle();
+        Assert.Equal(2, answers.Count);
+        answers[1].SetResult([new JwtSetKey { Algorithm = JwtAlgorithm.Hs256, Jwk = Jwk }]);
+        await Settle();
+
+        Assert.Single(device.Pipe.ClientSent);
+        Assert.Single(SentSince());
+        Assert.Empty(Reported());
     }
 
     [Fact]
@@ -298,7 +508,7 @@ public sealed partial class RouterServerTests
     {
         var time = new RecordingTime(_time);
 
-        using var device = StartRelayed(new Setup { Relay = Admitting with { Timeout = TimeSpan.FromMilliseconds(250) }, Time = time });
+        using var device = StartRelayed(new Setup { Relay = Admitting with { Timeout = TimeSpan.FromMilliseconds(250) }, Clock = time });
 
         Deliver(First, To(7, RequestOf(1, Held)));
         await Settle();
@@ -311,7 +521,7 @@ public sealed partial class RouterServerTests
         // its call id on leg B stays reserved as long as its timeout, against a late answer
         Assert.Equal([TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(250)], time.Armed);
         Assert.Equal(1, device.Aborted);
-        Assert.Equal(0, _transport.Sent[0].Envelope.Failure!.Hops);
+        Assert.Equal(0, _transport.Sent[0].Envelope.Failure!.Relays);
         Assert.Equal(["first failure 1 DestinationLost"], SentSince());
 
         var (reason, connectionHandle) = Assert.Single(_errors);
@@ -320,12 +530,12 @@ public sealed partial class RouterServerTests
         Assert.Equal(First, connectionHandle);
 
         // a relay of no timeout, on its own leg A, arms none
-        var legA = new ScriptedTransport();
+        var legA = new ScriptedTransport { Clock = time };
 
         using var unbounded = new RouterServer(
             legA,
-            new RouterServerOptions { Relay = Admitting, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = time });
-        using var behind = DeviceOf(new Setup { Time = time });
+            new RouterServerOptions { Relay = Admitting, ResolverScheduler = _scheduler, Scheduler = _scheduler });
+        using var behind = DeviceOf(new Setup { Clock = time });
 
         legA.Open(First);
         unbounded.RegisterDestination(behind.ToDevice, new DestinationOptions { DestinationId = 7 });
@@ -342,7 +552,7 @@ public sealed partial class RouterServerTests
     public async Task Holds_a_transfer_to_the_target_s_limit_at_its_opening_and_relays_one_to_the_destination_it_opened_on()
     {
         var limits = new RouterLimits { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_024, WindowBytes = 4_096 };
-        var legA = new Pipe(First, null);
+        var legA = new Pipe(First, null) { Clock = _time };
         var admissions = 0;
         var credits = new List<uint>();
 
@@ -362,11 +572,10 @@ public sealed partial class RouterServerTests
                 },
                 ResolverScheduler = _scheduler,
                 Scheduler = _scheduler,
-                Time = _time,
             });
         using var requester = new RouterClient(
             legA.Client,
-            new RouterClientOptions { Limits = limits, ResolverScheduler = _scheduler, Scheduler = _scheduler, Time = _time });
+            new RouterClientOptions { Limits = limits, ResolverScheduler = _scheduler, Scheduler = _scheduler });
         using var behind = DeviceOf(new Setup { DeviceLimits = limits with { MaximumPayloadBytes = 4_096 } });
 
         var registration = router.RegisterDestination(behind.ToDevice, new DestinationOptions { DestinationId = 7 });
@@ -402,7 +611,7 @@ public sealed partial class RouterServerTests
         });
 
         Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refused.Code);
-        Assert.Equal(0, refused.Hops);
+        Assert.Equal(0, refused.Relays);
         Assert.Empty(credits);
         Assert.Empty(behind.Pipe.ClientSent);
 
@@ -505,7 +714,14 @@ public sealed partial class RouterServerTests
 
         public bool IsDeferred { get; init; }
 
-        public TimeProvider? Time { get; init; }
+        // whether leg B is secure, which a bearer credential needs to cross it
+        public bool IsSecure { get; init; }
+
+        public TimeProvider? Clock { get; init; }
+
+        public Func<SessionRequest, CancellationToken, ValueTask<CallSession?>>? SessionOf { get; init; }
+
+        public IReadOnlyCollection<CredentialScheme>? CredentialSchemes { get; init; }
     }
 
     // a device behind the relay, its router and leg B to it; how many calls to held it saw cancelled
@@ -601,6 +817,12 @@ public sealed partial class RouterServerTests
 
         public string ConnectionHandle { get; }
 
+        // what both its ends run on
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
+        // whether its client end is secure, as a transport that never leaves the machine may say
+        public bool IsSecure { get; init; }
+
         public PipeClient Client { get; }
 
         public PipeServer Server { get; }
@@ -681,6 +903,22 @@ public sealed partial class RouterServerTests
     // a pipe's client end
     private sealed class PipeClient(Pipe pipe) : IRouterClientTransport
     {
+        public TimeProvider Clock
+        {
+            get
+            {
+                return pipe.Clock;
+            }
+        }
+
+        public bool IsSecure
+        {
+            get
+            {
+                return pipe.IsSecure;
+            }
+        }
+
         public event Action<TransportMessage>? Message;
 
         public event Action<bool, bool>? Close;
@@ -695,8 +933,10 @@ public sealed partial class RouterServerTests
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             return pipe.FromClient(bytes);
         }
     }
@@ -704,6 +944,14 @@ public sealed partial class RouterServerTests
     // a pipe's server end, of its one connection
     private sealed class PipeServer(Pipe pipe) : IRouterServerTransport
     {
+        public TimeProvider Clock
+        {
+            get
+            {
+                return pipe.Clock;
+            }
+        }
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;
@@ -725,8 +973,10 @@ public sealed partial class RouterServerTests
             Message?.Invoke(new TransportMessage(bytes, false), pipe.ConnectionHandle);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             return pipe.FromServer(bytes, connectionHandle);
         }
     }

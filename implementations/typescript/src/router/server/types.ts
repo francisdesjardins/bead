@@ -1,20 +1,26 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import type {
-  Data,
   EmitterListener,
   IEventIteratorOptions,
   IGauges,
-  ITimestamp,
+  ITransportMessage,
 } from '../../transport/shared/types';
 import type { IRouterClient } from '../client/types';
+import type {
+  IMetricsRegistry,
+  INotifyingSeries,
+  IProcedureSeries,
+} from '../shared/metrics-registry';
 import type {
   CallId,
   DebugDirection,
   DestinationId,
   IBeforeRequest,
   ICallAddress,
+  ICredentials,
   IFailure,
   INotificationLike,
   IProcedure,
@@ -23,12 +29,15 @@ import type {
   IRouterResult,
   IRouterLike,
   IRouterLimits,
+  ISubscriber,
   NotificationKey,
   ProcedureId,
   RedactedHeader,
   RouterActivity,
   RouterLimitsOptions,
   ServiceId,
+  SessionIdentifier,
+  SessionOf,
   SessionToken,
 } from '../shared/types';
 import type {
@@ -43,9 +52,9 @@ import type {
 
 // interfaces
 
-/** Who is notified of which procedure of which service, by connection and call id. */
+/** Who is notified of which procedure of which service, by connection, session and call id. */
 export interface INotificationManager {
-  /** A copy of the connections notified of a procedure, each with its subscription's call id. */
+  /** The subscriptions notified of a procedure, as copies: each connection's, in each session. */
   candidates(procedureAddress: IProcedureAddress): NotificationCandidates;
   /** Forgets every subscription of a connection, as when it closes. */
   clean(connectionHandle: TransportServerConnectionHandle): void;
@@ -61,16 +70,27 @@ export interface INotificationManager {
   /** The pacing of `connectionHandle`'s subscription under `callId`; `undefined` when not paced. */
   pacingOf(callId: CallId, connectionHandle: TransportServerConnectionHandle): IPacing | undefined;
   /**
+   * The series a subscription counts its notifications into, as it was registered with; `undefined`
+   * for one registered with none, or none under that call id.
+   */
+  seriesOf(
+    callId: CallId,
+    connectionHandle: TransportServerConnectionHandle
+  ): INotifyingSeries | undefined;
+  /**
    * Subscribes `subscription.connectionHandle` to `procedureAddress` under the call id of the
-   * request that subscribed it — paced, when that request asked — and gives that call id. Throws a
-   * {@link ProgrammerError}, and registers nothing, when the connection holds a subscription to that
-   * procedure already, or one under that call id.
+   * request that subscribed it, in the session that holds it — paced, when that request asked — and
+   * gives that call id. Throws a {@link ProgrammerError}, and registers nothing, when the connection
+   * holds a subscription to that procedure in that session already, or one under that call id.
    */
   register(procedureAddress: IProcedureAddress, subscription: ISubscribingCall): CallId;
-  /** The call id `connectionHandle` is subscribed to a procedure under; `undefined` when none. */
+  /**
+   * The call id a connection is subscribed to a procedure under, in a session of its own; `undefined`
+   * when none.
+   */
   subscriptionOf(
     procedureAddress: IProcedureAddress,
-    connectionHandle: TransportServerConnectionHandle
+    subscriber: ISubscriber<TransportServerConnectionHandle>
   ): CallId | undefined;
   /** Every subscription — `connectionHandle`'s alone, when given — as copies. */
   subscriptions(connectionHandle?: TransportServerConnectionHandle): ISubscription[];
@@ -87,24 +107,48 @@ export interface INotificationManagerOptions {
   pacing?: PacingLimitsOptions | undefined;
 }
 
-/** A call that subscribes: where it is, and whether its request asked to be paced. */
+/**
+ * A call that subscribes: where it is, the session it holds the subscription in, and whether its
+ * request asked to be paced.
+ */
 export interface ISubscribingCall extends ICallAddress<TransportServerConnectionHandle> {
+  /**
+   * For a credential's session, its end as the call resolved it, in whole milliseconds since the
+   * epoch, which the router times while the session holds a subscription; none for a session
+   * without one.
+   */
+  end?: number | undefined;
+  /** A credential's session's identifier; none for its connection's session. */
+  identifier?: SessionIdentifier | undefined;
   paced?: boolean | undefined;
+  /** The series its notifications count into, at the side that notifies; none counts nothing. */
+  series?: INotifyingSeries | undefined;
 }
 
-/** One subscription: which procedure, which connection, and the call id it stays open under. */
+/**
+ * One subscription: which procedure, which connection, the call id it stays open under, and the
+ * identifier of the credential's session that holds it, when one does.
+ */
 export interface ISubscription
-  extends IProcedureAddress, ICallAddress<TransportServerConnectionHandle> {}
+  extends IProcedureAddress, ICallAddress<TransportServerConnectionHandle> {
+  identifier?: SessionIdentifier | undefined;
+}
 
 // types
 
-/** The connections notified of one procedure, each with its subscription's call id. */
-export type NotificationCandidates = Map<TransportServerConnectionHandle, CallId>;
+/** The subscriptions notified of one procedure: each connection's, in each session of its own. */
+export type NotificationCandidates = ISubscription[];
 
-/** Service → procedure → connection → the call id of its subscription. */
+/**
+ * Service → procedure → connection → session → the call id of its subscription: its connection's
+ * session under `''`, a credential's under a key its identifier gives.
+ */
 export type Notifications = ReadonlyMap<
   ServiceId,
-  ReadonlyMap<ProcedureId, ReadonlyMap<TransportServerConnectionHandle, CallId>>
+  ReadonlyMap<
+    ProcedureId,
+    ReadonlyMap<TransportServerConnectionHandle, ReadonlyMap<string, CallId>>
+  >
 >;
 
 // ── Notification pacing ───────────────────────────────────────────────────────
@@ -168,13 +212,21 @@ export type PacingLimitsOptions = { [Key in keyof IPacingLimits]?: IPacingLimits
  */
 export interface ISession<Data> {
   connectionHandle: TransportServerConnectionHandle;
-  /** Milliseconds without activity before `connectionInactivityTimeoutReached`; `Infinity` is never. */
-  connectionInactivityTimeout: number;
+  /**
+   * Milliseconds without activity before `connectionInactivityTimeoutReached`: from 1 to 2³¹ − 1,
+   * stored rounded to the nearest whole one, or `Infinity` for never; 0 is refused. Left out, it is
+   * stored as the manager's default; a session handed out always holds one.
+   */
+  connectionInactivityTimeout?: number | undefined;
   /** What the router keeps about the session; structured-cloneable, since it is stored as a copy. */
   data: Data | undefined;
-  lastActivityTimestamp: ITimestamp;
-  /** Milliseconds without activity before `sessionInactivityTimeoutReached`; `Infinity` is never. */
-  sessionInactivityTimeout: number;
+  /**
+   * When the session was last active, in milliseconds since the epoch, as its manager's clock reads
+   * the wall clock.
+   */
+  lastActivity: number;
+  /** As `connectionInactivityTimeout`, before `sessionInactivityTimeoutReached`. */
+  sessionInactivityTimeout?: number | undefined;
   /** What the router announces to the connection; `undefined` until `set` draws one. */
   sessionToken: SessionToken | undefined;
 }
@@ -184,6 +236,8 @@ export interface ISession<Data> {
  * timer.
  */
 export interface ISessionManager<Data> {
+  /** The clock its timers run on, and its activity is read on. */
+  readonly clock: IClock;
   /** Each connection's timers. */
   readonly timers: ISessionManagerTimers;
 
@@ -193,7 +247,10 @@ export interface ISessionManager<Data> {
    * timers kept for a connection with no session — set through `timers` — are an anomaly.
    */
   gauges(): IGauges<TransportServerConnectionHandle>;
-  /** A new session for `connectionHandle`, not stored: no timeout, and no token until `set`. */
+  /**
+   * A new session for `connectionHandle`, not stored: its timeouts `Infinity`, none, and no token
+   * until `set`.
+   */
   create(connectionHandle: TransportServerConnectionHandle): ISession<Data>;
   /** Forgets a session and stops its timers, emitting `deleted`; `false` when there was none. */
   delete(connectionHandle: TransportServerConnectionHandle): boolean;
@@ -224,23 +281,34 @@ export interface ISessionManager<Data> {
   ): this;
   removeAllListeners(event?: SESSION_MANAGER_EVENTS): this;
   /**
-   * Restarts the connection timer of a stored session: `connectionInactivityTimeoutReached` in
-   * `timeout` milliseconds. `Infinity`, or more than `setTimeout` can wait, only stops it.
+   * Restarts the connection timer of a stored session, which only its `connectionHandle` names:
+   * `connectionInactivityTimeoutReached` in `timeout` milliseconds, rounded to the nearest whole
+   * one. `Infinity` only stops it; one that is not from 1 to {@link LONGEST_TIMER}, 0 among them, is
+   * a {@link ProgrammerError}, and the timer is left as it was. A connection with no session arms
+   * nothing.
    */
-  resetConnectionInactivityTimeout(session: ISession<Data>, timeout: number): void;
+  resetConnectionInactivityTimeout(
+    session: Pick<ISession<Data>, 'connectionHandle'>,
+    timeout: number
+  ): void;
   /** As {@link ISessionManager.resetConnectionInactivityTimeout}, for the session timer. */
-  resetSessionInactivityTimeout(session: ISession<Data>, timeout: number): void;
+  resetSessionInactivityTimeout(
+    session: Pick<ISession<Data>, 'connectionHandle'>,
+    timeout: number
+  ): void;
   /**
    * Stores a session, drawing its token when it has none; emits `created`, or `updated` when it
    * replaces a different one. A new session's timers start over, and a timeout that changed
-   * restarts its timer; a timeout of `0` is the manager's default, as for the `update*` methods.
-   * Throws a {@link ProgrammerError} for a negative timeout, or a token that is not one or that
-   * another connection holds — before anything is stored.
+   * restarts its timer; a timeout left out is the manager's default, as for the `update*` methods.
+   * Throws a {@link ProgrammerError} for a timeout neither `Infinity` nor from 1 to
+   * {@link LONGEST_TIMER} milliseconds, 0 among them, or a token that is not one or that another
+   * connection holds — before anything is stored.
    */
   set(session: ISession<Data>): ISession<Data>;
   /**
-   * Stores `session.connectionInactivityTimeout` — the manager's default when `0`, a
-   * {@link ProgrammerError} when negative. When it changed, restarts the timer with it and emits
+   * Stores `session.connectionInactivityTimeout`, rounded to the nearest whole millisecond — the
+   * manager's default when left out, a {@link ProgrammerError} when neither `Infinity` nor from 1
+   * to {@link LONGEST_TIMER}, 0 among them. When it changed, restarts the timer with it and emits
    * `connectionInactivityTimeoutChanged`; the same timeout restarts nothing, since activity is what
    * restarts a timer. `undefined` when the connection has no session.
    */
@@ -253,15 +321,15 @@ export interface ISessionManager<Data> {
    */
   sessionTokenOf(connectionHandle: TransportServerConnectionHandle): SessionToken | undefined;
   /**
-   * As {@link ISessionManager.updateLastActivityTimestamp}, by connection and without a copy, for
+   * As {@link ISessionManager.updateLastActivity}, by connection and without a copy, for
    * every message; whether the connection has a session.
    */
   touch(connectionHandle: TransportServerConnectionHandle): boolean;
   /**
-   * Stamps activity now and restarts both timers; emits `lastActivityTimestampChanged` when the
-   * stamp moved to a later millisecond.
+   * Stamps activity now and restarts both timers; emits `lastActivityChanged` when the stamp moved
+   * to another millisecond.
    */
-  updateLastActivityTimestamp(session: ISession<Data>): ISession<Data> | undefined;
+  updateLastActivity(session: ISession<Data>): ISession<Data> | undefined;
   /** As {@link ISessionManager.updateConnectionInactivityTimeout}, for the session timeout. */
   updateSessionInactivityTimeout(session: ISession<Data>): ISession<Data> | undefined;
   /**
@@ -272,12 +340,17 @@ export interface ISessionManager<Data> {
 }
 
 export interface ISessionManagerOptions {
+  /** The clock its timers run on, and its activity is read on; the platform's when not given. */
+  clock?: IClock | undefined;
   /**
-   * What `set` and `updateConnectionInactivityTimeout` store for `0`; 600 ms. Positive, or
-   * `Infinity` for never: anything else is a {@link ProgrammerError}.
+   * What `set` and `updateConnectionInactivityTimeout` store for a timeout left out; `Infinity`,
+   * never, when not given: the application gives its own. One that authenticates takes OWASP ASVS
+   * 4.0.3 V3.3.2's: 30 minutes of inactivity at level 2, 15 at level 3. From 1 to
+   * {@link LONGEST_TIMER} milliseconds, rounded to the nearest whole one, or `Infinity` for never:
+   * anything else, 0 among them, is a {@link ProgrammerError}, as the manager is built.
    */
   connectionInactivityTimeout?: number | undefined;
-  /** As `connectionInactivityTimeout`, for the session timeout; 30 s. */
+  /** As `connectionInactivityTimeout`, for the session timeout; `Infinity` when not given. */
   sessionInactivityTimeout?: number | undefined;
 }
 
@@ -319,11 +392,7 @@ export type SessionManagerEventMap<Data = unknown> = {
   created: [session: ISession<Data>];
   dataChanged: [session: ISession<Data>, newValue: Data | undefined, oldValue: Data | undefined];
   deleted: [session: ISession<Data>];
-  lastActivityTimestampChanged: [
-    session: ISession<Data>,
-    newValue: ITimestamp,
-    oldValue: ITimestamp,
-  ];
+  lastActivityChanged: [session: ISession<Data>, newValue: number, oldValue: number];
   sessionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number];
   /** The session as it is when its timer fires. */
   sessionInactivityTimeoutReached: [session: ISession<Data>];
@@ -341,9 +410,6 @@ export type SessionManagerOnInactivityTimeoutCallback<Data = unknown> = EmitterL
 export type SessionManagerOnSessionCallback<Data = unknown> = EmitterListener<
   SessionManagerEventMap<Data>[CREATED_EVENT | DELETED_EVENT | UPDATED_EVENT]
 >;
-
-/** What `setTimeout` returns, here or in a browser. */
-export type TimeoutId = ReturnType<typeof setTimeout>;
 
 // ── Router server ─────────────────────────────────────────────────────────────
 
@@ -381,6 +447,25 @@ export interface IRouterServer<
     connectionHandle: TransportServerConnectionHandle;
     failure: IFailure;
   }): Promise<void>;
+  /**
+   * Ends a credential's session by its identifier on every connection that keeps it, and nothing
+   * else (spec 13.9): each subscription it bounds ends with SESSION_REQUIRED on its call id, a call
+   * still in flight left to its own answer. Resolves once each failure was tried; one that cannot go
+   * out is reported to `error`. One no connection keeps ends nothing. Ending refuses no credential:
+   * one that still holds opens its session anew.
+   */
+  endSession(identifier: SessionIdentifier): Promise<void>;
+  /**
+   * Ends every credential's session of an issuer by that issuer, as when a key of its leaks, on every
+   * connection that keeps one, and nothing else (spec 13.9): each `JWT`'s session whose identifier's
+   * issuer is `issuer`, octet for octet, whatever its `sid` or `sub`, each subscription it bounds
+   * ending with SESSION_REQUIRED on its call id, a call still in flight left to its own answer; an
+   * `ELSEWHERE`'s identifier names no issuer. Resolves once each failure was tried; one that cannot
+   * go out is reported to `error`. An issuer no connection's session names ends nothing; one that is
+   * no string rejects with a {@link ProgrammerError}. Ending refuses no credential: one that still
+   * holds opens its session anew, a token a leaked key signed among them while that key serves.
+   */
+  endSessionsOf(issuer: string): Promise<void>;
   emit<K extends ROUTER_SERVER_EVENTS>(event: K, ...params: RouterServerEventMap[K]): boolean;
   /**
    * Every `event` from now on, as its arguments, for `for await`; the signal, a `break` or a throw
@@ -422,7 +507,7 @@ export interface IRouterServer<
    * Sends a request to the connection its options name, on an even call id, and resolves with its
    * result. Rejects with a {@link ProgrammerError} when none is named, for a notification it
    * `subscribes`, which a server never holds, for a procedure's payload limit that is not a whole
-   * number above 0, or a timeout longer than a timer holds; a {@link DisconnectError} when that
+   * number above 0, or a timeout no timer holds; a {@link DisconnectError} when that
    * connection is not open, closes first, or the router was disposed; a {@link FailureError} for a
    * failure answered, a payload too large or every call id in use; a {@link TimeoutError}, a
    * {@link CancelError}, or what the transport's `send` throws.
@@ -431,12 +516,22 @@ export interface IRouterServer<
     payload: Uint8Array,
     request: {
       /**
+       * Hears the call's id once the router drew it, before the request goes; a call refused before
+       * it draws one is never heard.
+       */
+      onCallId?: ((callId: CallId) => void) | undefined;
+      /**
        * Hears `true` as the request is handed to the transport, and `false` should the transport
        * refuse it: before `true`, or after `false`, nothing of it was tried.
        */
       onSent?: ((isHanded: boolean) => void) | undefined;
       options: IResolvedRequestOptions;
       procedure: IProcedure;
+      /**
+       * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s
+       * when none is given, as a relay's leg B.
+       */
+      series?: IProcedureSeries | undefined;
       subscribes?: INotificationLike | undefined;
     }
   ): Promise<IRouterResult>;
@@ -455,29 +550,60 @@ export interface IRouterServer<
   [Symbol.dispose](): void;
 }
 
-/** An envelope as the router sent or took it, and the connection it went to or came from. */
+/**
+ * An envelope as the router sent or took it, and the connection it went to or came from. What a
+ * listener throws is reported to `error`, with that connection, and changes nothing of the envelope.
+ */
 export interface IRouterServerDebugInfo {
   connectionHandle: TransportServerConnectionHandle;
   direction: DebugDirection;
-  /** A copy, without its session token. */
+  /** A copy, its credential reported by its scheme alone. */
   header: RedactedHeader;
 }
 
 /** What a server's router is built with. */
 export interface IRouterServerOptions {
   /**
+   * The clock it runs on: its transport's, which one given must be; the platform's when neither
+   * has one.
+   */
+  clock?: IClock | undefined;
+  /**
    * How much the router reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing.
    * They must hold together, or the router is a {@link ProgrammerError}.
    */
   limits?: RouterLimitsOptions | undefined;
+  /**
+   * What it resolves a request presenting a `JWT` or an `ELSEWHERE` with, on its clock: a `JWT`'s
+   * keys, audience and key set, an `ELSEWHERE`'s verifier. A scheme it is given nothing for is
+   * refused, CREDENTIAL_UNSUPPORTED. Given a `JWT`'s keys or key set, its limits hold 1,024 bytes of
+   * chunk and envelope at least, and its audience is given, whatever its relay does, or it is a
+   * {@link ProgrammerError}, as are a key not shaped for its algorithm and a key set given no issuer.
+   */
+  credentials?: ICredentials | undefined;
+  /**
+   * The registry it counts its calls and its notifications into, its `_OTHER` series made as it is
+   * given it: each resolver registered, and each requester made, declared to it. None counts
+   * nothing, and costs nothing.
+   */
+  metricsRegistry?: IMetricsRegistry | undefined;
   /** What a paced subscription queues at most: {@link PACING_DEFAULTS}' where it says nothing. */
   pacing?: PacingLimitsOptions | undefined;
   /** How the router relays a request that names a destination registered in it. */
   relay?: IRelayOptions | undefined;
   /**
+   * The call's session a request presenting none or `OPAQUE` runs in, asked once per request, its
+   * call id held, before its admission, in the turn it came: its connection's — a server's sessions
+   * give it — as {@link SessionOf} says. None when not given: a request presenting none runs in
+   * none, and one presenting `OPAQUE` is refused with `SESSION_REQUIRED`. A `JWT` and an `ELSEWHERE`
+   * resolve by `credentials`.
+   */
+  sessionOf?: SessionOf<TransportServerConnectionHandle> | undefined;
+  /**
    * The session of a connection — a session manager's token, say — which the router announces on
-   * the next answer to it whenever it changed; `undefined` for none. Never announced when not
-   * given. What it throws fails the answer it was asked for.
+   * the next answer to it whenever it changed, and a command presenting `OPAQUE` presents;
+   * `undefined` for none. Never announced when not given. What it throws fails the answer it was
+   * asked for.
    */
   sessionTokenOf?:
     | ((connectionHandle: TransportServerConnectionHandle) => SessionToken | undefined)
@@ -502,11 +628,21 @@ export interface IDestination {
 }
 
 export interface IDestinationOptions {
+  /**
+   * The audience it verifies, as a resource is named for a token (RFC 8707): a `JWT` goes to it only
+   * when its `aud` names it, and an `ELSEWHERE` only when it has one. None by default, which takes
+   * neither; a string of well-formed Unicode otherwise, or it is a {@link ProgrammerError}.
+   */
+  audience?: string | undefined;
   /** The destination, an integer from 1 to 2³² − 1; drawn, one not in use, when not given. */
   destinationId?: DestinationId | undefined;
   /** What the application calls it, for a list of its own. */
   label?: string | undefined;
-  /** The milliseconds leg B waits for its answer, the relay's at most; the relay's if not given. */
+  /**
+   * The milliseconds leg B waits for its answer, the relay's at most; the relay's if not given. From
+   * 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for none; any other, 0 among
+   * them, is a {@link ProgrammerError}.
+   */
   timeout?: number | undefined;
 }
 
@@ -522,20 +658,34 @@ export interface IDestinationRegistration extends IDestination {
 /** How a server router relays the requests that name a destination. */
 export interface IRelayOptions {
   /**
-   * Whether a request may be relayed, asked on its header — its destination included — before its
-   * destination is looked up, so a requester not admitted learns only whether any is registered:
-   * only `true` admits. Without it, the relay admits nobody. Synchronous, as every admission.
+   * Whether a request may be relayed, asked on its header — its destination included — and the
+   * call's session, before its destination is looked up, so a requester presenting none or `OPAQUE`
+   * that is not admitted learns only whether any is registered: only `true` admits. Without it, the
+   * relay admits nobody; a server's admits by `requireSessionOrCredential`. Synchronous, as every
+   * admission.
    */
   beforeRoute?: IBeforeRequest<TransportServerConnectionHandle> | undefined;
   /**
-   * The milliseconds leg B waits for its answer at most, whatever a destination says; none by
-   * default: the requester's own timeout governs, end to end, by the cancel it sends.
+   * The milliseconds leg B waits for its answer at most, whatever a destination says; none,
+   * `Infinity`, by default: the requester's own timeout governs, end to end, by the cancel it sends.
+   * From 1 to 2³¹ − 1 otherwise, rounded to the nearest whole one; any other, 0 among them, is a
+   * {@link ProgrammerError}.
    */
   timeout?: number | undefined;
+  /**
+   * Whether it verifies what it forwards besides (spec 14.3, step 1), with its router's
+   * `credentials`, before `beforeRoute`: a `JWT` against the audiences its destinations were
+   * registered with, a credential that does not hold refused SESSION_REQUIRED, one that holds
+   * resolving to its credential's session, which `beforeRoute` reads. Not by default: a `JWT`, and
+   * an `ELSEWHERE` its transport carried, go on unresolved, for the destination to verify.
+   */
+  verifies?: boolean | undefined;
 }
 
 /** The part of a transport server this router uses — met by this package's. */
 export interface IRouterServerTransportLike {
+  /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
+  readonly clock?: IClock | undefined;
   off(
     event: 'close',
     listener: EmitterListener<
@@ -550,7 +700,9 @@ export interface IRouterServerTransportLike {
   ): unknown;
   off(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
   on(
     event: 'close',
@@ -566,8 +718,23 @@ export interface IRouterServerTransportLike {
   ): unknown;
   on(
     event: 'message',
-    listener: EmitterListener<[data: Data, connectionHandle: TransportServerConnectionHandle]>
+    listener: EmitterListener<
+      [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
+    >
   ): unknown;
+  /**
+   * Whether a connection carries a credential beside an envelope the server sends it — a command, a
+   * relay's leg B: none of this package's does, a listen's batch, a WebSocket and a worker alike.
+   * None does without it. A command presenting `ELSEWHERE` over one that does not fails before it
+   * goes, DESTINATION_UNREACHABLE, and a relay sends it none (spec 13.4, 14.3).
+   */
+  carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean;
+  /**
+   * Whether a connection is secure: under TLS, from the loopback, or never leaving the machine, as
+   * a Web Worker. None is without it. A command presenting a `JWT` or an `ELSEWHERE` over one that is
+   * not fails before it goes, DESTINATION_UNREACHABLE, and a relay sends it neither (spec 13.4, 14.3).
+   */
+  isSecure?(connectionHandle: TransportServerConnectionHandle): boolean;
   /**
    * Whether a connection carries both ways — what the server sends of its own, a notification, a
    * command, a relay's request, as well as its answers; every connection does, without it. One drawn
@@ -575,7 +742,10 @@ export interface IRouterServerTransportLike {
    * it no request.
    */
   isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean;
-  send(data: Data, connectionHandle: TransportServerConnectionHandle): Promise<void>;
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
 }
 
 // types
@@ -587,8 +757,17 @@ export interface IRouterServerTransportLike {
  */
 export type RouterServerActivity = RouterActivity;
 
-/** What a destination names: a client router the relay calls through, or a connection of its own. */
-export type RelayTarget = IConnectionTarget | Pick<IRouterClient, 'limits' | 'request'>;
+/**
+ * What a destination names: a client router the relay calls through — the transport it calls
+ * through saying what it carries, none when it has none — or a connection of its own.
+ */
+export type RelayTarget =
+  | IConnectionTarget
+  | (Pick<IRouterClient, 'limits' | 'request'> & {
+      readonly transport?:
+        | Pick<IRouterClient['transport'], 'carriesCredential' | 'isSecure'>
+        | undefined;
+    });
 
 /** Event name → the arguments its listeners receive. */
 export type RouterServerEventMap = {
@@ -597,9 +776,10 @@ export type RouterServerEventMap = {
   debug: [info: IRouterServerDebugInfo];
   /**
    * What went wrong with an envelope no call was waiting on, in a resolver, or with a notification,
-   * and the connection that envelope came from or went to.
+   * and the connection that envelope came from or went to; none for what no connection carries: a
+   * debug listener that throws as a notification is told sent, to whoever is subscribed.
    */
-  error: [error: Error, connectionHandle: TransportServerConnectionHandle];
+  error: [error: Error, connectionHandle: TransportServerConnectionHandle | undefined];
 };
 
 /** The events a server router emits, named by the table that types them. */

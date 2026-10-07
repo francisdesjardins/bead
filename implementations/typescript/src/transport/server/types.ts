@@ -1,5 +1,7 @@
 // dependencies
 
+import type { Server } from 'node:http';
+import type { IClock } from '../shared/clock';
 import type {
   CLOSE_EVENT,
   CONNECTION_EVENT,
@@ -13,7 +15,7 @@ import type {
   IEventIteratorOptions,
   IGauges,
   IReadyStateMethods,
-  ITimestamp,
+  ITransportMessage,
   IWorkerMessageEventLike,
   IWorkerPortLike,
 } from '../shared/types';
@@ -30,8 +32,11 @@ export interface ITransportServerAddress {
 export interface ITransportServerClient {
   address: string;
   connectionHandle: TransportServerConnectionHandle;
-  /** When the connection last delivered a message; `undefined` until it has. */
-  lastActivityTimestamp: ITimestamp | undefined;
+  /**
+   * When the connection last delivered a message, in milliseconds since the epoch, as its server's
+   * clock reads the wall clock; `undefined` until it has.
+   */
+  lastActivity: number | undefined;
   port: number;
   type: TRANSPORTS;
 }
@@ -57,6 +62,14 @@ export interface ITransportServerDrawnHandleInfo {
   type: TRANSPORTS;
 }
 
+/** What every transport server takes, and each transport extends with its own. */
+export interface ITransportServerOptions {
+  /**
+   * The clock its timers run on, and the layers built on it with it; the platform's when not given.
+   */
+  clock?: IClock | undefined;
+}
+
 export interface ITransportServerStartOptions {
   /** The address to listen on. */
   address?: string | undefined;
@@ -77,12 +90,27 @@ export interface ITransportServer<
   readonly address: string;
   /** A copy, so a caller may consume it; each entry is what the connection looked like then. */
   readonly clients: ITransportServerClient[];
+  /** The clock it runs on, which a layer built on it runs on too. */
+  readonly clock: IClock;
   readonly port: number;
   readonly type: TRANSPORTS;
 
+  /**
+   * Whether it carries a credential beside an envelope it sends a connection: none of this package's
+   * does — an answer, a listen's batch, a WebSocket's message, a worker's — so its router fails a
+   * command presenting an `ELSEWHERE` before it goes, and its relay sends none on it (spec 13.4).
+   */
+  carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean;
   /** Closes one connection. Resolves `false` for an unknown handle, otherwise `true` once it closed. */
   close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
   closeAll(): Promise<boolean[]>;
+  /**
+   * Whether a connection is secure (spec 13.4): as its application says what stands in front of
+   * the server, when it says, whatever the server listens on; otherwise by what the server listens
+   * on, never by what a name resolves to — under TLS, on a loopback host, or never leaving the
+   * machine, as a worker.
+   */
+  isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
   emit<K extends TRANSPORT_SERVER_EVENTS>(
     event: K,
     ...params: TransportServerEventMap<Socket, Request>[K]
@@ -115,9 +143,13 @@ export interface ITransportServer<
    * dropped and resolves: the loss shows as that connection's `close`. A socket carries any message.
    * Over HTTP, an answer goes to the exchange of its request, and anything else waits for its client
    * to listen; a connection whose client does not listen rejects all but an answer with a
-   * {@link GenericError} — bytes that are no envelope with a {@link ProgrammerError}.
+   * {@link GenericError} — bytes that are no envelope with a {@link ProgrammerError}. No server
+   * carries a credential: an answer and what a listen brings back carry none, nor does a socket.
    */
-  send(data: Data, connectionHandle: TransportServerConnectionHandle): Promise<void>;
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
   /**
    * Listens. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, a
    * {@link CancelError}, or the system's own error — `EADDRINUSE` for a port taken — ending CLOSED.
@@ -139,12 +171,25 @@ export interface ITransportServer<
  * ready state, and hands `close` and `send` a connection it found registered, never a handle.
  */
 export interface ITransportServerImplementation<Socket = unknown> {
+  /** The clock it runs on; the platform's when none. */
+  readonly clock?: IClock | undefined;
+  /**
+   * Whether it is secure whatever it listens on: under TLS, or never leaving the machine, as a
+   * worker; when not, it is so on a loopback host alone.
+   */
+  readonly isSecure?: boolean | undefined;
+  /**
+   * What its application says stands in front of it, believed before what it listens on and
+   * {@link ITransportServerImplementation.isSecure}: `true` for TLS terminated before it, `false`
+   * for a proxy that serves the network in the clear; nothing, when it says nothing.
+   */
+  readonly secure?: boolean | undefined;
   readonly defaults: TransportServerResolvedStartOptions;
   readonly type: TRANSPORTS;
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;
   /** What the transport keeps of its connections besides the registry, counted; none, when nothing. */
   gauges?(): IGauges<TransportServerConnectionHandle>;
-  send(data: Data, connection: ITransportServerClientAware<Socket>): Promise<void>;
+  send(message: ITransportMessage, connection: ITransportServerClientAware<Socket>): Promise<void>;
   start(
     options: TransportServerResolvedStartOptions & { signal?: AbortSignal | undefined }
   ): Promise<ITransportServerAddress>;
@@ -187,7 +232,14 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
    * handle is the server's own error.
    */
   error: [error: Error, connectionHandle: TransportServerConnectionHandle | ''];
-  message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+  /**
+   * A listen held on the connection, `isHeld`, once its refusals passed, and its end, while the
+   * connection stands: over HTTP alone, whose listen is no silence (spec 13.7). A transport that has
+   * no listen never emits it.
+   */
+  listen: [isHeld: boolean, connectionHandle: TransportServerConnectionHandle];
+  /** An envelope, and the credential carried beside it: over HTTP alone, with a request. */
+  message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
 };
 
 /** The events a server emits, named by the table that types them. */
@@ -222,12 +274,29 @@ export interface IServerSocketLike {
   terminate(): void;
 }
 
-/** The part of the request that opened a connection this transport reads — met by Node's. */
+/**
+ * The part of the request that opened a connection this transport reads — met by Node's: its
+ * fields, as `headers` gives them and each line as it came, its method, its version, and its
+ * socket's address.
+ */
 export interface IIncomingMessageLike {
-  socket: {
+  readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  readonly httpVersion: string;
+  readonly method?: string | undefined;
+  /** Its fields as they came, each name before its value: what counts a field given twice. */
+  readonly rawHeaders: readonly string[];
+  readonly socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
   };
+}
+
+/** The socket of a request the transport answers itself, raw: a `CONNECT`'s, or an upgrade's. */
+export interface IUpgradeSocketLike {
+  destroy(): unknown;
+  end(data: string): unknown;
+  on(event: 'error', listener: () => void): unknown;
+  once(event: 'finish', listener: () => void): unknown;
 }
 
 /** The part of a WebSocket server this transport touches — met by `ws`'s `WebSocketServer`. */
@@ -238,38 +307,73 @@ export interface IWebSocketServerLike {
     event: 'connection',
     listener: (socket: IServerSocketLike, request: IIncomingMessageLike) => void
   ): unknown;
+  /** Its HTTP server's error, which `ws` forwards. */
   on(event: 'error', listener: (error: Error) => void): unknown;
+  /** Its HTTP server's `listening`, which `ws` forwards. */
   on(event: 'listening', listener: () => void): unknown;
+  /** An upgrade `ws` cannot read, which it leaves to the listener to answer. */
+  on(
+    event: 'wsClientError',
+    // oxlint-disable-next-line bead/options-last -- ws's own, a `wsClientError` listener's
+    listener: (error: Error, socket: IUpgradeSocketLike, request: IIncomingMessageLike) => void
+  ): unknown;
 }
 
 export interface IWebSocketServerConstructor {
-  new (options: {
-    host?: string | undefined;
-    maxPayload?: number | undefined;
-    port?: number | undefined;
-  }): IWebSocketServerLike;
+  /**
+   * `server` is the transport's own HTTP server, which `ws` upgrades on and leaves open when it
+   * closes.
+   */
+  new (options: { maxPayload?: number | undefined; server: Server }): IWebSocketServerLike;
 }
 
-export interface IWSTransportServerOptions {
+export interface IWSTransportServerOptions extends ITransportServerOptions {
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
    * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close` and
-   * `stop`. Defaults to {@link CLOSE_TIMEOUT}.
+   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake.
+   * From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end; any
+   * other, 0 among them, is a {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
    */
   closeTimeout?: number | undefined;
   /**
-   * Milliseconds between two pings of each connection, and `Infinity` for none: a connection that
-   * has not answered one by the next is dropped, and its `close` says it was not clean. Defaults to
+   * Milliseconds between two pings of each connection, rounded to the nearest whole one, from 1 to
+   * 2³¹ − 1, and `Infinity` for none; 0 is refused: a connection that has not answered one by the
+   * next is dropped, and its `close` says it was not clean. Defaults to
    * {@link HEARTBEAT}. A heartbeat keeps nothing of a session alive: it tells a live connection
    * from a dead one, and the session's own timers still count what the peer sends.
    */
   heartbeat?: number | undefined;
   /**
+   * The hosts — `Host` — a request at the server's address may name; any other is refused 403,
+   * whatever the request, before anything else of it is read, which a page that rebinds its name to
+   * this server's address cannot pass. Compared ASCII case-insensitively, in the form the field
+   * carries, an IDN host in punycode. Every host, when not given. A `Host` missing, repeated or no
+   * host is answered 400 before it, as HTTP answers it (RFC 9112 §3.2).
+   */
+  hosts?: readonly string[] | undefined;
+  /**
    * The largest message a connection may send, in bytes; `ws` closes a connection that sends a
-   * larger one with 1009. `ws`'s own default when not given.
+   * larger one with 1009. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's limit: a
+   * router whose `maximumEnvelopeBytes` is raised needs it raised alike, as `createWSServer` does.
    */
   maxPayload?: number | undefined;
+  /**
+   * The origins an upgrade that sends an `Origin` may come from, besides the server's own —
+   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly,
+   * checked on the upgrade, after its version and its form; any other is refused 403, since no
+   * same-origin policy guards an upgrade. `null` among them takes every upgrade that sends it; one
+   * with no `Origin` comes from anywhere. None, when not given.
+   */
+  origins?: readonly string[] | undefined;
+  /**
+   * What stands in front of it, which it cannot tell (spec 13.4): `true` for TLS terminated before
+   * it, which makes each connection secure; `false` for a proxy that serves the network in the
+   * clear, which leaves each in the clear, a loopback listener among them. When not given, a
+   * connection is secure as the server listens on a loopback host alone.
+   */
+  secure?: boolean | undefined;
   /** `ws`'s `WebSocketServer`: there is no global one to default to. */
   WebSocketServer: IWebSocketServerConstructor;
 }
@@ -301,8 +405,15 @@ export interface IDrawingRequest {
 /** The part of a request this transport reads — met by Node's, and by HTTP/2's compatibility one. */
 export interface IHTTPRequestLike {
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  /** `1.0`, `1.1` or `2.0`: an HTTP/1.1 request names its host, which an HTTP/1.0 one may not. */
+  readonly httpVersion: string;
   readonly httpVersionMajor: number;
   readonly method?: string | undefined;
+  /**
+   * Its fields as they came, each name before its value: what counts an `Authorization` or a
+   * `Host` given twice, which `headers` keeps once.
+   */
+  readonly rawHeaders: readonly string[];
   readonly socket: {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
@@ -344,13 +455,14 @@ export interface IHTTPServerLike {
   close(callback?: (error?: Error) => void): unknown;
   /** Ends the keep-alive sockets too, without which a stop waits on them; HTTP/1's since Node 18.2. */
   closeAllConnections?(): void;
+  // oxlint-disable-next-line bead/options-last -- Node's own, `listen(port, host, callback)`
   listen(port: number, host: string, callback?: () => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
   /** HTTP/2's: each session, which a stop closes, since it outlives the server's close. */
   on(event: 'session', listener: (session: IHTTPSessionLike) => void): unknown;
 }
 
-export interface IHTTPTransportServerOptions {
+export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   /**
    * The bytes of body the exchanges under way may hold together, counted as they come; past them,
    * an exchange is refused 503. Defaults to {@link BODY_BYTES_BUDGET}.
@@ -365,21 +477,24 @@ export interface IHTTPTransportServerOptions {
   createServer: (listener: HTTPRequestListener) => IHTTPServerLike;
   /**
    * Milliseconds a request handed on waits for its answer before its exchange counts as lost, which
-   * closes its connection; `Infinity` for ever. Defaults to {@link EXCHANGE_TIMEOUT}.
+   * closes its connection: from 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for
+   * ever; 0 is refused. Defaults to {@link EXCHANGE_TIMEOUT}.
    */
   exchangeTimeout?: number | undefined;
   /**
    * The hosts — `Host`, or HTTP/2's `:authority` — a request may name; any other is refused 403
-   * before anything is read, which a page that rebinds its name to this server's address cannot
-   * pass. Every host, when not given.
+   * before anything else is read, which a page that rebinds its name to this server's address
+   * cannot pass. Compared ASCII case-insensitively, in the form the field carries, an IDN host in
+   * punycode. Every host, when not given. An HTTP/1.1 request without a `Host`, with two, or with one
+   * that is no host is answered 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2).
    */
   hosts?: readonly string[] | undefined;
   /**
-   * Milliseconds a connection may go with no exchange under way before it is closed; `Infinity` for
-   * never. It tells a client alive from one gone, as a WebSocket's heartbeat does: a listen held is an
-   * exchange under way, so a client that listens again as each listen ends — or pauses less than
-   * this — stays. A session's own timers still count what the client says. Defaults to
-   * {@link INACTIVITY_TIMEOUT}.
+   * Milliseconds a connection may go with no exchange under way before it is closed: from 1 to
+   * 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for never; 0 is refused. It tells a
+   * client alive from one gone, as a WebSocket's heartbeat does: a listen held is an exchange under
+   * way, so a client that listens again as each listen ends — or pauses less than this — stays. A
+   * session's own timers still count what the client says. Defaults to {@link INACTIVITY_TIMEOUT}.
    */
   inactivityTimeout?: number | undefined;
   /**
@@ -407,8 +522,9 @@ export interface IHTTPTransportServerOptions {
    */
   maximumOutboxBytes?: number | undefined;
   /**
-   * Milliseconds a listen waits at most for something to bring back, whatever `wait` it asks; an
-   * intermediary's own timeout must be longer. Defaults to {@link MAXIMUM_WAIT}.
+   * Milliseconds a listen waits at most for something to bring back, whatever `wait` it asks: from 1
+   * to 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. An intermediary's
+   * own timeout must be longer. Defaults to {@link MAXIMUM_WAIT}.
    */
   maximumWait?: number | undefined;
   /**
@@ -417,13 +533,23 @@ export interface IHTTPTransportServerOptions {
    */
   maximumWaitingExchanges?: number | undefined;
   /**
-   * The origins a browser's exchange may come from, besides the server's own; one with no `Origin` —
-   * no browser's — comes from anywhere. It serves a proxy that rewrites the host: a page of another
-   * origin also needs CORS, which the transport does not answer yet.
+   * The origins an exchange that sends an `Origin` may come from, besides the server's own —
+   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly; any
+   * other is refused 403. `null` among them takes every exchange that sends it; one with no `Origin`
+   * comes from anywhere. It serves a proxy that rewrites the host: a page of another origin also
+   * needs CORS, which the transport does not answer yet. None, when not given.
    */
   origins?: readonly string[] | undefined;
   /** The path the transport answers on; anything else is 404. Defaults to {@link PATHNAME}. */
   pathname?: string | undefined;
+  /**
+   * What stands in front of it, which it cannot tell (spec 13.4): `true` for TLS terminated before
+   * it, which makes each connection secure; `false` for a proxy that serves the network in the
+   * clear, which leaves each in the clear, a loopback listener or a server of its own under TLS
+   * among them. When not given, a connection is secure as the server is under TLS or listens on a
+   * loopback host.
+   */
+  secure?: boolean | undefined;
 }
 
 // types
@@ -449,7 +575,7 @@ export interface IWorkerScopeLike {
   removeEventListener(type: 'message', listener: (event: IWorkerMessageEventLike) => void): void;
 }
 
-export interface IWorkerTransportServerOptions {
+export interface IWorkerTransportServerOptions extends ITransportServerOptions {
   /** Where connects come: a worker's `self`, or a port a test holds. */
   scope: IWorkerScopeLike;
 }

@@ -2,15 +2,21 @@
 
 // dependencies
 
+import { assertHeld, clockOf } from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { noop } from '../../transport/shared/noop';
-import { timestamp } from '../../transport/shared/timestamp';
-import type { ITimestamp } from '../../transport/shared/types';
 import { admissionOf, isAdmissionFailure } from './admission';
-import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT, FailureScope } from './constants';
+import {
+  DEBUG_EVENT,
+  DEPRECATED_EVENT,
+  DROPPED_EVENT,
+  FailureScope,
+  SERVER_CONNECTION_HANDLE,
+} from './constants';
 import { FailureError } from './errors';
+import { checkDeclaration } from './identity';
 import { createNotification } from './notification';
 import { createProcedureMap } from './procedure-map';
 import type {
@@ -38,33 +44,61 @@ import type {
   IResolvedRequestOptions,
   IRouterFailures,
   IRouterLike,
+  IRouterResult,
   IServiceManager,
   IServiceManagerOptions,
   NotificationResolverCallback,
   RequestResolverCallback,
   ResolverFailure,
+  ISubscriber,
   RouterAnswer,
   ServiceManagerEventMap,
 } from './types';
 
 // interfaces
 
+/**
+ * When a call started, on its router's clock: the wall clock's instant it reports, and the
+ * monotonic reading its duration counts from.
+ */
+interface IStarted {
+  instant: number;
+  timestamp: number;
+}
+
 /** One step of a call, as `trace` tells it to `debug`. */
-interface ITraceStep {
+interface ITraceStep<Handle extends string> {
+  /** Its call's id: a call made's once its router drew it, a request received's from its header. */
+  callId?: CallId | undefined;
+  /** The connection the call came from or goes to, which a listener's error is reported with. */
+  connectionHandle?: Handle | undefined;
   direction: DebugDirection;
   error?: unknown;
   /** Whether the call has answered, so the step carries how long it took. */
   isAnswered?: boolean | undefined;
   options?: IResolvedRequestOptions | undefined;
   rx?: unknown;
-  started?: ITimestamp | undefined;
+  /** When its call started: every step of one call carries the same. */
+  started: IStarted;
   tx?: unknown;
   type: DebugType;
+}
+
+/** A call made while someone listens: its steps' common part, and the id its router drew. */
+interface ITracedCall<Handle extends string> {
+  /** Its router's id for it, once `onCallId` heard it; none while it has not. */
+  callId: CallId | undefined;
+  /** What its router's `request` is handed, to hear the id it draws. */
+  readonly onCallId: (callId: CallId) => void;
+  readonly step: Omit<ITraceStep<Handle>, 'direction'>;
 }
 
 // types
 
 export type REQUEST_DEFAULTS = typeof REQUEST_DEFAULTS;
+
+/** What a call falls back on where its options say nothing: a timeout, and a close on timeout. */
+export type RequestDefaults = Pick<IResolvedRequestOptions, 'closeOnTimeout' | 'timeout'>;
 
 // constants
 
@@ -79,6 +113,10 @@ export const REQUEST_DEFAULTS = Object.freeze({
  * `undefined` when they are the same ask.
  */
 const differenceOf = (known: IProcedure, asked: IProcedure): string | undefined => {
+  if (known.procedureKind !== asked.procedureKind) {
+    return `kind ${String(known.procedureKind)}, not ${String(asked.procedureKind)}`;
+  }
+
   for (const field of ['maximumPayloadBytes', 'procedureName', 'serviceRevision'] as const) {
     if (known[field] !== asked[field]) {
       return `${field} ${String(known[field])}, not ${String(asked[field])}`;
@@ -139,58 +177,84 @@ const nameAfter = <Resolver extends (...params: never[]) => unknown>(
 };
 
 /**
- * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one;
- * `options` is left alone.
+ * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one
+ * — and the timeout held as a call's, so the trace, the router and the error tell one number:
+ * rounded to the nearest whole millisecond, `Infinity` to wait on, and a {@link ProgrammerError} for
+ * any other not from 1 to 2³¹ − 1, 0 among them. `options` is left alone.
  */
 export const resolveRequestOptions = (
-  options?: IRequestOptions,
-  defaults: Pick<IResolvedRequestOptions, 'closeOnTimeout' | 'timeout'> = REQUEST_DEFAULTS
+  defaults: RequestDefaults,
+  options?: IRequestOptions
 ): IResolvedRequestOptions => {
   const {
     closeOnTimeout = defaults.closeOnTimeout,
-    timeout = defaults.timeout,
+    timeout: givenTimeout = defaults.timeout,
     ...rest
   } = options ?? {};
+  const timeout = assertHeld("a call's timeout", givenTimeout);
 
   return closeOnTimeout === undefined ? { ...rest, timeout } : { ...rest, closeOnTimeout, timeout };
 };
 
-/** Whether a notification goes to a connection, as `options` say; `undefined` when each gets it. */
+/**
+ * Whether a notification goes to a subscription, by its connection and the session holding it, as
+ * `options` say; `undefined` when each gets it.
+ */
 const filterOf = <Handle extends string>(
   options?: INotifyOptions<Handle>
-): ((connectionHandle: Handle) => boolean) | undefined => {
+): ((subscriber: ISubscriber<Handle>) => boolean) | undefined => {
   const { exclude, filter } = options ?? {};
 
   if (exclude === undefined && filter === undefined) {
     return undefined;
   }
 
-  return (connectionHandle) => {
-    return connectionHandle !== exclude && (filter === undefined || filter(connectionHandle));
+  return (subscriber) => {
+    return subscriber.connectionHandle !== exclude && (filter === undefined || filter(subscriber));
   };
 };
 
 /**
- * The procedure alone, without whatever else the object carries: its limit, when it has one, and a
- * copy of its deprecation.
+ * The procedure alone, without whatever else the object carries: its kind and its limit, when it
+ * has them, and a copy of its deprecation.
  */
-const procedureOf = ({
-  deprecation,
-  maximumPayloadBytes,
-  procedureId,
-  procedureName,
-  serviceId,
-  serviceRevision,
-}: IProcedure): IProcedure => {
+const procedureOf = (given: IProcedure): IProcedure => {
+  const {
+    deprecation,
+    maximumPayloadBytes,
+    procedureId,
+    procedureKind,
+    procedureName,
+    serviceId,
+    serviceRevision,
+  } = given;
   const procedure = {
     procedureId,
     procedureName,
     serviceId,
     serviceRevision,
+    ...(procedureKind === undefined ? {} : { procedureKind }),
     ...(maximumPayloadBytes === undefined ? {} : { maximumPayloadBytes }),
   };
 
   return deprecation === undefined ? procedure : { ...procedure, deprecation: { ...deprecation } };
+};
+
+/** A call made, traced from `step`, which hears the id its router draws. */
+const tracedCallOf = <Handle extends string>(
+  step: Omit<ITraceStep<Handle>, 'direction'>
+): ITracedCall<Handle> => {
+  // ! apart from `callOf`, and called only while someone listens: a closure made in that async
+  // body would hold its locals in a context V8 makes at every call, listened to or not
+  const traced: ITracedCall<Handle> = {
+    callId: undefined,
+    onCallId: (callId) => {
+      traced.callId = callId;
+    },
+    step,
+  };
+
+  return traced;
 };
 
 /** A copy for `debug`, or the value itself when it cannot be cloned: a trace never fails a call. */
@@ -206,7 +270,8 @@ const snapshot = (value: unknown): unknown => {
 
 /**
  * The requesters and resolvers of the services on one router: what a requester calls, and what
- * answers it on the other side. Both sides of a router use the same manager.
+ * answers it on the other side. Both sides of a router use the same manager, which runs on its
+ * router's clock: one its options give that differs is a {@link ProgrammerError}.
  *
  * @example
  * import { createServiceManager } from '@francisdesjardins/bead/service-manager';
@@ -228,50 +293,91 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   router: IRouterLike<Handle>,
   options?: IServiceManagerOptions<Handle>
 ): IServiceManager<Handle> => {
+  const clock = clockOf(
+    { beneath: router.clock, given: options?.clock },
+    { below: 'its router', layer: 'a service manager' }
+  );
   const closeConnection = options?.closeConnection;
+  // held as the manager is built, rather than refused at each call it would time
   const defaults = Object.freeze({
     closeOnTimeout: options?.defaults?.closeOnTimeout,
-    timeout: options?.defaults?.timeout ?? REQUEST_DEFAULTS.timeout,
+    timeout: assertHeld(
+      "a call's default timeout",
+      options?.defaults?.timeout ?? REQUEST_DEFAULTS.timeout
+    ),
   });
   const emitter = createEmitter<ServiceManagerEventMap>();
   // the notifications this manager made, one per procedure, kept for its life: asked for again,
   // the same one is given
-  const notifications = createProcedureMap<{ notification: unknown; procedure: IProcedure }>();
+  const notifications = createProcedureMap<{
+    notification: unknown;
+    procedure: IProcedure;
+    window: number | undefined;
+  }>();
 
-  // tells `debug` about one step of a call; nothing is built when nobody listens
-  const trace = (procedure: IProcedure, step: ITraceStep): void => {
-    if (emitter.listenerCount(DEBUG_EVENT) === 0) {
+  // whether anyone listens to `debug`: the one check a call makes while nobody does
+  const isDebugging = (): boolean => {
+    return emitter.listenerCount(DEBUG_EVENT) > 0;
+  };
+
+  // now, for a call starting, traced: the wall clock for its start, the monotonic for its duration
+  const startedNow = (): IStarted => {
+    return { instant: clock.Date.now(), timestamp: clock.performance.now() };
+  };
+
+  // now, for a notification sent or heard, traced: one step, which takes no duration
+  const notifiedNow = (): IStarted => {
+    return { instant: clock.Date.now(), timestamp: 0 };
+  };
+
+  // tells `debug` about one step of a call, each listener within a guard: what one throws is
+  // reported through the router, with the call's connection, and changes nothing of the call
+  const trace = (procedure: IProcedure, step: ITraceStep<Handle>): void => {
+    if (!isDebugging()) {
       return;
     }
 
-    const {
-      direction,
-      error = null,
-      isAnswered = false,
-      options,
-      rx,
-      started = timestamp(),
-      tx,
-      type,
-    } = step;
+    const { callId, connectionHandle, direction, error = null, isAnswered = false } = step;
+    const { options, rx, started, tx, type } = step;
+    // ! the credential a call presents stays out of what is told: its token, or what its transport
+    // carries, never reaches a listener
+    const { credential: _credential, ...told } = options ?? {};
 
-    emitter.emit(DEBUG_EVENT, error, {
-      direction,
-      options: options === undefined ? undefined : { ...options },
-      procedureId: procedure.procedureId,
-      procedureName: procedure.procedureName,
-      rx: snapshot(rx),
-      serviceId: procedure.serviceId,
-      serviceRevision: procedure.serviceRevision,
-      timestamp: { duration: isAnswered ? timestamp(started).ms : undefined, event: started.ms },
-      tx: snapshot(tx),
-      type,
+    emitter.emitEach(DEBUG_EVENT, {
+      onError: (thrown) => {
+        router.report(toError(thrown), connectionHandle);
+      },
+      params: [
+        error,
+        {
+          callId,
+          // a step names its connection with its call, the server on a client, and none without
+          connectionHandle:
+            callId === undefined
+              ? undefined
+              : (connectionHandle ??
+                (router.failures.side === 'client' ? SERVER_CONNECTION_HANDLE : undefined)),
+          direction,
+          duration: isAnswered
+            ? Math.trunc(clock.performance.now() - started.timestamp)
+            : undefined,
+          options: options === undefined ? undefined : (told as IResolvedRequestOptions),
+          procedureId: procedure.procedureId,
+          procedureName: procedure.procedureName,
+          rx: snapshot(rx),
+          serviceId: procedure.serviceId,
+          serviceRevision: procedure.serviceRevision,
+          startedAt: started.instant,
+          tx: snapshot(tx),
+          type,
+        },
+      ],
     });
   };
 
-  // the requester body that `getRequest`, `getCommand` and a notification's subscribing call share:
-  // the options, the trace, the request, the close on timeout and the decoding; `subscribes` names
-  // the notification the call subscribes
+  // the requester body that `getRequest`, `getCommand` and a notification's subscribing call share,
+  // declared to the router as it is made, each call carrying the series it gave; `subscribes` names
+  // the notification the call subscribes; a timeout refused, or a value not written, fails first
   const callOf = <RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     {
@@ -286,79 +392,118 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   ) => {
     const { serializer } = dependencies;
     const { deprecation } = procedure;
+    const series = router.declareRequester(procedure);
 
     return (requestPayload: RequestPayload) => {
       return async (
         options?: IRequestOptions<Handle>
       ): Promise<{ callId: CallId; payload: ResponsePayload }> => {
-        const resolvedOptions = resolveRequestOptions(options, defaults);
+        const resolvedOptions = resolveRequestOptions(defaults, options);
         const { closeOnTimeout, destinationId } = resolvedOptions;
         const connectionHandle = options?.connectionHandle;
-        const started = timestamp();
-        const step = {
-          options: resolvedOptions,
-          started,
-          tx: requestPayload,
-          type,
-        } as const;
-
-        trace(procedure, { ...step, direction: 'tx' });
+        const encoded = serializer.encode(requestPayload);
+        // * the one check a call makes while nobody listens: no clock is read, no step is built
+        const traced = isDebugging()
+          ? tracedCallOf<Handle>({
+              connectionHandle,
+              options: resolvedOptions,
+              started: startedNow(),
+              tx: requestPayload,
+              type,
+            })
+          : undefined;
 
         if (deprecation !== undefined) {
           emitter.emit(DEPRECATED_EVENT, procedureOf(procedure));
         }
 
-        const encoded = serializer.encode(requestPayload);
-        // what the call fails with once it went out is told as its answer
-        const fail = (reason: unknown): never => {
-          trace(procedure, {
-            ...step,
-            direction: 'rx',
-            error: reason,
-            isAnswered: true,
-            rx: tracedFailureOf(reason),
-          });
+        const requested = router.request(encoded, {
+          onCallId: traced?.onCallId,
+          options: resolvedOptions,
+          procedure: procedureOf(procedure),
+          series,
+          subscribes: subscribes?.(),
+        });
+
+        // ! told as `request` returns, before the await, on every path: with the id its router
+        // drew, or none for a call refused first; a listener never runs in its router's turn
+        if (traced !== undefined) {
+          trace(procedure, { ...traced.step, callId: traced.callId, direction: 'tx' });
+        }
+
+        let result: IRouterResult;
+
+        try {
+          result = await requested;
+        } catch (reason) {
+          // a connection that let it go unanswered is closed, when the call or the manager says so
+          if (reason instanceof TimeoutError && closeOnTimeout && connectionHandle !== undefined) {
+            closeConnection?.(connectionHandle);
+          }
+
+          // what the call fails with once it went out is told as its answer
+          if (traced !== undefined) {
+            const { callId, step } = traced;
+            const rx = tracedFailureOf(reason);
+
+            trace(procedure, {
+              ...step,
+              callId,
+              direction: 'rx',
+              error: reason,
+              isAnswered: true,
+              rx,
+            });
+          }
 
           throw reason;
-        };
-        const { header, payload } = await router
-          .request(encoded, {
-            options: resolvedOptions,
-            procedure: procedureOf(procedure),
-            subscribes: subscribes?.(),
-          })
-          .catch((reason: unknown) => {
-            // a connection that let it go unanswered is closed, when the call or the manager says so
-            if (
-              reason instanceof TimeoutError &&
-              closeOnTimeout &&
-              connectionHandle !== undefined
-            ) {
-              closeConnection?.(connectionHandle);
-            }
+        }
 
-            return fail(reason);
-          });
+        const { header, payload } = result;
         let responsePayload: ResponsePayload;
 
         // an answer that does not decode fails here, with the result's header
         try {
           responsePayload = serializer.decode(payload);
         } catch (reason) {
-          return fail(
-            new FailureError(
-              { ...router.failures.payloadUndecodable, detail: toError(reason).message },
-              {
-                cause: reason,
-                destinationId,
-                header,
-                procedureAddress: procedure,
-              }
-            )
+          const failure = new FailureError(
+            { ...router.failures.payloadUndecodable, detail: toError(reason).message },
+            {
+              cause: reason,
+              destinationId,
+              header,
+              procedureAddress: procedure,
+            }
           );
+
+          if (traced !== undefined) {
+            const { callId, step } = traced;
+            const rx = tracedFailureOf(failure);
+
+            trace(procedure, {
+              ...step,
+              callId,
+              direction: 'rx',
+              error: failure,
+              isAnswered: true,
+              rx,
+            });
+          }
+
+          throw failure;
         }
 
-        trace(procedure, { ...step, direction: 'rx', isAnswered: true, rx: responsePayload });
+        if (traced !== undefined) {
+          const { callId, step } = traced;
+
+          trace(procedure, {
+            ...step,
+            callId,
+            direction: 'rx',
+            isAnswered: true,
+            rx: responsePayload,
+          });
+        }
 
         return { callId: header.callId, payload: responsePayload };
       };
@@ -390,11 +535,19 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     procedure: IProcedure,
     dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>
   ): INotification<RequestPayload, NotificationPayload> => {
+    // * the router's check before the manager's own reason, so spec 16.10's order holds here too
+    checkDeclaration(procedure);
+
     const known = notifications.get(procedure);
 
     // the router holds one notification per procedure, so a second one would never be triggered
     if (known !== undefined) {
-      const difference = differenceOf(known.procedure, procedure);
+      // * a window is the notification's, asked for once: unpaced and paced are two windows
+      const difference =
+        differenceOf(known.procedure, procedure) ??
+        (known.window === dependencies.window
+          ? undefined
+          : `window ${String(known.window)}, not ${String(dependencies.window)}`);
 
       if (difference !== undefined) {
         throw new ProgrammerError(
@@ -402,7 +555,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         );
       }
 
-      // the same procedure, name, revision, deprecation and payload limit: the same payloads
+      // the same procedure, kind, name, revision, deprecation, payload limit and window: the same
+      // payloads
       return known.notification as INotification<RequestPayload, NotificationPayload>;
     }
 
@@ -418,21 +572,31 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         return callOf(procedure, { dependencies, subscribes, type: 'request' });
       },
       router,
-      trace: (step) => {
-        trace(procedure, { ...step, type: 'notification' });
+      // heard, decoded or not: one check while nobody listens, and nothing built
+      trace: (error, rx) => {
+        if (isDebugging()) {
+          trace(procedure, {
+            direction: 'rx',
+            error,
+            rx,
+            started: notifiedNow(),
+            type: 'notification',
+          });
+        }
       },
     });
 
     notifications.set(procedure, {
       notification,
       procedure: procedureOf(procedure),
+      window: dependencies.window,
     });
 
     return notification;
   };
 
-  // the resolver of one procedure, registered in the router; a notification's callback may subscribe
-  // its requester, which a plain request's callback is not typed to see
+  // the resolver of one procedure, for the router to register; a notification's callback may
+  // subscribe its requester, which a plain request's callback is not typed to see
   const createResolver = <RequestPayload, ResponsePayload, Failure extends ResolverFailure>(
     procedure: IProcedure,
     {
@@ -455,8 +619,10 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     };
 
     const resolver = nameAfter(async (props: IRequestResolverProps<Handle>): Promise<void> => {
-      const { connectionHandle, header, signal } = props;
-      const started = timestamp();
+      const { connectionHandle, header, session, signal } = props;
+      // * the one check a request makes while nobody listens; traced, the call starts as it
+      // arrives, its admission and its decoding counting in its duration
+      const started = isDebugging() ? startedNow() : undefined;
       const target = { connectionHandle, header };
       // a request is answered once: by its callback, by a refusal, or as failed; the answer sets it,
       // out of the flow a type follows here
@@ -469,7 +635,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         let refusal: AdmissionFailure | undefined;
 
         try {
-          refusal = admit(target);
+          refusal = admit({ ...target, session });
         } catch (reason) {
           await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
 
@@ -488,13 +654,23 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         return router.respond({ failure: router.failures.payloadUndecodable }, target);
       }
 
-      trace(procedure, { direction: 'rx', rx: requestPayload, started, type });
+      if (started !== undefined) {
+        trace(procedure, {
+          callId: header.callId,
+          connectionHandle,
+          direction: 'rx',
+          rx: requestPayload,
+          started,
+          type,
+        });
+      }
 
-      // the callback is handed the request, decoded, and no more
+      // the callback is handed the request, decoded, its call's session, and no more
       const request: IRequestProps<RequestPayload, Handle> = Object.freeze({
         connectionHandle,
         header,
         payload: requestPayload,
+        session,
         signal,
       });
       const answer = async (payload: ResponsePayload | null, failure?: Failure) => {
@@ -511,20 +687,35 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
             : { failure: resolverFailureOf(failure, router.failures) };
 
         isAnswered = true;
-        trace(procedure, {
-          direction: 'tx',
-          isAnswered: true,
-          rx: requestPayload,
-          started,
-          tx: failure ?? payload,
-          type,
-        });
+
+        const step =
+          started === undefined
+            ? undefined
+            : ({
+                callId: header.callId,
+                connectionHandle,
+                direction: 'tx',
+                isAnswered: true,
+                rx: requestPayload,
+                started,
+                tx: failure ?? payload,
+                type,
+              } as const);
+
+        if (step !== undefined) {
+          trace(procedure, step);
+        }
 
         try {
           await router.respond(routerAnswer, target);
         } catch (reason) {
-          // an answer the router could not send — too large, say — is answered as failed, so its
-          // requester does not wait out its timeout; a connection gone takes neither
+          // an answer the router could not send — too large, say — is told again at its start with
+          // why, and answered as failed, so its requester does not wait out its timeout; a call no
+          // longer answered takes neither
+          if (step !== undefined && !signal.aborted) {
+            trace(procedure, { ...step, error: reason });
+          }
+
           await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
 
           throw reason;
@@ -537,7 +728,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
             throw new ProgrammerError(`${procedure.procedureName} subscribes before it answers`);
           }
 
-          return router.subscribe(target);
+          return router.subscribe({ ...target, session });
         },
       });
 
@@ -545,9 +736,24 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
         await callback(request, response);
       } catch (reason) {
         // a resolver that failed before it answered still answers, so its requester does not wait
-        // out its timeout; why it failed stays here, for the router to report
+        // out its timeout, told with why beside it, and why goes on for the router to report; a
+        // call no longer answered takes neither
         if (!isAnswered) {
           isAnswered = true;
+
+          if (started !== undefined && !signal.aborted) {
+            trace(procedure, {
+              callId: header.callId,
+              connectionHandle,
+              direction: 'tx',
+              error: reason,
+              isAnswered: true,
+              rx: requestPayload,
+              started,
+              type,
+            });
+          }
+
           await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
         }
 
@@ -556,18 +762,17 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     }, procedure);
 
     // the router asks the admission itself, before the payload comes
-    const admitted = Object.assign(resolver, { admit });
-
-    router.registerResolver(admitted);
-
-    return admitted;
+    return Object.assign(resolver, { admit });
   };
 
-  // a refusal is checked once, as the resolver is asked for, rather than as each request is refused
+  // a refusal is checked once, as the resolver is asked for, rather than as each request is refused,
+  // after the procedure's identity, which spec 16.10 checks before any reason of the manager's
   const assertRefusal = (
     procedure: IProcedure,
     { beforeRequest }: Pick<IRequestResolverDependencies<never, never, Handle>, 'beforeRequest'>
   ): void => {
+    checkDeclaration(procedure);
+
     if (
       beforeRequest?.refusal !== undefined &&
       !isAdmissionFailure(beforeRequest.refusal, router.failures)
@@ -591,7 +796,11 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     return (
       callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
     ): IRequestResolver<Handle> => {
-      return createResolver(procedure, { callback, dependencies, type: 'request' });
+      const resolver = createResolver(procedure, { callback, dependencies, type: 'request' });
+
+      router.registerResolver(resolver);
+
+      return resolver;
     };
   };
 
@@ -608,7 +817,11 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     return (
       callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
     ): IRequestResolver<Handle> => {
-      return createResolver(procedure, { callback, dependencies, type: 'command' });
+      const resolver = createResolver(procedure, { callback, dependencies, type: 'command' });
+
+      router.registerResolver(resolver);
+
+      return resolver;
     };
   };
 
@@ -632,31 +845,61 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       callback: NotificationResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
     ): INotificationResolver<NotificationPayload, Handle> => {
       const { serializer } = dependencies;
-      const resolver = createResolver(procedure, { callback, dependencies, type: 'request' });
+      // its `notify` given before it is registered: the router declares a resolver that notifies
+      const resolver = Object.assign(
+        createResolver(procedure, { callback, dependencies, type: 'request' }),
+        {
+          notify: async (
+            notification: NotificationPayload,
+            notifyOptions?: INotifyOptions<Handle>
+          ): Promise<void> => {
+            // * the one check a notification makes while nobody listens
+            const step = isDebugging()
+              ? ({
+                  direction: 'tx',
+                  started: notifiedNow(),
+                  tx: notification,
+                  type: 'notification',
+                } as const)
+              : undefined;
 
-      return Object.assign(resolver, {
-        notify: async (
-          notification: NotificationPayload,
-          notifyOptions?: INotifyOptions<Handle>
-        ): Promise<void> => {
-          trace(procedure, { direction: 'tx', tx: notification, type: 'notification' });
+            if (step !== undefined) {
+              trace(procedure, step);
+            }
 
-          await router
-            .notify(serializer.encodeNotification(notification), {
-              filter: filterOf(notifyOptions),
-              key: notifyOptions?.key,
-              procedure: procedureOf(resolver),
-            })
-            .catch((reason: unknown) => {
-              trace(procedure, {
-                direction: 'tx',
-                error: reason,
-                tx: notification,
-                type: 'notification',
+            // a value that does not write goes to the router in its payload's place, for it to count
+            // failed at each subscription it was for and report, as spec 17.2, item 6, has it
+            let payload: Uint8Array | Error;
+            let failure: unknown;
+
+            try {
+              payload = serializer.encodeNotification(notification);
+            } catch (reason) {
+              payload = toError(reason);
+              failure = payload;
+            }
+
+            try {
+              await router.notify(payload, {
+                filter: filterOf(notifyOptions),
+                key: notifyOptions?.key,
+                procedure: procedureOf(resolver),
               });
-            });
-        },
-      });
+            } catch (reason) {
+              failure = reason;
+            }
+
+            // what keeps it from going out is told at the start it was sent with
+            if (failure !== undefined && step !== undefined) {
+              trace(procedure, { ...step, error: failure });
+            }
+          },
+        }
+      );
+
+      router.registerResolver(resolver);
+
+      return resolver;
     };
   };
 
@@ -665,8 +908,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       return manager;
     }),
 
-    get debug() {
-      return emitter.listenerCount(DEBUG_EVENT) > 0;
+    get isDebugging() {
+      return isDebugging();
     },
 
     getCommand: (procedure, dependencies) => {
@@ -688,28 +931,36 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
 export {
   CLIENT_FAILURES,
+  CredentialScheme,
   DEBUG_EVENT,
   DEPRECATED_EVENT,
   DROPPED_EVENT,
   FailureScope,
+  ProcedureKind,
   ProtocolCode,
   SERVER_FAILURES,
 } from './constants';
 export { filterDebug, parseDebugFilter } from './debug-filter';
 export {
-  createDebugStatistics,
-  DEBUG_STATISTICS_DEFAULTS,
-  type IDebugStatistics,
-  type IDebugStatisticsOptions,
-  type IDurationSummary,
-} from './debug-statistics';
+  createMetricsRegistry,
+  METRICS_CONTENT_TYPE,
+  METRICS_REGISTRY_DEFAULTS,
+} from './metrics-registry';
+export type {
+  IMetricsExposition,
+  IMetricsRegistry,
+  IMetricsRegistryOptions,
+  IProcedureSeries,
+} from './metrics-registry';
 export { DisconnectError, FailureError } from './errors';
 export { ProgrammerError } from '../../transport/shared/errors';
 export type { IEventIteratorOptions } from '../../transport/shared/types';
 export type {
   AdmissionFailure,
+  Announcement,
   CallId,
   ConnectionHandle,
+  Credential,
   DebugDirection,
   DebugFilterSource,
   DebugType,
@@ -719,6 +970,7 @@ export type {
   IAdmissionRequest,
   IApplicationFailure,
   IBeforeRequest,
+  IBoundCall,
   IDebugEvent,
   IDebugFilter,
   IFailure,
@@ -747,6 +999,7 @@ export type {
   IRequestResolverDependencies,
   IRequestResolverProps,
   IRequestSerializerClient,
+  IRegistrar,
   IRequestSerializerServer,
   IResolvedRequestOptions,
   IResponse,
@@ -756,6 +1009,7 @@ export type {
   IRouterLike,
   IServiceManager,
   IServiceManagerOptions,
+  ISubscriber,
   NotificationKey,
   NotificationResolverCallback,
   ProcedureId,
@@ -773,5 +1027,6 @@ export type {
   ServiceManagerOnDeprecatedCallback,
   ServiceManagerOnDroppedCallback,
   ServiceRevision,
+  SessionIdentifier,
   SessionToken,
 } from './types';

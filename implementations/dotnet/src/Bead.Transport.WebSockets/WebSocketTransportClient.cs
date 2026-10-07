@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.WebSockets;
 
 namespace Bead.Transport.WebSockets;
@@ -8,23 +9,33 @@ public sealed record WebSocketTransportClientOptions
     /// <summary>
     /// The largest message it reads, in bytes: one larger closes its connection with 1009. A
     /// router's envelope limit at least; an envelope's limit by default, as the TypeScript side's
-    /// <c>maxPayload</c> is ws's own when not given.
+    /// <c>maxPayload</c> is.
     /// </summary>
     public int? MaximumMessageBytes { get; init; }
 
     /// <summary>
     /// How often the connection is pinged, and how long its pong may take: a server gone without a
-    /// word ends in a close rather than never. A whole number of milliseconds from 1 to 2³¹ − 1, or
-    /// <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses any other with an
-    /// <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// word ends in a close rather than never. From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses
+    /// any other, zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// The platform's, on the real clock.
     /// </summary>
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>How long a close handshake may take: a server that never answers is dropped after it.</summary>
+    /// <summary>
+    /// How long a close handshake may take: a server that never answers is dropped after it. From 1
+    /// to 2³¹ − 1 milliseconds, rounded to the nearest whole one, or
+    /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other,
+    /// zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
+    /// the platform's close, on the real clock.
+    /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>What a connect's timeout and a reconnection's waits run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What the stack built on it runs on, a connect's timeout and a reconnection's waits among
+    /// them; the system's clock when none.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>
@@ -50,7 +61,9 @@ public sealed record WebSocketConnectOptions
 
     /// <summary>
     /// How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds
-    /// unless told; zero never times out.
+    /// unless told, from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest
+    /// whole one, or <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which never times out;
+    /// zero is refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 }
@@ -67,7 +80,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // constants
 
     private readonly WebSocketTransportClientOptions _options;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     // what every move from one state to another decides by
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
@@ -82,14 +95,19 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private Action? _reconnect;
 
     /// <summary>
-    /// A transport client, not yet connected. A heartbeat no timer holds is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// A transport client, not yet connected, its heartbeat and close timeout held: one no timer
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public WebSocketTransportClient(WebSocketTransportClientOptions? options = null)
     {
-        _options = options ?? new WebSocketTransportClientOptions();
-        _time = _options.Time ?? TimeProvider.System;
-        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(options));
+        var given = options ?? new WebSocketTransportClientOptions();
+
+        _options = given with
+        {
+            Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportClientOptions.Heartbeat)),
+            CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportClientOptions.CloseTimeout)),
+        };
+        _clock = _options.Clock ?? TimeProvider.System;
     }
 
     /// <inheritdoc/>
@@ -136,6 +154,18 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// </summary>
     internal event Action? Opened;
 
+    /// <summary>
+    /// The largest message its connections read: the option given, or a router's largest envelope
+    /// by default, which a transport built alone takes, its router unknown to it.
+    /// </summary>
+    internal int MaximumMessageBytes
+    {
+        get
+        {
+            return _options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes;
+        }
+    }
+
     /// <summary>Where it is in its life: Uninitialized until its first connect.</summary>
     public ReadyState ReadyState
     {
@@ -145,11 +175,22 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
     }
 
+    /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
+        }
+    }
+
     /// <summary>
     /// Connects to the server; settles once the connection is open. Refused with an
-    /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed, and with an
-    /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled
-    /// already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
+    /// <see cref="ArgumentOutOfRangeException"/> for a timeout
+    /// <see cref="WebSocketConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
+    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
+    /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
+    /// changed, when its token is cancelled already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and the
     /// <see cref="WebSocketException"/> its socket throws, a dispose under way included, ending
     /// Closed.
@@ -160,10 +201,39 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     }
 
     /// <summary>
-    /// Hands <paramref name="bytes"/> to the connection; refused with a
-    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError.
+    /// A WebSocket carries no credential beside an envelope (spec 15.2): a call presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> over it fails before it goes.
     /// </summary>
-    public Task Send(ReadOnlyMemory<byte> bytes)
+    public bool CarriesCredential
+    {
+        get
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether it is secure, judged from the options of its last connect, never from what its host
+    /// resolves to (spec 13.4): <c>wss</c>, or a host on the loopback. None before its first connect.
+    /// </summary>
+    public bool IsSecure
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _lastConnectOptions is { } given && TransportSecurity.IsSecure((given.Secured, given.Host));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hands the bytes of <paramref name="message"/> to the connection, as binary; refused with a
+    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. A
+    /// WebSocket carries no credential: one given is not carried, as its router fails a call
+    /// presenting one before it goes.
+    /// </summary>
+    public Task Send(TransportMessage message)
     {
         WebSocketConnection? connection;
         ReadyState readyState;
@@ -175,7 +245,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
 
         return readyState == ReadyState.Open && connection is not null
-            ? connection.Send(bytes)
+            ? connection.Send(message.Bytes)
             : Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
     }
 
@@ -311,7 +381,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 {
                     return Connecting(target, (token, true));
                 },
-                (reconnect, _time));
+                (reconnect, _clock));
 
             // the last attempt opened as the token was cancelled: what it opened goes with it
             if (token.IsCancellationRequested)
@@ -390,10 +460,15 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(WebSocketConnectOptions options, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(WebSocketConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(given);
 
+        // held before anything moves or is kept, so a reconnection connects again with it held
+        var options = given with
+        {
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(WebSocketConnectOptions.Timeout)), given.Timeout),
+        };
         var (token, isAttempt) = call;
         ClientWebSocket socket;
 
@@ -429,7 +504,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 socket.Options.AddSubProtocol(protocol);
             }
 
-            using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _time) : null;
+            using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _clock) : null;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout?.Token ?? CancellationToken.None);
 
             try
@@ -438,7 +513,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {
-                throw new TimeoutException($"timed out after {options.Timeout.TotalMilliseconds}ms", reason);
+                throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
             }
 
             lock (_gate)
@@ -450,7 +525,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
 
                 _connecting = null;
-                _connection = connection = new WebSocketConnection(socket, (_options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes, _options.CloseTimeout));
+                _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
                 _readyState = ReadyState.Open;
             }
         }

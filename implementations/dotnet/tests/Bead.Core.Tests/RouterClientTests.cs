@@ -8,7 +8,7 @@ namespace Bead.Tests;
 /// <see cref="RouterClient"/>: against a server of the interop service, linked in memory, and against
 /// bytes a test writes as a server would.
 /// </summary>
-public sealed class RouterClientTests
+public sealed partial class RouterClientTests
 {
     // constants
 
@@ -23,6 +23,9 @@ public sealed class RouterClientTests
 
     private static readonly ResolvedRequestOptions Options = new() { Timeout = TimeSpan.FromSeconds(1) };
 
+    // text both ways, a notification's too, for a service manager over the router
+    private static readonly TextPayloads Text = new();
+
     private static readonly byte[] NotAnEnvelope = [0x0a, 0x14];
 
     // a whole envelope's prefix, of kind 0x17, which no side takes
@@ -30,7 +33,7 @@ public sealed class RouterClientTests
 
     // helpers
 
-    private static Func<JsonElement, Requester<JsonElement>> RequesterOf(ServiceManager services, string procedureName)
+    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(ServiceManager services, string procedureName)
     {
         return services.GetRequest(
             InteropService.ProcedureOf(procedureName),
@@ -63,14 +66,14 @@ public sealed class RouterClientTests
         return new RequestHeader { CallId = callId, ServiceId = 2, ProcedureId = 1 };
     }
 
-    private static Envelope ResultOf(uint callId, SessionAnnouncement? session = null)
+    private static Envelope ResultOf(uint callId, Credential? announcement = null)
     {
-        return new Envelope { Header = new ResultHeader { CallId = callId, Session = session } };
+        return new Envelope { Header = new ResultHeader { CallId = callId, Credential = announcement } };
     }
 
-    private static Envelope FailureOf(uint callId, ProtocolCode code, SessionAnnouncement? session = null)
+    private static Envelope FailureOf(uint callId, ProtocolCode code, Credential? announcement = null)
     {
-        return new Envelope { Header = new FailureHeader { CallId = callId, Session = session }, Failure = Failure.OfProtocol(code) };
+        return new Envelope { Header = new FailureHeader { CallId = callId, Credential = announcement }, Failure = Failure.OfProtocol(code) };
     }
 
     private static Envelope NotificationOf(uint callId, byte value = 5)
@@ -179,10 +182,13 @@ public sealed class RouterClientTests
         var server = new Registrations(RouterSide.Server);
         var client = new Registrations(RouterSide.Client);
 
+        // the destinations go to a server's router, which takes none of these resolvers
+        using var link = new Link();
+
         InteropService.Offer(new ServiceManager(server), (new SessionManager<string>(), new BeforeRequest((_) =>
         {
             return true;
-        })));
+        }), link.Server));
         InteropService.OfferClient(new ServiceManager(client));
 
         Assert.Equal(
@@ -213,7 +219,7 @@ public sealed class RouterClientTests
 
         using var router = new RouterClient(transport, new RouterClientOptions { Scheduler = scheduler, ResolverScheduler = scheduler });
 
-        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Session = Token } }));
+        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 9, Credential = Token } }));
 
         var waiting = RequesterOf(new ServiceManager(router), "slow")(JsonOf("{\"milliseconds\":3600000}"))();
 
@@ -225,6 +231,29 @@ public sealed class RouterClientTests
             return waiting.WaitAsync(Patience, Cancelled);
         });
         Assert.Null(router.SessionToken);
+    }
+
+    [Fact]
+    public void Runs_on_its_transport_s_clock_and_refuses_another()
+    {
+        var time = new FakeTimeProvider();
+        var transport = new ScriptedTransport { Clock = time };
+
+        using var router = new RouterClient(transport);
+        using var same = new RouterClient(transport, new RouterClientOptions { Clock = time });
+        using var told = new RouterClient(new ScriptedTransport());
+
+        Assert.Equal((time, time), (router.Clock, same.Clock));
+        Assert.Same(TimeProvider.System, told.Clock);
+
+        var refusal = Assert.Throws<ArgumentException>(() =>
+        {
+            return new RouterClient(transport, new RouterClientOptions { Clock = TimeProvider.System });
+        });
+
+        Assert.Equal(
+            "a client's router runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            refusal.Message);
     }
 
     [Fact]
@@ -273,7 +302,7 @@ public sealed class RouterClientTests
     {
         var time = new FakeTimeProvider();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var given = TimeSpan.FromMilliseconds(10);
 
@@ -301,7 +330,7 @@ public sealed class RouterClientTests
     }
 
     [Fact]
-    public async Task Learns_the_session_from_every_answer_paired_or_not_keeps_it_loses_it_and_never_presents_it()
+    public async Task Learns_the_session_from_every_answer_paired_or_not_keeps_it_loses_it_and_presents_it_on_no_call_that_does_not_ask_for_it()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -323,7 +352,7 @@ public sealed class RouterClientTests
         // the end announced loses it
         var second = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
 
-        transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired, SessionAnnouncement.Ended));
+        transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired, Credential.None));
 
         var ended = await Assert.ThrowsAsync<FailureException>(() =>
         {
@@ -341,7 +370,7 @@ public sealed class RouterClientTests
         Assert.Null(router.SessionToken);
         Assert.All(transport.Envelopes, (envelope) =>
         {
-            Assert.Null(Assert.IsType<RequestHeader>(envelope.Header).SessionToken);
+            Assert.Null(Assert.IsType<RequestHeader>(envelope.Header).Credential);
         });
     }
 
@@ -477,7 +506,7 @@ public sealed class RouterClientTests
     {
         var time = new FakeTimeProvider();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
         var given = TimeSpan.FromMilliseconds(10);
@@ -545,11 +574,11 @@ public sealed class RouterClientTests
     {
         var time = new FakeTimeProvider();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
         var given = TimeSpan.FromMilliseconds(20);
-        var ending = FailureOf(1, ProtocolCode.SessionRequired, SessionAnnouncement.Ended);
+        var ending = FailureOf(1, ProtocolCode.SessionRequired, Credential.None);
 
         var subscribing = await scripted.Subscribe(notification, Options with { Timeout = given });
 
@@ -574,15 +603,15 @@ public sealed class RouterClientTests
     }
 
     [Fact]
-    public async Task A_subscription_given_no_time_let_go_of_is_cancelled_and_its_call_id_reserved_5_s_or_until_the_connection_closes()
+    public async Task A_subscription_that_waits_without_end_let_go_of_is_cancelled_and_its_call_id_reserved_5_s_or_until_the_connection_closes()
     {
         var time = new RecordingTime();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
 
-        var subscribing = await scripted.Subscribe(notification, Options with { Timeout = TimeSpan.Zero });
+        var subscribing = await scripted.Subscribe(notification, Options with { Timeout = Timeout.InfiniteTimeSpan });
 
         transport.Deliver(ResultOf(1));
         await subscribing.WaitAsync(Patience, Cancelled);
@@ -736,7 +765,7 @@ public sealed class RouterClientTests
 
         // the session ended: the server ends the subscription, and announces the end; one on its way
         // behind it is dropped in silence
-        transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired, SessionAnnouncement.Ended));
+        transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired, Credential.None));
         transport.Deliver(NotificationOf(1));
         await scripted.Settle();
         Assert.Empty(scripted.Errors);
@@ -812,7 +841,11 @@ public sealed class RouterClientTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return router.Notify(ReadOnlyMemory<byte>.Empty, new NotifyRequest(Service.Address, null, null)).WaitAsync(Patience, Cancelled);
+            return router.Notify(ReadOnlyMemory<byte>.Empty, new NotifyRequest { Procedure = Service.Address }).WaitAsync(Patience, Cancelled);
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return router.Notify(new FormatException("unwritten"), new NotifyRequest { Procedure = Service.Address }).WaitAsync(Patience, Cancelled);
         });
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
@@ -855,7 +888,7 @@ public sealed class RouterClientTests
     {
         var time = new RecordingTime();
 
-        using var scripted = new ScriptedRouter(time: time);
+        using var scripted = new ScriptedRouter(clock: time);
         var (router, transport) = (scripted.Router, scripted.Transport);
         var notification = new ScriptedNotification(Service);
 
@@ -1075,6 +1108,91 @@ public sealed class RouterClientTests
     }
 
     [Fact]
+    public async Task Presents_OPAQUE_the_session_it_learned_on_a_call_that_asks_and_on_no_other_one_that_asks_before_any_session_fails_before_it_goes_SESSION_REQUIRED()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        async Task<FailureException> Refused()
+        {
+            return await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.Opaque() }))
+                    .WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        var before = await Refused();
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (before.Code, before.Origin));
+        Assert.Empty(transport.Sent);
+
+        // learned, it goes on a call that asks, and on no other
+        transport.Deliver(ResultOf(99, Token));
+        await scripted.Settle();
+        _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.Opaque() }));
+        _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+        _ = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(options: Options with { Credential = Credential.None }));
+        await scripted.Settle();
+
+        Assert.Equal(
+            [(1u, Credential.Opaque(Token)), (3u, null), (5u, null)],
+            transport.Envelopes.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, Assert.IsType<RequestHeader>(envelope.Header).Credential);
+            }));
+
+        // once it ended, a call that asks fails before it goes again
+        transport.Deliver(ResultOf(98, Credential.None));
+        await scripted.Settle();
+
+        var ended = await Refused();
+
+        Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (ended.Code, ended.Origin));
+        Assert.Equal(3, transport.Sent.Count);
+    }
+
+    [Fact]
+    public async Task The_server_s_requests_resolve_their_credential_as_a_server_does_none_and_the_session_it_learned_run_in_it_another_token_is_refused_SESSION_REQUIRED_a_JWT_CREDENTIAL_UNSUPPORTED()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var sessions = new List<(uint CallId, bool IsInSession)>();
+
+        router.RegisterResolver(new ScriptedResolver(Service, (props) =>
+        {
+            sessions.Add((props.Header.CallId, props.Session is not null));
+
+            return router.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(props.ConnectionHandle, props.Header));
+        }));
+
+        // none runs in none while it learned none, and an OPAQUE does not hold
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(2), Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(4) with { Credential = Token }, Payload = new byte[] { 1 } });
+        await scripted.Settle();
+
+        // learned, none and its token run in it; another token does not hold, and a JWT is a
+        // scheme it takes none of
+        transport.Deliver(ResultOf(99, Token));
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(6), Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(8) with { Credential = Token }, Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(10) with { Credential = SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA") }, Payload = new byte[] { 1 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(12) with { Credential = Credential.Jwt("a.b.c") }, Payload = new byte[] { 1 } });
+        await scripted.Settle();
+
+        Assert.Equal([(2u, false), (6u, true), (8u, true)], sessions);
+        Assert.Equal(
+            [(4u, ProtocolCode.SessionRequired), (10u, ProtocolCode.SessionRequired), (12u, ProtocolCode.CredentialUnsupported)],
+            transport.Failures);
+
+        // a client announces nothing
+        Assert.All(transport.Envelopes, (envelope) =>
+        {
+            Assert.True(envelope.Header is ResultHeader { Credential: null } or FailureHeader { Credential: null });
+        });
+    }
+
+    [Fact]
     public async Task The_server_s_requests_cancelled_by_the_server_abort_their_resolver_s_signal_and_are_answered_by_nothing()
     {
         using var scripted = new ScriptedRouter();
@@ -1163,7 +1281,12 @@ public sealed class RouterClientTests
         await scripted.Settle();
         transport.Deliver(new Envelope { Header = RequestHeaderOf(6) with { ServiceId = 99 } });
         await scripted.Settle();
-        Assert.Equal([failure, failure, refusal], scripted.Errors);
+
+        // each failed resolver answered PROCEDURE_FAILED, the one the transport refused reported too
+        Assert.Equal([failure, failure, refusal, refusal], scripted.Errors);
+        Assert.Equal(
+            [(2u, ProtocolCode.ProcedureFailed), (4u, ProtocolCode.ProcedureFailed), (6u, ProtocolCode.ServiceUnknown)],
+            transport.Failures);
     }
 
     [Fact]
@@ -1206,15 +1329,15 @@ public sealed class RouterClientTests
     }
 
     [Fact]
-    public async Task Tells_each_envelope_out_and_in_with_its_header_and_never_its_session_token()
+    public async Task Tells_each_envelope_out_and_in_with_its_connection_server_its_header_and_never_its_session_token()
     {
         using var scripted = new ScriptedRouter();
         var (router, transport) = (scripted.Router, scripted.Transport);
-        var seen = new List<(DebugDirection Direction, IEnvelopeHeader Header, bool HasSessionToken)>();
+        var seen = new List<(DebugDirection Direction, TracedEnvelope Envelope)>();
 
         router.Debug += (direction, envelope) =>
         {
-            seen.Add((direction, envelope.Header, envelope.HasSessionToken));
+            seen.Add((direction, envelope));
         };
 
         var answering = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
@@ -1222,9 +1345,210 @@ public sealed class RouterClientTests
         transport.Deliver(ResultOf(1, Token));
         Assert.Equal(1u, (await answering.WaitAsync(Patience, Cancelled)).Header.CallId);
         await scripted.Settle();
+
+        // on its one connection, the server, the session announced traced by its scheme alone
         Assert.Equal(
-            [(DebugDirection.Tx, RequestHeaderOf(1), false), (DebugDirection.Rx, new ResultHeader { CallId = 1 }, true)],
+            [
+                (DebugDirection.Tx, new TracedEnvelope(RouterClient.ServerConnectionHandle, RequestHeaderOf(1))),
+                (DebugDirection.Rx, new TracedEnvelope(RouterClient.ServerConnectionHandle, new ResultHeader { CallId = 1, Credential = Credential.Opaque() })),
+            ],
             seen);
+    }
+
+    [Fact]
+    public async Task Tells_a_call_s_steps_with_the_call_id_its_REQUEST_carries()
+    {
+        // a payload past 1,000 bytes goes as a transfer
+        using var scripted = new ScriptedRouter(new RouterLimits { ChunkBytes = 1_000, MaximumEnvelopeBytes = 1_000, WindowBytes = 2_000 });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var services = new ServiceManager(router);
+        var asking = services.GetRequest(Service, new RequestDependencies<string, string> { Serializer = Text });
+        var envelopes = new List<(DebugDirection Direction, EnvelopeKind Kind, uint CallId, bool IsTransfer)>();
+        var steps = new List<(DebugDirection Direction, uint? CallId)>();
+
+        router.Debug += (direction, envelope) =>
+        {
+            lock (envelopes)
+            {
+                envelopes.Add((direction, envelope.Header.Kind, envelope.Header.CallId, envelope.Header is RequestHeader { Total: not null }));
+            }
+        };
+        services.Debug += (_, told) =>
+        {
+            lock (steps)
+            {
+                steps.Add((told.Direction, told.CallId));
+            }
+        };
+
+        var whole = asking("a")();
+
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 1 }, Payload = Text.Encode("b") });
+        Assert.Equal("b", await whole.WaitAsync(Patience, Cancelled));
+
+        // its opening carries its call id as a whole request does; the server refuses it there
+        var opening = asking(new string('x', 3_000))();
+
+        transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, (await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return opening.WaitAsync(Patience, Cancelled);
+        })).Code);
+        await scripted.Settle();
+
+        // * each trace in its own order: no order between a step and its envelope
+        Assert.Equal(
+            [
+                (DebugDirection.Tx, EnvelopeKind.Request, 1u, false),
+                (DebugDirection.Rx, EnvelopeKind.Result, 1u, false),
+                (DebugDirection.Tx, EnvelopeKind.Request, 3u, true),
+                (DebugDirection.Rx, EnvelopeKind.Failure, 3u, false),
+            ],
+            envelopes);
+        Assert.Equal<(DebugDirection, uint?)>(
+            [(DebugDirection.Tx, 1), (DebugDirection.Rx, 1), (DebugDirection.Tx, 3), (DebugDirection.Rx, 3)],
+            steps);
+    }
+
+    [Fact]
+    public async Task Two_calls_to_one_procedure_started_in_one_millisecond_and_answered_in_one_batch_name_each_its_own_call_id()
+    {
+        var start = DateTimeOffset.FromUnixTimeMilliseconds(1_767_225_600_000);
+
+        // a clock that does not move
+        using var scripted = new ScriptedRouter(clock: new FakeTimeProvider(start));
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var services = new ServiceManager(router);
+        var asking = services.GetRequest(Service, new RequestDependencies<string, string> { Serializer = Text });
+        var steps = new List<(DebugDirection Direction, uint? CallId, DateTimeOffset StartedAt, object? Seen)>();
+
+        services.Debug += (_, told) =>
+        {
+            lock (steps)
+            {
+                steps.Add((told.Direction, told.CallId, told.StartedAt, told.Direction == DebugDirection.Tx ? told.Tx : told.Rx));
+            }
+        };
+
+        var first = asking("a")();
+        var second = asking("b")();
+
+        // one batch, the second call's answer first
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 3 }, Payload = Text.Encode("answers b") });
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 1 }, Payload = Text.Encode("answers a") });
+
+        Assert.Equal(["answers a", "answers b"], await Task.WhenAll(first, second).WaitAsync(Patience, Cancelled));
+
+        // * this side tells calls made from one thread in no order among themselves: each by its id
+        IEnumerable<(DebugDirection, uint?, DateTimeOffset, object?)> Told(DebugDirection direction)
+        {
+            return steps
+                .Where((step) =>
+                {
+                    return step.Direction == direction;
+                })
+                .OrderBy((step) =>
+                {
+                    return step.CallId;
+                })
+                .Select((step) =>
+                {
+                    return (step.Direction, step.CallId, step.StartedAt, step.Seen);
+                });
+        }
+
+        Assert.Equal<(DebugDirection, uint?, DateTimeOffset, object?)>(
+            [(DebugDirection.Tx, 1, start, "a"), (DebugDirection.Tx, 3, start, "b")],
+            Told(DebugDirection.Tx));
+        Assert.Equal<(DebugDirection, uint?, DateTimeOffset, object?)>(
+            [(DebugDirection.Rx, 1, start, "answers a"), (DebugDirection.Rx, 3, start, "answers b")],
+            Told(DebugDirection.Rx));
+    }
+
+    [Fact]
+    public async Task A_subscribing_call_binds_its_subscription_before_debug_hears_its_tx_step()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var services = new ServiceManager(router);
+        var notification = services.GetNotification(Service, new NotificationDependencies<string, string, string> { Serializer = Text });
+        var heard = new List<string>();
+        var told = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // a notification right behind its result, delivered as the tx step is told
+        services.Debug += (_, step) =>
+        {
+            if (step is { Direction: DebugDirection.Tx, Type: DebugType.Request, CallId: { } callId })
+            {
+                transport.Deliver(new Envelope { Header = new NotificationHeader { CallId = callId }, Payload = Text.Encode("first news") });
+                told.TrySetResult();
+            }
+        };
+
+        var registering = notification.Register("subscribe", (news) =>
+        {
+            lock (heard)
+            {
+                heard.Add(news);
+            }
+
+            return Task.CompletedTask;
+        })();
+
+        // its result once its tx step was told, its request on its way by then: the registration
+        // asks it from another thread, which settling the router does not wait for
+        await told.Task.WaitAsync(Patience, Cancelled);
+        transport.Deliver(ResultOf(1));
+        await using var registration = await registering.WaitAsync(Patience, Cancelled);
+        await scripted.Settle();
+
+        Assert.Equal(["first news"], heard);
+        Assert.Empty(scripted.Errors);
+    }
+
+    // the C# side's alone: one thread runs the TypeScript side, which has no scheduler to stay off
+    [Fact]
+    public async Task Tells_a_call_s_tx_step_off_its_router_s_scheduler()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var services = new ServiceManager(router);
+        var told = new List<(bool IsOnScheduler, bool IsAnswered)>();
+
+        using var answered = new ManualResetEventSlim();
+
+        // its answer, as the router takes it, on its scheduler
+        router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Rx && envelope.Header is ResultHeader)
+            {
+                answered.Set();
+            }
+        };
+
+        // * a listener that blocks until its call's answer came: on the router's scheduler, the
+        // answer would wait behind it, and it would wait in vain
+        services.Debug += (_, step) =>
+        {
+            if (step is { Direction: DebugDirection.Tx, CallId: { } callId })
+            {
+                var isOnScheduler = router.Core.Loop.IsCurrent;
+
+                transport.Deliver(new Envelope { Header = new ResultHeader { CallId = callId }, Payload = Text.Encode("b") });
+
+                var isAnswered = answered.Wait(Patience);
+
+                lock (told)
+                {
+                    told.Add((isOnScheduler, isAnswered));
+                }
+            }
+        };
+
+        Assert.Equal(
+            "b",
+            await services.GetRequest(Service, new RequestDependencies<string, string> { Serializer = Text })("a")().WaitAsync(Patience, Cancelled));
+        Assert.Equal([(false, true)], told);
     }
 
     [Fact]
@@ -1263,6 +1587,8 @@ public sealed class RouterClientTests
     // a router that records the resolvers registered on it, and does nothing else
     private sealed class Registrations(RouterSide side) : IRouterLike
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public List<string> Names { get; } = [];
 
         public RouterSide Side
@@ -1288,7 +1614,21 @@ public sealed class RouterClientTests
             return Task.FromException<RouterResult>(new InvalidOperationException("nothing is asked here"));
         }
 
+        public ProcedureSeries? DeclareRequester(Procedure procedure)
+        {
+            return null;
+        }
+
+        public void Report(Exception reason, string? connectionHandle)
+        {
+        }
+
         public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task Notify(Exception unwritten, NotifyRequest request)
         {
             return Task.CompletedTask;
         }
@@ -1328,12 +1668,34 @@ public sealed class RouterClientTests
         }
     }
 
+    // text in UTF-8, a request, its result and a notification alike
+    private sealed class TextPayloads : INotificationSerializerClient<string, string, string>
+    {
+        public ReadOnlyMemory<byte> Encode(string request)
+        {
+            return Payloads.WriteText(request);
+        }
+
+        public string Decode(ReadOnlyMemory<byte> response)
+        {
+            return Payloads.ReadText(response);
+        }
+
+        public string DecodeNotification(ReadOnlyMemory<byte> notification)
+        {
+            return Payloads.ReadText(notification);
+        }
+    }
+
     // a client's transport a test delivers to and closes, which records what it sends, read as the
     // server reads it, and fails its sends once told to
     private sealed class ScriptedTransport : IRouterClientTransport
     {
         private readonly Lock _gate = new();
         private readonly List<ReadOnlyMemory<byte>> _sent = [];
+        private readonly List<string?> _carried = [];
+
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<TransportMessage>? Message;
 
@@ -1341,6 +1703,23 @@ public sealed class RouterClientTests
 
         // what a send fails with, once set: what it was given is recorded all the same
         public Exception? Refusal { get; set; }
+
+        // whether it carries a credential beside an envelope, and is secure: in process, it is both
+        public bool CarriesCredential { get; set; } = true;
+
+        public bool IsSecure { get; set; } = true;
+
+        // what it carried beside each envelope sent, in order
+        public List<string?> Carried
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return [.. _carried];
+                }
+            }
+        }
 
         public List<ReadOnlyMemory<byte>> Sent
         {
@@ -1425,6 +1804,18 @@ public sealed class RouterClientTests
             Deliver(EnvelopeCodec.WriteEnvelope(envelope));
         }
 
+        // an envelope that came by a way that keeps no order with the answers, which it may overtake
+        public void Overtaking(Envelope envelope)
+        {
+            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { MayOvertake = true });
+        }
+
+        // an envelope, with what the transport carried beside it
+        public void Carrying(Envelope envelope, string carried)
+        {
+            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { Credential = carried });
+        }
+
         public void DeliverText(byte[] bytes)
         {
             Message?.Invoke(new TransportMessage(bytes, true));
@@ -1435,11 +1826,14 @@ public sealed class RouterClientTests
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             lock (_gate)
             {
                 _sent.Add(bytes.ToArray());
+                _carried.Add(message.Credential);
             }
 
             return Refusal is { } refusal ? Task.FromException(refusal) : Task.CompletedTask;
@@ -1447,27 +1841,33 @@ public sealed class RouterClientTests
     }
 
     // a client's router over a scripted transport, its loop and its callbacks on one scheduler a test
-    // settles, and the errors it raised; its clock moves only when a test moves it, so no call times
-    // out and no reservation ends while a test looks
+    // settles, and the errors it raised; its transport's clock, which the router runs on, moves only
+    // when a test moves it, so no call times out and no reservation ends while a test looks
     private sealed class ScriptedRouter : IDisposable
     {
-        public ScriptedRouter(RouterLimits? limits = null, TimeProvider? time = null)
+        public ScriptedRouter(RouterLimits? limits = null, TimeProvider? clock = null)
+            : this(new RouterClientOptions { Limits = limits, Clock = clock })
+        {
+        }
+
+        // a router of the options given, on its own scheduler, and on a clock only a test moves
+        // unless they give one
+        public ScriptedRouter(RouterClientOptions options)
         {
             var scheduler = new SerialScheduler();
 
+            Transport = new ScriptedTransport { Clock = options.Clock ?? new FakeTimeProvider() };
             Router = new RouterClient(
                 Transport,
-                new RouterClientOptions
+                options with
                 {
-                    Limits = limits,
                     ResolverScheduler = scheduler,
                     Scheduler = scheduler,
-                    Time = time ?? new FakeTimeProvider(),
                 });
             Router.Error += Errors.Add;
         }
 
-        public ScriptedTransport Transport { get; } = new();
+        public ScriptedTransport Transport { get; }
 
         public RouterClient Router { get; }
 
@@ -1583,6 +1983,9 @@ public sealed class RouterClientTests
             }
         }
 
+        // what its admission refuses every request with; none admits each
+        public Failure? Refusal { get; init; }
+
         public Task Handle(RequestResolverProps props)
         {
             return handle(props);
@@ -1590,7 +1993,7 @@ public sealed class RouterClientTests
 
         public Failure? Admit(AdmissionRequest request)
         {
-            return null;
+            return Refusal;
         }
     }
 
@@ -1688,12 +2091,13 @@ public sealed class RouterClientTests
         private readonly ClientEnd _client = new();
         private readonly ServerEnd _server = new();
 
-        public Link()
+        // both ends given `registry`, when given: one registry summing the two routers
+        public Link(MetricsRegistry? registry = null)
         {
             _client.Peer = _server;
             _server.Peer = _client;
-            Client = new RouterClient(_client);
-            Facade = new Server<string>(_server);
+            Client = new RouterClient(_client, new RouterClientOptions { MetricsRegistry = registry });
+            Facade = new Server<string>(_server, new ServerOptions { MetricsRegistry = registry });
             ClientServices = new ServiceManager(Client);
             ServerServices = Facade.Services;
             InteropService.Offer(Facade);
@@ -1738,6 +2142,8 @@ public sealed class RouterClientTests
 
         private sealed class ClientEnd : IRouterClientTransport
         {
+            public TimeProvider Clock { get; init; } = TimeProvider.System;
+
             public event Action<TransportMessage>? Message;
 
             public event Action<bool, bool>? Close;
@@ -1754,8 +2160,10 @@ public sealed class RouterClientTests
                 Close?.Invoke(false, false);
             }
 
-            public Task Send(ReadOnlyMemory<byte> bytes)
+            public Task Send(TransportMessage message)
             {
+                var bytes = message.Bytes;
+
                 Peer!.Deliver(bytes);
 
                 return Task.CompletedTask;
@@ -1764,6 +2172,8 @@ public sealed class RouterClientTests
 
         private sealed class ServerEnd : IServerTransport
         {
+            public TimeProvider Clock { get; init; } = TimeProvider.System;
+
             public event Action<string>? Connection;
 
             public event Action<TransportMessage, string>? Message;
@@ -1797,8 +2207,10 @@ public sealed class RouterClientTests
                 return Task.CompletedTask;
             }
 
-            public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+            public Task Send(TransportMessage message, string connectionHandle)
             {
+                var bytes = message.Bytes;
+
                 Peer!.Deliver(bytes);
 
                 return Task.CompletedTask;
@@ -1818,7 +2230,7 @@ public sealed class RouterClientTests
         var first = RequesterOf(services, "echo")(JsonOf("null"))();
 
         await scheduler.WhenIdle();
-        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 1, Session = Token }, Payload = "null"u8.ToArray() }));
+        transport.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new ResultHeader { CallId = 1, Credential = Token }, Payload = "null"u8.ToArray() }));
         await first.WaitAsync(Patience, Cancelled);
         Assert.Equal(Token, router.SessionToken);
 
@@ -1837,6 +2249,8 @@ public sealed class RouterClientTests
     // a client's transport a test delivers to, and whose connection it replaces, as a reconnection does
     private sealed class ReconnectingTransport : IRouterClientTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<TransportMessage>? Message;
 
         public event Action? Reconnect;
@@ -1863,8 +2277,10 @@ public sealed class RouterClientTests
             Reconnect?.Invoke();
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             return Task.CompletedTask;
         }
     }

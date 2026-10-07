@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "What Bead's conformance files share",
+  "$defs": {
+    "comment": {
+      "description": "What a file holds and how to read it, line by line.",
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "specVersion": {
+      "description": "The version of the spec a file belongs to, as spec/spec.md states it: Semantic Versioning.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "debuggingVersion": {
+      "description": "The version of the companion a file belongs to, as spec/debugging.md states it: Semantic Versioning.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "name": {
+      "description": "What an entry is about, unique in its file and its group.",
+      "type": "string",
+      "minLength": 1
+    },
+    "wallClock": {
+      "description": "Where a file's wall clock starts, an RFC 3339 instant in UTC: both sides' test clocks start there.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "advance": {
+      "description": "Milliseconds the given clock steps through, from due to due, its timers fired in their order.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "wall": {
+      "description": "Milliseconds the wall clock moves alone, forward or back, as a clock set by hand moves.",
+      "type": "integer",
+      "minimum": -2147483647,
+      "maximum": 2147483647,
+      "not": { "const": 0 }
+    },
+    "timer": {
+      "description": "A timer armed on the side's given clock, due exactly these milliseconds from now.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "duration": {
+      "description": "A duration a side is given, a bound or a timeout, in milliseconds as spec 1.4 holds one: 1 to 2^31 - 1.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "differs": {
+      "description": "The rows of docs/support.md an entry crosses, each naming it, and the language each excuses from it.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["row", "language"],
+        "additionalProperties": false,
+        "properties": {
+          "row": { "type": "string", "minLength": 1 },
+          "language": { "enum": ["TypeScript", "C#"] }
+        }
+      }
+    },
+    "clauses": {
+      "description": "The units an entry checks of the document its file belongs to, spec/spec.md, or spec/debugging.md for a file that repeats its debuggingVersion: a clause, 9.2 or 9.0; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[1-9][0-9]*\\.(0|[1-9][0-9]*)(\\.[1-9][0-9]*)?$" }
+    },
+    "bytes": {
+      "description": "Bytes in hexadecimal, two capital digits each, spaces aside; a bar parts a header from what follows it.",
+      "type": "string",
+      "pattern": "^(?:[0-9A-F]{2}[ |]*)*$"
+    },
+    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "u53": {
+      "description": "A 64-bit field, within the integers every language holds exactly: 0 to 2^53 - 1.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "serviceId": {
+      "description": "A service's id, as spec 16.2 holds it: 1 to 65,535; 0 is the protocol's (16.3).",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "procedureId": {
+      "description": "A procedure's id, as spec 16.2 holds it: 1 to 65,535.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "serviceRevision": {
+      "description": "A service's revision, as spec 16.2 holds it: 1 to 2^31 - 1; 0 means unknown, and is never declared (16.9).",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "procedureName": {
+      "description": "A procedure's name, spec 16.4's procedure-name: a lower-case ASCII letter, then 62 ASCII letters or digits at most; the lookahead ends it where nothing follows, where a $ would let a line feed by.",
+      "type": "string",
+      "pattern": "^[a-z][A-Za-z0-9]{0,62}(?![\\s\\S])"
+    },
+    "kind": {
+      "description": "REQUEST 16, RESULT 17, FAILURE 18, NOTIFICATION 19, CHUNK 20, CREDIT 21, CANCEL 22.",
+      "enum": [16, 17, 18, 19, 20, 21, 22]
+    },
+    "scope": {
+      "description": "PROTOCOL 0, APPLICATION 1.",
+      "enum": [0, 1]
+    },
+    "protocolCode": {
+      "description": "A code of the protocol, as spec/spec.md section 8 names them.",
+      "enum": [1, 2, 3, 4, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 36, 48, 49, 50, 51, 64, 65]
+    },
+    "code": {
+      "description": "A failure's code, the protocol's or the procedure's own: never 0.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "credential": {
+      "description": "A header's CREDENTIAL block, as spec 4.4 lays it out: its scheme, by name, or by its number for a scheme to come, and its credential. OPAQUE has its 16 bytes, never all zero; JWT, its token; NONE and ELSEWHERE, nothing; a scheme to come, its bytes, which may be none.",
+      "type": "object",
+      "required": ["scheme"],
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": { "scheme": { "enum": ["NONE", "ELSEWHERE"] } }
+        },
+        {
+          "required": ["bytes"],
+          "additionalProperties": false,
+          "properties": {
+            "scheme": { "const": "OPAQUE" },
+            "bytes": {
+              "description": "A session's token: 16 bytes in hexadecimal, two capital digits each, a space between, never all zero.",
+              "type": "string",
+              "pattern": "^[0-9A-F]{2}( [0-9A-F]{2}){15}$",
+              "not": { "pattern": "^00( 00){15}$" }
+            }
+          }
+        },
+        {
+          "required": ["token"],
+          "additionalProperties": false,
+          "properties": {
+            "scheme": { "const": "JWT" },
+            "token": {
+              "description": "A token in JWS Compact Serialization, base64url and periods, a byte a character: 1 to 1,004 of them, the most a header leaves.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,1004}$"
+            }
+          }
+        },
+        {
+          "required": ["bytes"],
+          "additionalProperties": false,
+          "properties": {
+            "scheme": { "type": "integer", "minimum": 4, "maximum": 65535 },
+            "bytes": {
+              "description": "Its bytes in hexadecimal, two capital digits each, a space between: none to 1,004, the most a header leaves.",
+              "type": "string",
+              "pattern": "^(?:[0-9A-F]{2}(?: [0-9A-F]{2}){0,1003})?$"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

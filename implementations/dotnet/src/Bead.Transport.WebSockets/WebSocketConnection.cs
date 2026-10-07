@@ -26,24 +26,25 @@ internal sealed class WebSocketConnection
     public WebSocket Socket { get; }
 
     /// <summary>
-    /// Throws an <see cref="ArgumentOutOfRangeException"/> unless <paramref name="heartbeat"/> is a
-    /// whole number of milliseconds from 1 to 2³¹ − 1, the longest a timer holds, or
-    /// <see cref="Timeout.InfiniteTimeSpan"/> for none.
+    /// <paramref name="heartbeat"/> held: from 1 to <see cref="Clocks.LongestTimer"/> milliseconds,
+    /// rounded to the nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> for none; any
+    /// other, zero among them, is an <see cref="ArgumentOutOfRangeException"/> naming the option
+    /// <paramref name="option"/>.
     /// </summary>
-    public static void AssertHeartbeat(TimeSpan heartbeat, string parameterName)
+    public static TimeSpan AssertHeartbeat(TimeSpan heartbeat, string option)
     {
-        if (heartbeat == Timeout.InfiniteTimeSpan
-            || (heartbeat > TimeSpan.Zero
-                && heartbeat <= TimeSpan.FromMilliseconds(int.MaxValue)
-                && heartbeat.Ticks % TimeSpan.TicksPerMillisecond == 0))
-        {
-            return;
-        }
+        return Clocks.AssertHeld(("a heartbeat", option), heartbeat);
+    }
 
-        throw new ArgumentOutOfRangeException(
-            parameterName,
-            heartbeat,
-            $"a heartbeat is a whole number of milliseconds from 1 to {int.MaxValue}, or Timeout.InfiniteTimeSpan for none");
+    /// <summary>
+    /// <paramref name="closeTimeout"/> held: from 1 to <see cref="Clocks.LongestTimer"/>
+    /// milliseconds, rounded to the nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> to
+    /// wait on the peer without end; any other, zero among them, is an
+    /// <see cref="ArgumentOutOfRangeException"/> naming the option <paramref name="option"/>.
+    /// </summary>
+    public static TimeSpan AssertCloseTimeout(TimeSpan closeTimeout, string option)
+    {
+        return Clocks.AssertHeld(("a close timeout", option), closeTimeout);
     }
 
     // what goes out once the socket is not open goes nowhere, as a send to a socket closing does
@@ -60,12 +61,13 @@ internal sealed class WebSocketConnection
     }
 
     // sends a close behind what was sent before it, and drops the socket should the peer not
-    // answer it within its timeout
+    // answer it within its timeout: on the real clock, since it bounds the platform's own close
+    // against a peer that does not answer, never what Bead times
     public async Task Close(WebSocketCloseStatus status)
     {
         await Answer(status);
 
-        if (await Task.WhenAny(_ended.Task, Task.Delay(_bounds.CloseTimeout)) != _ended.Task)
+        if (await Task.WhenAny(_ended.Task, Task.Delay(_bounds.CloseTimeout, TimeProvider.System)) != _ended.Task)
         {
             Socket.Abort();
         }

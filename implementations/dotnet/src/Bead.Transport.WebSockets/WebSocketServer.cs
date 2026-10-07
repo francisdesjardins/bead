@@ -6,7 +6,8 @@ public sealed record WebSocketServerOptions
     /// <summary>
     /// The transport's options. A message is an envelope at most — the server's limits' — unless
     /// they say more; less is an <see cref="ArgumentException"/>: the socket would cut off envelopes
-    /// the router takes.
+    /// the router takes. Its clock is every layer's: the server's own options give none, or the
+    /// same.
     /// </summary>
     public WebSocketTransportServerOptions? Transport { get; init; }
 
@@ -30,7 +31,7 @@ public sealed record WebSocketServerOptions
 /// </code>
 /// </example>
 /// <typeparam name="TData">What a session keeps.</typeparam>
-public sealed class WebSocketServer<TData> : IAsyncDisposable
+public sealed class WebSocketServer<TData> : IBeadServer<TData>
 {
     private readonly Server<TData> _server;
 
@@ -89,6 +90,24 @@ public sealed class WebSocketServer<TData> : IAsyncDisposable
         get
         {
             return _server.RequireSession;
+        }
+    }
+
+    /// <summary>A relay's admission by default, as <see cref="Server{TData}.RequireSessionOrCredential"/> says.</summary>
+    public BeforeRequest RequireSessionOrCredential
+    {
+        get
+        {
+            return _server.RequireSessionOrCredential;
+        }
+    }
+
+    // its transport as every server's, beside its own type, which the application starts
+    IServerTransport IBeadServer<TData>.Transport
+    {
+        get
+        {
+            return Transport;
         }
     }
 

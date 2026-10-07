@@ -2,7 +2,8 @@ namespace Bead;
 
 /// <summary>
 /// The subscription places of a server's connections. A place is the one subscription a connection
-/// holds to a procedure, and the first call to take it keeps it. A call in a place is in flight, from
+/// holds to a procedure for one session of its calls (spec 11.3) — its connection's, or a
+/// credential's — and the first call of that session to take it keeps it. A call in a place is in flight, from
 /// its subscribe until its answer goes out; established, once its answer went out; or waiting, when
 /// it was answered while another call, still in flight, held the place: the first one answered
 /// waits, and takes the place should the holder fall — its answer a failure, its answer not gone
@@ -31,26 +32,87 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     }
 
     /// <summary>
-    /// The calls a session's end ends on a connection: each established subscription, and each call
-    /// waiting, which no longer waits. A call in flight is left to its own answer.
+    /// The calls the end of a connection's session ends on its connection: each established
+    /// subscription that no credential's session bounds, and each call waiting, which no longer
+    /// waits. A call in flight is left to its own answer.
     /// </summary>
-    public List<uint> Drop(string connectionHandle)
+    public List<(uint CallId, ProcedureAddress Procedure)> Drop(string connectionHandle)
     {
+        return Drop(new Subscriber { ConnectionHandle = connectionHandle });
+    }
+
+    /// <summary>
+    /// The calls a session's end ends on a connection, the session of <paramref name="place"/>: each
+    /// established subscription it bounds, and each call waiting, which no longer waits. A call in
+    /// flight is left to its own answer.
+    /// </summary>
+    public List<(uint CallId, ProcedureAddress Procedure)> Drop(Subscriber place)
+    {
+        var connectionHandle = place.ConnectionHandle;
+
         // a call waiting on one in flight already believes it is subscribed: it ends as one that is
-        var successors = _waiting.Remove(connectionHandle, out var waiting) ? waiting.Values.ToList() : [];
+        List<Waiting> successors = [];
+
+        if (_waiting.TryGetValue(connectionHandle, out var waiting))
+        {
+            foreach (var (holder, successor) in waiting.ToList())
+            {
+                if (successor.Session?.Identifier == place.Identifier)
+                {
+                    waiting.Remove(holder);
+                    successors.Add(successor);
+                }
+            }
+
+            if (waiting.Count == 0)
+            {
+                _waiting.Remove(connectionHandle);
+            }
+        }
 
         return
         [
             .. notifications.Subscriptions(connectionHandle).Where((subscription) =>
             {
-                return !IsInFlight(new CallAddress(subscription.CallId, connectionHandle));
+                return subscription.Session == place.Identifier && !IsInFlight(new CallAddress(subscription.CallId, connectionHandle));
             }).Select((subscription) =>
             {
-                return subscription.CallId;
+                return (subscription.CallId, subscription.Procedure);
             }),
             .. successors.Select((successor) =>
             {
-                return successor.CallId;
+                return (successor.CallId, successor.Procedure);
+            }),
+        ];
+    }
+
+    /// <summary>
+    /// The subscriptions a close ends — a connection's alone, when given: each established, never one
+    /// in flight, which its call's own end counts, and each call waiting, which believes it is
+    /// subscribed; each by its procedure.
+    /// </summary>
+    public List<(CallAddress Call, ProcedureAddress Procedure)> Established(string? connectionHandle)
+    {
+        var subscriptions = connectionHandle is null ? notifications.Subscriptions() : notifications.Subscriptions(connectionHandle);
+
+        return
+        [
+            .. subscriptions.Where((subscription) =>
+            {
+                return !IsInFlight(new CallAddress(subscription.CallId, subscription.ConnectionHandle));
+            }).Select((subscription) =>
+            {
+                return (new CallAddress(subscription.CallId, subscription.ConnectionHandle), subscription.Procedure);
+            }),
+            .. _waiting.Where((waiting) =>
+            {
+                return connectionHandle is null || waiting.Key == connectionHandle;
+            }).SelectMany((waiting) =>
+            {
+                return waiting.Value.Values.Select((successor) =>
+                {
+                    return (new CallAddress(successor.CallId, waiting.Key), successor.Procedure);
+                });
             }),
         ];
     }
@@ -115,7 +177,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
             return null;
         }
 
-        var holder = answer.Notifies ? notifications.SubscriptionOf(answer.Procedure, connectionHandle) : null;
+        var holder = answer.Notifies ? notifications.SubscriptionOf(answer.Procedure, call.Subscriber) : null;
 
         // a notification's successful answer subscribes the connection under the request's call id,
         // before it goes out, so no notification sent once the requester has its answer can miss it
@@ -137,7 +199,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
                 _waiting[connectionHandle] = waiting;
             }
 
-            waiting[held] = new Waiting(callId, paced, answer.Procedure);
+            waiting[held] = new Waiting(callId, paced, answer.Procedure) { Session = call.Session };
         }
 
         if (!isSubscribed)
@@ -162,7 +224,7 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     /// </summary>
     public uint Subscribe(SubscribingCall call, ProcedureAddress procedure)
     {
-        if (notifications.SubscriptionOf(procedure, call.ConnectionHandle) is { } holder)
+        if (notifications.SubscriptionOf(procedure, call.Subscriber) is { } holder)
         {
             return holder;
         }
@@ -252,14 +314,23 @@ internal sealed class SubscriptionPlaces(NotificationManager notifications, Func
     // the place goes to the call that waited on it, while its connection is open and holds none
     private void HandOver(Waiting? successor, string connectionHandle)
     {
-        if (successor is { } waiting
-            && isConnected(connectionHandle)
-            && notifications.SubscriptionOf(waiting.Procedure, connectionHandle) is null)
+        if (successor is not { } waiting || !isConnected(connectionHandle))
         {
-            notifications.Register(waiting.Procedure, new SubscribingCall(waiting.CallId, connectionHandle, waiting.Paced));
+            return;
+        }
+
+        var call = new SubscribingCall(waiting.CallId, connectionHandle, waiting.Paced) { Session = waiting.Session };
+
+        if (notifications.SubscriptionOf(waiting.Procedure, call.Subscriber) is null)
+        {
+            notifications.Register(waiting.Procedure, call);
         }
     }
 
-    // a call answered while another holds its place, the procedure, and whether it asked to be paced
-    private sealed record Waiting(uint CallId, bool Paced, ProcedureAddress Procedure);
+    // a call answered while another holds its place, the procedure, whether it asked to be paced,
+    // and the session it runs in, its place's
+    private sealed record Waiting(uint CallId, bool Paced, ProcedureAddress Procedure)
+    {
+        public CallSession? Session { get; init; }
+    }
 }

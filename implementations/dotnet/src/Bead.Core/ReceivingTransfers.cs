@@ -16,7 +16,7 @@ internal sealed record ReceivingTransfersOptions
     /// <summary>The limits they hold by: the budget, the transfers at once, the window, the runs, the payload, the inactivity.</summary>
     public required RouterLimits Limits { get; init; }
 
-    /// <summary>The bytes a chunk before the last carries at least.</summary>
+    /// <summary>The bytes a chunk before the last carries, exactly, and the last at most.</summary>
     public required int PayloadBytesPerChunk { get; init; }
 
     /// <summary>Sends a credit a transfer is granted, on its call.</summary>
@@ -26,7 +26,7 @@ internal sealed record ReceivingTransfersOptions
     public required Action<Action> Post { get; init; }
 
     /// <summary>What their timers run on.</summary>
-    public required TimeProvider Time { get; init; }
+    public required TimeProvider Clock { get; init; }
 }
 
 /// <summary>
@@ -141,9 +141,9 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
     /// Opens a transfer on its call from its opening, or gives the failure that refuses it:
     /// <c>PAYLOAD_TOO_LARGE</c> when this side takes no transfer, for a total of 0 or past the
     /// payload's limit; <c>CAPACITY_EXCEEDED</c> when the connection holds its transfers already, or
-    /// the budget cannot hold the opening; <c>CHUNK_INVALID</c> for an opening that holds its whole
-    /// total. Given <c>OnStall</c>, a timer hears the transfer stall when nothing comes for the
-    /// inactivity allowed.
+    /// the budget cannot hold the opening; <c>CHUNK_INVALID</c> for an opening that carries no byte
+    /// of its payload, or holds its whole total. Given <c>OnStall</c>, a timer hears the transfer
+    /// stall when nothing comes for the inactivity allowed.
     /// </summary>
     public (Receiving? Receiving, Failure? Refusal) Open(
         ReadOnlyMemory<byte> opening,
@@ -236,7 +236,7 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
 
         var generation = state.Generation;
 
-        state.Timer = options.Time.CreateTimer(
+        state.Timer = options.Clock.CreateTimer(
             (_) =>
             {
                 options.Post(() =>

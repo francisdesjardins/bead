@@ -16,8 +16,10 @@ export * from './server';
 
 /** A worker server's layers and options: the transport's, and the rest as a server takes them. */
 export interface IWorkerServerOptions<Data = unknown>
-  extends Omit<IServerLayers<WorkerTransportServer, Data>, 'transport'>, IServerOptions {
-  /** The transport's options: where the worker hears its page, its `self`. */
+  extends
+    Omit<IServerLayers<WorkerTransportServer, Data>, 'transport'>,
+    Omit<IServerOptions, 'clock'> {
+  /** The transport's options: where the worker hears its page, its `self`; its clock, every layer's. */
   transport: IWorkerTransportServerOptions;
 }
 
@@ -51,7 +53,9 @@ export const createWorkerServer = <Data = unknown>(
     {
       closeOnCommandTimeout: options.closeOnCommandTimeout,
       connectionInactivityTimeout: options.connectionInactivityTimeout,
+      credentials: options.credentials,
       limits: options.limits,
+      metricsRegistry: options.metricsRegistry,
       pacing: options.pacing,
       relay: options.relay,
     }

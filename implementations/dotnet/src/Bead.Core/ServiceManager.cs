@@ -2,27 +2,63 @@ namespace Bead;
 
 /// <summary>
 /// The part of a router a service manager calls: it registers the resolvers, answers through the
-/// router, and names the side whose failures it raises.
+/// router, and names the side whose failures it raises and the clock the manager runs on.
 /// </summary>
 public interface IRouterLike
 {
     /// <summary>Which side the router is.</summary>
     RouterSide Side { get; }
 
-    /// <summary>Registers a resolver; a second one for its procedure is an <see cref="ArgumentException"/>.</summary>
+    /// <summary>What the router's timers run on: its transport's clock.</summary>
+    TimeProvider Clock { get; }
+
+    /// <summary>
+    /// Registers a resolver; one out of its range, off its form or against its kind (spec 16.10), or a
+    /// second one for its procedure, is an <see cref="ArgumentException"/>.
+    /// </summary>
     void RegisterResolver(IRequestResolver resolver);
 
     /// <summary>Answers a request, while its call is open.</summary>
     Task Respond(RouterAnswer response, AnswerTarget target);
 
-    /// <summary>Sends a request, and settles with its result.</summary>
+    /// <summary>
+    /// Sends a request, and settles with its result. <see cref="RouterRequest.OnCallId"/> hears the
+    /// call's id once the router drew it, before the request goes; a call refused before it draws
+    /// one is never heard, and a router that never calls it leaves every step of its calls unnamed.
+    /// It fails by the task it gives, never by a throw: the manager tells the call's tx step only
+    /// once it returned, so a router that throws loses that step.
+    /// </summary>
     Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request);
 
     /// <summary>
-    /// Notifies the connections subscribed to a procedure: a server's router does; a client's, which
+    /// Declares a requester of <paramref name="procedure"/> to the router's registry, as the
+    /// requester is made (spec/debugging.md 7.2), and gives the series each of its calls carries as
+    /// <see cref="RouterRequest.Series"/>; one out of its range, off its form or against its kind
+    /// (spec 16.10), first, or one the registry refuses, is an <see cref="ArgumentException"/>. A
+    /// router given no registry gives none.
+    /// </summary>
+    ProcedureSeries? DeclareRequester(Procedure procedure);
+
+    /// <summary>
+    /// What went wrong around the router that no call waits on — a debug listener's error among it —
+    /// told through its error event, in its turn, with <paramref name="connectionHandle"/> on a
+    /// server's: none for what belongs to no connection's step, a notification sent or heard.
+    /// </summary>
+    void Report(Exception reason, string? connectionHandle);
+
+    /// <summary>
+    /// Notifies the connections subscribed to a procedure: a server's router does. A client's, which
     /// notifies nobody, throws an <see cref="InvalidOperationException"/>.
     /// </summary>
     Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request);
+
+    /// <summary>
+    /// A notification whose value did not write, given why in its payload's place: a server's router
+    /// sends it to none of the subscriptions it was for, counts it failed for each, and reports why
+    /// once (spec 17.2, item 6; spec/debugging.md 10.1). A client's, which notifies nobody, throws an
+    /// <see cref="InvalidOperationException"/>.
+    /// </summary>
+    Task Notify(Exception unwritten, NotifyRequest request);
 
     /// <summary>
     /// Subscribes the connection a request came from to that request's procedure, and gives the call
@@ -34,7 +70,8 @@ public interface IRouterLike
     bool HasNotification(INotificationLike notification);
 
     /// <summary>
-    /// Holds a notification for its procedure: a client's router does, a second for the same
+    /// Holds a notification for its procedure: a client's router does, one out of its range or off
+    /// its form (spec 16.10), first, an <see cref="ArgumentException"/>, and a second for the same
     /// procedure an <see cref="InvalidOperationException"/>; a server's, which subscribes nobody,
     /// cannot.
     /// </summary>
@@ -72,9 +109,9 @@ public sealed record RequestDependencies<TRequest, TResponse>
     public required IRequestSerializerClient<TRequest, TResponse> Serializer { get; init; }
 }
 
-/// <summary>One call of a procedure, its payload given: its options, when any, then its result.</summary>
+/// <summary>A call bound to its payload: given its options, when any, it goes, and gives its result.</summary>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
-public delegate Task<TResponse> Requester<TResponse>(RequestOptions? options = null);
+public delegate Task<TResponse> BoundCall<TResponse>(RequestOptions? options = null);
 
 /// <summary>
 /// How the side that answers a request reads it and writes the answer. A failure is the router's to
@@ -93,8 +130,11 @@ public interface IRequestSerializerServer<TRequest, TResponse>
 }
 
 /// <summary>
-/// Whether a request may reach a resolver, on its header alone: only <c>true</c> admits it; anything
-/// else refuses it, with <see cref="Refusal"/>, or with <see cref="ProtocolCode.AccessDenied"/>.
+/// Whether a request may reach a resolver, on its header alone: only <c>true</c> admits it;
+/// anything else refuses it, with <see cref="Refusal"/>, or with
+/// <see cref="ProtocolCode.AccessDenied"/>. The router answers a refusal SESSION_REQUIRED of a
+/// call that presented a credential ACCESS_DENIED, its detail kept: the credential may hold, and
+/// its requester would withdraw it (spec 9.2, step 5).
 /// </summary>
 public sealed class BeforeRequest
 {
@@ -134,6 +174,22 @@ public sealed class BeforeRequest
     {
         return _admits(request);
     }
+
+    /// <summary>
+    /// What the admission makes of a request: none admits it; any other its refusal, or
+    /// ACCESS_DENIED. The router answers a refusal SESSION_REQUIRED of a call whose header presents
+    /// a credential ACCESS_DENIED, whatever the admission (spec 9.2, step 5). An admission that
+    /// throws throws.
+    /// </summary>
+    internal Failure? RefusalOf(AdmissionRequest request)
+    {
+        if (Admits(request))
+        {
+            return null;
+        }
+
+        return Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+    }
 }
 
 /// <summary>What a resolver of a procedure needs: how its payloads are written, and who it admits.</summary>
@@ -161,6 +217,9 @@ public sealed record RequestProps<TPayload>
     /// <summary>Its payload, decoded.</summary>
     public required TPayload Payload { get; init; }
 
+    /// <summary>The call's session, as its credential resolved it; none when the call runs in none.</summary>
+    public CallSession? Session { get; init; }
+
     /// <summary>
     /// Cancelled when the call ends before its answer — its requester cancelled it, its connection
     /// closed — so the callback may stop: its answer would go nowhere.
@@ -187,11 +246,31 @@ public interface IResponse<TPayload>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
 public delegate Task RequestResolverCallback<TRequest, TResponse>(RequestProps<TRequest> request, IResponse<TResponse> response);
 
-/// <summary>What a notification goes to: its procedure, which connections, and its key.</summary>
-/// <param name="Procedure">The procedure that notifies.</param>
-/// <param name="Filter">Whether a connection subscribed gets it; each does when none.</param>
-/// <param name="Key">What it replaces, queued for a paced subscription: the one of the same key.</param>
-public sealed record NotifyRequest(ProcedureAddress Procedure, Func<string, bool>? Filter, object? Key);
+/// <summary>
+/// Who holds a subscription: a connection, and the identifier of the session holding it — a
+/// credential's; none for its connection's (spec 11.3).
+/// </summary>
+public readonly record struct Subscriber
+{
+    /// <summary>Its connection.</summary>
+    public required string ConnectionHandle { get; init; }
+
+    /// <summary>Its credential's session's identifier; none for its connection's session.</summary>
+    public SessionIdentifier? Identifier { get; init; }
+}
+
+/// <summary>What a notification goes to: its procedure, which subscriptions, and its key.</summary>
+public sealed record NotifyRequest
+{
+    /// <summary>The procedure that notifies.</summary>
+    public required ProcedureAddress Procedure { get; init; }
+
+    /// <summary>Whether a subscriber gets it; each does when none.</summary>
+    public Func<Subscriber, bool>? Filter { get; init; }
+
+    /// <summary>What it replaces, queued for a paced subscription: the one of the same key.</summary>
+    public object? Key { get; init; }
+}
 
 /// <summary>Who a notification goes to, as its code says: the connections, and what it is about.</summary>
 public sealed record NotifyOptions
@@ -199,8 +278,11 @@ public sealed record NotifyOptions
     /// <summary>A connection left out: the one whose request made the change, say.</summary>
     public string? Exclude { get; init; }
 
-    /// <summary>Whether a connection gets it: those of one user, say.</summary>
-    public Func<string, bool>? Filter { get; init; }
+    /// <summary>
+    /// Whether a subscriber gets it, by its connection and the identifier of the session that holds
+    /// its subscription: those of one user, say.
+    /// </summary>
+    public Func<Subscriber, bool>? Filter { get; init; }
 
     /// <summary>
     /// What it is about — the entity whose state it carries — for a paced subscription: queued past
@@ -282,18 +364,39 @@ public enum DebugType
     Request,
 }
 
-/// <summary>When a step of a call came, and — once the call answered — how long it took, in milliseconds.</summary>
-/// <param name="Duration">How long the call took, once it answered; none before.</param>
-/// <param name="Event">When the call started, in milliseconds since 1970.</param>
-public readonly record struct DebugTimestamp(long? Duration, long Event);
-
 /// <summary>What one step of a call tells whoever hears a manager's <c>Debug</c>.</summary>
 public sealed record DebugEvent
 {
+    /// <summary>
+    /// The call id its call's envelopes carry: a call made's, once its router drew it; a request
+    /// received's, its header's. None for a call refused before its id was drawn, and none for a
+    /// notification, sent or heard. A request's id on its span, as OpenTelemetry's
+    /// <c>jsonrpc.request.id</c> carries it; it names its call on its connection while the call is
+    /// open, and its router may draw it again once the call ended.
+    /// </summary>
+    public uint? CallId { get; init; }
+
+    /// <summary>
+    /// The connection its call is on, as its envelopes name it:
+    /// <see cref="RouterClient.ServerConnectionHandle"/> on a client. None where
+    /// <see cref="CallId"/> is none.
+    /// </summary>
+    public string? ConnectionHandle { get; init; }
+
     /// <summary>Whether it went out or came in.</summary>
     public required DebugDirection Direction { get; init; }
 
-    /// <summary>The call's options, its defaults applied; none for a step that has none.</summary>
+    /// <summary>
+    /// How long the call took once it answered, in whole milliseconds of its router clock's
+    /// monotonic reading, a fraction dropped; none before, and for a notification. A span's duration,
+    /// as <see cref="System.Diagnostics.Activity.Duration"/> and an OpenTelemetry span carry it.
+    /// </summary>
+    public TimeSpan? Duration { get; init; }
+
+    /// <summary>
+    /// The call's options, its defaults applied, its credential left out; none for a step that has
+    /// none.
+    /// </summary>
     public ResolvedRequestOptions? Options { get; init; }
 
     /// <summary>The procedure's number in its service.</summary>
@@ -311,8 +414,12 @@ public sealed record DebugEvent
     /// <summary>The revision of the procedure's service.</summary>
     public required int ServiceRevision { get; init; }
 
-    /// <summary>When the call started, and how long it took once it answered.</summary>
-    public required DebugTimestamp Timestamp { get; init; }
+    /// <summary>
+    /// When the call started, on its router clock's wall reading; a notification, one step, starts
+    /// as it is sent or heard. A span's start, as <see cref="System.Diagnostics.Activity.StartTimeUtc"/>
+    /// and an OpenTelemetry span's start time carry it.
+    /// </summary>
+    public required DateTimeOffset StartedAt { get; init; }
 
     /// <summary>What went out, decoded.</summary>
     public object? Tx { get; init; }
@@ -324,7 +431,12 @@ public sealed record DebugEvent
 /// <summary>What a call's options leave out, for a manager to fill.</summary>
 public sealed record RequestDefaults
 {
-    /// <summary>How long a call waits for its answer; 5 s when none.</summary>
+    /// <summary>
+    /// How long a call waits for its answer; 5 s when none. Held as a call's, as the manager is
+    /// built: rounded to the nearest whole millisecond, infinite to wait on, and an
+    /// <see cref="ArgumentOutOfRangeException"/> for any other not from 1 to
+    /// <see cref="Clocks.LongestTimer"/>, zero among them.
+    /// </summary>
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>Whether a command unanswered in time closes the connection it went to; none closes nothing.</summary>
@@ -344,8 +456,11 @@ public sealed record ServiceManagerOptions
     /// <summary>What a call's options leave out.</summary>
     public RequestDefaults? Defaults { get; init; }
 
-    /// <summary>What a trace's timestamps are read from; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What a trace's instants are read from: its router's clock when none; another is an
+    /// <see cref="ArgumentException"/>.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>
@@ -360,21 +475,30 @@ public sealed class ServiceManager
     private readonly IRouterLike _router;
     private readonly Action<string>? _closeConnection;
     private readonly RequestDefaults _defaults;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
 
     // the notifications this manager made, one per procedure, kept for its life: asked for again,
     // the same one is given
     private readonly Dictionary<ProcedureAddress, (Procedure Procedure, object Notification)> _notifications = [];
 
-    /// <summary>A manager of the services on <paramref name="router"/>, with its options.</summary>
+    /// <summary>
+    /// A manager of the services on <paramref name="router"/>, with its options, on its router's
+    /// clock: one given that differs is an <see cref="ArgumentException"/>, and a default timeout
+    /// not held an <see cref="ArgumentOutOfRangeException"/>.
+    /// </summary>
     public ServiceManager(IRouterLike router, ServiceManagerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(router);
 
         _router = router;
         _closeConnection = options?.CloseConnection;
-        _defaults = options?.Defaults ?? new RequestDefaults();
-        _time = options?.Time ?? TimeProvider.System;
+
+        // held as the manager is built, rather than refused at each call it would time
+        _defaults = (options?.Defaults ?? new RequestDefaults()) with
+        {
+            Timeout = Clocks.AssertHeld(("a call's default timeout", nameof(RequestDefaults.Timeout)), options?.Defaults?.Timeout ?? TimeoutDefault),
+        };
+        _clock = Clocks.Of((options?.Clock, router.Clock), ("a service manager", "its router"));
     }
 
     /// <summary>A notification dropped: its procedure, and the failure the other end ended it with, if any.</summary>
@@ -382,14 +506,18 @@ public sealed class ServiceManager
 
     /// <summary>
     /// One step of a call — a request made or answered, a command, a notification sent or heard —
-    /// and the exception it failed with, or none. Nothing is built when nobody hears it.
+    /// and the exception it failed with, or none; on a tx step, why its tx did not go out: a
+    /// notification that could not go, an answer its router refused, told again at its start, or
+    /// none, from a resolver that failed before it answered. Nothing is built, and no clock read,
+    /// while nobody hears it. A listener that throws is reported through the router, with the
+    /// call's connection on a server's, and changes nothing of the call.
     /// </summary>
     public event Action<Exception?, DebugEvent>? Debug;
 
     /// <summary>A deprecated procedure was called; its deprecation says what to use instead, when it says.</summary>
     public event Action<Procedure>? Deprecated;
 
-    /// <summary>Whether anyone hears <see cref="Debug"/>: nothing is traced while nobody does.</summary>
+    /// <summary>Whether anyone hears <see cref="Debug"/>: nothing is traced, and nothing built for it, while nobody does.</summary>
     public bool IsDebugging
     {
         get
@@ -401,8 +529,11 @@ public sealed class ServiceManager
     /// <summary>
     /// The notification of <paramref name="procedure"/>, which callbacks register on: the first
     /// registration subscribes, by a request that opens a subscription — paced, with a window — and
-    /// the last one taken away unsubscribes. The same procedure asked for again gives the same
-    /// notification; asked for differently, it is an <see cref="InvalidOperationException"/>.
+    /// the last one taken away unsubscribes. The same procedure asked for again, at the same window
+    /// or at none twice, gives the same notification; asked for differently, or at another window, it
+    /// is an <see cref="InvalidOperationException"/>, after its router's check: one out of its range
+    /// or off its form (spec 16.10) is an <see cref="ArgumentException"/> first, and one against its
+    /// call as its router holds it.
     /// </summary>
     public INotification<TRequest, TNotification> GetNotification<TRequest, TResponse, TNotification>(
         Procedure procedure,
@@ -410,6 +541,9 @@ public sealed class ServiceManager
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(dependencies);
+
+        // * the router's reasons come before the manager's own, as at every layer (spec 16.10)
+        Identity.Check(procedure, nameof(procedure));
 
         lock (_notifications)
         {
@@ -422,15 +556,25 @@ public sealed class ServiceManager
                         $"{procedure.ServiceId}/{procedure.ProcedureId} is already a notification, asked for otherwise");
                 }
 
+                // ! a window is the subscription's, unpaced and paced two of them: a second caller's
+                // kept in silence would pace it at the first's
+                if (same.Window != dependencies.Window)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedure.ServiceId}/{procedure.ProcedureId} is already a notification with {WindowOf(same.Window)}, not {WindowOf(dependencies.Window)}");
+                }
+
                 return same;
             }
 
+            // its subscribing request is a requester of the procedure, declared as it is made
+            var series = _router.DeclareRequester(procedure);
             var notification = new Notification<TRequest, TResponse, TNotification>(
                 procedure,
                 (_router, dependencies),
                 ((payload, call) =>
                 {
-                    return CallOf(payload, (procedure, dependencies.Serializer, call.Options, (DebugType.Request, call.Subscribes)));
+                    return CallOf(payload, (procedure, dependencies.Serializer, call.Options, (DebugType.Request, call.Subscribes, series)));
                 },
                 (failure) =>
                 {
@@ -438,7 +582,11 @@ public sealed class ServiceManager
                 },
                 (error, notification) =>
                 {
-                    Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification });
+                    // * one check a notification heard while nobody listens
+                    if (IsDebugging)
+                    {
+                        Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification, Started = NotifiedNow() });
+                    }
                 }
             ));
 
@@ -454,7 +602,7 @@ public sealed class ServiceManager
     /// <see cref="FailureException"/>; a result that does not decode, one of
     /// <see cref="ProtocolCode.PayloadUndecodable"/>.
     /// </summary>
-    public Func<TRequest, Requester<TResponse>> GetRequest<TRequest, TResponse>(
+    public Func<TRequest, BoundCall<TResponse>> GetRequest<TRequest, TResponse>(
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
@@ -466,7 +614,7 @@ public sealed class ServiceManager
     /// options. A requester as <see cref="GetRequest{TRequest, TResponse}"/> gives one; one
     /// unanswered in time closes its connection when its options, or the manager's defaults, say so.
     /// </summary>
-    public Func<TRequest, Requester<TResponse>> GetCommand<TRequest, TResponse>(
+    public Func<TRequest, BoundCall<TResponse>> GetCommand<TRequest, TResponse>(
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
@@ -509,6 +657,7 @@ public sealed class ServiceManager
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(dependencies);
+        Identity.Check(procedure, nameof(procedure));
 
         return (callback) =>
         {
@@ -535,13 +684,37 @@ public sealed class ServiceManager
         };
     }
 
-    // the failure a failed call carries, for a trace; none when it carries none
-    private static Failure? TracedFailureOf(Exception reason)
+    // a window, in a refusal's sentence
+    private static string WindowOf(int? window)
     {
-        return reason is FailureException failure ? failure.Failure : null;
+        return window is { } given ? $"window {given}" : "no window";
     }
 
-    // tells Debug of one step of a call; nothing is built when nobody hears it
+    // the failure a failed call carries, for a trace: its code, its scope and its detail; none when
+    // it carries none
+    private static Failure? TracedFailureOf(Exception reason)
+    {
+        return reason is FailureException { Failure: var failure }
+            ? new Failure { Code = failure.Code, Detail = failure.Detail, Scope = failure.Scope }
+            : null;
+    }
+
+    // now, for a call starting: the instant it is told at, on the wall clock, and the reading its
+    // duration counts from, on the monotonic one
+    private Started StartedNow()
+    {
+        return new Started(_clock.GetUtcNow(), _clock.GetTimestamp());
+    }
+
+    // now, for a notification sent or heard: one step, which takes no duration, read on the wall
+    // clock alone
+    private Started NotifiedNow()
+    {
+        return new Started(_clock.GetUtcNow(), 0);
+    }
+
+    // tells Debug of one step of a call, each listener within a guard: what one throws is reported
+    // through the router, and changes nothing of the call; nothing is built when nobody hears it
     private void Trace(Procedure procedure, DebugStep step)
     {
         if (Debug is not { } debug)
@@ -549,35 +722,68 @@ public sealed class ServiceManager
             return;
         }
 
-        var now = _time.GetUtcNow();
-        var started = step.Started ?? now;
-
-        debug(step.Error, new DebugEvent
+        var debugEvent = new DebugEvent
         {
+            CallId = step.CallId,
+            ConnectionHandle = ConnectionOf(step),
             Direction = step.Direction,
+            Duration = step.IsAnswered ? WholeMillisecondsOf(_clock.GetElapsedTime(step.Started.Timestamp)) : null,
             Options = step.Options,
             ProcedureId = procedure.ProcedureId,
             ProcedureName = procedure.ProcedureName,
             Rx = step.Rx,
             ServiceId = procedure.ServiceId,
             ServiceRevision = procedure.ServiceRevision,
-            Timestamp = new DebugTimestamp(step.IsAnswered ? (long)(now - started).TotalMilliseconds : null, started.ToUnixTimeMilliseconds()),
+            StartedAt = step.Started.Instant,
             Tx = step.Tx,
             Type = step.Type,
-        });
+        };
+
+        foreach (var listener in debug.GetInvocationList())
+        {
+            try
+            {
+                ((Action<Exception?, DebugEvent>)listener)(step.Error, debugEvent);
+            }
+            catch (Exception reason)
+            {
+                _router.Report(reason, step.ConnectionHandle);
+            }
+        }
+    }
+
+    // the connection a step's call is on, as its envelopes name it: a client's one peer, the server,
+    // whatever its options said; none for a step that names no call
+    private string? ConnectionOf(DebugStep step)
+    {
+        if (step.CallId is null)
+        {
+            return null;
+        }
+
+        return _router.Side == RouterSide.Client ? RouterClient.ServerConnectionHandle : step.ConnectionHandle;
+    }
+
+    // a time in whole milliseconds, a fraction dropped
+    private static TimeSpan WholeMillisecondsOf(TimeSpan time)
+    {
+        return TimeSpan.FromTicks(time.Ticks - (time.Ticks % TimeSpan.TicksPerMillisecond));
     }
 
     // a requester: given a payload, then options, one call
-    private Func<TRequest, Requester<TResponse>> RequesterOf<TRequest, TResponse>(
+    private Func<TRequest, BoundCall<TResponse>> RequesterOf<TRequest, TResponse>(
         Procedure procedure,
         (RequestDependencies<TRequest, TResponse> Dependencies, DebugType Type) made)
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(made.Dependencies);
 
+        // declared as it is made (spec/debugging.md 7.2): each of its calls carries its series
+        var series = _router.DeclareRequester(procedure);
+
         async Task<TResponse> Called(TRequest payload, RequestOptions? options)
         {
-            return (await CallOf(payload, (procedure, made.Dependencies.Serializer, options, (made.Type, null)))).Response;
+            return (await CallOf(payload, (procedure, made.Dependencies.Serializer, options, (made.Type, null, series)))).Response;
         }
 
         return (payload) =>
@@ -596,6 +802,8 @@ public sealed class ServiceManager
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(made.Dependencies);
+        // as the resolver is asked for, before its callback is given, as every side refuses it (spec 16.10)
+        Identity.Check(procedure, nameof(procedure));
 
         return (callback) =>
         {
@@ -619,7 +827,9 @@ public sealed class ServiceManager
         };
     }
 
-    // a call's options, with the defaults applied: the call's, then the manager's, then 5 s and no close
+    // a call's options, with the defaults applied: the call's, then the manager's, which is 5 s when
+    // none, and no close; the timeout held as a call's, so the trace, the router and the error tell
+    // one number
     private ResolvedRequestOptions OptionsOf(RequestOptions? given)
     {
         return new ResolvedRequestOptions
@@ -627,8 +837,9 @@ public sealed class ServiceManager
             CancellationToken = given?.CancellationToken ?? CancellationToken.None,
             CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
             ConnectionHandle = given?.ConnectionHandle,
+            Credential = given?.Credential,
             DestinationId = given?.DestinationId,
-            Timeout = given?.Timeout ?? _defaults.Timeout ?? TimeoutDefault,
+            Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
         };
     }
 
@@ -655,34 +866,50 @@ public sealed class ServiceManager
     }
 
     // one call — a request, a command, or the request that subscribes a notification: its options
-    // with the defaults applied, its trace, the request, the close on timeout, and its result decoded
+    // with the defaults applied, its trace, the request, the close on timeout, and its result
+    // decoded; a timeout refused fails as the options are resolved, and a value that does not write
+    // as it is written, both before the trace and the deprecation: no call is made (spec 17.2,
+    // item 4; spec/debugging.md 4.3)
     private async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
         TRequest payload,
-        (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes) Made) call)
+        (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes, ProcedureSeries? Series) Made) call)
     {
-        var (procedure, serializer, given, (type, subscribes)) = call;
+        var (procedure, serializer, given, (type, subscribes, series)) = call;
         var options = OptionsOf(given);
-        var step = new DebugStep(DebugDirection.Tx, type) { Options = options, Started = _time.GetUtcNow(), Tx = payload };
+        var encoded = serializer.Encode(payload);
 
-        // what the call fails with once it went out is told as its answer
-        void Failed(Exception reason)
-        {
-            Trace(procedure, step with { Direction = DebugDirection.Rx, Error = reason, IsAnswered = true, Rx = TracedFailureOf(reason) });
-        }
-
-        Trace(procedure, step);
+        // * one check a call while nobody listens: no clock read, no step, no copy of its options,
+        // nothing to hear its call id; a credential stays out of what a side tells, and the trace
+        // carries none
+        var traced = IsDebugging
+            ? new TracedCall(this, (procedure, new DebugStep(DebugDirection.Tx, type)
+            {
+                ConnectionHandle = options.ConnectionHandle,
+                Options = options with { Credential = null },
+                Started = StartedNow(),
+                Tx = payload,
+            }))
+            : null;
 
         if (procedure.Deprecation is not null)
         {
             Deprecated?.Invoke(procedure);
         }
 
-        var encoded = serializer.Encode(payload);
+        var requested = _router.Request(
+            encoded,
+            new RouterRequest(procedure, options)
+            {
+                OnCallId = traced is null ? null : traced.OnCallId,
+                Series = series,
+                Subscribes = subscribes,
+            });
         RouterResult result;
 
         try
         {
-            result = await _router.Request(encoded, new RouterRequest(procedure, options) { Subscribes = subscribes });
+            // one awaiter either way: the request itself, or the request once its tx step was told
+            result = await (traced is null ? requested : traced.Told(requested));
         }
         catch (Exception reason)
         {
@@ -692,7 +919,7 @@ public sealed class ServiceManager
                 _closeConnection?.Invoke(connectionHandle);
             }
 
-            Failed(reason);
+            traced?.Failed(reason);
 
             throw;
         }
@@ -705,19 +932,24 @@ public sealed class ServiceManager
         }
         catch (FailureException reason)
         {
-            Failed(reason);
+            traced?.Failed(reason);
 
             throw;
         }
 
-        Trace(procedure, step with { Direction = DebugDirection.Rx, IsAnswered = true, Rx = response });
+        traced?.Answered(response);
 
         return (result.Header.CallId, response);
     }
 
-    // one step of a call, as Trace tells it
+    // one step of a call, as Trace tells it, and the connection a listener's error is reported with
     private sealed record DebugStep(DebugDirection Direction, DebugType Type)
     {
+        // the call id its envelopes carry, once drawn; none for a step that names no call
+        public uint? CallId { get; init; }
+
+        public string? ConnectionHandle { get; init; }
+
         public Exception? Error { get; init; }
 
         public bool IsAnswered { get; init; }
@@ -726,10 +958,64 @@ public sealed class ServiceManager
 
         public object? Rx { get; init; }
 
-        public DateTimeOffset? Started { get; init; }
+        // when its call started: every step of one call carries the same
+        public required Started Started { get; init; }
 
         public object? Tx { get; init; }
     }
+
+    // a call made while someone listens, and made only then: it hears its call id as its router
+    // draws it, and tells its tx step from the manager's own flow once it holds the id, or once the
+    // request failed before one was drawn; its rx step names the same id
+    private sealed class TracedCall(ServiceManager manager, (Procedure Procedure, DebugStep Step) call)
+    {
+        // ! continuations run asynchronously: what awaits the id, and the tx step's listeners with
+        // it, never runs inside OnCallId, on its router's scheduler, where one that blocks holds
+        // every connection of that router. Bead's routers draw it in a task of their scheduler,
+        // where the runtime inlines no await; over a router that draws it under no scheduler of its
+        // own, this alone keeps them off
+        private readonly TaskCompletionSource<uint> _drawn = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // the call id its steps name, once its tx step was told; none for a call refused before
+        // its router drew one
+        private uint? _callId;
+
+        // hears the call id on the router's scheduler: it records it, and tells nothing there
+        public void OnCallId(uint callId)
+        {
+            _drawn.TrySetResult(callId);
+        }
+
+        // * the tx step, told once the first of the id and the request's end came, with the id or
+        // with none; then the request's outcome, which its rx step follows
+        public async Task<RouterResult> Told(Task<RouterResult> requested)
+        {
+            await Task.WhenAny(_drawn.Task, requested);
+
+            // drawn before the request goes, so before it ends: whichever came first, it is held
+            _callId = _drawn.Task.IsCompletedSuccessfully ? await _drawn.Task : null;
+            manager.Trace(call.Procedure, call.Step with { CallId = _callId });
+
+            return await requested;
+        }
+
+        // its answer, decoded
+        public void Answered(object? response)
+        {
+            manager.Trace(call.Procedure, call.Step with { CallId = _callId, Direction = DebugDirection.Rx, IsAnswered = true, Rx = response });
+        }
+
+        // what the call failed with once it started, told as its answer
+        public void Failed(Exception reason)
+        {
+            manager.Trace(
+                call.Procedure,
+                call.Step with { CallId = _callId, Direction = DebugDirection.Rx, Error = reason, IsAnswered = true, Rx = TracedFailureOf(reason) });
+        }
+    }
+
+    // when a call started: its instant on the wall clock, and the monotonic reading its duration counts from
+    private readonly record struct Started(DateTimeOffset Instant, long Timestamp);
 
     // what a resolver is made of: its procedure, its serializer, its admission, its callback, and
     // what its calls are
@@ -776,26 +1062,53 @@ public sealed class ServiceManager
         {
             var exclude = options?.Exclude;
             var filter = options?.Filter;
-            Func<string, bool>? filtered = exclude is null && filter is null
+            Func<Subscriber, bool>? filtered = exclude is null && filter is null
                 ? null
-                : (connectionHandle) =>
+                : (subscriber) =>
                 {
-                    return connectionHandle != exclude && (filter is null || filter(connectionHandle));
+                    return subscriber.ConnectionHandle != exclude && (filter is null || filter(subscriber));
                 };
 
-            var step = new DebugStep(DebugDirection.Tx, DebugType.Notification) { Tx = notification };
+            // * one check a notification sent while nobody listens: no clock read, no step
+            var step = manager.IsDebugging
+                ? new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.NotifiedNow(), Tx = notification }
+                : null;
 
-            manager.Trace(Procedure, step);
+            if (step is not null)
+            {
+                manager.Trace(Procedure, step);
+            }
 
-            // what keeps it from going out is the router's to report, and the trace's to tell:
-            // notifying never fails its caller
+            var request = new NotifyRequest { Filter = filtered, Key = options?.Key, Procedure = Procedure.Address };
+
+            // * a value that does not write goes to none of its subscriptions: handed to the router in
+            // its payload's place, which counts it failed for each and reports it (spec 17.2, item 6)
+            ReadOnlyMemory<byte> encoded = default;
+            Exception? failure = null;
+
             try
             {
-                await manager._router.Notify(made.Serializer.EncodeNotification(notification), new NotifyRequest(Procedure.Address, filtered, options?.Key));
+                encoded = made.Serializer.EncodeNotification(notification);
             }
             catch (Exception reason)
             {
-                manager.Trace(Procedure, step with { Error = reason });
+                failure = reason;
+            }
+
+            // what keeps it from going out is the router's to report, and the trace's to tell, at the
+            // start it was sent with: notifying never fails its caller
+            try
+            {
+                await (failure is null ? manager._router.Notify(encoded, request) : manager._router.Notify(failure, request));
+            }
+            catch (Exception reason)
+            {
+                failure = reason;
+            }
+
+            if (failure is not null && step is not null)
+            {
+                manager.Trace(Procedure, step with { Error = failure });
             }
         }
     }
@@ -823,20 +1136,16 @@ public sealed class ServiceManager
 
         public Failure? Admit(AdmissionRequest request)
         {
-            var beforeRequest = made.BeforeRequest;
-
-            if (beforeRequest is null || beforeRequest.Admits(request))
-            {
-                return null;
-            }
-
-            return beforeRequest.Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+            return made.BeforeRequest?.RefusalOf(request);
         }
 
         public async Task Handle(RequestResolverProps props)
         {
             ArgumentNullException.ThrowIfNull(props);
 
+            // * the call starts as it arrives, its admission and its decoding counted in its duration,
+            // for a listener: one check while nobody listens, and no clock read
+            Started? started = manager.IsDebugging ? manager.StartedNow() : null;
             var target = new AnswerTarget(props.ConnectionHandle, props.Header);
             TRequest payload;
 
@@ -847,7 +1156,7 @@ public sealed class ServiceManager
 
                 try
                 {
-                    refusal = Admit(new AdmissionRequest(props.ConnectionHandle, props.Header));
+                    refusal = Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session });
                 }
                 catch
                 {
@@ -876,16 +1185,24 @@ public sealed class ServiceManager
                 return;
             }
 
-            var started = manager._time.GetUtcNow();
+            if (started is { } at)
+            {
+                manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type)
+                {
+                    CallId = props.Header.CallId,
+                    ConnectionHandle = props.ConnectionHandle,
+                    Rx = payload,
+                    Started = at,
+                });
+            }
 
-            manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type) { Rx = payload, Started = started });
-
-            var response = new Response(this, (target, payload, started));
+            var response = new Response(this, (target, payload, started, props.Signal));
             var request = new RequestProps<TRequest>
             {
                 ConnectionHandle = props.ConnectionHandle,
                 Header = props.Header,
                 Payload = payload,
+                Session = props.Session,
                 Signal = props.Signal,
             };
 
@@ -893,13 +1210,28 @@ public sealed class ServiceManager
             {
                 await made.Callback(request, response);
             }
-            catch
+            catch (Exception reason)
             {
                 // a resolver that failed before it answered still answers, so its requester does
-                // not wait out its timeout; why it failed goes on, for the router to report
+                // not wait out its timeout, told with why beside it; why it failed goes on, for the
+                // router to report; a call no longer answered takes neither
                 if (!response.IsAnswered)
                 {
                     response.IsAnswered = true;
+
+                    if (started.HasValue && !props.Signal.IsCancellationRequested)
+                    {
+                        manager.Trace(Procedure, new DebugStep(DebugDirection.Tx, made.Type)
+                        {
+                            CallId = props.Header.CallId,
+                            ConnectionHandle = props.ConnectionHandle,
+                            Error = reason,
+                            IsAnswered = true,
+                            Rx = payload,
+                            Started = started.Value,
+                        });
+                    }
+
                     await AnswerFailed(target);
                 }
 
@@ -956,7 +1288,7 @@ public sealed class ServiceManager
                 nameof(failure));
         }
 
-        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, DateTimeOffset Started) answering) : INotificationResponse<TResponse>
+        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started? Started, CancellationToken Signal) answering) : INotificationResponse<TResponse>
         {
             public bool IsAnswered { get; set; }
 
@@ -1011,19 +1343,44 @@ public sealed class ServiceManager
                 var answer = answerOf();
 
                 IsAnswered = true;
-                resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type) { IsAnswered = true, Rx = answering.Request, Started = answering.Started, Tx = answered });
+
+                // traced once its request was, to whoever listens
+                Told(answered, null);
 
                 try
                 {
                     await resolver._router.Respond(answer, Target);
                 }
-                catch
+                catch (Exception reason)
                 {
-                    // an answer the router could not send — too large, say — is answered as failed,
-                    // so its requester does not wait out its timeout
+                    // an answer the router could not send — too large, say — is told again at its
+                    // start with why, and answered as failed, so its requester does not wait out its
+                    // timeout
+                    Told(answered, reason);
+
                     await resolver.AnswerFailed(Target);
 
                     throw;
+                }
+            }
+
+            // ! tells its answer's step, or why it did not go, to whoever listens; built here, out of
+            // the async Send, so that a request holds no step of its own while nobody listens. A call
+            // no longer answered takes no failure
+            private void Told(object? answered, Exception? reason)
+            {
+                if (answering.Started is { } started && (reason is null || !answering.Signal.IsCancellationRequested))
+                {
+                    resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type)
+                    {
+                        CallId = Target.Header.CallId,
+                        ConnectionHandle = Target.ConnectionHandle,
+                        Error = reason,
+                        IsAnswered = true,
+                        Rx = answering.Request,
+                        Started = started,
+                        Tx = answered,
+                    });
                 }
             }
         }

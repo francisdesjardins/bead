@@ -24,7 +24,7 @@ type ReadFailures = Pick<
 
 // constants
 
-// a failure's record: its code, its hops, its flags, then its detail
+// a failure's record: its code, its relays, its flags, then its detail
 const RECORD_BYTES = 4;
 
 // the one flag of a failure's record this layout reads: the code is the procedure's own
@@ -80,6 +80,43 @@ const isContinuation = (byte: number | undefined): boolean => {
   return byte !== undefined && (byte & 0xc0) === 0x80;
 };
 
+/**
+ * The bytes of the character `byte` leads, as UTF-8 writes one (RFC 3629 §4): 2 to 4; 1 for any
+ * other byte.
+ */
+const sequenceBytesOf = (byte: number): number => {
+  if (byte >= 0xc2 && byte <= 0xdf) {
+    return 2;
+  }
+
+  if (byte >= 0xe0 && byte <= 0xef) {
+    return 3;
+  }
+
+  return byte >= 0xf0 && byte <= 0xf4 ? 4 : 1;
+};
+
+/**
+ * Where a detail cut at `end` of `payload` ends: at the lead byte of the character the cut fell in,
+ * at most three bytes back, whose sequence crosses the cut; where it fell for anything else.
+ */
+const cutOf = (payload: Uint8Array, end: number): number => {
+  // past the end there is nothing to continue
+  if (end >= payload.length) {
+    return end;
+  }
+
+  for (let index = end - 1; index >= Math.max(RECORD_BYTES, end - 3); index -= 1) {
+    const byte = payload[index] ?? 0;
+
+    if (!isContinuation(byte)) {
+      return index + sequenceBytesOf(byte) > end ? index : end;
+    }
+  }
+
+  return end;
+};
+
 // definition
 
 /**
@@ -102,10 +139,10 @@ export const bytesOf = (data: Data): Uint8Array => {
 };
 
 /**
- * A failure's record, from a failure envelope's payload: its code, its hops as they came, its scope,
- * and its detail — cut to `maximumDetailBytes`, back to the start of the character the cut fell in.
- * Throws a {@link FailureError} of `envelopeMalformed` for fewer than 4 bytes, a code of 0, or a
- * flag other than the application's.
+ * A failure's record, from a failure envelope's payload: its code, its relays as they came, its
+ * scope, and its detail — cut to `maximumDetailBytes`, back to the start of the character the cut
+ * fell in. Throws a {@link FailureError} of `envelopeMalformed` for fewer than 4 bytes, a code of
+ * 0, or a flag other than the application's.
  */
 export const readFailure = (
   payload: Uint8Array,
@@ -137,17 +174,14 @@ export const readFailure = (
     throw malformed(`a failure's record carries no flag 0x${(flags & ~APPLICATION).toString(16)}`);
   }
 
-  let end = Math.min(payload.length, RECORD_BYTES + maximumDetailBytes);
-
-  // a cut inside a character drops the whole character; past the end there is nothing to continue
-  while (end > RECORD_BYTES && isContinuation(payload[end])) {
-    end -= 1;
-  }
+  // ! a cut inside a character drops that character alone: a lead byte at most three bytes back
+  // whose sequence crosses the cut; a stray continuation byte at the cut drops nothing (spec 7.3)
+  const end = cutOf(payload, Math.min(payload.length, RECORD_BYTES + maximumDetailBytes));
 
   return {
     code,
     detail: decoder.decode(payload.subarray(RECORD_BYTES, end)),
-    hops: view.getUint8(2),
+    relays: view.getUint8(2),
     scope: (flags & APPLICATION) === 0 ? FailureScope.PROTOCOL : FailureScope.APPLICATION,
   };
 };
@@ -231,7 +265,7 @@ export const writeFailure = (
   failure: IFailure,
   maximumDetailBytes: number = LIMIT_DEFAULTS.maximumDetailBytes
 ): Uint8Array => {
-  const { code, detail = '', hops = 0, scope } = failure;
+  const { code, detail = '', relays = 0, scope } = failure;
 
   if (!Number.isInteger(code) || code < 1 || code > 0xffff) {
     throw new ProgrammerError(
@@ -239,9 +273,9 @@ export const writeFailure = (
     );
   }
 
-  if (!Number.isInteger(hops) || hops < 0 || hops > 0xff) {
+  if (!Number.isInteger(relays) || relays < 0 || relays > 0xff) {
     throw new ProgrammerError(
-      `a failure crossed an integer from 0 to 255 relays, not ${String(hops)}`
+      `a failure crossed an integer from 0 to 255 relays, not ${String(relays)}`
     );
   }
 
@@ -255,7 +289,7 @@ export const writeFailure = (
   const { written } = encoder.encodeInto(detail, record.subarray(RECORD_BYTES));
 
   view.setUint16(0, code);
-  view.setUint8(2, hops);
+  view.setUint8(2, relays);
   view.setUint8(3, scope === FailureScope.APPLICATION ? APPLICATION : 0);
 
   return record.subarray(0, RECORD_BYTES + written);

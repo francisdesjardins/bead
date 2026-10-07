@@ -3,6 +3,7 @@
 export const CLOSE_EVENT = 'close';
 export const CONNECTION_EVENT = 'connection';
 export const ERROR_EVENT = 'error';
+export const LISTEN_EVENT = 'listen';
 export const MESSAGE_EVENT = 'message';
 export const RECONNECT_EVENT = 'reconnect';
 
@@ -59,9 +60,6 @@ export const WORKER_MESSAGES = Object.freeze({
   OPEN: 'bead-open',
 });
 
-/** The longest delay a timer holds, in milliseconds: past it, `setTimeout` fires at once. */
-export const TIMER_MAX = 2 ** 31 - 1;
-
 /** `'arraybuffer'` rather than `'blob'`: an envelope is read synchronously, and a `Blob` cannot be. */
 export const TRANSPORT_WEBSOCKET_BINARYTYPE = 'arraybuffer' as const;
 
@@ -70,6 +68,7 @@ export const TRANSPORT_WEBSOCKET_BINARYTYPE = 'arraybuffer' as const;
 export type CLOSE_EVENT = typeof CLOSE_EVENT;
 export type CONNECTION_EVENT = typeof CONNECTION_EVENT;
 export type ERROR_EVENT = typeof ERROR_EVENT;
+export type LISTEN_EVENT = typeof LISTEN_EVENT;
 export type MESSAGE_EVENT = typeof MESSAGE_EVENT;
 export type RECONNECT_EVENT = typeof RECONNECT_EVENT;
 

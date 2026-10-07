@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { CLIENT_FAILURES, SERVER_FAILURES } from '../constants';
 import { createPendingCalls, type IPendingRequest } from '../pending-calls';
 
@@ -35,9 +36,9 @@ test.describe('createPendingCalls', () => {
           return callId === 5;
         },
       },
-      { lastCallId: 9 }
+      { clock: createTestClock(), lastCallId: 9 }
     );
-    const server = createPendingCalls({ failures: SERVER_FAILURES });
+    const server = createPendingCalls({ failures: SERVER_FAILURES }, { clock: createTestClock() });
 
     client.add({ callId: 1, connectionHandle: 'a' }, requestOf());
     client.reserve({ callId: 3, connectionHandle: 'a' });
@@ -49,7 +50,7 @@ test.describe('createPendingCalls', () => {
   });
 
   test('forget a call, only while it is the request given, when one is', () => {
-    const calls = createPendingCalls({ failures: CLIENT_FAILURES });
+    const calls = createPendingCalls({ failures: CLIENT_FAILURES }, { clock: createTestClock() });
     const call = { callId: 1, connectionHandle: 'a' };
     const waiting = requestOf();
 
@@ -64,35 +65,22 @@ test.describe('createPendingCalls', () => {
     expect(calls.get(call)).toBeUndefined();
   });
 
-  test('reserve a call id until its timer fires, the later end of two standing', () => {
-    const calls = createPendingCalls({ failures: CLIENT_FAILURES });
-    const armed: { delay: unknown; fire: () => void }[] = [];
-    const { setTimeout: realSet } = globalThis;
+  test('reserve a call id until its timer fires on its clock, the later end of two standing', () => {
+    const clock = createTestClock();
+    const calls = createPendingCalls({ failures: CLIENT_FAILURES }, { clock });
 
-    // each timer is fired by hand, never by the clock
-    try {
-      globalThis.setTimeout = ((fire: () => void, delay?: number) => {
-        armed.push({ delay, fire });
-
-        return realSet(() => {
-          return undefined;
-        }, 0);
-      }) as typeof realSet;
-
-      calls.reserve({ callId: 1, connectionHandle: 'a', timeout: 40 });
-      calls.reserve({ callId: 1, connectionHandle: 'a', timeout: 10 });
-      calls.reserve({ callId: 3, connectionHandle: 'a', timeout: 10 });
-      calls.reserve({ callId: 3, connectionHandle: 'a', timeout: 40 });
-    } finally {
-      globalThis.setTimeout = realSet;
-    }
+    calls.reserve({ callId: 1, connectionHandle: 'a', timeout: 40 });
+    calls.reserve({ callId: 1, connectionHandle: 'a', timeout: 10 });
+    calls.reserve({ callId: 3, connectionHandle: 'a', timeout: 10 });
+    calls.reserve({ callId: 3, connectionHandle: 'a', timeout: 40 });
 
     // the earlier end of call id 1 arms nothing; the later one of call id 3 replaces its timer
     expect(
-      armed.map(({ delay }) => {
+      clock.armed.map(({ delay }) => {
         return delay;
       })
     ).toEqual([40, 10, 40]);
+    expect(clock.cleared).toEqual([clock.armed[1]?.handle]);
     expect([calls.isReserved(1, 'a'), calls.isReserved(3, 'a'), calls.isReserved(1, 'b')]).toEqual([
       true,
       true,
@@ -100,18 +88,43 @@ test.describe('createPendingCalls', () => {
     ]);
 
     // the timer replaced frees nothing
-    armed[1]?.fire();
+    clock.tick(39);
 
-    expect(calls.isReserved(3, 'a')).toBe(true);
+    expect([calls.isReserved(1, 'a'), calls.isReserved(3, 'a')]).toEqual([true, true]);
 
-    armed[0]?.fire();
-    armed[2]?.fire();
+    clock.tick(1);
 
     expect([calls.isReserved(1, 'a'), calls.isReserved(3, 'a')]).toEqual([false, false]);
   });
 
+  test("compare a reservation's end on its clock's monotonic reading, which a wall clock set by hand does not move", () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const calls = createPendingCalls({ failures: CLIENT_FAILURES }, { clock });
+
+    calls.reserve({ callId: 1, connectionHandle: 'a', timeout: 40 });
+    // a wall clock moved an hour on, or back, says nothing of which end is later
+    clock.setSystemTime(Date.UTC(2026, 0, 1, 1));
+    calls.reserve({ callId: 1, connectionHandle: 'a', timeout: 10 });
+    clock.setSystemTime(Date.UTC(2025, 11, 31));
+    calls.reserve({ callId: 1, connectionHandle: 'a', timeout: 20 });
+
+    expect(
+      clock.armed.map(({ delay }) => {
+        return delay;
+      })
+    ).toEqual([40]);
+
+    clock.tick(39);
+
+    expect(calls.isReserved(1, 'a')).toBe(true);
+
+    clock.tick(1);
+
+    expect(calls.isReserved(1, 'a')).toBe(false);
+  });
+
   test('take out every call of a connection, or of every one, freeing the call ids it reserved', () => {
-    const calls = createPendingCalls({ failures: CLIENT_FAILURES });
+    const calls = createPendingCalls({ failures: CLIENT_FAILURES }, { clock: createTestClock() });
     const first = requestOf();
     const second = requestOf();
 
@@ -133,6 +146,7 @@ test.describe('createPendingCalls', () => {
     const calls = createPendingCalls(
       { failures: CLIENT_FAILURES },
       {
+        clock: createTestClock(),
         onRemove: (pendingRequest) => {
           removed.push(pendingRequest);
         },
@@ -171,7 +185,10 @@ test.describe('createPendingCalls', () => {
   });
 
   test('count the calls waited on and the call ids reserved, and the connections they belong to', () => {
-    const calls = createPendingCalls<string>({ failures: CLIENT_FAILURES });
+    const calls = createPendingCalls<string>(
+      { failures: CLIENT_FAILURES },
+      { clock: createTestClock() }
+    );
 
     calls.add({ callId: 1, connectionHandle: 'a' }, requestOf());
     calls.add({ callId: 3, connectionHandle: 'a' }, requestOf());

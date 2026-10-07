@@ -30,6 +30,7 @@ import {
 import {
   createWSTransportClient,
   HEARTBEAT,
+  MAXIMUM_MESSAGE_BYTES,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
   type WSTransportClient,
@@ -39,6 +40,23 @@ import { createFakeWebSocket } from './fake-websocket';
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
   (client as ITransportClientInternal<object, never>)[dispose]();
+};
+
+/**
+ * Whether a client carries a credential, and is secure, once a connect to `target` was tried — the
+ * judgement made from the URL it was given, its socket refused.
+ */
+const judgedOf = async (target: { host: string; secured?: boolean }) => {
+  const client = createWSTransportClient({
+    // no constructor at all: the socket it would open is refused as it is made
+    WebSocket: (() => {
+      return undefined;
+    }) as unknown as IWebSocketConstructor,
+  });
+
+  await client.connect({ ...target, port: 8_080 }).catch(() => {});
+
+  return [client.carriesCredential, client.isSecure];
 };
 
 const nextEvent = <K extends TRANSPORT_CLIENT_EVENTS>(client: WSTransportClient, event: K) => {
@@ -201,7 +219,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
             host,
             port: portOf(gatedServer),
             signal: controller.signal,
-            timeout: 0,
+            timeout: Infinity,
           });
           controller.abort('why');
 
@@ -227,7 +245,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
 
         try {
-          const connecting = client.connect({ host, port: portOf(gatedServer), timeout: 0 });
+          const connecting = client.connect({ host, port: portOf(gatedServer), timeout: Infinity });
           drop(client);
 
           await expect(connecting).rejects.toBeInstanceOf(ConnectError);
@@ -301,7 +319,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
           const received = nextMessage(server);
 
           await client.connect({ host, port });
-          await client.send(payload());
+          await client.send({ data: payload() });
 
           const { data, isBinary } = await received;
           expect(data.toString()).toBe('hello');
@@ -309,10 +327,23 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
       }
 
+      test('carries no credential: the envelope alone goes', async () => {
+        const received = nextMessage(server);
+
+        await client.connect({ host, port });
+        await client.send({
+          credential: 'Bearer mF_9.B5f-4.1JqM',
+          data: new TextEncoder().encode('hello'),
+        });
+
+        const { data, isBinary } = await received;
+        expect([isBinary, data.toString()]).toEqual([true, 'hello']);
+      });
+
       test('rejects with a ReadyStateError after disconnecting', async () => {
         await client.connect({ host, port });
         await client.disconnect();
-        await expect(client.send('HelloWorld')).rejects.toBeInstanceOf(ReadyStateError);
+        await expect(client.send({ data: 'HelloWorld' })).rejects.toBeInstanceOf(ReadyStateError);
       });
     });
 
@@ -325,7 +356,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         const messages: unknown[] = [];
         const both = new Promise<void>((resolve) => {
-          client.on('message', (data) => {
+          client.on('message', ({ data }) => {
             messages.push(data);
             if (messages.length === 2) {
               resolve();
@@ -349,7 +380,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         const message = nextEvent(client, 'message');
         await client.connect({ host, port });
-        const [data] = await message;
+        const [{ data }] = await message;
 
         expect(data).toBeInstanceOf(ArrayBuffer);
       });
@@ -362,7 +393,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         const message = nextEvent(client, 'message');
         await client.connect({ host, port });
-        const [data] = await message;
+        const [{ data }] = await message;
 
         expect(data).toBeInstanceOf(Blob);
         expect(await (data as Blob).text()).toBe('binary');
@@ -377,14 +408,14 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         await client.connect({ host, port });
         const echoed = nextEvent(client, 'message');
-        await client.send('ping');
+        await client.send({ data: 'ping' });
 
-        expect(await echoed).toEqual(['ping']);
+        expect(await echoed).toEqual([{ credential: undefined, data: 'ping' }]);
       });
 
       test('emits no message once a disconnect has begun', async () => {
         const messages: unknown[] = [];
-        client.on('message', (data) => {
+        client.on('message', ({ data }) => {
           messages.push(data);
         });
 
@@ -490,7 +521,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         drop(client);
 
         expect(client.isClosed()).toBe(true);
-        await expect(client.send('x')).rejects.toHaveProperty('got', ReadyState.CLOSED);
+        await expect(client.send({ data: 'x' })).rejects.toHaveProperty('got', ReadyState.CLOSED);
 
         await client.connect({ host, port });
         expect(client.isOpen()).toBe(true);
@@ -802,6 +833,64 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
   });
 });
 
+test.describe('WSTransportClient, what it carries', () => {
+  test('carries no credential beside an envelope, and is secure under wss or to a loopback host, judged by the URL it was given', async () => {
+    expect(createWSTransportClient().isSecure).toBe(false);
+    expect(
+      await Promise.all([
+        judgedOf({ host: 'bead.example', secured: true }),
+        judgedOf({ host: 'localhost' }),
+        judgedOf({ host: '127.0.0.1' }),
+        judgedOf({ host: '::1' }),
+        judgedOf({ host: 'bead.example' }),
+        judgedOf({ host: '192.0.2.1' }),
+      ])
+    ).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, false],
+      [false, false],
+    ]);
+  });
+});
+
+test.describe('WSTransportClient, its message limit', () => {
+  test('closes with 1009 a message past an envelope’s limit, 16,778,240 bytes, over `ws` when told no bound', async () => {
+    const server = await startServer();
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const client = createWSTransportClient({ WebSocket: TrackedWsWebSocket });
+    const connection = nextConnection(server);
+
+    try {
+      await client.connect({ host, port: portOf(server) });
+
+      const { socket } = await connection;
+      const whole = nextEvent(client, 'message');
+
+      socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES));
+
+      const [{ data }] = await whole;
+
+      expect((data as ArrayBuffer).byteLength).toBe(16_778_240);
+
+      const closed = new Promise<number>((resolve) => {
+        socket.once('close', (code: number) => {
+          resolve(code);
+        });
+      });
+
+      socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES + 1));
+
+      expect(await closed).toBe(1009);
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
+  });
+});
+
 test.describe('WSTransportClient, heartbeat', () => {
   test('pings its server every heartbeat over a socket that can, and closes at the beat after a ping it left unanswered', async () => {
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
@@ -842,7 +931,7 @@ test.describe('WSTransportClient, heartbeat', () => {
     await client.disconnect();
   });
 
-  test('beats nothing over a socket that cannot ping, a browser’s, nor with a heartbeat of Infinity; refuses one no timer holds', async () => {
+  test('beats nothing over a socket that cannot ping, a browser’s, nor with a heartbeat of Infinity', async () => {
     const browser = createFakeWebSocket();
     const pinging = createFakeWebSocket({ canPing: true });
     const clients = [
@@ -867,12 +956,6 @@ test.describe('WSTransportClient, heartbeat', () => {
       })
     ).toEqual([true, true]);
     expect(pinging.sockets[0]?.pings).toBe(0);
-
-    for (const heartbeat of [0, 1.5, 2 ** 31]) {
-      expect(() => {
-        return createWSTransportClient({ heartbeat, WebSocket: pinging.FakeWebSocket });
-      }, String(heartbeat)).toThrow(ProgrammerError);
-    }
   });
 
   test('stops beating once disconnected, dropped or closed by its server, and pings no socket that is closing', async () => {

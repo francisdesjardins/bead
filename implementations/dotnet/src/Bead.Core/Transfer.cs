@@ -132,9 +132,9 @@ internal sealed class OutgoingTransfer
 /// A payload as its receiver receives it: its total, the opening's first bytes, each chunk after
 /// placed at its offset, in any order, and joined once whole. Credit is granted a window at a time;
 /// <see cref="RouterLimits.MaximumChunkRuns"/> bounds the runs of bytes apart it holds. A chunk before
-/// the last carries a full chunk at least, as its sender sends them, and a chunk comes whole again or
-/// not at all over bytes received: each piece it holds is a chunk's own bytes, never a sliver of
-/// them. Touched on its router's scheduler alone.
+/// the last carries a full chunk, exactly, and the last a full one at most, as its sender sends them,
+/// and a chunk comes whole again or not at all over bytes received: each piece it holds is a chunk's
+/// own bytes, never a sliver of them. Touched on its router's scheduler alone.
 /// </summary>
 internal sealed class IncomingTransfer
 {
@@ -186,15 +186,21 @@ internal sealed class IncomingTransfer
 
     /// <summary>
     /// A transfer received from <paramref name="opening"/>, or the failure that refuses it: an
-    /// opening that holds its whole total opens no transfer, and is <c>CHUNK_INVALID</c>. A total
-    /// past what an array holds is an <see cref="ArgumentOutOfRangeException"/>: the limits refuse it
-    /// before.
+    /// opening that carries no byte of its payload, or holds its whole total, opens no transfer, and
+    /// is <c>CHUNK_INVALID</c>. A total past what an array holds is an
+    /// <see cref="ArgumentOutOfRangeException"/>: the limits refuse it before.
     /// </summary>
     public static (IncomingTransfer? Transfer, Failure? Refusal) Open(
         ReadOnlyMemory<byte> opening,
         (RouterLimits Limits, int PayloadBytesPerChunk, long Total) options)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThan(options.Total, Array.MaxLength, nameof(options));
+
+        // an opening carries one byte of its payload at least
+        if (opening.IsEmpty)
+        {
+            return (null, Invalid("an opening carries one byte of its payload at least, not 0"));
+        }
 
         if (opening.Length >= options.Total)
         {
@@ -247,9 +253,10 @@ internal sealed class IncomingTransfer
 
     /// <summary>
     /// Places a chunk's bytes, checked in this order: within the total, not empty, last when it
-    /// reaches the total and only then, full when it does not — or <c>CHUNK_INVALID</c>; within the
-    /// credit — or <c>CREDIT_EXCEEDED</c>; received already, whole — a duplicate; clear of every byte
-    /// received — or <c>CHUNK_INVALID</c>. Too many runs of bytes apart is <c>CHUNK_INVALID</c> too.
+    /// reaches the total and only then, full when it does not, full at most when it does — or
+    /// <c>CHUNK_INVALID</c>; within the credit — or <c>CREDIT_EXCEEDED</c>; received already, whole —
+    /// a duplicate; clear of every byte received — or <c>CHUNK_INVALID</c>. Too many runs of bytes
+    /// apart is <c>CHUNK_INVALID</c> too.
     /// </summary>
     public (ChunkOutcome Outcome, Failure? Refusal) Place(ReadOnlyMemory<byte> bytes, (bool IsLast, long Offset) chunk)
     {
@@ -273,10 +280,13 @@ internal sealed class IncomingTransfer
                 : $"a chunk from {offset} reaches the total, yet says more follow"));
         }
 
-        // one before the last is full, as its sender sends them, so no small chunk is held
-        if (!isLast && bytes.Length < _payloadBytesPerChunk)
+        // ! a chunk before the last is full, exactly, and the last full at most, as its sender sends
+        // them: no small chunk is held, and no CHUNK's envelope passes chunkBytes (spec 12.6.1)
+        if (isLast ? bytes.Length > _payloadBytesPerChunk : bytes.Length != _payloadBytesPerChunk)
         {
-            return Refused(Invalid($"a chunk before the last carries {_payloadBytesPerChunk} bytes at least, not {bytes.Length}"));
+            return Refused(Invalid(isLast
+                ? $"a last chunk carries {_payloadBytesPerChunk} bytes at most, not {bytes.Length}"
+                : $"a chunk before the last carries {_payloadBytesPerChunk} bytes, not {bytes.Length}"));
         }
 
         if (bytes.Length > _creditEnd - offset)

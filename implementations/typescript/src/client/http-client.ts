@@ -21,7 +21,10 @@ export * from './client';
  */
 export interface IHTTPClientOptions
   extends Omit<IClientLayers<HTTPTransportClient>, 'transport'>, IClientOptions {
-  /** The transport's options; the largest answer is the limits' envelope, which they set. */
+  /**
+   * The transport's options; the largest answer is the limits' envelope, which they set, and the
+   * clock is every layer's.
+   */
   transport?: Omit<IHTTPTransportClientOptions, 'maximumBodyBytes'> | undefined;
 }
 
@@ -56,6 +59,12 @@ export const createHTTPClient = (options?: IHTTPClientOptions): HTTPClient => {
         maximumBodyBytes: limits.maximumEnvelopeBytes,
       }),
     },
-    { limits }
+    {
+      credential: options?.credential,
+      credentials: options?.credentials,
+      devtools: options?.devtools,
+      limits,
+      metricsRegistry: options?.metricsRegistry,
+    }
   );
 };

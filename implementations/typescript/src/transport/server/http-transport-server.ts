@@ -11,18 +11,25 @@ import {
   CONNECTION_TOKEN_HEADER,
   CONNECTION_UNKNOWN,
   ERROR_EVENT,
+  LISTEN_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
-  TIMER_MAX,
   TRANSPORT_HTTP,
 } from '../shared/constants';
+import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
-import { timestamp } from '../shared/timestamp';
 import type { Data } from '../shared/types';
+import {
+  HOST_REFUSAL,
+  isTakenHost,
+  isTakenOrigin,
+  isWellFormedHost,
+  ORIGIN_REFUSAL,
+} from './hosts-and-origins';
 import { createTransportServer, generateDrawnHandle } from './transport-server';
 import type {
   HTTPRequestListener,
@@ -85,7 +92,7 @@ interface IExchange {
   isEnded: boolean;
   readonly response: IHTTPResponseLike;
   /** Ends its connection, as lost, once its request waited past `exchangeTimeout` for its answer. */
-  timer: ReturnType<typeof setTimeout> | undefined;
+  timer: TimeoutId | undefined;
 }
 
 /** An envelope of the server's own, waiting in its connection's outbox until a listen acknowledges it. */
@@ -98,7 +105,7 @@ interface IOutgoing {
 interface IListen {
   readonly connection: IDrawn;
   readonly response: IHTTPResponseLike;
-  timer: ReturnType<typeof setTimeout> | undefined;
+  timer: TimeoutId | undefined;
 }
 
 /**
@@ -109,10 +116,10 @@ interface IListen {
 interface IDrawn extends IDrawnConnection {
   readonly address: string;
   /** The call ids of the client's a cancel came for before their request, each until it lapses. */
-  readonly buried: Map<number, ReturnType<typeof setTimeout>>;
+  readonly buried: Map<number, TimeoutId>;
   readonly connectionHandle: TransportServerConnectionHandle;
   readonly connectionToken: string;
-  idle: ReturnType<typeof setTimeout> | undefined;
+  idle: TimeoutId | undefined;
   /** Its client said at connect that it listens: the server may send of its own. */
   readonly isListening: boolean;
   /** The listen held, when one is. */
@@ -177,9 +184,9 @@ export const START_DEFAULTS = Object.freeze({
 } satisfies ITransportServerStartOptions);
 
 /**
- * What the transport reads of an envelope, and nothing else, as 0001 lays out the prefix every
- * layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the call id
- * in its fifth to eighth.
+ * What the transport reads of an envelope, and nothing else (0020), in the prefix 0001 lays out and
+ * every layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the
+ * call id in its fifth to eighth.
  */
 export const ENVELOPE_PREFIX = Object.freeze({
   bytes: 8,
@@ -207,11 +214,11 @@ export const REFUSALS = Object.freeze({
   BUSY: 'busy',
   CALL_WAITING: 'call-waiting',
   CONNECTION_UNKNOWN,
-  HOST: 'host-refused',
+  HOST: HOST_REFUSAL,
   LISTEN_UNDECLARED: 'listen-undeclared',
   MALFORMED: 'malformed',
   METHOD: 'method-refused',
-  ORIGIN: 'origin-refused',
+  ORIGIN: ORIGIN_REFUSAL,
   PATH: 'path-unknown',
   TOO_LARGE: 'too-large',
   TYPE: 'type-refused',
@@ -300,6 +307,42 @@ const hasBody = (request: IHTTPRequestLike): boolean => {
   );
 };
 
+// the values of every line of the field `name` a request carries, as they came: `headers` keeps
+// the first of two, so they are counted where each stands
+const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
+  const values: string[] = [];
+  const { rawHeaders } = request;
+
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    if (rawHeaders[index]?.toLowerCase() === name) {
+      values.push(rawHeaders[index + 1] ?? '');
+    }
+  }
+
+  return values;
+};
+
+// the credential a field carries: its value whole, without the spaces and tabs around it (RFC 9110
+// §5.5); none when nothing is left
+const credentialOf = (value: string | undefined): string | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && (value[start] === ' ' || value[start] === '\t')) {
+    start += 1;
+  }
+
+  while (end > start && (value[end - 1] === ' ' || value[end - 1] === '\t')) {
+    end -= 1;
+  }
+
+  return start === end ? undefined : value.slice(start, end);
+};
+
 // a body of Bead's media type, parameters aside, sent as it is
 const isBeadBody = (request: IHTTPRequestLike): boolean => {
   const type = headerOf(request, 'content-type')?.split(';')[0]?.trim().toLowerCase();
@@ -338,28 +381,15 @@ const drawToken = (): string => {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(TOKEN_BYTES))).toString('base64url');
 };
 
-// a whole number above 0; a timer's no more than a timer holds, or, when it may be, Infinity
-const assertOption = (
-  name: string,
-  { timer, value }: { timer?: 'bounded' | 'unbounded'; value: number }
-) => {
-  const isWhole = Number.isInteger(value) && value > 0;
-  const isHeld = isWhole && value <= TIMER_MAX;
-  const isValid =
-    timer === undefined ? isWhole : isHeld || (timer === 'unbounded' && value === Infinity);
-  const holds = {
-    bounded: ' a timer holds',
-    none: '',
-    unbounded: ' a timer holds, or Infinity',
-  }[timer ?? 'none'];
-
-  if (!isValid) {
-    throw new ProgrammerError(`${name} is a whole number above 0${holds}, not ${String(value)}`);
+// a whole number above 0
+const assertOption = (name: string, { value }: { value: number }) => {
+  if (!(Number.isInteger(value) && value > 0)) {
+    throw new ProgrammerError(`${name} is a whole number above 0, not ${String(value)}`);
   }
 };
 
 // a timer that keeps no process alive: a browser's has no `unref`
-const unref = (timer: ReturnType<typeof setTimeout>): void => {
+const unref = (timer: TimeoutId): void => {
   (timer as { unref?: () => unknown }).unref?.();
 };
 
@@ -376,6 +406,14 @@ const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd)
   response.end();
 };
 
+// a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
+const sendHead = (response: IHTTPResponseLike): void => {
+  if (!response.headersSent) {
+    response.writeHead(200, { ...RESPONSE_HEADERS, 'content-type': BEAD_MEDIA_TYPE });
+    response.flushHeaders?.();
+  }
+};
+
 // definition
 
 /**
@@ -389,24 +427,29 @@ const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd)
  * kind and call id, and nothing else: a request's exchange waits under its call id — from its first
  * 8 bytes — for the answer the router sends on it, whose head goes out as the request is handed on,
  * so the requester knows the router has it; any other envelope is handed on and its exchange ends
- * 204. A cancel ends the exchange of its call; one that comes before its request buries that call
- * id for {@link BURIAL_MILLISECONDS}. Each refusal of the transport's own is marked in
- * `bead-refusal`. An exchange lost — its response closed before the transport ended it — closes the
- * connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and a
- * connection idle past `inactivityTimeout`.
+ * 204. A request is handed on with its credential, the `Authorization` field of its `POST` as it
+ * came, its surrounding whitespace removed, and none when the field is empty or absent; no other
+ * exchange's is read, and a `POST` with two is refused 400. An answer, and what a listen brings
+ * back, carry none. A cancel ends the exchange of its call; one that comes before its request
+ * buries that call id for {@link BURIAL_MILLISECONDS}. Each refusal of the transport's own is marked
+ * in `bead-refusal`. An exchange lost — its response closed before the transport ended it — closes
+ * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and
+ * a connection idle past `inactivityTimeout`.
  *
  * What the server sends of its own reaches a client that said at connect that it listens —
  * `bead-listen: ?1`, which the 201 says back. It waits in the connection's outbox, numbered, until a
  * listen — a `GET` with `after` and `wait` — brings back all that waits, in a batch of
  * `application/prs.bead-batch`, the number of its first in `bead-sequence`; the next listen
  * acknowledges by `after` what its client heard whole, and what it did not comes again. A listen waits up to `wait`, no longer than `maximumWait`, for something
- * to bring back; a second takes the first's place. An outbox past `maximumOutboxBytes` closes its
+ * to bring back; a second takes the first's place. Each listen held, once past its refusals, emits
+ * `listen` with `true`, and its end, while its connection stands, `listen` with `false`: the layers
+ * above count no silence meanwhile (spec 13.7). An outbox past `maximumOutboxBytes` closes its
  * connection. A connection whose client does not listen carries answers alone: anything else
  * rejects its `send`.
  *
  * @example
  * const server = createHTTPTransportServer({ createServer: (listener) => createServer(listener) });
- * server.on('message', (data, connectionHandle) => {});
+ * server.on('message', ({ credential, data }, connectionHandle) => {});
  * const { port } = await server.start({ findOpenPort: true });
  */
 export const createHTTPTransportServer = (
@@ -414,29 +457,31 @@ export const createHTTPTransportServer = (
 ): HTTPTransportServer => {
   const {
     bodyBytesBudget = BODY_BYTES_BUDGET,
+    clock = PLATFORM_CLOCK,
     createServer,
-    exchangeTimeout = EXCHANGE_TIMEOUT,
+    exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
     hosts,
-    inactivityTimeout = INACTIVITY_TIMEOUT,
+    inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
     isProxyTrusted = false,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
     maximumConnections = MAXIMUM_CONNECTIONS,
     maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
     maximumOutboxBytes = MAXIMUM_OUTBOX_BYTES,
-    maximumWait = MAXIMUM_WAIT,
+    maximumWait: givenMaximumWait = MAXIMUM_WAIT,
     maximumWaitingExchanges = MAXIMUM_WAITING_EXCHANGES,
     origins = [],
     pathname = PATHNAME,
+    secure,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
-  assertOption('exchangeTimeout', { timer: 'unbounded', value: exchangeTimeout });
-  assertOption('inactivityTimeout', { timer: 'unbounded', value: inactivityTimeout });
+  const exchangeTimeout = assertHeld('exchangeTimeout', givenExchangeTimeout);
+  const inactivityTimeout = assertHeld('inactivityTimeout', givenInactivityTimeout);
   assertOption('maximumBodyBytes', { value: maximumBodyBytes });
   assertOption('maximumConnections', { value: maximumConnections });
   assertOption('maximumConnectionsPerAddress', { value: maximumConnectionsPerAddress });
   assertOption('maximumOutboxBytes', { value: maximumOutboxBytes });
-  assertOption('maximumWait', { timer: 'bounded', value: maximumWait });
+  const maximumWait = assertHeldFinite('maximumWait', givenMaximumWait);
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
 
   // what the transport keeps of each connection, by handle
@@ -474,20 +519,10 @@ export const createHTTPTransportServer = (
           : remoteAddress;
       };
 
-      // a browser's exchange from the server's own origin, or one it was told; any other client's
-      // has no `Origin`, and comes from anywhere
+      // an exchange from the server's own origin, or one it was told; one with no `Origin` comes from
+      // anywhere, and any client that sends one is judged by it
       const isAllowedOrigin = (request: IHTTPRequestLike): boolean => {
-        const origin = headerOf(request, 'origin');
-
-        if (origin === undefined || origins.includes(origin)) {
-          return true;
-        }
-
-        try {
-          return new URL(origin).host === hostOf(request);
-        } catch {
-          return false;
-        }
+        return isTakenOrigin(headerOf(request, 'origin'), { host: hostOf(request), origins });
       };
 
       // ends an exchange the transport answers itself; one whose body it will not read is closed
@@ -503,22 +538,22 @@ export const createHTTPTransportServer = (
 
       // a connection idle — no exchange under way — closes past its timeout
       const rest = (connection: IDrawn): void => {
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
         connection.idle = undefined;
 
         if (inactivityTimeout === Infinity || connection.open > 0) {
           return;
         }
 
-        connection.idle = setTimeout(() => {
+        connection.idle = clock.setTimeout(() => {
           closeDrawn(connection, false);
         }, inactivityTimeout);
         unref(connection.idle);
       };
 
       // out of the registry before its close is told; each exchange still waiting learns its
-      // connection is gone — by the marked 404, or, its head out already, by its socket cut, as a
-      // lost exchange is
+      // connection is gone — by the marked 404 until its request is handed on, then by its socket cut
+      // after its head, as a lost exchange's: a request handed on ran, which no refusal may deny
       const closeDrawn = (connection: IDrawn, isClean: boolean): void => {
         const { address, connectionHandle, connectionToken } = connection;
 
@@ -536,17 +571,21 @@ export const createHTTPTransportServer = (
         } else {
           perAddress.set(address, others);
         }
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
 
         for (const burial of connection.buried.values()) {
-          clearTimeout(burial);
+          clock.clearTimeout(burial);
         }
 
         connection.buried.clear();
 
         for (const exchange of connection.waiting.values()) {
           exchange.isEnded = true;
-          clearTimeout(exchange.timer);
+          clock.clearTimeout(exchange.timer);
+
+          if (exchange.isDelivered) {
+            sendHead(exchange.response);
+          }
 
           if (exchange.response.headersSent) {
             exchange.response.destroy();
@@ -575,7 +614,7 @@ export const createHTTPTransportServer = (
           connection.listen = undefined;
         }
 
-        clearTimeout(listen.timer);
+        clock.clearTimeout(listen.timer);
 
         if (outbox.length === 0) {
           return (endWith(response, end), undefined);
@@ -650,14 +689,14 @@ export const createHTTPTransportServer = (
           return total + bytes.length;
         }, 0);
         connection.open += 1;
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
 
         if (client !== undefined) {
-          client.lastActivityTimestamp = timestamp();
+          client.lastActivity = clock.Date.now();
         }
 
         response.on('close', () => {
-          clearTimeout(held.timer);
+          clock.clearTimeout(held.timer);
 
           if (connection.listen === held) {
             connection.listen = undefined;
@@ -667,8 +706,11 @@ export const createHTTPTransportServer = (
 
           if (drawn.get(connection.connectionHandle) === connection) {
             rest(connection);
+            server.emit(LISTEN_EVENT, false, connection.connectionHandle);
           }
         });
+        // said before the listen it replaces ends, so a second keeps its connection held throughout
+        server.emit(LISTEN_EVENT, true, connection.connectionHandle);
 
         if (connection.listen !== undefined) {
           answer(connection.listen, NOTHING);
@@ -679,7 +721,7 @@ export const createHTTPTransportServer = (
         }
 
         connection.listen = held;
-        held.timer = setTimeout(
+        held.timer = clock.setTimeout(
           () => {
             answer(held, NOTHING);
           },
@@ -695,9 +737,9 @@ export const createHTTPTransportServer = (
           return;
         }
 
-        clearTimeout(connection.buried.get(callId));
+        clock.clearTimeout(connection.buried.get(callId));
 
-        const burial = setTimeout(() => {
+        const burial = clock.setTimeout(() => {
           connection.buried.delete(callId);
         }, BURIAL_MILLISECONDS);
 
@@ -759,7 +801,7 @@ export const createHTTPTransportServer = (
         connections.set(connectionHandle, {
           address,
           connectionHandle,
-          lastActivityTimestamp: undefined,
+          lastActivity: undefined,
           port: request.socket.remotePort ?? 0,
           socket: connection,
           type: TRANSPORT_HTTP,
@@ -786,6 +828,13 @@ export const createHTTPTransportServer = (
         const { request, response } = exchange;
         const { connectionHandle } = connection;
         const declared = Number(headerOf(request, 'content-length') ?? Number.NaN);
+        const authorizations = linesOf(request, 'authorization');
+
+        // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
+        // could be taken for the other
+        if (authorizations.length > 1) {
+          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+        }
 
         if (Number.isFinite(declared) && declared > maximumBodyBytes) {
           return (finish(exchange, { reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
@@ -817,12 +866,12 @@ export const createHTTPTransportServer = (
         let sides = 2;
 
         connection.open += 1;
-        clearTimeout(connection.idle);
+        clock.clearTimeout(connection.idle);
 
         const client = connections.get(connectionHandle);
 
         if (client !== undefined) {
-          client.lastActivityTimestamp = timestamp();
+          client.lastActivity = clock.Date.now();
         }
 
         const release = (): void => {
@@ -845,7 +894,7 @@ export const createHTTPTransportServer = (
         // ends it now, before its body or its answer; what still comes is counted, and dropped
         const endEarly = (end: IEnd): void => {
           state.isEnded = true;
-          clearTimeout(state.timer);
+          clock.clearTimeout(state.timer);
 
           if (prefix !== undefined && connection.waiting.get(prefix.callId) === state) {
             connection.waiting.delete(prefix.callId);
@@ -885,7 +934,7 @@ export const createHTTPTransportServer = (
           prefix = { callId, kind };
 
           if (connection.buried.has(callId)) {
-            clearTimeout(connection.buried.get(callId));
+            clock.clearTimeout(connection.buried.get(callId));
             connection.buried.delete(callId);
             state.isCancelled = true;
           }
@@ -895,7 +944,7 @@ export const createHTTPTransportServer = (
 
         response.on('close', () => {
           release();
-          clearTimeout(state.timer);
+          clock.clearTimeout(state.timer);
 
           // closed before the transport ended it: lost, as a dropped socket's frames are
           if (!state.isEnded) {
@@ -974,20 +1023,20 @@ export const createHTTPTransportServer = (
 
           const envelope = body.bytes.slice(0, body.length);
 
+          // a request is handed on with the credential its exchange carried; no other envelope is
           if (kind === ENVELOPE_KINDS.REQUEST) {
+            const credential = credentialOf(authorizations[0]);
+
             state.isDelivered = true;
-            server.emit(MESSAGE_EVENT, envelope, connectionHandle);
+            server.emit(MESSAGE_EVENT, { credential, data: envelope }, connectionHandle);
 
             // still waiting — not answered as it came — its head goes now, so its client knows the
             // router has it; and it waits for its answer no longer than it may
             if (connection.waiting.get(callId) === state) {
-              if (!response.headersSent) {
-                response.writeHead(200, { ...RESPONSE_HEADERS, 'content-type': BEAD_MEDIA_TYPE });
-                response.flushHeaders?.();
-              }
+              sendHead(response);
 
               if (exchangeTimeout !== Infinity) {
-                state.timer = setTimeout(() => {
+                state.timer = clock.setTimeout(() => {
                   closeDrawn(connection, false);
                 }, exchangeTimeout);
                 unref(state.timer);
@@ -997,7 +1046,7 @@ export const createHTTPTransportServer = (
             return undefined;
           }
 
-          server.emit(MESSAGE_EVENT, envelope, connectionHandle);
+          server.emit(MESSAGE_EVENT, { credential: undefined, data: envelope }, connectionHandle);
 
           if (kind === ENVELOPE_KINDS.CANCEL) {
             const cancelled = connection.waiting.get(callId);
@@ -1010,7 +1059,7 @@ export const createHTTPTransportServer = (
             } else if (cancelled.isDelivered) {
               connection.waiting.delete(callId);
               cancelled.isEnded = true;
-              clearTimeout(cancelled.timer);
+              clock.clearTimeout(cancelled.timer);
               endWith(cancelled.response, { status: 204 });
             } else {
               cancelled.isCancelled = true;
@@ -1023,9 +1072,21 @@ export const createHTTPTransportServer = (
 
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
-        const host = hostOf(request);
 
-        if (hosts !== undefined && (host === undefined || !hosts.includes(host))) {
+        // what HTTP refuses of its own (RFC 9112 §3.2), as HTTP answers it, unmarked; HTTP/2's
+        // authority is its server's to judge
+        if (
+          request.httpVersionMajor === 1 &&
+          !isWellFormedHost(linesOf(request, 'host'), {
+            isRequired: request.httpVersion === '1.1',
+          })
+        ) {
+          response.writeHead(400, { 'content-length': '0', connection: 'close' });
+
+          return (response.end(), undefined);
+        }
+
+        if (!isTakenHost(hostOf(request), hosts)) {
           return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
         }
 
@@ -1085,7 +1146,15 @@ export const createHTTPTransportServer = (
       };
 
       return {
+        clock,
         defaults: START_DEFAULTS,
+        // a server under TLS has its contexts, as Node's https and its HTTP/2 secure server do
+        get isSecure() {
+          return (
+            typeof (httpServer as { addContext?: unknown } | undefined)?.addContext === 'function'
+          );
+        },
+        secure,
         type: TRANSPORT_HTTP,
 
         start: async ({ address, findOpenPort, port, signal }) => {
@@ -1208,7 +1277,9 @@ export const createHTTPTransportServer = (
 
         // an answer ends the exchange of its request; anything else — a late answer too — waits for
         // a listen, when its client listens
-        send: (data, { socket }) => {
+        // neither carries a credential: the router fails a command that presents one before it
+        // goes, DESTINATION_UNREACHABLE (decision 0010)
+        send: ({ data }, { socket }) => {
           const bytes = bytesOf(data);
 
           if (bytes === undefined || bytes.length < ENVELOPE_PREFIX.bytes) {
@@ -1244,7 +1315,7 @@ export const createHTTPTransportServer = (
 
           connection.waiting.delete(callId);
           exchange.isEnded = true;
-          clearTimeout(exchange.timer);
+          clock.clearTimeout(exchange.timer);
 
           const { response } = exchange;
 

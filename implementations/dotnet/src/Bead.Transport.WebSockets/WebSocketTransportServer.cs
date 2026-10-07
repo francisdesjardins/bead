@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
@@ -24,17 +25,52 @@ public sealed record WebSocketTransportServerOptions
 
     /// <summary>
     /// How often each connection is pinged, and how long its pong may take: a peer gone without a
-    /// word ends in a close rather than never. A whole number of milliseconds from 1 to 2³¹ − 1, or
-    /// <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses any other with an
-    /// <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// word ends in a close rather than never. From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// nearest whole one, or <see cref="Timeout.InfiniteTimeSpan"/> for none; the transport refuses
+    /// any other, zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built.
+    /// The platform's, on the real clock.
     /// </summary>
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>How long a close handshake may take: a peer that never answers is dropped after it.</summary>
+    /// <summary>
+    /// How long a close handshake may take: a peer that never answers is dropped after it. From 1 to
+    /// 2³¹ − 1 milliseconds, rounded to the nearest whole one, or
+    /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without end; the transport refuses any other,
+    /// zero among them, with an <see cref="ArgumentOutOfRangeException"/> as it is built. It bounds
+    /// the platform's close, on the real clock.
+    /// </summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>What tells when a connection last delivered a message; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What the stack built on it runs on, and what tells when a connection last delivered a
+    /// message; the system's clock when none.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// What stands in front of it, which it cannot tell (spec 13.4): true for TLS terminated before
+    /// it, which makes its connections secure; false for a proxy that serves the network in the
+    /// clear, which leaves them in the clear; none to judge by the address it listens on. Believed
+    /// whatever it listens on.
+    /// </summary>
+    public bool? Secure { get; init; }
+
+    /// <summary>
+    /// The hosts a request may name, in any ASCII case, in the form the field carries, an IDN host
+    /// in punycode, checked before anything else of the request but its <c>Host</c>'s form; any when
+    /// none. The server judges its own origin by the request's <c>Host</c>, so this is what refuses a
+    /// page that rebinds its name to the server's address, whatever it sends.
+    /// </summary>
+    public IReadOnlyList<string>? Hosts { get; init; }
+
+    /// <summary>
+    /// The origins an upgrade that sends an <c>Origin</c> may come from besides the server's own,
+    /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly, checked
+    /// once its version and its form are a handshake's: none by default. <c>null</c> among them
+    /// takes every upgrade that sends it. No same-origin policy guards an upgrade, so a page of an
+    /// origin named here is served outright.
+    /// </summary>
+    public IReadOnlyList<string> Origins { get; init; } = [];
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -56,29 +92,42 @@ public sealed record WebSocketTransportStartOptions
 /// cref="WebSocketTransportServerOptions.Heartbeat"/>. A text message is delivered as text, which
 /// a router reports. What goes out to one connection goes in order, one message at a time. It goes
 /// from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed,
-/// and starts again once Closed.
+/// and starts again once Closed. A request it does not upgrade it refuses in the order spec 15.2
+/// states, each refusal of its own marked as <see cref="WebSocketRefusals"/> names it: a host not
+/// taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, or a version but
+/// 13, 426; a malformed upgrade, 400; an origin not taken, 403.
 /// </summary>
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
     private readonly WebSocketTransportServerOptions _options;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     // each connection, and its end as the server tells it: gone from the handles, its close raised
     private readonly ConcurrentDictionary<string, Held> _connections = new();
     // its ready state, and the guards around its start and its stop, as every transport server's
     private readonly TransportServerLife _life = new();
     private WebApplication? _application;
+
+    // whether its connections are secure: as its application says what stands in front of it, or,
+    // when it says nothing, bound to the loopback as it starts, since it takes no TLS of its own
+    private volatile bool _isSecure;
     // how many connections came, which ranks each: the dictionary keeps no order
     private long _arrivals;
 
     /// <summary>
-    /// A transport server, not yet listening. A heartbeat no timer holds is an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
-        _options = options ?? new WebSocketTransportServerOptions();
-        WebSocketConnection.AssertHeartbeat(_options.Heartbeat, nameof(options));
-        _time = _options.Time ?? TimeProvider.System;
+        var given = options ?? new WebSocketTransportServerOptions();
+
+        _options = given with
+        {
+            Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
+            CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportServerOptions.CloseTimeout)),
+        };
+        _clock = _options.Clock ?? TimeProvider.System;
+        _isSecure = _options.Secure ?? false;
     }
 
     /// <inheritdoc/>
@@ -112,12 +161,33 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// </summary>
     internal Func<WebSocket, string, (WebSocket Socket, string ConnectionHandle)>? Accepted { get; init; }
 
+    /// <summary>
+    /// The largest message its connections read: the option given, or a router's largest envelope
+    /// by default, which a transport built alone takes, its router unknown to it.
+    /// </summary>
+    internal int MaximumMessageBytes
+    {
+        get
+        {
+            return _options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes;
+        }
+    }
+
     /// <summary>Where it is in its life: Uninitialized until its first start.</summary>
     public ReadyState ReadyState
     {
         get
         {
             return _life.ReadyState;
+        }
+    }
+
+    /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
         }
     }
 
@@ -220,6 +290,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
             bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
+            _isSecure = _options.Secure ?? TransportSecurity.IsSecure((false, start.Address));
         }
         catch
         {
@@ -267,13 +338,32 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return Stop();
     }
 
+    /// <summary>
+    /// A WebSocket carries no credential beside an envelope (spec 15.2): a command presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes.
+    /// </summary>
+    public bool CarriesCredential(string connectionHandle)
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a connection is secure (spec 13.4): as <see cref="WebSocketTransportServerOptions.Secure"/>
+    /// says, when given; otherwise judged from its listener, never from what a name resolves to,
+    /// bound to a loopback address, since it takes no TLS of its own.
+    /// </summary>
+    public bool IsSecure(string connectionHandle)
+    {
+        return _isSecure;
+    }
+
     /// <inheritdoc/>
-    public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+    public Task Send(TransportMessage message, string connectionHandle)
     {
         // as the TypeScript side's: what goes to a connection not open goes nowhere, and says nothing,
         // for the router refuses what is for a connection it does not hold itself
         return _connections.TryGetValue(connectionHandle, out var held) && held.Connection.Socket.State == WebSocketState.Open
-            ? held.Connection.Send(bytes)
+            ? held.Connection.Send(message.Bytes)
             : Task.CompletedTask;
     }
 
@@ -323,15 +413,51 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
+    // a refusal written: its status, its fields, its mark when it has one, its date from the
+    // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be
+    private void Refuse(HttpResponse response, HandshakeRefusal refusal)
+    {
+        response.StatusCode = refusal.Status;
+
+        foreach (var (name, value) in refusal.Fields)
+        {
+            response.Headers[name] = value;
+        }
+
+        if (refusal.Refusal is { } reason)
+        {
+            response.Headers[HostsAndOrigins.RefusalHeader] = reason;
+        }
+
+        // ! Kestrel keeps the date and the length the application writes: without the length it
+        // leaves it out of a HEAD's answer
+        response.Headers.Date = _clock.GetUtcNow().ToString("r", CultureInfo.InvariantCulture);
+        response.ContentLength = 0;
+    }
+
     // a request: one that upgrades becomes a connection, until its socket closes; none is taken once
-    // a stop began
+    // a stop began, and any other is refused in the order spec 15.2 states, the connection going
+    // with the refusal, as the TypeScript side's does
     private async Task Accept(HttpContext context)
     {
-        var isStopping = _life.IsStopping;
-
-        if (!context.WebSockets.IsWebSocketRequest || isStopping)
+        if (_life.IsStopping)
         {
-            context.Response.StatusCode = isStopping ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status426UpgradeRequired;
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+
+            return;
+        }
+
+        if (WebSocketHandshake.RefusalOf(context.Request, _options) is { } refusal)
+        {
+            Refuse(context.Response, refusal);
+
+            return;
+        }
+
+        // ! a guard: what the judgement takes Kestrel upgrades, and its accept throws on any other
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            Refuse(context.Response, WebSocketHandshake.Malformed);
 
             return;
         }
@@ -342,7 +468,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var port = context.Connection.RemotePort;
         var peerHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port}";
         var (socket, connectionHandle) = Accepted?.Invoke(accepted, peerHandle) ?? (accepted, peerHandle);
-        var connection = new WebSocketConnection(socket, (_options.MaximumMessageBytes ?? LimitDefaults.MaximumEnvelopeBytes, _options.CloseTimeout));
+        var connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = new Held
         {
@@ -360,7 +486,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             Connection?.Invoke(connectionHandle);
             await connection.Read((message) =>
             {
-                held.Client = held.Client with { LastActivityTimestamp = _time.GetUtcNow() };
+                held.Client = held.Client with { LastActivity = _clock.GetUtcNow() };
                 Message?.Invoke(message, connectionHandle);
             });
         }

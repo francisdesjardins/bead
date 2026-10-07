@@ -16,7 +16,9 @@ public sealed record HttpTransportClientOptions
 
     /// <summary>
     /// How long it goes on listening again, its listens lost, before it counts its connection lost: 5
-    /// minutes by default, a server's own inactivity timeout; infinite for ever.
+    /// minutes by default, a server's own inactivity timeout; infinite for ever. From 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds otherwise, rounded to the nearest whole one;
+    /// zero is refused.
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
@@ -26,14 +28,26 @@ public sealed record HttpTransportClientOptions
     /// <summary>The largest answer, and the largest envelope a batch brings, it reads: an envelope's limit by default.</summary>
     public int? MaximumBodyBytes { get; init; }
 
-    /// <summary>How long it waits before it listens again after a listen that brought nothing: none by default.</summary>
+    /// <summary>
+    /// How long it waits before it listens again after a listen that brought nothing: none, zero, by
+    /// default, which listens again at once; from 1 to <see cref="Clocks.LongestTimer"/> milliseconds
+    /// otherwise, rounded to the nearest whole one. Infinite is refused.
+    /// </summary>
     public TimeSpan Pause { get; init; } = TimeSpan.Zero;
 
-    /// <summary>How long each listen asks the server to wait: 25 seconds by default, under a server's 30 and an intermediary's 60.</summary>
+    /// <summary>
+    /// How long each listen asks the server to wait: 25 seconds by default, under a server's 30 and
+    /// an intermediary's 60; zero asks it to answer at once, which polls. From 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds otherwise, rounded to the nearest whole one;
+    /// infinite is refused.
+    /// </summary>
     public TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(25);
 
-    /// <summary>What its timeouts and waits run on; the system's clock when none.</summary>
-    public TimeProvider? Time { get; init; }
+    /// <summary>
+    /// What the stack built on it runs on, its timeouts and waits among them; the system's clock when
+    /// none. A disconnect's wait on the server bounds the platform's exchange, on the real clock.
+    /// </summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 /// <summary>Where a client connects — <c>http://host:port/pathname</c>, or <c>https://</c> when secured — and how long it waits.</summary>
@@ -51,7 +65,12 @@ public sealed record HttpConnectOptions
     /// <summary>The path the server answers on, prefixed with a single leading slash.</summary>
     public string Pathname { get; init; } = HttpTransport.Pathname;
 
-    /// <summary>How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds unless told; zero never times out.</summary>
+    /// <summary>
+    /// How long the connect may take before it throws a <see cref="TimeoutException"/>: 30 seconds
+    /// unless told, from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest
+    /// whole one, or <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which never times out;
+    /// zero is refused.
+    /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 }
 
@@ -63,7 +82,10 @@ public sealed record HttpConnectOptions
 /// answer comes as a message when it does; a refusal the server marks fails, nothing having been
 /// tried, and the one that says the connection is gone closes it, once that failure is heard;
 /// anything else leaves the outcome unknown: it settles, and closes the connection, as a socket
-/// that drops does.
+/// that drops does. Each send carries its credential, when it has one, in the <c>Authorization</c>
+/// field of its <c>POST</c>, as it is given; one that is no field's value — anything but visible
+/// ASCII, spaces and tabs — is refused before it goes. An answer, and what a listen brings back,
+/// carry none.
 /// </summary>
 /// <remarks>
 /// What the server sends of its own, a client that listens — the default, once the server says it
@@ -78,7 +100,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 {
     private const int LengthBytes = 4;
 
-    // how long a disconnect waits on the server before it lets the connection go all the same
+    // how long a disconnect waits on the server before it lets the connection go all the same: on
+    // the real clock, since it bounds the platform's exchange against a server that does not
+    // answer, never what Bead times
     private static readonly TimeSpan DisconnectTimeout = TimeSpan.FromSeconds(5);
 
     // how long it waits before listening again after its listens were lost: nothing after the first,
@@ -86,10 +110,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LastRetry = TimeSpan.FromSeconds(30);
 
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
-
     private readonly HttpTransportClientOptions _options;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     private readonly int _maximumBodyBytes;
 
     // what every move from one state to another decides by
@@ -108,16 +130,23 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private Action? _reconnect;
 
     /// <summary>
-    /// A transport client, not yet connected. A wait, a pause or an inactivity timeout no timer holds
-    /// is an <see cref="ArgumentOutOfRangeException"/>.
+    /// A transport client, not yet connected, its durations held. An inactivity timeout neither
+    /// infinite nor from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, or a wait or a pause
+    /// neither zero nor in that range, is an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public HttpTransportClient(HttpTransportClientOptions? options = null)
     {
-        _options = options ?? new HttpTransportClientOptions();
-        AssertDelay((nameof(HttpTransportClientOptions.InactivityTimeout), _options.InactivityTimeout), true);
-        AssertDelay((nameof(HttpTransportClientOptions.Pause), _options.Pause), false);
-        AssertDelay((nameof(HttpTransportClientOptions.Wait), _options.Wait), false);
-        _time = _options.Time ?? TimeProvider.System;
+        var given = options ?? new HttpTransportClientOptions();
+
+        // zero is at once for a delay: a listen again at once, and a listen the server answers at
+        // once, which polls
+        _options = given with
+        {
+            InactivityTimeout = Clocks.AssertHeld((nameof(HttpTransportClientOptions.InactivityTimeout), nameof(HttpTransportClientOptions.InactivityTimeout)), given.InactivityTimeout),
+            Pause = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Pause), nameof(HttpTransportClientOptions.Pause)), given.Pause),
+            Wait = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Wait), nameof(HttpTransportClientOptions.Wait)), given.Wait),
+        };
+        _clock = _options.Clock ?? TimeProvider.System;
         _maximumBodyBytes = _options.MaximumBodyBytes ?? LimitDefaults.MaximumEnvelopeBytes;
     }
 
@@ -163,6 +192,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
+    /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
+    public TimeProvider Clock
+    {
+        get
+        {
+            return _clock;
+        }
+    }
+
     /// <summary>Whether the server took its listen at connect: what it sends of its own reaches this client.</summary>
     public bool IsListening
     {
@@ -174,8 +212,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
-    /// an <see cref="InvalidOperationException"/> unless Uninitialized or Closed, and with an
-    /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled already.
+    /// an <see cref="ArgumentOutOfRangeException"/> for a timeout
+    /// <see cref="HttpConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
+    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
+    /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
+    /// changed, when its token is cancelled already.
     /// Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and an
     /// <see cref="HttpRequestException"/> when the server draws none, ending Closed.
@@ -186,11 +227,40 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     /// <summary>
-    /// Posts one envelope, settling on the head of its answer; refused with a
-    /// <see cref="DisconnectException"/> unless Open. A refusal the server marks is an
-    /// <see cref="IOException"/>: nothing of it was tried.
+    /// It carries a credential beside an envelope, in the <c>Authorization</c> of its <c>POST</c>
+    /// (spec 15.5).
     /// </summary>
-    public Task Send(ReadOnlyMemory<byte> bytes)
+    public bool CarriesCredential
+    {
+        get
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether it is secure, judged from the options of its last connect, never from what its host
+    /// resolves to (spec 13.4): <c>https</c>, or a host on the loopback. None before its first connect.
+    /// </summary>
+    public bool IsSecure
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _lastConnectOptions is { } given && TransportSecurity.IsSecure((given.Secured, given.Host));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Posts one envelope, with its credential in the <c>Authorization</c> field when it has one,
+    /// settling on the head of its answer; refused with a <see cref="DisconnectException"/> unless
+    /// Open, and with an <see cref="ArgumentException"/>, its connection kept, for a credential no
+    /// field carries. A refusal the server marks is an <see cref="IOException"/>: nothing of it was
+    /// tried.
+    /// </summary>
+    public Task Send(TransportMessage message)
     {
         Drawn? connection;
         ReadyState readyState;
@@ -201,9 +271,18 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             readyState = _readyState;
         }
 
-        return readyState == ReadyState.Open && connection is not null
-            ? Posting((connection, bytes))
-            : Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+        if (readyState != ReadyState.Open || connection is null)
+        {
+            return Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+        }
+
+        // refused before it goes, the connection kept: a field could not carry it as it is
+        if (message.Credential is { } credential && !IsFieldValue(credential))
+        {
+            return Task.FromException(new ArgumentException("a credential holds visible ASCII, spaces and tabs alone", nameof(message)));
+        }
+
+        return Posting((connection, message));
     }
 
     /// <summary>
@@ -239,7 +318,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         {
             try
             {
-                using var deleting = new CancellationTokenSource(DisconnectTimeout, _time);
+                using var deleting = new CancellationTokenSource(DisconnectTimeout, TimeProvider.System);
                 using var deleted = await Deleting(connection, deleting.Token);
             }
             catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException)
@@ -323,7 +402,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                 {
                     return Connecting(target, (token, true));
                 },
-                (reconnect, _time));
+                (reconnect, _clock));
 
             // the last attempt opened as the token was cancelled: what it opened goes with it
             if (token.IsCancellationRequested)
@@ -404,19 +483,6 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         http?.Dispose();
     }
 
-    // a whole number of milliseconds from 0 a timer holds; or, when it may be, infinite
-    private static void AssertDelay((string Name, TimeSpan Value) delay, bool mayBeInfinite)
-    {
-        var isHeld = delay.Value >= TimeSpan.Zero && delay.Value <= LongestTimer && delay.Value.Ticks % TimeSpan.TicksPerMillisecond == 0;
-
-        if (!isHeld && !(mayBeInfinite && delay.Value == Timeout.InfiniteTimeSpan))
-        {
-            throw new ArgumentOutOfRangeException(
-                delay.Name,
-                $"{delay.Name} is a whole number of milliseconds from 0 a timer holds{(mayBeInfinite ? ", or infinite" : "")}, not {delay.Value.TotalMilliseconds}");
-        }
-    }
-
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -433,6 +499,16 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return new Uri($"{(options.Secured ? "https" : "http")}://{host}:{options.Port}{path}");
     }
 
+    // what a field's value holds, and so a credential the Authorization field carries: visible
+    // ASCII, spaces and tabs (RFC 9110 §5.5)
+    private static bool IsFieldValue(string value)
+    {
+        return value.All((character) =>
+        {
+            return character is '\t' or (>= ' ' and <= '~');
+        });
+    }
+
     // the media type of a response, parameters aside
     private static string? TypeOf(HttpResponseMessage response)
     {
@@ -445,7 +521,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     // how long to wait before listening again after `losses` listens lost in a row, drawn apart so
-    // the clients one restart dropped together come back apart, as EventSource's do
+    // the clients one restart dropped together come back apart, as EventSource's do; in whole
+    // milliseconds, as every wait of Bead's
     private static TimeSpan RetryDelayOf(int losses)
     {
         if (losses == 1)
@@ -454,8 +531,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
 
         var delay = TimeSpan.FromTicks(Math.Min(LastRetry.Ticks, FirstRetry.Ticks * (1L << Math.Min(losses - 2, 30))));
+        var drawn = (delay / 2) + (delay / 2 * Random.Shared.NextDouble());
 
-        return (delay / 2) + (delay / 2 * Random.Shared.NextDouble());
+        return TimeSpan.FromMilliseconds(Math.Floor(drawn.TotalMilliseconds));
     }
 
     // the HTTP client its exchanges go through, built as a connect needs it
@@ -508,7 +586,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         {
             try
             {
-                using var deleting = new CancellationTokenSource(DisconnectTimeout, _time);
+                using var deleting = new CancellationTokenSource(DisconnectTimeout, TimeProvider.System);
                 using var request = RequestOf(connection, (HttpMethod.Delete, connection.Uri));
                 using var deleted = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deleting.Token);
             }
@@ -559,10 +637,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(HttpConnectOptions options, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(HttpConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(given);
 
+        // held before anything moves or is kept, so a reconnection connects again with it held
+        var options = given with
+        {
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(HttpConnectOptions.Timeout)), given.Timeout),
+        };
         var (token, isAttempt) = call;
         var uri = UriOf(options);
         CancellationTokenSource connecting;
@@ -591,7 +674,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         try
         {
-            using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _time) : null;
+            using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _clock) : null;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, connecting.Token, timeout?.Token ?? CancellationToken.None);
             using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new ByteArrayContent([]) };
 
@@ -610,7 +693,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {
-                throw new TimeoutException($"timed out after {options.Timeout.TotalMilliseconds}ms", reason);
+                throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
             }
             catch (OperationCanceledException reason) when (connecting.IsCancellationRequested && !token.IsCancellationRequested)
             {
@@ -676,7 +759,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     // one envelope posted, settling on the head of its answer, the answer itself read after: a
     // caller waiting on it resumes as it settles, before what follows, as a rejection's handlers run
     // before a timer of 0
-    private Task Posting((Drawn Connection, ReadOnlyMemory<byte> Bytes) sent)
+    private Task Posting((Drawn Connection, TransportMessage Message) sent)
     {
         var settled = new TaskCompletionSource();
 
@@ -693,16 +776,22 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return settled.Task;
     }
 
-    private async Task Exchanging((Drawn Connection, ReadOnlyMemory<byte> Bytes) sent, TaskCompletionSource settled)
+    private async Task Exchanging((Drawn Connection, TransportMessage Message) sent, TaskCompletionSource settled)
     {
-        var (connection, bytes) = sent;
+        var (connection, message) = sent;
         HttpResponseMessage response;
 
         try
         {
             using var request = RequestOf(connection, (HttpMethod.Post, connection.Uri));
 
-            request.Content = new ReadOnlyMemoryContent(bytes);
+            // as it is given: a header parsed would be written again its own way
+            if (message.Credential is { } credential)
+            {
+                request.Headers.TryAddWithoutValidation(Microsoft.Net.Http.Headers.HeaderNames.Authorization, credential);
+            }
+
+            request.Content = new ReadOnlyMemoryContent(message.Bytes);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
             response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
         }
@@ -791,7 +880,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             // end — lost, or disconnecting — is no answer of this one's
             if (body.Length > 0 && _drawn == connection)
             {
-                Hear(body);
+                Hear(body, false);
             }
         }
     }
@@ -821,7 +910,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                     if (losses == 1 && _options.InactivityTimeout != Timeout.InfiniteTimeSpan)
                     {
-                        expiring = new CancellationTokenSource(_options.InactivityTimeout, _time);
+                        expiring = new CancellationTokenSource(_options.InactivityTimeout, _clock);
                     }
 
                     if (expiring is { IsCancellationRequested: true })
@@ -861,13 +950,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
-    // an envelope an answer or a listen brought back; a listener that throws stops nothing: its throw
-    // is left to a task nobody waits on, told as an exception unobserved, and the client goes on
-    private void Hear(byte[] envelope)
+    // an envelope an answer or a listen brought back, which carry no credential, what a listen
+    // brought back marked as what may overtake an answer (spec 15.9); a listener that throws stops
+    // nothing: its throw is left to a task nobody waits on, told as an exception unobserved, and the
+    // client goes on
+    private void Hear(byte[] envelope, bool mayOvertake)
     {
         try
         {
-            Message?.Invoke(new TransportMessage(envelope, false));
+            Message?.Invoke(new TransportMessage(envelope, false) { MayOvertake = mayOvertake });
         }
         catch (Exception reason)
         {
@@ -888,7 +979,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         try
         {
-            await Task.Delay(pause.Delay, _time, cut.Token);
+            await Task.Delay(pause.Delay, _clock, cut.Token);
         }
         catch (OperationCanceledException)
         {
@@ -975,7 +1066,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                     cursor.After += 1;
                     heard += 1;
-                    Hear(envelope);
+                    Hear(envelope, true);
                 }
             }
             catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)

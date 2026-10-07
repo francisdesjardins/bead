@@ -1,8 +1,13 @@
+import { once } from 'node:events';
+import { createServer, type IncomingMessage } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
+import { createHTTPTransportClient } from '../../../transport/client/http-transport-client';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   CLIENT_FAILURES,
+  CredentialScheme,
   EnvelopeKind,
   FailureScope,
   LIMIT_DEFAULTS,
@@ -11,6 +16,7 @@ import {
 } from '../../shared/constants';
 import { DisconnectError, FailureError } from '../../shared/errors';
 import type {
+  Credential,
   IFailure,
   IProcedure,
   IRequestHeader,
@@ -20,7 +26,11 @@ import type {
   IRouterResult,
   RouterAnswer,
 } from '../../shared/types';
+import { createRouterClient } from '../../client/router-client';
+import { readEnvelope, writeEnvelope } from '../../shared/envelope';
+import { createPipedTransports } from '../../shared/__tests__/fixtures';
 import { createRelay } from '../relay';
+import { createRouterServer, requireSessionOrCredential } from '../router-server';
 import type { IRelayOptions, RelayTarget } from '../types';
 
 // helpers
@@ -181,13 +191,338 @@ const createTestRelay = (
 /** The failures of the answers written, as their codes, relays crossed and details. */
 const failuresOf = (answers: [RouterAnswer, IRequestHeader][]) => {
   return answers.map(([answer]) => {
-    const { code, detail, hops } = answer.failure ?? ({} as Partial<IFailure>);
+    const { code, detail, relays } = answer.failure ?? ({} as Partial<IFailure>);
 
-    return answer.failure === undefined ? [...answer.payload] : [code, hops, detail];
+    return answer.failure === undefined ? [...answer.payload] : [code, relays, detail];
   });
 };
 
 // definition
+
+/** A token whose claims set names `aud`, as a relay reads it without verifying it. */
+const tokenNaming = (aud: unknown): string => {
+  const part = (value: object): string => {
+    return Buffer.from(JSON.stringify(value)).toString('base64url');
+  };
+
+  return `${part({ alg: 'HS256', typ: 'at+jwt' })}.${part({ aud, sub: 'carol' })}.AAAA`;
+};
+
+/** A request's header to `destinationId`, presenting `credential`. */
+const presentingOf = (
+  callId: number,
+  { credential, destinationId = 7 }: { credential: Credential | undefined; destinationId?: number }
+): IRequestHeader => {
+  return {
+    ...headerOf(callId, { destinationId }),
+    ...(credential === undefined ? {} : { credential }),
+  };
+};
+
+/**
+ * A relay that admits all, whose connections of its own carry a credential securely unless
+ * `carriage` says otherwise, recording each leg B request of its own router and each answer.
+ */
+const createCarryingRelay = (
+  carriage: ReadonlyMap<Handle, { carriesCredential: boolean; isSecure: boolean }> = new Map(),
+  limits: IRouterLimits = LIMIT_DEFAULTS
+) => {
+  const answers: RouterAnswer[] = [];
+  const own: IAsked[] = [];
+  const relay = createRelay({
+    carriageOf: (connectionHandle) => {
+      return carriage.get(connectionHandle) ?? { carriesCredential: true, isSecure: true };
+    },
+    failures: SERVER_FAILURES,
+    limits,
+    options: {
+      beforeRoute: () => {
+        return true;
+      },
+    },
+    report: () => {},
+    request: (payload, { onSent, options: requestOptions, procedure }) => {
+      own.push({ options: requestOptions, payload, procedure });
+
+      return answering(Uint8Array.of(8))(
+        onSent ??
+          (() => {
+            return undefined;
+          })
+      );
+    },
+    respond: (answer) => {
+      answers.push(answer);
+
+      return Promise.resolve();
+    },
+  });
+
+  return { answers, own, relay };
+};
+
+test.describe('createRelay, credentials', () => {
+  const ELSEWHERE = { scheme: CredentialScheme.ELSEWHERE } as const;
+  const CARRIED = 'Bearer mF_9.B5f-4.1JqM';
+  const jwtNaming = (aud: unknown) => {
+    return { scheme: CredentialScheme.JWT, token: tokenNaming(aud) } as const;
+  };
+
+  test('answers a call leg B cannot carry DESTINATION_UNREACHABLE, nothing tried: a JWT whose aud names not its destination’s audience, or to one of none; an ELSEWHERE to one of none, or over a leg B that carries none; either in the clear', () => {
+    const plain: Handle = 'type=WS;ip=192.0.2.1;port=50003';
+    const { relay } = createCarryingRelay(
+      new Map([
+        [device, { carriesCredential: false, isSecure: true }],
+        [plain, { carriesCredential: true, isSecure: false }],
+      ])
+    );
+
+    relay.register({ connectionHandle: first }, { audience: 'bead-interop', destinationId: 3 });
+    relay.register({ connectionHandle: first }, { destinationId: 5 });
+    relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 7 });
+    relay.register({ connectionHandle: plain }, { audience: 'bead-interop', destinationId: 9 });
+
+    const codeOf = (credential: Credential | undefined, destinationId: number) => {
+      return relay.handlerOf(destinationId)?.admit?.({
+        connectionHandle: first,
+        header: presentingOf(1, { credential, destinationId }),
+      })?.code;
+    };
+    const unreachable = ProtocolCode.DESTINATION_UNREACHABLE;
+
+    expect(
+      [
+        undefined,
+        { scheme: CredentialScheme.OPAQUE, token: 'AQEBAQEBAQEBAQEBAQEBAQ' },
+        jwtNaming('bead-interop'),
+        jwtNaming(['bead-other', 'bead-interop']),
+        jwtNaming('bead-other'),
+        { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+        ELSEWHERE,
+      ].map((credential) => {
+        return [3, 5, 7, 9].map((destinationId) => {
+          return codeOf(credential as Credential | undefined, destinationId);
+        });
+      })
+    ).toEqual([
+      [undefined, undefined, undefined, undefined],
+      [undefined, undefined, undefined, undefined],
+      [undefined, unreachable, undefined, unreachable],
+      [undefined, unreachable, undefined, unreachable],
+      [unreachable, unreachable, unreachable, unreachable],
+      [unreachable, unreachable, unreachable, unreachable],
+      [undefined, unreachable, unreachable, unreachable],
+    ]);
+  });
+
+  test('presents on leg B what leg A does: a JWT’s same bytes, an ELSEWHERE with what leg A’s transport carried, none for none or OPAQUE', async () => {
+    const { answers, own, relay } = createCarryingRelay();
+    const jwt = jwtNaming('bead-interop');
+
+    relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 7 });
+
+    for (const [callId, credential] of [
+      [1, undefined],
+      [3, { scheme: CredentialScheme.OPAQUE, token: 'AQEBAQEBAQEBAQEBAQEBAQ' }],
+      [5, jwt],
+      [7, ELSEWHERE],
+    ] as const) {
+      await relay.handlerOf(7)?.({
+        ...propsOf(presentingOf(callId, { credential: credential as Credential | undefined })),
+        transportCredential: CARRIED,
+      });
+    }
+
+    expect(
+      own.map(({ options: asked }) => {
+        return asked.credential;
+      })
+    ).toEqual([
+      { scheme: CredentialScheme.NONE },
+      { scheme: CredentialScheme.NONE },
+      { scheme: CredentialScheme.JWT, token: jwt.token },
+      { carried: CARRIED, scheme: CredentialScheme.ELSEWHERE },
+    ]);
+    expect(answers).toHaveLength(4);
+  });
+
+  test('holds a payload to what one envelope holds behind leg B’s header with its credential, call by call, for a target that takes no transfer', async () => {
+    const limits = { ...LIMIT_DEFAULTS, chunkBytes: 1_024, maximumTransfers: 0 };
+    const { answers, own, relay } = createCarryingRelay(new Map(), limits);
+    const jwt = jwtNaming('bead-interop');
+    // its header: 12 bytes, then the block's head and its token padded to a word
+    const behindJwt = 1_024 - 12 - 4 - Math.ceil(jwt.token.length / 4) * 4;
+
+    relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 7 });
+
+    const handler = relay.handlerOf(7);
+
+    expect(handler?.maximumPayloadBytes).toBe(1_012);
+
+    for (const [callId, credential, length] of [
+      [1, jwt, behindJwt],
+      [3, jwt, behindJwt + 1],
+      [5, undefined, behindJwt + 1],
+    ] as const) {
+      await handler?.(
+        propsOf(presentingOf(callId, { credential }), { payload: new Uint8Array(length) })
+      );
+    }
+
+    // a transfer's total, held as it is admitted, before any credit
+    expect(
+      handler?.admit?.({
+        connectionHandle: first,
+        header: { ...presentingOf(7, { credential: jwt }), total: behindJwt + 1 },
+      })?.code
+    ).toBe(ProtocolCode.PAYLOAD_TOO_LARGE);
+    const answered = answers.map((answer): [RouterAnswer, IRequestHeader] => {
+      return [answer, headerOf(1)];
+    });
+
+    expect(failuresOf(answered)).toEqual([
+      [8],
+      [
+        ProtocolCode.PAYLOAD_TOO_LARGE,
+        undefined,
+        `a payload is ${String(behindJwt)} bytes at most, not ${String(behindJwt + 1)}`,
+      ],
+      [8],
+    ]);
+    expect(own).toHaveLength(2);
+  });
+
+  test('answers leg A PAYLOAD_TOO_LARGE, the relay’s own and not reported, for a JWT that came whole and leaves leg B’s opening no room', async () => {
+    // leg B: a router whose envelopes hold 1,024 bytes, so 100 bytes behind a JWT of 1,000 go as a
+    // transfer, whose opening's header of 1,024 bytes passes 1,020
+    const pipe = createPipedTransports({ connectionHandle: device });
+    using legB = createRouterClient(pipe.client, {
+      limits: { chunkBytes: 1_024, maximumEnvelopeBytes: 1_024 },
+    });
+    const { answers, relay, reports } = createTestRelay();
+    const named = tokenNaming('bead-interop');
+    const jwt = { scheme: CredentialScheme.JWT, token: named.padEnd(1_000, 'A') } as const;
+
+    pipe.open();
+    relay.register(legB, { audience: 'bead-interop', destinationId: 7 });
+
+    // whole on leg A: 1,020 bytes of header beside its destination, then its payload
+    await relay.handlerOf(7)?.(
+      propsOf(presentingOf(1, { credential: jwt }), { payload: new Uint8Array(100) })
+    );
+
+    expect(failuresOf(answers)).toEqual([
+      [
+        ProtocolCode.PAYLOAD_TOO_LARGE,
+        undefined,
+        "a payload of 100 bytes goes as a transfer, whose opening's header of 1024 bytes passes 1020",
+      ],
+    ]);
+    expect(reports).toEqual([]);
+    expect(pipe.sent.client).toEqual([]);
+  });
+});
+
+test.describe('createRelay, over HTTP', () => {
+  test('writes the Authorization of a relayed request to leg B as it came, over HTTP', async () => {
+    // a listener of the test's own on the loopback, as a server of Bead's over HTTP answers: it
+    // draws a connection, then answers each request with its payload, recording what each POST
+    // carried in its Authorization and presented in its block
+    const heard: { authorization: string | undefined; credential: unknown }[] = [];
+    const bodyOf = async (request: IncomingMessage): Promise<Uint8Array> => {
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of request) {
+        chunks.push(chunk as Buffer);
+      }
+
+      return new Uint8Array(Buffer.concat(chunks));
+    };
+    const listener = createServer((request, response) => {
+      void bodyOf(request).then((body) => {
+        const token = request.headers['bead-connection-token'];
+
+        if (request.method === 'POST' && token === undefined) {
+          response.writeHead(201, { 'bead-connection-token': 'AQIDBAUGBwgJCgsMDQ4PEA' });
+
+          return (response.end(), undefined);
+        }
+
+        const envelope =
+          body.length === 0
+            ? undefined
+            : readEnvelope(body, {
+                failures: CLIENT_FAILURES,
+                maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+              });
+
+        if (request.method !== 'POST' || envelope?.kind !== EnvelopeKind.REQUEST) {
+          response.writeHead(204);
+
+          return (response.end(), undefined);
+        }
+
+        heard.push({
+          authorization: request.headers.authorization,
+          credential: envelope.header.credential,
+        });
+        response.writeHead(200, { 'content-type': 'application/prs.bead' });
+        response.end(
+          writeEnvelope({
+            header: { callId: envelope.header.callId, kind: EnvelopeKind.RESULT },
+            kind: EnvelopeKind.RESULT,
+            payload: envelope.payload,
+          })
+        );
+
+        return undefined;
+      });
+    });
+
+    listener.listen(0, '127.0.0.1');
+    await once(listener, 'listening');
+
+    const { port } = listener.address() as AddressInfo;
+    // leg B: a router the relay calls through, over HTTP, to the listener
+    using legB = createRouterClient(createHTTPTransportClient({ isListening: false }));
+    // leg A: a client of the relay's, in process
+    const pipe = createPipedTransports({ connectionHandle: first });
+    using relaying = createRouterServer(pipe.server, {
+      relay: { beforeRoute: requireSessionOrCredential },
+    });
+    using legA = createRouterClient(pipe.client);
+    const procedure = { procedureId: 1, procedureName: 'echo', serviceId: 2, serviceRevision: 1 };
+    const jwt = { scheme: CredentialScheme.JWT, token: tokenNaming('bead-interop') } as const;
+
+    try {
+      await legB.transport.connect({ host: '127.0.0.1', port });
+      relaying.registerDestination(legB, { audience: 'bead-interop', destinationId: 7 });
+      pipe.open();
+
+      // two spaces inside, as it came: the value whole, never rewritten
+      for (const credential of [
+        { carried: 'Interop  sub=ada', scheme: CredentialScheme.ELSEWHERE } as const,
+        jwt,
+      ]) {
+        const { payload } = await legA.request(Uint8Array.of(1, 2, 3), {
+          options: { credential, destinationId: 7, timeout: 5_000 },
+          procedure,
+        });
+
+        expect([...payload]).toEqual([1, 2, 3]);
+      }
+
+      expect(heard).toEqual([
+        { authorization: 'Interop  sub=ada', credential: { scheme: CredentialScheme.ELSEWHERE } },
+        { authorization: undefined, credential: jwt },
+      ]);
+    } finally {
+      await legB.transport.disconnect().catch(() => {});
+      listener.closeAllConnections();
+      listener.close();
+    }
+  });
+});
 
 test.describe('createRelay', () => {
   test('relays nothing while no destination is registered, and every destination once one is', () => {
@@ -345,7 +680,12 @@ test.describe('createRelay', () => {
 
     expect(asked).toEqual([
       {
-        options: { signal: props.signal, timeout: Infinity },
+        // leg B presents none, said so, whatever the router it calls through presents by default
+        options: {
+          credential: { scheme: CredentialScheme.NONE },
+          signal: props.signal,
+          timeout: Infinity,
+        },
         payload: Uint8Array.of(4, 5),
         procedure: {
           maximumPayloadBytes: 1_000,
@@ -385,7 +725,7 @@ test.describe('createRelay', () => {
 
     relay.register(target, { destinationId: 7 });
 
-    for (const [hops, origin, scope] of [
+    for (const [relays, origin, scope] of [
       [0, 'peer', FailureScope.APPLICATION],
       [0, 'peer', FailureScope.PROTOCOL],
       [3, 'relayed', FailureScope.PROTOCOL],
@@ -393,7 +733,7 @@ test.describe('createRelay', () => {
       [255, 'relayed', FailureScope.PROTOCOL],
     ] as const) {
       control.settle = refusing(
-        new FailureError({ code: 19, detail: 'its own detail', hops, origin, scope }),
+        new FailureError({ code: 19, detail: 'its own detail', origin, relays, scope }),
         'handed'
       );
       await relay.handlerOf(7)?.(propsOf(headerOf(1)));
@@ -404,11 +744,11 @@ test.describe('createRelay', () => {
         return answer.failure;
       })
     ).toEqual([
-      { code: 19, detail: 'its own detail', hops: 1, scope: FailureScope.APPLICATION },
-      { code: 19, detail: 'its own detail', hops: 1, scope: FailureScope.PROTOCOL },
-      { code: 19, detail: 'its own detail', hops: 4, scope: FailureScope.PROTOCOL },
-      { code: 19, detail: 'its own detail', hops: 255, scope: FailureScope.PROTOCOL },
-      { code: 19, detail: 'its own detail', hops: 255, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 1, scope: FailureScope.APPLICATION },
+      { code: 19, detail: 'its own detail', relays: 1, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 4, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 255, scope: FailureScope.PROTOCOL },
+      { code: 19, detail: 'its own detail', relays: 255, scope: FailureScope.PROTOCOL },
     ]);
   });
 
@@ -489,7 +829,7 @@ test.describe('createRelay', () => {
       new FailureError({
         ...CLIENT_FAILURES.payloadTooLarge,
         detail: 'a payload is 8 bytes at most, not 9',
-        hops: 3,
+        relays: 3,
       }),
       'never'
     );
@@ -593,7 +933,7 @@ test.describe('createRelay', () => {
     expect([before.asked.length, after.asked.length]).toEqual([1, 0]);
   });
 
-  test('waits on leg B as long as the destination says, the relay’s timeout at most, or on; a timeout no timer holds is refused', async () => {
+  test('waits on leg B as long as the destination says, the relay’s timeout at most, or on', async () => {
     const { relay } = createTestRelay({
       beforeRoute: () => {
         return true;
@@ -621,15 +961,6 @@ test.describe('createRelay', () => {
         return options.timeout;
       })
     ).toEqual([5_000, 250, Infinity, 250, 5_000]);
-
-    for (const timeout of [0, -1, 2 ** 31, Number.NaN]) {
-      expect(() => {
-        return relay.register(target, { timeout });
-      }, String(timeout)).toThrow(ProgrammerError);
-      expect(() => {
-        return createTestRelay({ timeout });
-      }, String(timeout)).toThrow(ProgrammerError);
-    }
   });
 
   test('passes nothing on to a connection of its own that takes no request of the relay’s', async () => {
@@ -720,6 +1051,40 @@ test.describe('createRelay', () => {
       { options: { connectionHandle: first } },
       { options: { connectionHandle: device } },
     ]);
+  });
+
+  test('takes the audience each destination verifies, gives the set of them, and refuses one not of well-formed Unicode', () => {
+    const { relay } = createTestRelay();
+
+    relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 3 });
+    relay.register({ connectionHandle: first }, { audience: 'bead-interop', destinationId: 5 });
+    relay.register(createTarget().target, { audience: 'bead-other', destinationId: 7 });
+    relay.register(createTarget().target, { destinationId: 9 });
+
+    expect(relay.audiences()).toEqual(['bead-interop', 'bead-other']);
+    expect(() => {
+      return relay.register(createTarget().target, { audience: '\ud800' });
+    }).toThrow(ProgrammerError);
+  });
+
+  test('forwards a credential unresolved unless it verifies, as each of its handlers says, to a destination registered or not', () => {
+    const forwarding = createTestRelay();
+    const verifying = createTestRelay({
+      beforeRoute: () => {
+        return true;
+      },
+      verifies: true,
+    });
+
+    for (const { relay } of [forwarding, verifying]) {
+      relay.register(createTarget().target, { destinationId: 7 });
+    }
+
+    expect(
+      [forwarding, verifying].flatMap(({ relay }) => {
+        return [relay.handlerOf(7)?.forwardsCredentials, relay.handlerOf(8)?.forwardsCredentials];
+      })
+    ).toEqual([true, true, false, false]);
   });
 
   test('counts its destinations, those whose connection closed among them, and keeps none for a connection', () => {

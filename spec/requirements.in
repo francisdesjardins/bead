@@ -1,0 +1,3 @@
+# What spec/check.py needs. spec/requirements.txt locks it, with every hash:
+#   pip-compile --generate-hashes --strip-extras --no-emit-index-url --output-file spec/requirements.txt spec/requirements.in
+jsonschema==4.26.0

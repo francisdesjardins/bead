@@ -2,9 +2,11 @@
 
 // dependencies
 
+import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { LIMIT_DEFAULTS } from './constants';
+import { CallEnding, type IProcedureSeries, microsecondsOf } from './metrics-registry';
 import type { CallId, ICallAddress, IRequestHeader, IRouterLimits } from './types';
 
 // interfaces
@@ -17,18 +19,22 @@ interface IDispatchedRequest<Handle extends string> {
 
 /**
  * A call to answer: its controller, whether its answer is going out, and what it receives of its
- * payload, while it does.
+ * payload, while it does; and, counted, its series, the monotonic reading it started at, and whether
+ * it ended.
  */
 interface IAnswering<Receiving> {
   controller: AbortController;
   isAnswered: boolean;
+  isEnded: boolean;
   receiving: Receiving | undefined;
+  series: IProcedureSeries | undefined;
+  startedAt: number;
 }
 
 /** A call whose transfer ended: the end its credit reached, and what forgets it. */
 interface IAbandoned {
   creditEnd: number;
-  timer: ReturnType<typeof setTimeout>;
+  timer: TimeoutId;
 }
 
 /** What a call receives of its payload: a transfer, and the end of the credit it granted so far. */
@@ -57,6 +63,11 @@ export interface IAnsweringCalls<
   close(call: ICallAddress<Handle>, controller: AbortController): void;
   /** The controller of the request dispatched with `header`; `undefined` for one never dispatched. */
   controllerOf(header: IRequestHeader): AbortController | undefined;
+  /**
+   * Counts the call of a request ended, as `ending` says — its answer handed to its transport, say
+   * — once, into the series it was opened with; nothing for a call that counts none.
+   */
+  end(request: IDispatchedRequest<Handle>, ending: CallEnding): void;
   /** The calls answered and those abandoned, counted, and their connections. */
   gauges(): IGauges<Handle>;
   /** Whether the peer's call is open on `call`'s call id, whichever request opened it. */
@@ -69,9 +80,11 @@ export interface IAnsweringCalls<
   isAnswering(request: IDispatchedRequest<Handle>): boolean;
   /**
    * Opens the call of a request as it is dispatched, and gives the controller made for it; a call
-   * abandoned on its call id is forgotten.
+   * abandoned on its call id is forgotten. Given `series`, the call starts there now, timed from now,
+   * and ends there once: as `end` says, else cancelled as it is taken, closed as every call is, and
+   * an error as it is closed unanswered.
    */
-  open(request: IDispatchedRequest<Handle>): AbortController;
+  open(request: IDispatchedRequest<Handle>, series?: IProcedureSeries): AbortController;
   /** What a call receives of its payload; `undefined` for a call that receives none. */
   receivingOf(call: ICallAddress<Handle>): Receiving | undefined;
   /** Takes a call out, and gives its controller. */
@@ -98,16 +111,19 @@ export interface IAnsweringCalls<
  * `onRemove` hears it then, once. A call that received a transfer and ends — answered, refused,
  * cancelled — stays abandoned for the inactivity a transfer is allowed, since what its credit let
  * the peer send may still come, a copy or out of order; the oldest of a connection's yields once it
- * keeps `maximumTransfers`, one at least. A call that goes with its connection is abandoned by none.
+ * keeps `maximumTransfers`, one at least, and the inactivity runs on `clock`. A call that goes with
+ * its connection is abandoned by none.
  */
 export const createAnsweringCalls = <
   Handle extends string,
   Receiving extends IReceivingCredit = IReceivingCredit,
->(options?: {
+>(options: {
+  clock: IClock;
   limits?: Pick<IRouterLimits, 'maximumTransfers' | 'transferInactivityTimeout'> | undefined;
   onRemove?: ((receiving: Receiving) => void) | undefined;
 }): IAnsweringCalls<Handle, Receiving> => {
-  const { maximumTransfers, transferInactivityTimeout } = options?.limits ?? LIMIT_DEFAULTS;
+  const { clock } = options;
+  const { maximumTransfers, transferInactivityTimeout } = options.limits ?? LIMIT_DEFAULTS;
   const answering = new Map<Handle, Map<CallId, IAnswering<Receiving>>>();
   // the controller of each request dispatched, by its header
   const dispatched = new WeakMap<IRequestHeader, AbortController>();
@@ -122,12 +138,22 @@ export const createAnsweringCalls = <
       return;
     }
 
-    clearTimeout(entry.timer);
+    clock.clearTimeout(entry.timer);
     calls.delete(callId);
 
     if (calls.size === 0) {
       abandoned.delete(connectionHandle);
     }
+  };
+
+  // counts a call ended, once, timed to now
+  const ended = (entry: IAnswering<Receiving>, ending: CallEnding): void => {
+    if (entry.series === undefined || entry.isEnded) {
+      return;
+    }
+
+    entry.isEnded = true;
+    entry.series.end(ending, microsecondsOf(clock.performance.now() - entry.startedAt));
   };
 
   // keeps a call abandoned until its timer fires, the oldest of its connection's yielding
@@ -142,7 +168,7 @@ export const createAnsweringCalls = <
       forgetAbandoned({ callId: oldest, connectionHandle });
     }
 
-    const timer = setTimeout(() => {
+    const timer = clock.setTimeout(() => {
       forgetAbandoned({ callId, connectionHandle });
     }, transferInactivityTimeout);
 
@@ -177,7 +203,7 @@ export const createAnsweringCalls = <
 
     if (entry.receiving !== undefined) {
       abandon({ callId, connectionHandle }, entry.receiving.creditEnd);
-      options?.onRemove?.(entry.receiving);
+      options.onRemove?.(entry.receiving);
     }
 
     return entry;
@@ -202,10 +228,22 @@ export const createAnsweringCalls = <
       }
     },
     close: (call, controller) => {
-      forget(call, controller);
+      const entry = forget(call, controller);
+
+      // closed before its end was counted, it ends with no answer handed to its transport
+      if (entry !== undefined) {
+        ended(entry, CallEnding.ERROR);
+      }
     },
     controllerOf: (header) => {
       return dispatched.get(header);
+    },
+    end: ({ connectionHandle, header }, ending) => {
+      const entry = answering.get(connectionHandle)?.get(header.callId);
+
+      if (entry !== undefined && entry.controller === dispatched.get(header)) {
+        ended(entry, ending);
+      }
     },
     gauges: () => {
       return gaugesOf({
@@ -222,12 +260,20 @@ export const createAnsweringCalls = <
 
       return controller === undefined || (entry?.controller === controller && !entry.isAnswered);
     },
-    open: ({ connectionHandle, header }) => {
+    open: ({ connectionHandle, header }, series) => {
       const controller = new AbortController();
       const calls = answering.get(connectionHandle) ?? new Map<CallId, IAnswering<Receiving>>();
 
+      series?.start();
       forgetAbandoned({ callId: header.callId, connectionHandle });
-      calls.set(header.callId, { controller, isAnswered: false, receiving: undefined });
+      calls.set(header.callId, {
+        controller,
+        isAnswered: false,
+        isEnded: false,
+        receiving: undefined,
+        series,
+        startedAt: series === undefined ? 0 : clock.performance.now(),
+      });
       dispatched.set(header, controller);
       answering.set(connectionHandle, calls);
 
@@ -237,7 +283,13 @@ export const createAnsweringCalls = <
       return answering.get(connectionHandle)?.get(callId)?.receiving;
     },
     take: (call) => {
-      return forget(call)?.controller;
+      const entry = forget(call);
+
+      if (entry !== undefined) {
+        ended(entry, CallEnding.CANCELLED);
+      }
+
+      return entry?.controller;
     },
     takeAll: (connectionHandle) => {
       const connections =
@@ -247,9 +299,10 @@ export const createAnsweringCalls = <
       const controllers: AbortController[] = [];
 
       for (const handle of connections) {
-        for (const [callId, { controller }] of answering.get(handle)?.entries() ?? []) {
+        for (const [callId, entry] of answering.get(handle)?.entries() ?? []) {
           forget({ callId, connectionHandle: handle });
-          controllers.push(controller);
+          ended(entry, CallEnding.CLOSED);
+          controllers.push(entry.controller);
         }
 
         // a map's entry deleted as it is visited leaves the others to visit

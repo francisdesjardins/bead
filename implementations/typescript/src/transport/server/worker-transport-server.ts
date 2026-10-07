@@ -10,7 +10,6 @@ import {
   WORKER_MESSAGES,
 } from '../shared/constants';
 import { ProgrammerError } from '../shared/errors';
-import { timestamp } from '../shared/timestamp';
 import { transferableOf } from '../shared/transferable';
 import type { IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
 import { createTransportServer, generateDrawnHandle } from './transport-server';
@@ -49,14 +48,17 @@ export const START_DEFAULTS = Object.freeze({
  * the application's, and left to it.
  *
  * `start` listens at once, before anything is awaited, so no connect a worker hears early is lost.
- * A worker terminated takes its connections with it, and a port does not say so.
+ * A worker terminated takes its connections with it, and a port does not say so. A worker carries no
+ * credential beside an envelope: each message delivered carries none, and a credential given to
+ * `send` is not carried.
  *
  * @example
  * const server = createWorkerTransportServer({ scope });
- * server.on('message', (data, connectionHandle) => {});
+ * server.on('message', ({ data }, connectionHandle) => {});
  * await server.start();
  */
 export const createWorkerTransportServer = ({
+  clock,
   scope,
 }: IWorkerTransportServerOptions): WorkerTransportServer => {
   return createTransportServer<IWorkerPortLike, undefined>((server, connections) => {
@@ -81,7 +83,7 @@ export const createWorkerTransportServer = ({
       const connection: ITransportServerClientAware<IWorkerPortLike> = {
         address: 'local',
         connectionHandle,
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: 0,
         socket: port,
         type: TRANSPORT_WORKER,
@@ -94,9 +96,11 @@ export const createWorkerTransportServer = ({
         }
 
         if (data instanceof ArrayBuffer) {
-          connection.lastActivityTimestamp = timestamp();
+          connection.lastActivity = server.clock.Date.now();
 
-          return (server.emit(MESSAGE_EVENT, data, connectionHandle), undefined);
+          return (
+            server.emit(MESSAGE_EVENT, { credential: undefined, data }, connectionHandle), undefined
+          );
         }
 
         if (data === WORKER_MESSAGES.CLOSE) {
@@ -118,7 +122,9 @@ export const createWorkerTransportServer = ({
     };
 
     return {
+      clock,
       defaults: START_DEFAULTS,
+      isSecure: true,
       type: TRANSPORT_WORKER,
 
       close: (connection) => {
@@ -127,7 +133,9 @@ export const createWorkerTransportServer = ({
 
         return Promise.resolve();
       },
-      send: (data, { socket: port }) => {
+      // a credential given here is not carried: the router fails a command that presents one
+      // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+      send: ({ data }, { socket: port }) => {
         const bytes = transferableOf(data);
 
         if (bytes === undefined) {

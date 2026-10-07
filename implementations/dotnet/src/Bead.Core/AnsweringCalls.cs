@@ -17,8 +17,17 @@ internal sealed class AnsweringCall
     /// <summary>What it receives of its payload as a transfer; none once the call leaves.</summary>
     public RequestReceiving? Receiving { get; set; }
 
+    /// <summary>The call's session, once its credential resolved; none for a call in none.</summary>
+    public CallSession? Session { get; set; }
+
+    /// <summary>What its transport carried beside its request, kept for one presenting ELSEWHERE alone.</summary>
+    public string? TransportCredential { get; set; }
+
     /// <summary>What hears, on the router's scheduler, that the call ended before its answer went: a result going as a transfer.</summary>
     public Action<Exception>? OnAbort { get; set; }
+
+    /// <summary>How it was counted as it started; none once it ended, and for a router given no registry.</summary>
+    public StartedCall? Counted { get; set; }
 }
 
 /// <summary>
@@ -37,7 +46,7 @@ internal sealed record AnsweringCallsOptions
     public required Action<Action> Post { get; init; }
 
     /// <summary>What its timers run on.</summary>
-    public required TimeProvider Time { get; init; }
+    public required TimeProvider Clock { get; init; }
 
     /// <summary>Hears what a call received of its payload as the call leaves, once.</summary>
     public Action<RequestReceiving>? OnRemove { get; init; }
@@ -265,7 +274,7 @@ internal sealed class AnsweringCalls(AnsweringCallsOptions options)
         _abandoned[call.ConnectionHandle] = calls;
 
         Abandoned? abandoned = null;
-        var timer = options.Time.CreateTimer(
+        var timer = options.Clock.CreateTimer(
             (_) =>
             {
                 options.Post(() =>

@@ -29,17 +29,19 @@ export const isAdmissionFailure = (failure: unknown, failures: IRouterFailures):
 };
 
 /**
- * The admission `beforeRequest` makes of a request, on its header alone: `undefined` admits it, and
- * only `true` does — a composition that loses its refusal, or a caller without types that returns
- * nothing or a failure, is refused all the same, with its `refusal`, or `failures`' access denied.
- * A `beforeRequest` that throws throws.
+ * The admission `beforeRequest` makes of a request, on its header and its call's session alone:
+ * `undefined` admits it, and only `true` does — a composition that loses its refusal, or a caller
+ * without types that returns nothing or a failure, is refused all the same, with its `refusal` as it
+ * is, or `failures`' access denied. Its router answers a SESSION_REQUIRED of a call whose header
+ * presents a credential ACCESS_DENIED, as it does every handler's (spec 9.2, step 5). A
+ * `beforeRequest` that throws throws.
  */
 export const admissionOf = <Handle extends string>(
   beforeRequest: IBeforeRequest<Handle>,
   failures: IRouterFailures
 ): ((request: IAdmissionRequest<Handle>) => AdmissionFailure | undefined) => {
-  return ({ connectionHandle, header }) => {
-    const admission: unknown = beforeRequest({ connectionHandle, header });
+  return ({ connectionHandle, header, session }) => {
+    const admission: unknown = beforeRequest({ connectionHandle, header, session });
 
     return admission === true ? undefined : (beforeRequest.refusal ?? failures.accessDenied);
   };

@@ -8,9 +8,11 @@ import {
   startServer,
   stopServer,
 } from '../../transport/shared/__tests__/fixtures';
+import { createFakeWebSocket } from '../../transport/client/__tests__/fake-websocket';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
+import { CredentialScheme } from '../../router/shared/constants';
 import { toSessionToken } from '../../router/shared/identifiers';
-import type { Envelope, IFailure, OutgoingEnvelope, SessionToken } from '../../router/shared/types';
+import type { Announcement, Envelope, IFailure, OutgoingEnvelope } from '../../router/shared/types';
 import {
   createWSClient,
   DisconnectError,
@@ -95,13 +97,13 @@ const startEnvelopeServer = async () => {
 const answerTo = (
   { envelope }: IReceivedEnvelope,
   {
+    credential,
     failure,
     payload = new Uint8Array(0),
-    sessionToken,
-  }: { failure?: IFailure; payload?: Uint8Array; sessionToken?: SessionToken }
+  }: { credential?: Announcement; failure?: IFailure; payload?: Uint8Array }
 ): OutgoingEnvelope => {
   const { callId } = envelope.header;
-  const session = sessionToken === undefined ? {} : { sessionToken };
+  const session = credential === undefined ? {} : { credential };
 
   return failure === undefined
     ? { header: { callId, kind: 0x11, ...session }, kind: 0x11, payload }
@@ -123,6 +125,47 @@ test('createWSClient builds its router with the limits given', async () => {
   await expect(
     client.services.getRequest(echo, { serializer })('much too long')()
   ).rejects.toMatchObject({ detail: 'a payload is 8 bytes at most, not 13' });
+});
+
+test('createWSClient takes a message of an envelope at most, more when the transport says so, and never less', async () => {
+  // envelopes of 256 bytes
+  const small = { chunkBytes: 128, maximumEnvelopeBytes: 256, windowBytes: 256 };
+
+  for (const [limits, maxPayload, expected] of [
+    [undefined, undefined, 16_778_240],
+    [small, undefined, 256],
+    [small, 1_024, 1_024],
+  ] as const) {
+    const given: unknown[] = [];
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const Recording = Object.assign(
+      // oxlint-disable-next-line prefer-arrow-callback -- the transport calls it with `new`, which an arrow refuses
+      function (_url: string, _protocols: unknown, options?: { maxPayload?: number }) {
+        given.push(options);
+
+        return new (FakeWebSocket as unknown as new () => object)();
+      },
+      { CONNECTING: 0, OPEN: 1 }
+    ) as unknown as typeof FakeWebSocket;
+    const client = createWSClient({ limits, transport: { maxPayload, WebSocket: Recording } });
+    const connecting = client.connect({ host, port: 8_080 });
+
+    sockets.at(-1)?.fireOpen();
+    await connecting;
+
+    expect(given).toEqual([{ maxPayload: expected }]);
+    await client[Symbol.asyncDispose]();
+  }
+
+  // a socket that cuts off what the router would take
+  for (const [limits, maxPayload] of [
+    [undefined, 256],
+    [small, 255],
+  ] as const) {
+    expect(() => {
+      return createWSClient({ limits, transport: { maxPayload } });
+    }).toThrow(`maxPayload is an envelope's limit at least`);
+  }
 });
 
 for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
@@ -156,7 +199,10 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
       envelopes.send(
         request.socket,
-        answerTo(request, { payload: text.encode('HELLO'), sessionToken: TOKEN })
+        answerTo(request, {
+          credential: { scheme: CredentialScheme.OPAQUE, token: TOKEN },
+          payload: text.encode('HELLO'),
+        })
       );
 
       await expect(answering).resolves.toBe('HELLO');

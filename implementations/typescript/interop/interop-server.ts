@@ -13,13 +13,17 @@ import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createHTTPServer } from '../src/server/http-server';
 import { createWSServer } from '../src/server/ws-server';
-import { offerInterop } from './offer';
+import { PLATFORM_CLOCK } from '../src/transport/shared/clock';
+import { interopCredentialsOf, offerInterop } from './offer';
 
 // definition
 
 const port = Number(process.argv[2] ?? 0);
-const server = createWSServer<string>({ transport: { WebSocketServer } });
+// the interop service's credentials, on the clock both servers run on, the platform's
+const credentials = interopCredentialsOf(PLATFORM_CLOCK);
+const server = createWSServer<string>({ credentials, transport: { WebSocketServer } });
 const httpServer = createHTTPServer<string>({
+  credentials,
   transport: {
     createServer: (listener) => {
       return createServer(listener);
@@ -29,7 +33,7 @@ const httpServer = createHTTPServer<string>({
 
 for (const each of [server, httpServer]) {
   each.router.on('error', (error, connectionHandle) => {
-    process.stderr.write(`${connectionHandle}: ${error.message}
+    process.stderr.write(`${connectionHandle ?? 'no connection'}: ${error.message}
 `);
   });
   offerInterop(each);

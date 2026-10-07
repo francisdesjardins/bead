@@ -24,6 +24,12 @@ internal sealed class PendingRequest
 
     public Action<bool>? OnSent { get; init; }
 
+    /// <summary>How it was counted as it started; none for a router given no registry.</summary>
+    public StartedCall? Counted { get; init; }
+
+    /// <summary>What its transport carries beside its request, a call's presenting ELSEWHERE; none for any other.</summary>
+    public string? Carried { get; init; }
+
     public bool IsSent { get; set; }
 
     public ITimer? Timer { get; set; }
@@ -45,14 +51,22 @@ internal sealed class PendingRequest
         }
     }
 
+    // * the call ends as its router settles it (spec/debugging.md 9.1), counted once, whichever
+    // way settles it first
     public void Resolve(RouterResult result)
     {
-        _completion.TrySetResult(result);
+        if (_completion.TrySetResult(result))
+        {
+            Counted?.End((CallOutcome.Result, null));
+        }
     }
 
     public void Reject(Exception reason)
     {
-        _completion.TrySetException(reason);
+        if (_completion.TrySetException(reason))
+        {
+            Counted?.End(StartedCall.EndingOf(reason));
+        }
     }
 }
 
@@ -67,14 +81,12 @@ internal sealed class PendingCalls
 {
     // constants
 
-    // how long a call id stays reserved when its call gave no timeout a timer can hold
+    // how long a call id stays reserved when its call gave no timeout
     private static readonly TimeSpan ReservationDefault = TimeSpan.FromSeconds(5);
-
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private readonly CallIdSequence _sequence;
     private readonly Func<uint, string, bool> _isCallIdInUse;
-    private readonly TimeProvider _time;
+    private readonly TimeProvider _clock;
     private readonly Action<Action> _post;
     private readonly Action<PendingRequest>? _onRemove;
     private readonly Dictionary<string, Dictionary<uint, PendingRequest>> _pending = [];
@@ -84,17 +96,31 @@ internal sealed class PendingCalls
     {
         _sequence = new CallIdSequence(side, options.LastCallId);
         _isCallIdInUse = options.IsCallIdInUse;
-        _time = options.Time;
+        _clock = options.Clock;
         _post = options.Post;
         _onRemove = options.OnRemove;
     }
 
     // helpers
 
-    /// <summary>How long a call id stays reserved: its call's timeout, or the default when it has none.</summary>
-    public static TimeSpan ReservationOf(TimeSpan timeout)
+    /// <summary>
+    /// How long a call id stays reserved: its call's timeout, held, or the default for none or
+    /// infinite.
+    /// </summary>
+    public static TimeSpan ReservationOf(TimeSpan? timeout)
     {
-        return timeout > TimeSpan.Zero && timeout <= LongestTimer ? timeout : ReservationDefault;
+        return timeout is { } given && given != System.Threading.Timeout.InfiniteTimeSpan ? given : ReservationDefault;
+    }
+
+    /// <summary>
+    /// A reservation held: rounded to the nearest whole millisecond, or none, for the default. One
+    /// that is neither infinite — a call that waited on, which reserves for the default too, since
+    /// nothing is reserved for ever — nor from 1 to <see cref="Clocks.LongestTimer"/> milliseconds,
+    /// zero among them, is an <see cref="ArgumentOutOfRangeException"/>.
+    /// </summary>
+    public static TimeSpan? AssertReservation(TimeSpan? timeout)
+    {
+        return timeout is { } given ? Clocks.AssertHeld(("a call id's reservation", nameof(timeout)), given) : null;
     }
 
     // definition
@@ -171,18 +197,18 @@ internal sealed class PendingCalls
     }
 
     /// <summary>
-    /// Reserves a call id for <paramref name="timeout"/>, or for the default time when it is none a
-    /// timer can hold; reserved twice, the later end stands.
+    /// Reserves a call id for <paramref name="timeout"/>, held as <see cref="AssertReservation"/>
+    /// holds one, or for the default time for none or infinite; reserved twice, the later end stands,
+    /// compared on the clock's monotonic reading.
     /// </summary>
-    public void Reserve(CallAddress call, TimeSpan timeout)
+    public void Reserve(CallAddress call, TimeSpan? timeout)
     {
-        var lasts = ReservationOf(timeout);
-        var ends = _time.GetUtcNow() + lasts;
+        var lasts = ReservationOf(AssertReservation(timeout));
         var reserved = EntriesOf(_reservations, call.ConnectionHandle);
 
         if (reserved.TryGetValue(call.CallId, out var previous))
         {
-            if (previous.Ends >= ends)
+            if (previous.Lasts - _clock.GetElapsedTime(previous.Started) >= lasts)
             {
                 return;
             }
@@ -191,7 +217,8 @@ internal sealed class PendingCalls
         }
 
         Reservation? reservation = null;
-        var timer = _time.CreateTimer(
+        var started = _clock.GetTimestamp();
+        var timer = _clock.CreateTimer(
             (_) =>
             {
                 _post(() =>
@@ -203,7 +230,7 @@ internal sealed class PendingCalls
             lasts,
             System.Threading.Timeout.InfiniteTimeSpan);
 
-        reservation = new Reservation(ends, timer);
+        reservation = new Reservation(started, lasts, timer);
         reserved[call.CallId] = reservation;
     }
 
@@ -271,8 +298,8 @@ internal sealed class PendingCalls
         }
     }
 
-    // a call id reserved: when it is free again, and what frees it
-    private sealed record Reservation(DateTimeOffset Ends, ITimer Timer);
+    // a call id reserved: when, on the clock's monotonic reading, for how long, and what frees it
+    private sealed record Reservation(long Started, TimeSpan Lasts, ITimer Timer);
 }
 
 /// <summary>How the pending calls of a router are built.</summary>
@@ -280,7 +307,7 @@ internal sealed record PendingCallsOptions
 {
     public required Func<uint, string, bool> IsCallIdInUse { get; init; }
 
-    public required TimeProvider Time { get; init; }
+    public required TimeProvider Clock { get; init; }
 
     public required Action<Action> Post { get; init; }
 

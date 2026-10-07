@@ -1,7 +1,9 @@
 name: CI
 
 # Every job on every push and pull request: the spec is shared, so a change anywhere can break
-# either side. `ci-ok` is the only required check; it fails when any other job did not pass.
+# either side. `ci-ok` stands for every job; it fails when any other job did not pass. Branch
+# protection, which would make it the one check a branch requires, waits on GitHub Pro or a public
+# repository.
 on:
   # Branches only: a tag pushed by a release points at a commit its branch's run already checked.
   push:
@@ -31,7 +33,10 @@ env:
 jobs:
   # ── Spec ─────────────────────────────────────────────────────────────────────
   # The conformance files are what their generators write: regenerated, they must come out
-  # identical to the committed ones, byte for byte.
+  # identical to the committed ones, byte for byte. Then spec/check.py, from its hash-locked
+  # dependencies: each file under its schema, the version of its document, the spec's sections and
+  # the vector groups naming each other, the companion's expositions read as 0.0.4, and each side's
+  # tests reading every group.
   spec:
     name: Spec
     runs-on: ubuntu-26.04
@@ -43,14 +48,26 @@ jobs:
           python-version: '3.14'
       - run: python spec/generators/make_vectors.py
       - run: python spec/generators/make_conversations.py
+      - run: python spec/generators/make_transports.py
+      - run: python spec/generators/make_clocks.py
+      - run: python spec/generators/make_durations.py
+      - run: python spec/generators/make_debug_filters.py
+      - run: python spec/generators/make_metrics.py
+      - run: python spec/generators/make_codecs.py
+      - run: python spec/generators/make_identities.py
       - run: git diff --exit-code -- spec
       - name: No file the generators wrote is new
         run: test -z "$(git status --porcelain -- spec)"
+      - run: >-
+          python -m pip install --disable-pip-version-check -q --require-hashes --only-binary=:all:
+          -r spec/requirements.txt
+      - run: python spec/check.py
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
-  # The TypeScript side's own gate: types, lint, format, comment budget, doc examples, then its
-  # tests. The interop against the C# server runs in the .NET job, the only one with both runtimes.
-  # On the current line and on the floor `engines.node` declares, so the floor holds by a run.
+  # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
+  # examples, the generated `Probe` held to its generator, then its tests. The interop against the C#
+  # server runs in the .NET job, the only one with both runtimes. On the current line and on the
+  # floor `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
@@ -58,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['26', '24']
+        node: ['26', '24.9']
     defaults:
       run:
         working-directory: implementations/typescript
@@ -82,6 +99,13 @@ jobs:
       - run: $YARN test --grep-invert "the C# server of the interop service"
       # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
       - run: $YARN playground:build:file
+      # The DevTools extension, built, then tested on the current line: its pure modules, and itself
+      # loaded in Chromium against the static build above, which needs the browser installed.
+      - run: $YARN devtools:build
+      - if: matrix.node == '26'
+        run: $YARN playwright install --with-deps chromium
+      - if: matrix.node == '26'
+        run: $YARN test:devtools
       # The root's own files, from the README to this CI, under the TypeScript side's formatter. The
       # conformance files are left to their generators.
       - name: Format of the root's files
@@ -89,7 +113,8 @@ jobs:
         run: >-
           implementations/typescript/node_modules/.bin/oxfmt
           -c implementations/typescript/.oxfmtrc.json --check
-          README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/interop-service.json tools .github
+          README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/debugging.md spec/interop-service.json
+          spec/schemas tools .github
 
   # ── .NET ─────────────────────────────────────────────────────────────────────
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
@@ -132,7 +157,11 @@ jobs:
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
-  # left out, git-flow writes them.
+  # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
+  # anchor, resolves; every version agrees with itself, and a release moves each as its changes owe;
+  # and the root's tools pass their own tests: here, since the job runs once, on the Node it already
+  # has. `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
+  # version's last release are read from: a clone without its tags fails the versions' floors.
   commits:
     name: Commits
     runs-on: ubuntu-26.04
@@ -164,10 +193,25 @@ jobs:
             set -- "$AFTER" --not --exclude="origin/$BRANCH" --remotes=origin
           fi
           node tools/check-commits.mjs "$@"
+      - name: Check the links
+        run: node tools/check-links.mjs
+      # Each version agrees with itself, the C# lock files' project ranges included, and a released
+      # section of the CHANGELOG stays as its tag shipped it; on a release branch, a pull request
+      # into main and main, the release moved each version its changes owe, dated its section, and
+      # tagged its documents where they belong (decision 0008). On a pull request, `github.ref` is
+      # its merge ref, so the head branch names the ref, and a base of main makes it a release.
+      - name: Check the versions
+        env:
+          REF: ${{ github.head_ref || github.ref }}
+          BASE: ${{ github.base_ref }}
+        run: node tools/check-versions.mjs --ref "$REF" --base "$BASE"
+      # The root's tools, by their own tests, in Node's runner: no dependency.
+      - name: Test the root's tools
+        run: node --test "tools/__tests__/*.test.mjs"
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
-  # The only required check: green when every job above passed, red otherwise, including when one
-  # was cancelled or skipped.
+  # The one check that stands for every job: green when every job above passed, red otherwise,
+  # including when one was cancelled or skipped.
   ci-ok:
     name: CI ok
     if: always()

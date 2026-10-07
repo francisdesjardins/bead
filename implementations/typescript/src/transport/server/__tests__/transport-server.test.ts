@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
+import * as clocks from '../../shared/clock';
 import * as constants from '../../shared/constants';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
-import * as timestamps from '../../shared/timestamp';
 import * as entry from '../transport-server';
+import { createTestClock } from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
 import {
   createTransportServer,
@@ -33,7 +34,7 @@ const createStubServer = (options?: {
       connections.set(connectionHandle, {
         address: '127.0.0.1',
         connectionHandle,
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: 1,
         socket: { id: connectionHandle },
         type: 'WS',
@@ -123,7 +124,87 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
     ] as const) {
       expect(entry[name]).toBe(readyState[name]);
     }
-    expect(entry.timestamp).toBe(timestamps.timestamp);
+    expect([entry.LONGEST_TIMER, entry.PLATFORM_CLOCK]).toEqual([
+      clocks.LONGEST_TIMER,
+      clocks.PLATFORM_CLOCK,
+    ]);
+  });
+
+  test('runs on the clock its transport supplies, the platform’s when it supplies none', () => {
+    const clock = createTestClock();
+    const implementation = {
+      defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
+      type: 'WS',
+      close: () => {
+        return Promise.resolve();
+      },
+      send: () => {
+        return Promise.resolve();
+      },
+      start: ({ address, port }: ITransportServerAddress) => {
+        return Promise.resolve({ address, port });
+      },
+      stop: () => {
+        return Promise.resolve();
+      },
+    } as const;
+
+    expect(
+      createTransportServer(() => {
+        return { ...implementation, clock };
+      }).clock
+    ).toBe(clock);
+    expect(
+      createTransportServer(() => {
+        return implementation;
+      }).clock
+    ).toBe(clocks.PLATFORM_CLOCK);
+  });
+
+  test('carries no credential toward a connection, and is secure on a loopback host it listens on, or as its transport says', async () => {
+    const securedBy = async (address: string, isSecure?: true) => {
+      const server = createTransportServer<object, undefined>(() => {
+        return {
+          defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
+          ...(isSecure === undefined ? {} : { isSecure }),
+          type: 'WS',
+          close: () => {
+            return Promise.resolve();
+          },
+          send: () => {
+            return Promise.resolve();
+          },
+          start: ({ port }) => {
+            return Promise.resolve({ address, port });
+          },
+          stop: () => {
+            return Promise.resolve();
+          },
+        };
+      });
+
+      await server.start({ address });
+
+      return [server.carriesCredential(A), server.isSecure(A)];
+    };
+
+    expect(
+      await Promise.all([
+        securedBy('127.0.0.1'),
+        securedBy('::1'),
+        securedBy('localhost'),
+        securedBy('0.0.0.0'),
+        securedBy('192.0.2.1'),
+        securedBy('192.0.2.1', true),
+      ])
+    ).toEqual([
+      [false, true],
+      [false, true],
+      [false, true],
+      [false, false],
+      [false, false],
+      [false, true],
+    ]);
   });
 
   test('names a connection by its type, address and port', () => {
@@ -283,7 +364,7 @@ test.describe('createTransportServer', () => {
       {
         address: '127.0.0.1',
         connectionHandle: A,
-        lastActivityTimestamp: undefined,
+        lastActivity: undefined,
         port: 1,
         type: 'WS',
       },
@@ -338,8 +419,8 @@ test.describe('createTransportServer', () => {
     await server.start();
     register(A);
 
-    await server.send('x', B);
-    await server.send('x', A);
+    await server.send({ data: 'x' }, B);
+    await server.send({ data: 'x' }, A);
     expect(calls).toEqual(['start', `send:${A}`]);
   });
 

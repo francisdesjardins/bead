@@ -2,8 +2,7 @@
 
 // dependencies
 
-import { TIMER_MAX } from './constants';
-import { ProgrammerError } from './errors';
+import { assertHeld } from './clock';
 
 // interfaces
 
@@ -24,16 +23,12 @@ export const HEARTBEAT = 30_000;
 
 // helpers
 
-/** Throws a {@link ProgrammerError} unless `heartbeat` is a whole number of milliseconds a timer holds, or `Infinity`. */
-export const assertHeartbeat = (heartbeat: number): void => {
-  if (
-    heartbeat !== Infinity &&
-    !(Number.isInteger(heartbeat) && heartbeat > 0 && heartbeat <= TIMER_MAX)
-  ) {
-    throw new ProgrammerError(
-      `a heartbeat is a whole number of milliseconds from 1 to ${String(TIMER_MAX)}, or Infinity for none, not ${String(heartbeat)}`
-    );
-  }
+/**
+ * `heartbeat` held: a number of milliseconds from 1 to 2³¹ − 1, rounded to the nearest whole one,
+ * or `Infinity` for none; any other, 0 among them, is a {@link ProgrammerError}.
+ */
+export const assertHeartbeat = (heartbeat: number): number => {
+  return assertHeld('a heartbeat', heartbeat);
 };
 
 // definition
@@ -58,21 +53,25 @@ export const createHeartbeat = (
 ): IHeartbeat => {
   let isAnswered = true;
 
-  const timer =
-    heartbeat === Infinity
-      ? undefined
-      : setInterval(() => {
-          if (!isAnswered) {
-            clearInterval(timer);
+  // the platform's own timers, never a clock given: a ping plays in real time on every side, as the
+  // platform under the other side's pings it (decision 0011)
+  const stop = (): void => {
+    // oxlint-disable-next-line no-restricted-properties -- a WebSocket's ping is the platform's
+    globalThis.clearInterval(timer);
+  };
+  const beat = (): void => {
+    if (!isAnswered) {
+      stop();
+      drop();
 
-            return (drop(), undefined);
-          }
+      return;
+    }
 
-          isAnswered = false;
-          ping();
-
-          return undefined;
-        }, heartbeat);
+    isAnswered = false;
+    ping();
+  };
+  // oxlint-disable-next-line no-restricted-properties -- a WebSocket's ping is the platform's
+  const timer = heartbeat === Infinity ? undefined : globalThis.setInterval(beat, heartbeat);
 
   // a browser's timer has no `unref`
   (timer as { unref?: () => unknown } | undefined)?.unref?.();
@@ -81,8 +80,6 @@ export const createHeartbeat = (
     answer: () => {
       isAnswered = true;
     },
-    stop: () => {
-      clearInterval(timer);
-    },
+    stop,
   };
 };

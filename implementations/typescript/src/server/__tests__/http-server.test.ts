@@ -5,10 +5,10 @@ import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
 import { createHTTPClient, type HTTPClient } from '../../client/http-client';
 import { createWSClient } from '../../client/ws-client';
-import { timersOf } from '../../router/shared/__tests__/fixtures';
 import type { IProcedure } from '../../router/shared/types';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createFakeFetch } from '../../transport/client/__tests__/fake-fetch';
+import { createTestClock, timersBy } from '../../transport/shared/__tests__/fixtures';
 import {
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
@@ -72,30 +72,32 @@ const digestOf = (payload: Uint8Array) => {
 };
 
 /**
- * An HTTP server on a free port — a session opened by `openSession`, `read` behind it, `upload`
- * answering its payload's digest, `slow` waiting on its signal, `news` a subscription — and an HTTP
- * client connected to it. `await using` takes them apart.
+ * An HTTP server on a free port — a session opened by `openSession`, of `sessionInactivityTimeout`,
+ * `read` behind it, `upload` answering its payload's digest, `slow` waiting on its signal, `news` a
+ * subscription — and an HTTP client connected to it. `await using` takes them apart.
  */
-const connectHTTP = async (
-  options?: Partial<Parameters<typeof createHTTPServer>[0]>,
-  { isListening = true }: { isListening?: boolean } = {}
-) => {
+const connectHTTP = async ({
+  isListening = true,
+  server: given,
+  sessionInactivityTimeout = Infinity,
+}: {
+  isListening?: boolean;
+  server?: Partial<Parameters<typeof createHTTPServer>[0]>;
+  sessionInactivityTimeout?: number;
+} = {}) => {
   const server: HTTPServer = createHTTPServer({
     transport: {
       createServer: (listener) => {
         return createServer(listener);
       },
     },
-    ...options,
+    ...given,
   });
   const { services, sessions } = server;
   const aborted: unknown[] = [];
 
   services.getRequestResolver(openSession, { serializer: text })((request, response) => {
-    sessions.set({
-      ...sessions.create(request.connectionHandle),
-      sessionInactivityTimeout: Infinity,
-    });
+    sessions.set({ ...sessions.create(request.connectionHandle), sessionInactivityTimeout });
 
     return response('opened');
   });
@@ -254,7 +256,7 @@ test.describe('an HTTP server and client', () => {
   });
 
   test('refuse a subscription to a client that does not listen, which nothing brings back, and a command, which nothing carries', async () => {
-    await using connected = await connectHTTP(undefined, { isListening: false });
+    await using connected = await connectHTTP({ isListening: false });
     const { client, server } = connected;
     const refused = await client.services
       .getNotification(news, { serializer: { ...text, decodeNotification: text.decode } })(
@@ -279,7 +281,11 @@ test.describe('an HTTP server and client', () => {
   });
 
   test('close a connection that opened no session within its timeout, 30 s by default', async () => {
-    await using connected = await connectHTTP({ connectionInactivityTimeout: 50 });
+    // a client that does not listen: one that does holds a listen, which is no silence
+    await using connected = await connectHTTP({
+      isListening: false,
+      server: { connectionInactivityTimeout: 50 },
+    });
     const { client } = connected;
     const closed = new Promise((resolve) => {
       client.transport.once('close', (...params) => {
@@ -299,15 +305,18 @@ test.describe('an HTTP server and client', () => {
 
     expect(await closed).toEqual([false, false]);
 
-    // by default, the timer a connection arms on a server built with no timeout; nothing listens
+    // by default, the timer a connection arms on a server built with no timeout, on the clock its
+    // transport is given; nothing listens
+    const clock = createTestClock();
     await using server = createHTTPServer({
       transport: {
+        clock,
         createServer: (listener) => {
           return createServer(listener);
         },
       },
     });
-    const { armed } = timersOf(() => {
+    const { armed } = timersBy(clock, () => {
       server.transport.emit(
         'connection',
         { ordinal: 1 },
@@ -322,6 +331,43 @@ test.describe('an HTTP server and client', () => {
       })
     ).toEqual([CONNECTION_INACTIVITY_TIMEOUT]);
     expect(CONNECTION_INACTIVITY_TIMEOUT).toBe(30_000);
+  });
+
+  test('end a session past its session timeout while its client holds a listen, which brings back the failure of its subscription, the connection staying', async () => {
+    const clock = createTestClock();
+
+    await using connected = await connectHTTP({
+      server: {
+        transport: {
+          clock,
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+        },
+      },
+      sessionInactivityTimeout: 1_000,
+    });
+    const { client, server } = connected;
+    const dropped = Promise.withResolvers<unknown>();
+
+    client.services.on('dropped', (procedure, failure) => {
+      dropped.resolve([procedure.procedureName, failure?.code]);
+    });
+    await client.services.getRequest(openSession, { serializer: text })('me')();
+    await client.services.getNotification(news, {
+      serializer: { ...text, decodeNotification: text.decode },
+    })('subscribe', () => {})();
+
+    // the client holds a listen, which the server's clock, the test's, never ends by itself
+    await expect
+      .poll(() => {
+        return server.transport.gauges().counts['listens'];
+      })
+      .toBe(1);
+    clock.tick(1_000);
+
+    await expect(dropped.promise).resolves.toEqual(['news', ProtocolCode.SESSION_REQUIRED]);
+    expect([server.sessions.getAll(), server.transport.clients]).toEqual([[], [expect.anything()]]);
   });
 
   test('bring a client that listens what the server sends of its own: a subscription’s notifications, a command, a call relayed to it', async () => {
@@ -411,7 +457,7 @@ test.describe('an HTTP server and client', () => {
   });
 
   test('pass nothing on to a connection drawn over HTTP whose client does not listen, which takes no request of the server’s', async () => {
-    await using connected = await connectHTTP(undefined, { isListening: false });
+    await using connected = await connectHTTP({ isListening: false });
     const { client, server } = connected;
     const connectionHandle = server.transport.clients[0]?.connectionHandle;
 
@@ -458,19 +504,21 @@ test.describe('an HTTP server and client', () => {
 
     await expect(refused).rejects.toMatchObject({
       code: ProtocolCode.DESTINATION_UNREACHABLE,
-      hops: 0,
+      relays: 0,
     });
 
     const lost = echoing('hi')({ destinationId: 7 });
 
     (await nextCall(3))?.fail();
 
-    await expect(lost).rejects.toMatchObject({ code: ProtocolCode.DESTINATION_LOST, hops: 0 });
+    await expect(lost).rejects.toMatchObject({ code: ProtocolCode.DESTINATION_LOST, relays: 0 });
     legB.transport.removeAllListeners();
   });
 
   test('refuse a body past the envelope its router takes, 413, before the router reads any of it', async () => {
-    await using connected = await connectHTTP({ limits: { maximumEnvelopeBytes: 1_024 } });
+    await using connected = await connectHTTP({
+      server: { limits: { maximumEnvelopeBytes: 1_024 } },
+    });
     const url = `http://${host}:${String(connected.port)}/bead`;
     const drawn = await fetch(url, {
       headers: { 'content-type': BEAD_MEDIA_TYPE },
@@ -529,5 +577,20 @@ test.describe('an HTTP server and client', () => {
     expect(() => {
       return createHTTPClient({ limits: { maximumTransfers: 2 } });
     }).toThrow(ProgrammerError);
+  });
+
+  test('refuse an inactivity timeout of 0, which its default does not stand in for', () => {
+    expect(() => {
+      return createHTTPServer({
+        connectionInactivityTimeout: 0,
+        transport: {
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+        },
+      });
+    }).toThrow(
+      "a connection's inactivity timeout is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 0"
+    );
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/bead",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP and a Web Worker transport, each a client and a server, a client and a server router with the service, session and notification managers, and the client and server over them.",
   "license": "Apache-2.0",
@@ -20,6 +20,7 @@
     "./notification-manager": "./src/router/server/notification-manager.ts",
     "./router-client": "./src/router/client/router-client.ts",
     "./router-server": "./src/router/server/router-server.ts",
+    "./service": "./src/service/service.ts",
     "./service-manager": "./src/router/shared/service-manager.ts",
     "./session-manager": "./src/router/server/session-manager.ts",
     "./server": "./src/server/server.ts",
@@ -38,22 +39,31 @@
   "scripts": {
     "comment-budget": "node tools/check-comment-budget.mjs",
     "demo": "node demo/serve.ts",
+    "devtools:build": "node devtools/build.ts",
     "playground:build:file": "node demo/playground.ts",
     "docs:examples": "node tools/check-examples.mjs",
     "docs:examples:fix": "node tools/check-examples.mjs --fix",
-    "check": "yarn type-check && yarn lint --deny-warnings && yarn format:check && yarn comment-budget && yarn docs:examples",
+    "check": "yarn type-check && yarn lint --deny-warnings && yarn lint:cases && yarn format:check && yarn comment-budget && yarn docs:examples && yarn protobuf:check",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint --type-aware",
+    "lint:cases": "node tools/check-oxlint-plugin.mjs",
     "lint:fix": "oxlint --type-aware --fix",
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
+    "test:devtools": "playwright test --config playwright.devtools.config.ts",
     "type-check": "node node_modules/typescript-7/bin/tsc --noEmit",
-    "verify:all": "yarn check && yarn test"
+    "verify:all": "yarn check && yarn test",
+    "protobuf:check": "node tools/check-protobuf.mjs",
+    "protobuf:generate": "node tools/check-protobuf.mjs --write"
   },
   "devDependencies": {
+    "@bufbuild/buf": "1.73.0",
+    "@bufbuild/protobuf": "2.16.0",
+    "@bufbuild/protoc-gen-es": "2.16.0",
     "@playwright/test": "1.63.0",
+    "@sinonjs/fake-timers": "15.4.0",
     "@types/node": "^24.19.0",
     "@types/ws": "^8.18.2",
     "c8": "12.0.0",
@@ -65,7 +75,7 @@
     "ws": "^8.22.0"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=24.9"
   },
   "packageManager": "yarn@4.18.1"
 }

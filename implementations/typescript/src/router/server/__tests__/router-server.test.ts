@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
@@ -6,37 +7,55 @@ import { allClosed, host, IMPLEMENTATIONS } from '../../../transport/shared/__te
 import { createWSTransportServer } from '../../../transport/server/ws-transport-server';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
-import type { Data } from '../../../transport/shared/types';
+import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
+import { headerBytesOf } from '../../shared/header';
 import { toSessionToken } from '../../shared/identifiers';
 import { createServiceManager } from '../../shared/service-manager';
 import type {
+  Credential,
   Envelope,
+  ICredentials,
+  IElsewhereSession,
+  IFailure,
+  INotificationLike,
   IProcedure,
   OutgoingEnvelope,
   RouterLimitsOptions,
+  SessionOf,
 } from '../../shared/types';
 import type { IRelayOptions, RelayTarget } from '../types';
 import {
+  createTestClock,
+  delaysOn,
+  type TestClock,
+  timersUntil,
+} from '../../../transport/shared/__tests__/fixtures';
+import {
   callIdsOf,
+  countedOf,
   createPipedTransports,
   envelopeOf,
-  spyTimers,
-  timersWhile,
 } from '../../shared/__tests__/fixtures';
 import { createRouterClient } from '../../client/router-client';
 import {
   CancelError,
   CLIENT_FAILURES,
+  createMetricsRegistry,
   createRouterServer,
+  CredentialScheme,
   DisconnectError,
   EnvelopeKind,
   FailureError,
   FailureScope,
+  LIMIT_DEFAULTS,
   ProgrammerError,
   ProtocolCode,
+  requireSession,
   SERVER_FAILURES,
   TimeoutError,
+  type IJwtKey,
+  type IJwtSetKey,
   type IRouterServerTransportLike,
 } from '../router-server';
 
@@ -92,15 +111,84 @@ const options = { timeout: 1_000 };
 const TOKEN = toSessionToken(new Uint8Array(16).fill(7));
 const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(8));
 
-/** A client's request for `procedure`, on `callId`, carrying `payload`. */
+// what an answer announces: the session, by its token
+const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
+
+// a JWT's clock, keys and tokens, the application's and its key set's
+const NOW = Date.parse('2026-01-01T00:00:00Z');
+const AUDIENCE = 'https://bead.example';
+const ISSUER = 'https://issuer.example';
+const SET_ISSUER = 'https://keys.example';
+const SET_KID = 'set-1';
+// keys of these tests' own, 32 bytes each: one given, one its key set answers
+const SECRET = Buffer.alloc(32, 1);
+const SET_SECRET = Buffer.alloc(32, 2);
+const KEY: IJwtKey = Object.freeze({
+  algorithm: 'HS256',
+  issuer: ISSUER,
+  jwk: { k: SECRET.toString('base64url'), kty: 'oct' },
+});
+const SET_KEY: IJwtSetKey = Object.freeze({
+  algorithm: 'HS256',
+  jwk: { k: SET_SECRET.toString('base64url'), kid: SET_KID, kty: 'oct' },
+});
+
+/**
+ * An access token for grace, ending at `exp`, in seconds, `claims` over its own: under
+ * {@link KEY}'s secret, or, naming `kid`, under the key the key set answers for {@link SET_ISSUER}.
+ */
+const jwtOf = (
+  exp: number,
+  { claims: extra = {}, kid }: { claims?: Record<string, unknown>; kid?: string } = {}
+): string => {
+  const part = (value: object): string => {
+    return Buffer.from(JSON.stringify(value)).toString('base64url');
+  };
+  const header = part({ alg: 'HS256', typ: 'at+jwt', ...(kid === undefined ? {} : { kid }) });
+  const claims = part({
+    aud: AUDIENCE,
+    exp,
+    iss: kid === undefined ? ISSUER : SET_ISSUER,
+    sub: 'grace',
+    ...extra,
+  });
+  const signature = createHmac('sha256', kid === undefined ? SECRET : SET_SECRET)
+    .update(`${header}.${claims}`)
+    .digest('base64url');
+
+  return `${header}.${claims}.${signature}`;
+};
+
+/** A key set for {@link SET_ISSUER} that records each ask, and answers as each is settled. */
+const createKeySet = () => {
+  const asks: { issuer: string; settle: PromiseWithResolvers<readonly IJwtSetKey[]> }[] = [];
+
+  return {
+    asks,
+    keySet: {
+      ask: (issuer: string) => {
+        const settle = Promise.withResolvers<readonly IJwtSetKey[]>();
+
+        asks.push({ issuer, settle });
+
+        return settle.promise;
+      },
+      issuers: [SET_ISSUER],
+    },
+  };
+};
+
+/** A client's request for `procedure`, on `callId`, presenting `credential`, carrying `payload`. */
 const requestOf = (
   callId: number,
   {
+    credential,
     destinationId,
     opensSubscription,
     payload = new Uint8Array(0),
     procedure = echo,
   }: {
+    credential?: Credential;
     destinationId?: number;
     opensSubscription?: true;
     payload?: Uint8Array;
@@ -110,6 +198,7 @@ const requestOf = (
   return {
     header: {
       callId,
+      credential,
       destinationId,
       kind: EnvelopeKind.REQUEST,
       opensSubscription,
@@ -166,14 +255,22 @@ const resultOf = (callId: number, payload = new Uint8Array(0)): OutgoingEnvelope
   return { header: { callId, kind: EnvelopeKind.RESULT }, kind: EnvelopeKind.RESULT, payload };
 };
 
-/** A transport server that records what it sends, read as a client reads it, and delivers what a test gives. */
-const createScriptedTransport = () => {
+/**
+ * A transport server that records what it sends, read as a client reads it, and the credential it
+ * is given beside it, delivers what a test gives, with what its transport carried, and carries a
+ * credential, securely, unless told otherwise.
+ */
+const createScriptedTransport = ({
+  carriesCredential = true,
+  isSecure = true,
+}: { carriesCredential?: boolean; isSecure?: boolean } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [socket: unknown, request: unknown, connectionHandle: Handle];
-    message: [data: Data, connectionHandle: Handle];
+    message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
   const sent: ISentEnvelope[] = [];
+  const carried: (string | undefined)[] = [];
   const control = {
     /** Called with each envelope as it is handed over, before the send settles. */
     onSend: undefined as ((sentEnvelope: ISentEnvelope) => void) | undefined,
@@ -182,9 +279,17 @@ const createScriptedTransport = () => {
   };
 
   const transport: IRouterServerTransportLike = {
+    carriesCredential: () => {
+      return carriesCredential;
+    },
+    isSecure: () => {
+      return isSecure;
+    },
     off: emitter.off,
     on: emitter.on,
-    send: (data, connectionHandle) => {
+    send: ({ credential, data }, connectionHandle) => {
+      carried.push(credential);
+
       const sentEnvelope = {
         connectionHandle,
         envelope: readEnvelope(bytesOf(data), {
@@ -212,16 +317,24 @@ const createScriptedTransport = () => {
   const deliver = (connectionHandle: Handle, envelope: OutgoingEnvelope | Uint8Array) => {
     emitter.emit(
       'message',
-      envelope instanceof Uint8Array ? envelope : envelopeOf(envelope),
+      { data: envelope instanceof Uint8Array ? envelope : envelopeOf(envelope) },
       connectionHandle
     );
   };
 
-  return { close, control, deliver, emitter, open, sent, transport };
+  // as `deliver`, with what its transport carried beside it
+  const carry = (
+    connectionHandle: Handle,
+    { credential, envelope }: { credential: string; envelope: OutgoingEnvelope }
+  ) => {
+    emitter.emit('message', { credential, data: envelopeOf(envelope) }, connectionHandle);
+  };
+
+  return { carried, carry, close, control, deliver, emitter, open, sent, transport };
 };
 
 const recordErrors = (router: ReturnType<typeof createRouterServer>) => {
-  const errors: [Error, string][] = [];
+  const errors: [Error, string | undefined][] = [];
 
   router.on('error', (error, connectionHandle) => {
     errors.push([error, connectionHandle]);
@@ -231,7 +344,7 @@ const recordErrors = (router: ReturnType<typeof createRouterServer>) => {
 };
 
 /** Each error reported, as its failure's code or its message, and the connection named. */
-const reportedOf = (errors: [Error, string][]) => {
+const reportedOf = (errors: [Error, string | undefined][]) => {
   return errors.map(([error, connectionHandle]) => {
     return [error instanceof FailureError ? error.code : error.message, connectionHandle];
   });
@@ -279,6 +392,22 @@ test.describe('createRouterServer', () => {
     expect(router.notifications.subscriptions()).toEqual([]);
   });
 
+  test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
+    const clock = createTestClock();
+    const { transport } = createScriptedTransport();
+    using onItsTransport = createRouterServer(createWSTransportServer({ clock, WebSocketServer }));
+    using onItsOwn = createRouterServer(transport, { clock });
+
+    expect([onItsTransport.clock, onItsOwn.clock]).toEqual([clock, clock]);
+    expect(() => {
+      createRouterServer(createWSTransportServer({ WebSocketServer }), { clock });
+    }).toThrow(
+      new ProgrammerError(
+        "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
+      )
+    );
+  });
+
   test.describe('a connection’s requests', () => {
     test('go to the resolver registered, which answers on their call id, announcing the session once', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
@@ -306,7 +435,7 @@ test.describe('createRouterServer', () => {
         [
           first,
           {
-            header: { callId: 31, kind: EnvelopeKind.RESULT, sessionToken: TOKEN },
+            header: { callId: 31, credential: OPAQUE, kind: EnvelopeKind.RESULT },
             kind: EnvelopeKind.RESULT,
             payload: text.encode('hi!'),
           },
@@ -368,6 +497,49 @@ test.describe('createRouterServer', () => {
       ]);
     });
 
+    test('are each asked their session of its sessionOf, once, their call id held, before their admission, which reads it, as their callback does', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      const order: unknown[] = [];
+      using router = createRouterServer(transport, {
+        sessionOf: ({ connectionHandle, header }, signal) => {
+          order.push(['session', connectionHandle, header.callId, signal.aborted]);
+
+          return header.credential === undefined ? undefined : Object.freeze({ data: 'ada' });
+        },
+      });
+      const services = createServiceManager(router);
+
+      services.getRequestResolver(echo, {
+        beforeRequest: ({ header, session }) => {
+          order.push(['admit', header.callId, session]);
+
+          return true;
+        },
+        serializer: answering,
+      })((request, response) => {
+        order.push(['callback', request.header.callId, request.session]);
+
+        return response('ok');
+      });
+
+      deliver(first, requestOf(31));
+      deliver(first, requestOf(33, { credential: OPAQUE }));
+      await sleep(0);
+
+      expect(order).toEqual([
+        ['session', first, 31, false],
+        ['admit', 31, undefined],
+        ['callback', 31, undefined],
+        ['session', first, 33, false],
+        ['admit', 33, { data: 'ada' }],
+        ['callback', 33, { data: 'ada' }],
+      ]);
+      expect(answersOf(sent)).toEqual([
+        [first, 'result', 31, 'ok'],
+        [first, 'result', 33, 'ok'],
+      ]);
+    });
+
     test('refused their admission never reach a callback, which would subscribe a plain request', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
@@ -425,7 +597,7 @@ test.describe('createRouterServer', () => {
         sent.map(({ envelope }) => {
           return envelope?.header;
         })
-      ).toEqual([{ callId: 3, kind: EnvelopeKind.RESULT, sessionToken: TOKEN }]);
+      ).toEqual([{ callId: 3, credential: OPAQUE, kind: EnvelopeKind.RESULT }]);
     });
 
     test('are refused when nobody answers them, or they name a destination: this router relays nothing', async () => {
@@ -480,7 +652,7 @@ test.describe('createRouterServer', () => {
     });
 
     test('that fail in their resolver, or do not read, are reported with their connection', async () => {
-      const { control, deliver, emitter, transport } = createScriptedTransport();
+      const { control, deliver, emitter, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
       const errors = recordErrors(router);
 
@@ -497,7 +669,7 @@ test.describe('createRouterServer', () => {
 
       deliver(first, requestOf(1));
       deliver(second, subscribingOf(1));
-      emitter.emit('message', 'text', first);
+      emitter.emit('message', { data: 'text' }, first);
 
       // a refusal that cannot go out
       control.sendErrors.set(second, new Error('gone'));
@@ -509,6 +681,13 @@ test.describe('createRouterServer', () => {
         [ProtocolCode.ENVELOPE_MALFORMED, first],
         ['rejected', first],
         ['gone', second],
+      ]);
+      // each resolver that failed answered PROCEDURE_FAILED: the one that threw within its
+      // delivery, before its connection's sends fail, then the one that rejected
+      expect(answersOf(sent)).toEqual([
+        [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
+        [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
       ]);
     });
 
@@ -579,6 +758,30 @@ test.describe('createRouterServer', () => {
   });
 
   test.describe('its own requests', () => {
+    test('tells a command made with the call id its router drew, on its connection', async () => {
+      const { deliver, open, transport } = createScriptedTransport();
+      using router = createRouterServer(transport);
+      const services = createServiceManager(router);
+      const command = services.getCommand(echo, { serializer: text });
+      const steps: unknown[] = [];
+
+      services.on('debug', (_error, { callId, connectionHandle, direction, type }) => {
+        steps.push([direction, type, callId, connectionHandle]);
+      });
+      open(first);
+      open(second);
+
+      const running = command('run')({ ...options, connectionHandle: second });
+
+      deliver(second, resultOf(2, text.encode('done')));
+
+      await expect(running).resolves.toBe('done');
+      expect(steps).toEqual([
+        ['tx', 'command', 2, second],
+        ['rx', 'command', 2, second],
+      ]);
+    });
+
     test('go to the connection their options name, on even call ids, and resolve with that connection’s result alone', async () => {
       const { deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport, {
@@ -618,6 +821,59 @@ test.describe('createRouterServer', () => {
       expect(text.decode((await answering).payload)).toBe('pong');
       expect(reportedOf(errors)).toEqual([[ProtocolCode.CALL_UNKNOWN, second]]);
       expect(activity).toEqual(['request first', 'response first']);
+    });
+
+    test('present OPAQUE when they ask, their connection’s session as sessionTokenOf gives it, and fail before they go, SESSION_REQUIRED, when it has none', async () => {
+      const { deliver, open, sent, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, {
+        sessionTokenOf: (connectionHandle) => {
+          return connectionHandle === first ? TOKEN : undefined;
+        },
+      });
+      const asking = {
+        ...options,
+        credential: { scheme: CredentialScheme.OPAQUE },
+      } as const;
+
+      open(first);
+      open(second);
+
+      await expect(
+        router.request(new Uint8Array(0), {
+          options: { ...asking, connectionHandle: second },
+          procedure: echo,
+        })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        origin: 'local',
+        side: 'server',
+      });
+
+      const answering = router.request(new Uint8Array(0), {
+        options: { ...asking, connectionHandle: first },
+        procedure: echo,
+      });
+
+      await sleep(0);
+      deliver(first, resultOf(2));
+      await answering;
+
+      expect(
+        sent.map(({ connectionHandle, envelope }) => {
+          return [connectionHandle, envelope?.header];
+        })
+      ).toEqual([
+        [
+          first,
+          {
+            callId: 2,
+            credential: OPAQUE,
+            kind: EnvelopeKind.REQUEST,
+            procedureId: 1,
+            serviceId: 2,
+          },
+        ],
+      ]);
     });
 
     test('name their connection, and it must be open; a server holds no subscription', async () => {
@@ -742,8 +998,8 @@ test.describe('createRouterServer', () => {
 
       control.onSend = ({ connectionHandle }) => {
         subscribedWhenSent.push(
-          [...router.notifications.candidates(news).keys()].map((subscriber) => {
-            return subscriber === connectionHandle ? 'itself' : 'another';
+          router.notifications.candidates(news).map((subscriber) => {
+            return subscriber.connectionHandle === connectionHandle ? 'itself' : 'another';
           })
         );
       };
@@ -912,7 +1168,7 @@ test.describe('createRouterServer', () => {
       expect(await reached({ exclude: second })).toEqual([first, third]);
       expect(
         await reached({
-          filter: (connectionHandle) => {
+          filter: ({ connectionHandle }) => {
             return connectionHandle !== first;
           },
         })
@@ -920,7 +1176,7 @@ test.describe('createRouterServer', () => {
       expect(
         await reached({
           exclude: third,
-          filter: (connectionHandle) => {
+          filter: ({ connectionHandle }) => {
             return connectionHandle !== first;
           },
         })
@@ -953,7 +1209,7 @@ test.describe('createRouterServer', () => {
       sent.length = 0;
 
       await resolver.notify('flash', {
-        filter: (connectionHandle) => {
+        filter: ({ connectionHandle }) => {
           if (connectionHandle === second) {
             throw failure;
           }
@@ -1218,9 +1474,13 @@ test.describe('createRouterServer', () => {
       using router = createRouterServer(transport);
       const services = createServiceManager(router);
       const errors = recordErrors(router);
-      // one byte past what a result's envelope holds whole, its session counted
-      const large = 'x'.repeat(1_048_553);
+      // one byte past what a result's envelope holds whole, its announcement counted: a chunk's
+      // 1 MiB less its header's 8 bytes and an announcement's 20
+      const large = 'x'.repeat(1_048_549);
 
+      expect(
+        headerBytesOf({ callId: 1, credential: OPAQUE, kind: EnvelopeKind.RESULT }) + large.length
+      ).toBe(LIMIT_DEFAULTS.chunkBytes + 1);
       open(first);
       services.getNotificationResolver(news, { serializer: answering })((request, response) => {
         if (request.payload === 'explicit') {
@@ -1764,7 +2024,7 @@ test.describe('createRouterServer', () => {
         [
           first,
           ProtocolCode.SESSION_REQUIRED,
-          { callId: 1, kind: EnvelopeKind.FAILURE, sessionToken: null },
+          { callId: 1, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
         ],
         [first, ProtocolCode.SESSION_REQUIRED, { callId: 3, kind: EnvelopeKind.FAILURE }],
       ]);
@@ -1894,23 +2154,17 @@ test.describe('createRouterServer', () => {
     await sleep(0);
 
     expect(seen).toEqual([
+      ['rx', 'first', { callId: 9, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 }],
       [
-        'rx',
+        'tx',
         'first',
-        {
-          callId: 9,
-          hasSessionToken: false,
-          kind: EnvelopeKind.REQUEST,
-          procedureId: 1,
-          serviceId: 2,
-        },
+        { callId: 9, credentialScheme: CredentialScheme.OPAQUE, kind: EnvelopeKind.RESULT },
       ],
-      ['tx', 'first', { callId: 9, hasSessionToken: true, kind: EnvelopeKind.RESULT }],
     ]);
     expect(sent[0]?.envelope?.header).toEqual({
       callId: 9,
+      credential: OPAQUE,
       kind: EnvelopeKind.RESULT,
-      sessionToken: TOKEN,
     });
     expect(JSON.stringify(seen)).not.toContain(TOKEN);
   });
@@ -1930,7 +2184,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
       const told: unknown[] = [];
 
       client.router.on('debug', ({ direction, header }) => {
-        told.push([direction, header.kind, header.callId, header.hasSessionToken]);
+        told.push([direction, header.kind, header.callId, header.credentialScheme]);
       });
 
       try {
@@ -2015,13 +2269,13 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
         expect(unsubscribed).toEqual(['3 3']);
         expect(serverRouter.notifications.subscriptions()).toEqual([]);
-        expect(told).toContainEqual(['rx', EnvelopeKind.REQUEST, 2, false]);
+        expect(told).toContainEqual(['rx', EnvelopeKind.REQUEST, 2, undefined]);
         // announced once, on the first answer
         expect(
           told.filter((entry) => {
-            return (entry as unknown[])[3] === true;
+            return (entry as unknown[])[3] !== undefined;
           })
-        ).toEqual([['rx', EnvelopeKind.RESULT, 1, true]]);
+        ).toEqual([['rx', EnvelopeKind.RESULT, 1, CredentialScheme.OPAQUE]]);
 
         // a subscription again, which the connection takes away with it
         const dropped: unknown[] = [];
@@ -2055,6 +2309,1028 @@ test('a server’s failures are its own, whatever table a client uses', () => {
   expect(FailureScope.PROTOCOL).toBe(0);
 });
 
+test.describe('createRouterServer, credentials', () => {
+  const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
+  const CARRIED = 'Interop sub=ada';
+
+  /** Each failure sent: its call id, its code, its detail. */
+  const failuresOf = (sent: ISentEnvelope[]) => {
+    return sent.flatMap(({ envelope }) => {
+      return envelope?.kind === EnvelopeKind.FAILURE
+        ? [[envelope.header.callId, envelope.failure.code, envelope.failure.detail]]
+        : [];
+    });
+  };
+
+  /** A router whose ELSEWHERE verifier is `verify`, `echo` answering the name of its call's session. */
+  const createVerifying = (
+    verify: NonNullable<ICredentials['verify']>,
+    { clock }: { clock?: TestClock } = {}
+  ) => {
+    const scripted = createScriptedTransport();
+    const router = createRouterServer(scripted.transport, {
+      clock,
+      credentials: { verify },
+    });
+    const services = createServiceManager(router);
+
+    services.getRequestResolver(echo, { serializer: answering })((request, response) => {
+      const { session } = request;
+
+      return response(session === undefined ? 'none' : JSON.stringify(session.data));
+    });
+
+    return { ...scripted, errors: recordErrors(router), router };
+  };
+
+  test('moves the end of a session kept by a call whose credential renews it, and by none that settles once its call ended', async () => {
+    const clock = createTestClock(1_767_225_600_000);
+    const now = clock.Date.now();
+    const settling = new Map<string, PromiseWithResolvers<IElsewhereSession | undefined>>();
+    const { carry, deliver, router } = createVerifying(
+      (carried) => {
+        const resolution = Promise.withResolvers<IElsewhereSession | undefined>();
+
+        settling.set(carried, resolution);
+
+        return resolution.promise;
+      },
+      { clock }
+    );
+    const subscribing = subscribingOf(1);
+
+    using _router = router;
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('subscribed');
+      }
+    );
+    carry(first, {
+      credential: 'kept',
+      envelope: {
+        ...subscribing,
+        header: { ...subscribing.header, credential: ELSEWHERE },
+      } as OutgoingEnvelope,
+    });
+    carry(first, { credential: 'late', envelope: requestOf(3, { credential: ELSEWHERE }) });
+    carry(first, { credential: 'renewed', envelope: requestOf(5, { credential: ELSEWHERE }) });
+    await sleep(0);
+    settling.get('kept')?.resolve({ data: 'ada', end: now + 60_000, id: 'ada' });
+    await sleep(0);
+
+    expect(delaysOn(clock)).toEqual([60_000]);
+
+    // cancelled as it resolves, its later end moves nothing
+    deliver(first, cancelOf(3));
+    settling.get('late')?.resolve({ data: 'ada', end: now + 120_000, id: 'ada' });
+    await sleep(0);
+
+    expect(delaysOn(clock)).toEqual([60_000]);
+
+    settling.get('renewed')?.resolve({ data: 'ada', end: now + 90_000, id: 'ada' });
+    await sleep(0);
+
+    expect(delaysOn(clock)).toEqual([90_000]);
+  });
+
+  test('requests run in none without a sessionOf, and one presenting a credential is refused SESSION_REQUIRED or CREDENTIAL_UNSUPPORTED', async () => {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      sessionTokenOf: () => {
+        return TOKEN;
+      },
+    });
+
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.session === undefined ? 'none' : 'a session');
+      }
+    );
+    deliver(first, requestOf(1));
+    await sleep(0);
+    deliver(first, requestOf(3, { credential: OPAQUE }));
+    deliver(first, requestOf(5, { credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } }));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 1, 'none'],
+      [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 5, ProtocolCode.CREDENTIAL_UNSUPPORTED],
+    ]);
+  });
+
+  test('answers an admission’s SESSION_REQUIRED to a call that presented a credential ACCESS_DENIED, and to one that presented none SESSION_REQUIRED', async () => {
+    const { carry, deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: {
+        audience: AUDIENCE,
+        keys: [KEY],
+        verify: () => {
+          return Promise.resolve({ id: 'ada' });
+        },
+      },
+      sessionOf: ({ header }) => {
+        return header.credential === undefined ? undefined : Object.freeze({ data: 'leg A' });
+      },
+      sessionTokenOf: () => {
+        return TOKEN;
+      },
+    });
+    const errors = recordErrors(router);
+
+    // an admission of the application's own, which refuses every call with SESSION_REQUIRED, its
+    // detail its own
+    createServiceManager(router).getRequestResolver(echo, {
+      beforeRequest: Object.assign(
+        () => {
+          return false;
+        },
+        { refusal: { ...SERVER_FAILURES.sessionRequired, detail: 'not this one' } }
+      ),
+      serializer: answering,
+    })((_request, response) => {
+      return response('admitted');
+    });
+    deliver(first, requestOf(1));
+    deliver(first, requestOf(3, { credential: OPAQUE }));
+    deliver(
+      first,
+      requestOf(5, {
+        credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600) },
+      })
+    );
+    carry(first, { credential: CARRIED, envelope: requestOf(7, { credential: ELSEWHERE }) });
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(4);
+
+    // each credential held, and its call in a session: the admission's refusal is not the
+    // credential's, which its requester keeps
+    expect(
+      failuresOf(sent).toSorted(([a], [b]) => {
+        return Number(a) - Number(b);
+      })
+    ).toEqual([
+      [1, ProtocolCode.SESSION_REQUIRED, 'not this one'],
+      [3, ProtocolCode.ACCESS_DENIED, 'not this one'],
+      [5, ProtocolCode.ACCESS_DENIED, 'not this one'],
+      [7, ProtocolCode.ACCESS_DENIED, 'not this one'],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  test('asks verify once per request with exactly what its transport carried and a live signal, never for none, OPAQUE or an ELSEWHERE that carried nothing', async () => {
+    const asked: unknown[] = [];
+    const { carry, deliver, router, sent } = createVerifying((carried, signal) => {
+      asked.push([carried, signal.aborted]);
+
+      return Promise.resolve({ data: carried, id: carried });
+    });
+
+    using _router = router;
+
+    carry(first, {
+      credential: ` \t${CARRIED}`,
+      envelope: requestOf(1, { credential: ELSEWHERE }),
+    });
+    carry(first, { credential: CARRIED, envelope: requestOf(3) });
+    carry(first, { credential: CARRIED, envelope: requestOf(5, { credential: OPAQUE }) });
+    deliver(first, requestOf(7, { credential: ELSEWHERE }));
+    await sleep(0);
+
+    expect(asked).toEqual([[` \t${CARRIED}`, false]]);
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 3, 'none'],
+      [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 7, ProtocolCode.SESSION_REQUIRED],
+      [first, 'result', 1, JSON.stringify(` \t${CARRIED}`)],
+    ]);
+    expect(failuresOf(sent)).toEqual([
+      [5, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      [7, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+    ]);
+  });
+
+  test('resolves an ELSEWHERE whose verifier settles at once in a later turn, answering a request presenting none delivered behind it first', async () => {
+    const { carry, deliver, router, sent } = createVerifying((carried) => {
+      return { data: carried, id: carried };
+    });
+
+    using _router = router;
+
+    carry(first, { credential: CARRIED, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    deliver(first, requestOf(3));
+    await sleep(0);
+
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.header.callId;
+      })
+    ).toEqual([3, 1]);
+  });
+
+  test('a cancel and a close during resolution abort the signal, and what the verifier settles to after is dropped in silence', async () => {
+    const pending: {
+      resolution: PromiseWithResolvers<IElsewhereSession | undefined>;
+      signal: AbortSignal;
+    }[] = [];
+    const { carry, close, deliver, errors, router, sent } = createVerifying((_carried, signal) => {
+      const resolution = Promise.withResolvers<IElsewhereSession | undefined>();
+
+      pending.push({ resolution, signal });
+
+      return resolution.promise;
+    });
+
+    using _router = router;
+
+    carry(first, { credential: CARRIED, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    carry(first, { credential: CARRIED, envelope: requestOf(3, { credential: ELSEWHERE }) });
+    carry(second, { credential: CARRIED, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    await sleep(0);
+    deliver(first, cancelOf(1));
+    // its call id is free again at once
+    deliver(first, requestOf(1));
+    close(second);
+
+    expect(
+      pending.map(({ signal }) => {
+        return signal.aborted;
+      })
+    ).toEqual([true, false, true]);
+
+    pending[0]?.resolution.resolve({ data: 'ada', id: 'ada' });
+    pending[2]?.resolution.reject(new Error('a verifier that fails late'));
+    pending[1]?.resolution.resolve(undefined);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 1, 'none'],
+      [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers a verifier that throws at once PROCEDURE_FAILED, and reports it as one that rejects, never SESSION_REQUIRED', async () => {
+    const { carry, errors, router, sent } = createVerifying((carried) => {
+      if (carried === 'throws') {
+        throw new Error('this verifier throws');
+      }
+
+      return Promise.reject(new Error('this verifier rejects'));
+    });
+
+    using _router = router;
+
+    carry(first, { credential: 'throws', envelope: requestOf(1, { credential: ELSEWHERE }) });
+    carry(first, { credential: 'rejects', envelope: requestOf(3, { credential: ELSEWHERE }) });
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+      [first, 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
+    ]);
+    expect(reportedOf(errors)).toEqual([
+      ['this verifier throws', first],
+      ['this verifier rejects', first],
+    ]);
+  });
+
+  test('reports and traces no carried value of an ELSEWHERE, only its scheme', async () => {
+    const secret = 'Interop sub=secret';
+    const { carry, router, sent } = createVerifying(() => {
+      return Promise.reject(new Error('this verifier fails, on purpose'));
+    });
+    const told: unknown[] = [];
+
+    using _router = router;
+
+    router.on('error', (error) => {
+      told.push(error.message, error.cause, (error as { header?: unknown }).header);
+    });
+    router.on('debug', (info) => {
+      told.push(info);
+    });
+    carry(first, { credential: secret, envelope: requestOf(1, { credential: ELSEWHERE }) });
+    carry(first, {
+      credential: secret,
+      envelope: requestOf(3, { credential: { bytes: new Uint8Array(), scheme: 9 } }),
+    });
+    await sleep(0);
+
+    expect(failuresOf(sent)).toHaveLength(2);
+    expect(JSON.stringify(told)).not.toContain('secret');
+    expect(
+      told.flatMap((info) => {
+        return typeof info === 'object' && info !== null && 'direction' in info
+          ? [(info as unknown as { header: { credentialScheme?: number } }).header.credentialScheme]
+          : [];
+      })
+    ).toEqual([CredentialScheme.ELSEWHERE, 9, undefined, undefined]);
+  });
+
+  test('fails a command presenting ELSEWHERE over a transport that carries none, and a JWT command over one not secure, before they go, DESTINATION_UNREACHABLE', async () => {
+    const elsewhere = { carried: CARRIED, scheme: CredentialScheme.ELSEWHERE } as const;
+    const jwt = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+    const command = async (
+      router: ReturnType<typeof createRouterServer>,
+      credential: typeof elsewhere | typeof jwt
+    ) => {
+      return router
+        .request(new Uint8Array(0), {
+          options: { ...options, connectionHandle: first, credential },
+          procedure: echo,
+        })
+        .then(
+          () => {
+            return 'answered';
+          },
+          (reason: unknown) => {
+            return reason instanceof FailureError ? [reason.code, reason.origin] : reason;
+          }
+        );
+    };
+
+    for (const [carriesCredential, isSecure] of [
+      [false, true],
+      [true, false],
+    ] as const) {
+      const { open, sent, transport } = createScriptedTransport({ carriesCredential, isSecure });
+
+      using router = createRouterServer(transport);
+
+      open(first);
+
+      const unreachable = [ProtocolCode.DESTINATION_UNREACHABLE, 'local'];
+
+      expect([await command(router, elsewhere)]).toEqual([unreachable]);
+
+      if (isSecure) {
+        const going = command(router, jwt);
+
+        await sleep(0);
+
+        expect(sent[0]?.envelope?.header).toMatchObject({ callId: 2, credential: jwt });
+        router[Symbol.dispose]();
+        await going;
+      } else {
+        expect([await command(router, jwt)]).toEqual([unreachable]);
+        expect(sent).toEqual([]);
+      }
+    }
+  });
+
+  test('refuses as it is built limits that hold no header of 1020 bytes once it takes a JWT', () => {
+    const { transport } = createScriptedTransport();
+    const limits = { chunkBytes: 1_000, maximumEnvelopeBytes: 1_000, windowBytes: 2_000 };
+    const key = {
+      algorithm: 'HS256',
+      issuer: 'https://issuer.example',
+      jwk: { k: 'A'.repeat(43), kty: 'oct' },
+    } as const;
+
+    const keySet = {
+      ask: () => {
+        return Promise.resolve([]);
+      },
+      issuers: ['https://keys.example'],
+    };
+
+    for (const credentials of [{ keys: [key] }, { keySet }]) {
+      expect(() => {
+        return createRouterServer(transport, {
+          credentials: { ...credentials, audience: 'https://bead.example' },
+          limits,
+        });
+      }).toThrow(/limits do not hold together/);
+    }
+
+    expect(() => {
+      return createRouterServer(transport, {
+        credentials: {
+          audience: 'https://bead.example',
+          keys: [{ ...key, jwk: { k: 'A'.repeat(42), kty: 'oct' } }],
+        },
+      });
+    }).toThrow(ProgrammerError);
+
+    // an ELSEWHERE's verifier holds whatever the limits
+    using router = createRouterServer(transport, {
+      credentials: {
+        verify: () => {
+          return Promise.resolve(undefined);
+        },
+      },
+      limits,
+    });
+
+    expect(router.limits.chunkBytes).toBe(1_000);
+  });
+
+  test('refuses as it is built keys or a key set without an audience, whatever its relay does, and a key set given no issuer', () => {
+    const { transport } = createScriptedTransport();
+    const key = {
+      algorithm: 'HS256',
+      issuer: 'https://issuer.example',
+      jwk: { k: 'A'.repeat(43), kty: 'oct' },
+    } as const;
+    const ask = () => {
+      return Promise.resolve([]);
+    };
+    const keySet = { ask, issuers: ['https://keys.example'] };
+
+    for (const credentials of [{ keys: [key] }, { keySet }]) {
+      // a relay that verifies holds the audiences of its destinations, but a request to the
+      // server itself holds its own
+      for (const relay of [undefined, { verifies: false }, { verifies: true }]) {
+        expect(() => {
+          return createRouterServer(transport, { credentials, relay });
+        }).toThrow(ProgrammerError);
+      }
+    }
+
+    expect(() => {
+      return createRouterServer(transport, {
+        credentials: { audience: 'https://bead.example', keySet: { ask, issuers: [] } },
+      });
+    }).toThrow(ProgrammerError);
+  });
+
+  test("hands the filter one subscriber, its connection and its session's identifier", async () => {
+    const { carry, deliver, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      credentials: {
+        verify: (carried) => {
+          return Promise.resolve({ data: carried, id: carried });
+        },
+      },
+    });
+    const notification = createServiceManager(router).getNotificationResolver(news, {
+      serializer: answering,
+    })((_request, response) => {
+      return response('subscribed');
+    });
+    const envelope = subscribingOf(3);
+    const seen: unknown[] = [];
+
+    deliver(first, subscribingOf(1));
+    carry(first, {
+      credential: 'ada',
+      envelope: {
+        ...envelope,
+        header: { ...envelope.header, credential: ELSEWHERE },
+      } as OutgoingEnvelope,
+    });
+    await sleep(0);
+
+    await notification.notify('to none', {
+      filter: (subscriber) => {
+        seen.push(subscriber);
+
+        return false;
+      },
+    });
+
+    // * its subscriber alone: nothing of the subscription's call reaches a filter
+    expect(seen).toStrictEqual([
+      { connectionHandle: first },
+      { connectionHandle: first, identifier: { id: 'ada', scheme: CredentialScheme.ELSEWHERE } },
+    ]);
+  });
+
+  test('holds one subscription a procedure per session of a connection, its connection’s and each credential’s, each notified alone, and ends a credential’s by its identifier', async () => {
+    const { carry, deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      credentials: {
+        verify: (carried) => {
+          return Promise.resolve({ data: carried, id: carried });
+        },
+      },
+    });
+    const notification = createServiceManager(router).getNotificationResolver(news, {
+      serializer: answering,
+    })((_request, response) => {
+      return response('subscribed');
+    });
+    const subscribe = (callId: number, carried?: string) => {
+      const envelope = subscribingOf(callId);
+
+      if (carried === undefined) {
+        return (deliver(first, envelope), undefined);
+      }
+
+      return (
+        carry(first, {
+          credential: carried,
+          envelope: {
+            ...envelope,
+            header: { ...envelope.header, credential: ELSEWHERE },
+          } as OutgoingEnvelope,
+        }),
+        undefined
+      );
+    };
+
+    subscribe(1);
+    subscribe(3, 'ada');
+    subscribe(5, 'bob');
+    subscribe(7, 'ada');
+    await sleep(0);
+    sent.length = 0;
+
+    await notification.notify('to ada', {
+      filter: ({ identifier }) => {
+        return identifier !== undefined && 'id' in identifier && identifier.id === 'ada';
+      },
+    });
+    await notification.notify('to all');
+    await router.endSession({ id: 'bob', scheme: CredentialScheme.ELSEWHERE });
+    // none keeps it now: it ends nothing
+    await router.endSession({ id: 'bob', scheme: CredentialScheme.ELSEWHERE });
+
+    expect(answersOf(sent)).toEqual([
+      [first, EnvelopeKind.NOTIFICATION, 3, 'to ada'],
+      [first, EnvelopeKind.NOTIFICATION, 1, 'to all'],
+      [first, EnvelopeKind.NOTIFICATION, 3, 'to all'],
+      [first, EnvelopeKind.NOTIFICATION, 5, 'to all'],
+      [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(
+      router.notifications.subscriptions().map(({ callId, identifier }) => {
+        return [callId, identifier];
+      })
+    ).toEqual([
+      [1, undefined],
+      [3, { id: 'ada', scheme: CredentialScheme.ELSEWHERE }],
+    ]);
+  });
+
+  test('answers a subscribing call whose JWT’s end passes before its answer with its RESULT, then SESSION_REQUIRED, and its client withdraws nothing', async () => {
+    const clock = createTestClock(NOW);
+    const pipe = createPipedTransports({ connectionHandle: first });
+    // its end, exp plus 60 s, two minutes on
+    const credential = { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 60) } as const;
+    using server = createRouterServer(pipe.server, {
+      clock,
+      credentials: { audience: AUDIENCE, keys: [KEY] },
+    });
+    using client = createRouterClient(pipe.client, { clock, credential });
+    const serverServices = createServiceManager(server);
+    const flash: IProcedure = { ...news, procedureId: 7, procedureName: 'flash' };
+    const released = Promise.withResolvers<void>();
+    const withdrawn: unknown[] = [];
+    const dropped = new Map<string, number | undefined>();
+    const errors: unknown[] = [];
+    let entered = 0;
+
+    // news subscribes in flight once released, and answers a turn later; flash's answer alone
+    // subscribes it
+    serverServices.getNotificationResolver(news, { serializer: answering })(
+      async (_request, response) => {
+        entered += 1;
+        await released.promise;
+        response.registerNotification();
+        await sleep(0);
+
+        return response('subscribed');
+      }
+    );
+    serverServices.getNotificationResolver(flash, { serializer: answering })(
+      async (_request, response) => {
+        entered += 1;
+        await released.promise;
+
+        return response('subscribed');
+      }
+    );
+    client.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+    pipe.open();
+
+    const subscribing = [news, flash].map(async (procedure) => {
+      const notification: INotificationLike = {
+        ...procedure,
+        drop: (failure) => {
+          dropped.set(procedure.procedureName, failure?.code);
+        },
+        trigger: () => {
+          return Promise.resolve([]);
+        },
+      };
+
+      await client.registerNotification(notification);
+
+      const { payload } = await client.request(new Uint8Array(0), {
+        options,
+        procedure,
+        subscribes: notification,
+      });
+
+      return text.decode(payload);
+    });
+
+    // both resolved before their end, and wait in their resolvers while the wall clock passes it
+    await expect
+      .poll(() => {
+        return entered;
+      })
+      .toBe(2);
+    clock.setSystemTime(NOW + 120_000);
+    released.resolve();
+
+    expect(await Promise.all(subscribing)).toEqual(['subscribed', 'subscribed']);
+    await expect
+      .poll(() => {
+        return dropped.size;
+      })
+      .toBe(2);
+
+    // each call's RESULT goes first, its FAILURE behind it, never a FAILURE on a call still owed its
+    // answer
+    const answers = answersOf(
+      pipe.sent.server.map((bytes) => {
+        return {
+          connectionHandle: first,
+          envelope: readEnvelope(bytes, {
+            failures: CLIENT_FAILURES,
+            maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+          }),
+        };
+      })
+    );
+
+    for (const callId of [1, 3]) {
+      expect(
+        answers.filter((answer) => {
+          return answer[2] === callId;
+        })
+      ).toEqual([
+        [first, 'result', callId, 'subscribed'],
+        [first, 'failure', callId, ProtocolCode.SESSION_REQUIRED],
+      ]);
+    }
+
+    expect(answers).toHaveLength(4);
+    expect(Object.fromEntries(dropped)).toEqual({
+      flash: ProtocolCode.SESSION_REQUIRED,
+      news: ProtocolCode.SESSION_REQUIRED,
+    });
+    expect(withdrawn).toEqual([]);
+    expect(client.credential).toEqual(credential);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers nothing to a call cancelled while it waits on its key set, whose ask goes on for the others', async () => {
+    const { asks, keySet } = createKeySet();
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: { audience: AUDIENCE, keySet },
+    });
+    const errors = recordErrors(router);
+    const presenting = {
+      credential: {
+        scheme: CredentialScheme.JWT,
+        token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+      },
+    } as const;
+
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(String((request.session?.data as { sub?: unknown } | undefined)?.sub));
+      }
+    );
+    deliver(first, requestOf(1, presenting));
+    deliver(first, requestOf(3, presenting));
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    deliver(first, cancelOf(1));
+    asks[0]?.settle.resolve([SET_KEY]);
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([[first, 'result', 3, 'grace']]);
+    expect(asks).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('dispatches nothing and runs no resolver for a JWT call that waits on its key set as the router is disposed', async () => {
+    const { asks, keySet } = createKeySet();
+    const { deliver, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: { audience: AUDIENCE, keySet },
+    });
+    const errors = recordErrors(router);
+    let resolved = 0;
+
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (_request, response) => {
+        resolved += 1;
+
+        return response('ran');
+      }
+    );
+    deliver(
+      first,
+      requestOf(1, {
+        credential: {
+          scheme: CredentialScheme.JWT,
+          token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+        },
+      })
+    );
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    router[Symbol.dispose]();
+    asks[0]?.settle.resolve([SET_KEY]);
+    // long enough for its key to be found and its signature verified, had its call gone on
+    await sleep(20);
+
+    expect(resolved).toBe(0);
+    expect(sent).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers SESSION_REQUIRED from the admission of a resolver registered on it ACCESS_DENIED to a call that presented a JWT that holds, whose client keeps its default, and SESSION_REQUIRED to one that presented none', async () => {
+    const clock = createTestClock(NOW);
+    const pipe = createPipedTransports({ connectionHandle: first });
+    const credential = { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600) } as const;
+    using server = createRouterServer(pipe.server, {
+      clock,
+      credentials: { audience: AUDIENCE, keys: [KEY] },
+    });
+    using client = createRouterClient(pipe.client, { clock, credential });
+    const errors = recordErrors(server);
+    const withdrawn: unknown[] = [];
+    const refusedOf = (requesting: Promise<unknown>) => {
+      return requesting.then(
+        () => {
+          return 'answered';
+        },
+        (reason: unknown) => {
+          return reason instanceof FailureError ? [reason.code, reason.detail] : reason;
+        }
+      );
+    };
+
+    // registered raw, no service manager between: its admission refuses every call
+    server.registerResolver(
+      Object.assign(
+        () => {
+          return Promise.resolve();
+        },
+        echo,
+        {
+          admit: () => {
+            return { ...SERVER_FAILURES.sessionRequired, detail: 'sign in first' };
+          },
+        }
+      )
+    );
+    client.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    pipe.open();
+
+    expect(
+      await refusedOf(client.request(new Uint8Array(0), { options, procedure: echo }))
+    ).toEqual([ProtocolCode.ACCESS_DENIED, 'sign in first']);
+    expect(
+      await refusedOf(
+        client.request(new Uint8Array(0), {
+          options: { ...options, credential: { scheme: CredentialScheme.NONE } },
+          procedure: echo,
+        })
+      )
+    ).toEqual([ProtocolCode.SESSION_REQUIRED, 'sign in first']);
+    expect(withdrawn).toEqual([]);
+    expect(client.credential).toEqual(credential);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers a JWT call past the calls its key set lets wait for an issuer’s deadline CAPACITY_EXCEEDED, reporting nothing, and its client keeps its default', async () => {
+    const clock = createTestClock(NOW);
+    const pipe = createPipedTransports({ connectionHandle: first });
+    const { asks, keySet } = createKeySet();
+    // the client's default names a kid the key set's first answer does not
+    const credential = {
+      scheme: CredentialScheme.JWT,
+      token: jwtOf(NOW / 1_000 + 3_600, { kid: 'set-2' }),
+    } as const;
+    using server = createRouterServer(pipe.server, {
+      clock,
+      credentials: { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: 1 } },
+    });
+    using client = createRouterClient(pipe.client, { clock, credential });
+    const errors = recordErrors(server);
+    const withdrawn: unknown[] = [];
+
+    createServiceManager(server).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(String((request.session?.data as { sub?: unknown } | undefined)?.sub));
+      }
+    );
+    client.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    pipe.open();
+
+    // the key set's keys held, by a call presenting a kid its answer names
+    const holding = client.request(new Uint8Array(0), {
+      options: {
+        ...options,
+        credential: {
+          scheme: CredentialScheme.JWT,
+          token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+        },
+      },
+      procedure: echo,
+    });
+
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    asks[0]?.settle.resolve([SET_KEY]);
+
+    expect(text.decode((await holding).payload)).toBe('grace');
+
+    // within the minute, one waits for the deadline, the other is past the bound
+    const outcomes = [1, 2].map(() => {
+      return client
+        .request(new Uint8Array(0), { options: { timeout: 120_000 }, procedure: echo })
+        .then(
+          ({ payload }) => {
+            return text.decode(payload);
+          },
+          (reason: unknown) => {
+            return reason instanceof FailureError ? [reason.code, reason.origin] : reason;
+          }
+        );
+    });
+    const refused = await Promise.race(outcomes);
+
+    expect(refused).toEqual([ProtocolCode.CAPACITY_EXCEEDED, 'peer']);
+    expect(asks).toHaveLength(1);
+
+    // at the deadline, the ask then names its kid
+    await clock.tickAsync(60_000);
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    asks[1]?.settle.resolve([SET_KEY, { ...SET_KEY, jwk: { ...SET_KEY.jwk, kid: 'set-2' } }]);
+
+    expect(
+      (await Promise.all(outcomes)).toSorted((a, b) => {
+        return String(a).localeCompare(String(b));
+      })
+    ).toEqual([[ProtocolCode.CAPACITY_EXCEEDED, 'peer'], 'grace']);
+    expect(withdrawn).toEqual([]);
+    expect(client.credential).toEqual(credential);
+    expect(errors).toEqual([]);
+  });
+
+  test('ends every credential’s session of an issuer by that issuer on every connection, its sid’s and its sub’s alike, and nothing of another issuer’s nor an ELSEWHERE’s whose id is that issuer; an issuer none names ends nothing', async () => {
+    const { carry, deliver, sent, transport } = createScriptedTransport();
+    const otherIssuer = 'https://other.example';
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: {
+        audience: AUDIENCE,
+        keys: [KEY, { ...KEY, issuer: otherIssuer }],
+        verify: (carried) => {
+          return Promise.resolve({ data: carried, id: carried });
+        },
+      },
+    });
+    const errors = recordErrors(router);
+    const exp = NOW / 1_000 + 3_600;
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('subscribed');
+      }
+    );
+
+    const presenting = (callId: number, credential: Credential): OutgoingEnvelope => {
+      const envelope = subscribingOf(callId);
+
+      return { ...envelope, header: { ...envelope.header, credential } } as OutgoingEnvelope;
+    };
+    const jwt = (extra: Record<string, unknown>): Credential => {
+      return { scheme: CredentialScheme.JWT, token: jwtOf(exp, { claims: extra }) };
+    };
+
+    deliver(first, presenting(1, jwt({})));
+    deliver(first, presenting(3, jwt({ sid: 'one' })));
+    deliver(first, presenting(5, jwt({ iss: otherIssuer })));
+    carry(first, {
+      credential: ISSUER,
+      envelope: presenting(7, { scheme: CredentialScheme.ELSEWHERE }),
+    });
+    deliver(second, presenting(1, jwt({ sub: 'carol' })));
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(5);
+    sent.length = 0;
+
+    // octet for octet: the issuer in upper case names none
+    await router.endSessionsOf(ISSUER.toUpperCase());
+
+    expect(sent).toEqual([]);
+
+    await router.endSessionsOf(ISSUER);
+    // none keeps one now, and no session names this one: each ends nothing
+    await router.endSessionsOf(ISSUER);
+    await router.endSessionsOf('https://unnamed.example');
+
+    expect(
+      answersOf(sent).toSorted((a, b) => {
+        return String(a).localeCompare(String(b));
+      })
+    ).toEqual([
+      [first, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
+      [second, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(
+      router.notifications
+        .subscriptions()
+        .map(({ callId, connectionHandle, identifier }) => {
+          return [connectionHandle, callId, identifier];
+        })
+        .toSorted(([, a], [, b]) => {
+          return Number(a) - Number(b);
+        })
+    ).toEqual([
+      [first, 5, { issuer: otherIssuer, scheme: CredentialScheme.JWT, sub: 'grace' }],
+      [first, 7, { id: ISSUER, scheme: CredentialScheme.ELSEWHERE }],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  test('refuses endSessionsOf an issuer that is no string, ending nothing', async () => {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(NOW),
+      credentials: { audience: AUDIENCE, keys: [KEY] },
+    });
+    const subscribing = subscribingOf(1);
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('subscribed');
+      }
+    );
+    deliver(first, {
+      ...subscribing,
+      header: {
+        ...subscribing.header,
+        credential: { scheme: CredentialScheme.JWT, token: jwtOf(NOW / 1_000 + 3_600) },
+      },
+    } as OutgoingEnvelope);
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+
+    for (const [index, issuer] of [undefined, null, 7, { issuer: ISSUER }].entries()) {
+      await expect(
+        router.endSessionsOf(issuer as unknown as string),
+        String(index)
+      ).rejects.toBeInstanceOf(ProgrammerError);
+    }
+
+    expect(sent).toHaveLength(1);
+    expect(router.notifications.subscriptions()).toHaveLength(1);
+  });
+});
+
 test.describe('createRouterServer, relaying', () => {
   const device: Handle = 'type=WS;ip=127.0.0.1;port=50100';
   const failing: IProcedure = { ...echo, procedureId: 2, procedureName: 'failing' };
@@ -2071,12 +3347,17 @@ test.describe('createRouterServer, relaying', () => {
    * signal aborts; `isDeferred` hands each message a turn later.
    */
   const createDevice = ({
+    clock,
     isDeferred,
     limits,
-  }: { isDeferred?: boolean | undefined; limits?: RouterLimitsOptions | undefined } = {}) => {
+  }: {
+    clock?: TestClock | undefined;
+    isDeferred?: boolean | undefined;
+    limits?: RouterLimitsOptions | undefined;
+  } = {}) => {
     const pipe = createPipedTransports({ connectionHandle: device, isDeferred });
-    const toDevice = createRouterClient(pipe.client, { limits });
-    const deviceRouter = createRouterServer(pipe.server, { limits });
+    const toDevice = createRouterClient(pipe.client, { clock, limits });
+    const deviceRouter = createRouterServer(pipe.server, { clock, limits });
     const services = createServiceManager(deviceRouter);
     const aborted: unknown[] = [];
 
@@ -2117,13 +3398,22 @@ test.describe('createRouterServer, relaying', () => {
    * by default, with the device behind it at destination 7; what the relay reports is recorded.
    */
   const createRelayed = ({
+    clock,
     deviceLimits,
     isDeferred,
     relay = admitting,
-  }: { deviceLimits?: RouterLimitsOptions; isDeferred?: boolean; relay?: IRelayOptions } = {}) => {
+    sessionOf,
+  }: {
+    clock?: TestClock;
+    deviceLimits?: RouterLimitsOptions;
+    isDeferred?: boolean;
+    relay?: IRelayOptions;
+    sessionOf?: SessionOf<Handle>;
+  } = {}) => {
     const legA = createScriptedTransport();
-    const router = createRouterServer(legA.transport, { relay });
+    const router = createRouterServer(legA.transport, { clock, relay, sessionOf });
     const { [Symbol.dispose]: disposeDevice, ...behind } = createDevice({
+      clock,
       isDeferred,
       limits: deviceLimits,
     });
@@ -2173,11 +3463,11 @@ test.describe('createRouterServer, relaying', () => {
     ).toEqual([
       // an answer names its call alone
       { callId: 1, kind: EnvelopeKind.RESULT },
-      { code: 21, detail: 'nothing to echo', hops: 1, scope: FailureScope.APPLICATION },
+      { code: 21, detail: 'nothing to echo', relays: 1, scope: FailureScope.APPLICATION },
       {
         code: ProtocolCode.PROCEDURE_UNKNOWN,
         detail: 'no procedure 9 in service 2',
-        hops: 1,
+        relays: 1,
         scope: FailureScope.PROTOCOL,
       },
     ]);
@@ -2185,6 +3475,238 @@ test.describe('createRouterServer, relaying', () => {
     // the target's own failures are answered, not reported
     expect(errors).toEqual([]);
     expect(router.destinations()).toEqual([{ destinationId: 7, label: 'the device' }]);
+  });
+
+  test('hands beforeRoute a JWT unresolved, refusing a scheme to come CREDENTIAL_UNSUPPORTED and an ELSEWHERE that carried nothing SESSION_REQUIRED before it; OPAQUE resolves to leg A’s connection’s session, which beforeRoute reads', async () => {
+    const routed: unknown[] = [];
+    using relayed = createRelayed({
+      relay: {
+        beforeRoute: ({ header, session }) => {
+          routed.push([header.callId, session]);
+
+          return session !== undefined;
+        },
+      },
+      sessionOf: ({ header }) => {
+        const { credential } = header;
+
+        return credential !== undefined && 'token' in credential && credential.token === TOKEN
+          ? Object.freeze({ data: 'leg A' })
+          : undefined;
+      },
+    });
+    const { deliver, pipe, sent } = relayed;
+
+    deliver(
+      first,
+      requestOf(1, {
+        credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+        destinationId: 7,
+      })
+    );
+    deliver(
+      first,
+      requestOf(3, { credential: { scheme: CredentialScheme.ELSEWHERE }, destinationId: 7 })
+    );
+    deliver(first, requestOf(5, { destinationId: 7 }));
+    deliver(
+      first,
+      requestOf(7, { credential: OPAQUE, destinationId: 7, payload: text.encode('hi') })
+    );
+    deliver(
+      first,
+      requestOf(9, {
+        credential: { scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN },
+        destinationId: 7,
+      })
+    );
+    deliver(
+      first,
+      requestOf(11, { credential: { bytes: new Uint8Array(), scheme: 4 }, destinationId: 7 })
+    );
+    await sleep(0);
+
+    // none and OPAQUE in the turn they came; a JWT and an ELSEWHERE in a later one
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
+          : [envelope?.header.callId, envelope?.kind];
+      })
+    ).toEqual([
+      [5, ProtocolCode.ACCESS_DENIED, ''],
+      [9, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+      [1, ProtocolCode.ACCESS_DENIED, ''],
+      [3, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+      [7, EnvelopeKind.RESULT],
+    ]);
+    expect(routed).toEqual([
+      [5, undefined],
+      [7, { data: 'leg A' }],
+      [1, undefined],
+    ]);
+    // leg B carried the one admitted alone, and no credential
+    expect(
+      pipe.sent.client.map((bytes) => {
+        return readEnvelope(bytes, {
+          failures: SERVER_FAILURES,
+          maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+        })?.header;
+      })
+    ).toEqual([{ callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 }]);
+  });
+
+  test('answers a JWT and an ELSEWHERE it forwards without verifying ACCESS_DENIED once beforeRoute is requireSession, a call in none SESSION_REQUIRED, and relays an OPAQUE that holds', async () => {
+    using relayed = createRelayed({
+      relay: { beforeRoute: requireSession },
+      sessionOf: ({ header }) => {
+        const { credential } = header;
+
+        return credential !== undefined && 'token' in credential && credential.token === TOKEN
+          ? Object.freeze({ data: 'leg A' })
+          : undefined;
+      },
+    });
+    const { carry, deliver, errors, pipe, sent } = relayed;
+
+    deliver(
+      first,
+      requestOf(1, {
+        credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+        destinationId: 7,
+      })
+    );
+    carry(first, {
+      credential: 'Bearer mF_9.B5f-4.1JqM',
+      envelope: requestOf(3, {
+        credential: { scheme: CredentialScheme.ELSEWHERE },
+        destinationId: 7,
+      }),
+    });
+    deliver(first, requestOf(5, { destinationId: 7 }));
+    deliver(
+      first,
+      requestOf(7, { credential: OPAQUE, destinationId: 7, payload: text.encode('hi') })
+    );
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(4);
+
+    expect(
+      sent
+        .map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.FAILURE
+            ? [envelope.header.callId, envelope.failure.code, envelope.failure.relays]
+            : [envelope?.header.callId, envelope?.kind];
+        })
+        .toSorted(([a], [b]) => {
+          return Number(a) - Number(b);
+        })
+    ).toEqual([
+      [1, ProtocolCode.ACCESS_DENIED, 0],
+      [3, ProtocolCode.ACCESS_DENIED, 0],
+      [5, ProtocolCode.SESSION_REQUIRED, 0],
+      [7, EnvelopeKind.RESULT],
+    ]);
+    // leg B carried the OPAQUE call alone
+    expect(pipe.sent.client).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('answers a JWT past the calls its key set lets wait CAPACITY_EXCEEDED at its first step, reporting nothing, as a relay that verifies', async () => {
+    const clock = createTestClock(NOW);
+    const legA = createScriptedTransport();
+    const { asks, keySet } = createKeySet();
+    using router = createRouterServer(legA.transport, {
+      clock,
+      credentials: { audience: AUDIENCE, keySet: { ...keySet, maximumWaitingCalls: 1 } },
+      relay: { ...admitting, verifies: true },
+    });
+    using behind = createDevice({ clock });
+    const errors = recordErrors(router);
+    const presenting = {
+      credential: {
+        scheme: CredentialScheme.JWT,
+        token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+      },
+      destinationId: 7,
+      payload: text.encode('hi'),
+    } as const;
+
+    legA.open(first);
+    router.registerDestination(behind.toDevice, { audience: AUDIENCE, destinationId: 7 });
+
+    // the ask its one call left answers no key: within the minute, a token waits for the deadline
+    legA.deliver(first, requestOf(1, presenting));
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    legA.deliver(first, cancelOf(1));
+    asks[0]?.settle.resolve([]);
+    await sleep(0);
+
+    // one waits for the deadline, the other is refused before leg B
+    legA.deliver(first, requestOf(3, presenting));
+    legA.deliver(first, requestOf(5, presenting));
+    await expect
+      .poll(() => {
+        return legA.sent.length;
+      })
+      .toBe(1);
+
+    expect(answersOf(legA.sent)).toEqual([
+      [first, 'failure', expect.any(Number), ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect([asks.length, behind.pipe.sent.client]).toEqual([1, []]);
+
+    // at the deadline, the ask then names its kid: verified, the other goes on through leg B,
+    // whatever the device answers it
+    await clock.tickAsync(60_000);
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(2);
+    asks[1]?.settle.resolve([SET_KEY]);
+    await expect
+      .poll(() => {
+        return legA.sent.length;
+      })
+      .toBe(2);
+
+    expect(behind.pipe.sent.client).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps the default JWT a client presents through a relay whose beforeRoute is requireSession: its ACCESS_DENIED withdraws nothing', async () => {
+    const legA = createPipedTransports({ connectionHandle: first });
+    const credential = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+    using router = createRouterServer(legA.server, { relay: { beforeRoute: requireSession } });
+    using requester = createRouterClient(legA.client, { credential });
+    using behind = createDevice();
+    const withdrawn: unknown[] = [];
+
+    router.registerDestination(behind.toDevice, { destinationId: 7 });
+    requester.on('credentialWithdrawn', (scheme) => {
+      withdrawn.push(scheme);
+    });
+    legA.open();
+
+    await expect(
+      requester.request(text.encode('hi'), {
+        options: { destinationId: 7, timeout: 5_000 },
+        procedure: echo,
+      })
+    ).rejects.toMatchObject({ code: ProtocolCode.ACCESS_DENIED, relays: 0 });
+
+    expect(withdrawn).toEqual([]);
+    expect(requester.credential).toEqual(credential);
+    expect(behind.pipe.sent.client).toEqual([]);
   });
 
   test('refuses before leg B — the routing not admitted, the destination unknown, a subscription, a payload past the target’s limit — and sends the target nothing', async () => {
@@ -2309,7 +3831,7 @@ test.describe('createRouterServer, relaying', () => {
     expect(
       sent.map(({ envelope }) => {
         return envelope?.kind === EnvelopeKind.FAILURE
-          ? [envelope.failure.hops, envelope.failure.detail]
+          ? [envelope.failure.relays, envelope.failure.detail]
           : undefined;
       })
     ).toEqual([
@@ -2323,40 +3845,34 @@ test.describe('createRouterServer, relaying', () => {
   });
 
   test('ends leg B past the relay’s timeout, cancelling it at the target, and answers lost; no timer without one', async () => {
-    using relayed = createRelayed({ relay: { ...admitting, timeout: 250 } });
+    const clock = createTestClock();
+    using relayed = createRelayed({ clock, relay: { ...admitting, timeout: 250 } });
     const { aborted, deliver, errors, sent } = relayed;
-    const { armed, restore } = spyTimers();
+    const delaysArmed = () => {
+      return clock.armed.map(({ delay }) => {
+        return delay;
+      });
+    };
 
-    try {
-      deliver(first, requestOf(1, { destinationId: 7, procedure: held }));
-      await sleep(0);
+    deliver(first, requestOf(1, { destinationId: 7, procedure: held }));
+    await sleep(0);
 
-      expect(
-        armed.map(({ delay }) => {
-          return delay;
-        })
-      ).toEqual([250]);
+    expect(delaysArmed()).toEqual([250]);
 
-      armed[0]?.fire();
-      await sleep(0);
+    await clock.tickAsync(250);
+    await sleep(0);
 
-      // its call id on leg B stays reserved as long as its timeout, against a late answer
-      expect(
-        armed.map(({ delay }) => {
-          return delay;
-        })
-      ).toEqual([250, 250]);
-    } finally {
-      restore();
-    }
+    // its call id on leg B stays reserved as long as its timeout, against a late answer
+    expect(delaysArmed()).toEqual([250, 250]);
 
     expect(aborted).toEqual([expect.any(CancelError)]);
     expect(answersOf(sent)).toEqual([[first, 'failure', 1, ProtocolCode.DESTINATION_LOST]]);
-    expect(sent[0]?.envelope).toMatchObject({ failure: { hops: 0 } });
+    expect(sent[0]?.envelope).toMatchObject({ failure: { relays: 0 } });
     expect(reportedOf(errors)).toEqual([[expect.stringContaining('250'), first]]);
 
-    using unbounded = createRelayed();
-    const { armed: none } = await timersWhile(async () => {
+    const unboundedClock = createTestClock();
+    using unbounded = createRelayed({ clock: unboundedClock });
+    const { armed: none } = await timersUntil(unboundedClock, async () => {
       unbounded.deliver(first, requestOf(1, { destinationId: 7, procedure: held }));
       await sleep(0);
     });
@@ -2418,7 +3934,7 @@ test.describe('createRouterServer, relaying', () => {
     };
 
     // past the device's 4 KiB: refused at its opening, before any credit
-    expect(await ask(5_000)).toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE, hops: 0 });
+    expect(await ask(5_000)).toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE, relays: 0 });
     expect(credits).toEqual([]);
     expect(behind.pipe.sent.client).toEqual([]);
     // within it: credited, and relayed to the device it opened on
@@ -2696,7 +4212,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
 
     for (const word of ['a', 'b', 'c', 'd']) {
       await resolver.notify(word, {
-        filter: (connectionHandle) => {
+        filter: ({ connectionHandle }) => {
           return connectionHandle === first;
         },
       });
@@ -2853,5 +4369,378 @@ test.describe('createRouterServer, its paced subscriptions', () => {
       largestQueuedNotificationBytes: 1_048_576,
       largestQueuedNotifications: 64,
     });
+  });
+});
+
+test.describe('createRouterServer, its metrics', () => {
+  // a line of a series of `procedure`'s, as the exposition writes it: by the rest of its name, its
+  // labels and its value
+  const lineOf = (family: string, labels: string) => {
+    return (rest: string): string => {
+      return `${family}${rest.replace('{}', `{${labels}}`).replace('{outcome', `{${labels},outcome`)}`;
+    };
+  };
+
+  test('a debug listener that throws on an envelope is reported with its connection, and the envelope and its call go on, every listener told', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport);
+    const errors = recordErrors(router);
+    const failure = new Error('listener bug');
+    const heard: string[] = [];
+
+    router.on('debug', () => {
+      throw failure;
+    });
+    router.on('debug', ({ direction }) => {
+      heard.push(direction);
+    });
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.payload);
+      }
+    );
+    open(first);
+    deliver(first, requestOf(1, { payload: text.encode('hi') }));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([[first, 'result', 1, 'hi']]);
+    expect(heard).toEqual(['rx', 'tx']);
+    expect(errors).toEqual([
+      [failure, first],
+      [failure, first],
+    ]);
+  });
+
+  test('counts a command to a connection not open as started and closed in the turn it started', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const series = router.declareRequester(echo);
+    const asking = router.request(new Uint8Array(0), {
+      options: { ...options, connectionHandle: first },
+      procedure: echo,
+      series,
+    });
+    const made = lineOf('bead_client_call_', 'service="2",procedure="echo",type="command"');
+
+    expect(countedOf(metricsRegistry)).toEqual([
+      made('duration_seconds_count{} 1'),
+      made('handled_total{outcome="closed"} 1'),
+      made('started_total{} 1'),
+    ]);
+    await expect(asking).rejects.toBeInstanceOf(DisconnectError);
+  });
+
+  test('counts a notification it cannot hand to its transport as failed, and one its transport refuses once it has it as sent', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { control, deliver, open, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(),
+      // a notification of 100 bytes goes in no envelope of 64
+      limits: { chunkBytes: 64, maximumEnvelopeBytes: 64, windowBytes: 128 },
+      metricsRegistry,
+    });
+    const errors = recordErrors(router);
+    const notifying = createServiceManager(router).getNotificationResolver(news, {
+      serializer: answering,
+    })((_request, response) => {
+      return response('ok');
+    });
+
+    open(first);
+    deliver(first, subscribingOf(1));
+    await sleep(0);
+    await notifying.notify('x'.repeat(100));
+    control.sendErrors.set(first, new Error('this transport refuses, once it has it'));
+    await notifying.notify('x');
+
+    expect(reportedOf(errors)).toEqual([
+      [ProtocolCode.PAYLOAD_TOO_LARGE, first],
+      ['this transport refuses, once it has it', first],
+    ]);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_notifications');
+      })
+    ).toEqual([
+      'bead_notifications_sent_total{service="2",procedure="news",outcome="sent"} 1',
+      'bead_notifications_sent_total{service="2",procedure="news",outcome="failed"} 1',
+    ]);
+  });
+
+  test('counts a notification whose value does not write as failed for each subscription it was for, sends it to none, and reports why once', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const errors = recordErrors(router);
+    const refusal = new TypeError('this value does not write');
+    const notifying = createServiceManager(router).getNotificationResolver(news, {
+      serializer: {
+        ...answering,
+        encodeNotification: () => {
+          throw refusal;
+        },
+      },
+    })((_request, response) => {
+      return response('ok');
+    });
+
+    open(first);
+    open(second);
+    deliver(first, subscribingOf(1));
+    deliver(second, subscribingOf(1));
+    await sleep(0);
+
+    const answered = sent.length;
+
+    await expect(notifying.notify('x')).resolves.toBeUndefined();
+    expect(sent).toHaveLength(answered);
+    expect(errors).toEqual([[refusal, undefined]]);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_notifications');
+      })
+    ).toEqual(['bead_notifications_sent_total{service="2",procedure="news",outcome="failed"} 2']);
+  });
+
+  test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, transport } = createScriptedTransport();
+    using router = createRouterServer(
+      {
+        ...transport,
+        isTwoWay: () => {
+          return false;
+        },
+      },
+      { clock: createTestClock(), metricsRegistry }
+    );
+    const errors = recordErrors(router);
+    const services = createServiceManager(router);
+
+    services.getRequestResolver(echo, {
+      beforeRequest: () => {
+        throw new Error('this admission fails');
+      },
+      serializer: answering,
+    })((request, response) => {
+      return response(request.payload);
+    });
+    services.getNotificationResolver(news, { serializer: answering })((_request, response) => {
+      return response('ok');
+    });
+    open(first);
+    deliver(first, requestOf(1));
+    deliver(first, subscribingOf(3));
+    await sleep(0);
+
+    expect(errors).toHaveLength(1);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_server_call_handled_total');
+      })
+    ).toEqual([
+      'bead_server_call_handled_total{service="2",procedure="echo",type="request",outcome="failure",code="PROCEDURE_FAILED"} 1',
+      'bead_server_call_handled_total{service="2",procedure="news",type="request",outcome="failure",code="SUBSCRIPTION_UNSUPPORTED"} 1',
+    ]);
+  });
+
+  test('one registry given to a client’s router and a server’s counts a call at each of its ends', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const clock = createTestClock();
+    const pipe = createPipedTransports({ connectionHandle: first });
+    using server = createRouterServer(pipe.server, { clock, metricsRegistry });
+    using client = createRouterClient(pipe.client, { clock, metricsRegistry });
+    const labels = 'service="2",procedure="echo",type="request"';
+    const made = lineOf('bead_client_call_', labels);
+    const answered = lineOf('bead_server_call_', labels);
+
+    createServiceManager(server).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.payload);
+      }
+    );
+    pipe.open();
+
+    await expect(
+      createServiceManager(client).getRequest(echo, { serializer: asking })('hi')()
+    ).resolves.toBe('hi');
+    expect(countedOf(metricsRegistry)).toEqual([
+      made('duration_seconds_count{} 1'),
+      made('handled_total{outcome="result"} 1'),
+      made('started_total{} 1'),
+      answered('duration_seconds_count{} 1'),
+      answered('handled_total{outcome="result"} 1'),
+      answered('started_total{} 1'),
+    ]);
+  });
+
+  test('answers a call whose handler fails before it answers PROCEDURE_FAILED, and counts it so', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const errors = recordErrors(router);
+    const other: IProcedure = { ...echo, procedureId: 7, procedureName: 'other' };
+    const answered = lineOf('bead_server_call_', 'service="2",procedure="other",type="request"');
+
+    // a resolver of its own whose handler fails before it answers: its router answers it
+    router.registerResolver(
+      Object.assign(() => {
+        return Promise.reject(new Error('this handler breaks, on purpose'));
+      }, other)
+    );
+    open(first);
+    deliver(first, requestOf(1, { procedure: other }));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(reportedOf(errors)).toEqual([['this handler breaks, on purpose', first]]);
+    expect(metricsRegistry.exposition().text).toContain(
+      'bead_server_call_duration_seconds_bucket{service="2",procedure="other",type="request",le="0.0"} 1\n'
+    );
+    expect(countedOf(metricsRegistry)).toEqual([
+      answered('duration_seconds_count{} 1'),
+      answered('handled_total{outcome="failure",code="PROCEDURE_FAILED"} 1'),
+      answered('started_total{} 1'),
+    ]);
+  });
+
+  test('drops each subscription a close or its disposal ends with no code, and none its client cancels', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { close, deliver, open, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    const droppedOf = () => {
+      return countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_subscriptions_dropped_total');
+      });
+    };
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('ok');
+      }
+    );
+
+    for (const connectionHandle of [first, second, third]) {
+      open(connectionHandle);
+    }
+
+    for (const connectionHandle of [first, second, third]) {
+      deliver(connectionHandle, subscribingOf(1));
+    }
+
+    await sleep(0);
+
+    // a cancel ends a subscription its client asked to end: no drop
+    deliver(third, cancelOf(1));
+    await sleep(0);
+
+    expect(droppedOf()).toEqual([]);
+
+    close(first);
+    await sleep(0);
+
+    expect(droppedOf()).toEqual([
+      'bead_subscriptions_dropped_total{service="2",procedure="news"} 1',
+    ]);
+
+    router[Symbol.dispose]();
+    await sleep(0);
+
+    expect(droppedOf()).toEqual([
+      'bead_subscriptions_dropped_total{service="2",procedure="news"} 2',
+    ]);
+  });
+
+  test('counts a subscription its application drops under the code of the failure that ends it, whatever its code', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    // a protocol code, a code of the procedure's own, and a code section 8 names none of
+    const ending: [Handle, IFailure][] = [
+      [first, SERVER_FAILURES.accessDenied],
+      [second, { code: 9, scope: FailureScope.APPLICATION }],
+      [third, { code: 99, scope: FailureScope.PROTOCOL }],
+    ];
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('ok');
+      }
+    );
+
+    for (const [connectionHandle] of ending) {
+      open(connectionHandle);
+      deliver(connectionHandle, subscribingOf(1));
+    }
+
+    await sleep(0);
+    sent.length = 0;
+
+    for (const [connectionHandle, failure] of ending) {
+      await router.dropSubscriptions({ connectionHandle, failure });
+    }
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.ACCESS_DENIED],
+      [second, 'failure', 1, 9],
+      [third, 'failure', 1, 99],
+    ]);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_subscriptions_dropped_total');
+      })
+    ).toEqual([
+      'bead_subscriptions_dropped_total{service="2",procedure="news",code="ACCESS_DENIED"} 1',
+      'bead_subscriptions_dropped_total{service="2",procedure="news",code="application"} 1',
+      'bead_subscriptions_dropped_total{service="2",procedure="news",code="_OTHER"} 1',
+    ]);
+  });
+
+  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded and its service at one revision', () => {
+    const { transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      clock: createTestClock(),
+      metricsRegistry: createMetricsRegistry(),
+    });
+    const services = createServiceManager(router);
+    const resolve = (procedure: IProcedure) => {
+      services.getRequestResolver(procedure, { serializer: answering })((_request, response) => {
+        return response(procedure.procedureName);
+      });
+    };
+
+    resolve(echo);
+
+    // the same procedure under its name, at another address, its case another: one name (spec 16.6)
+    expect(() => {
+      resolve({ ...echo, procedureId: 2, procedureName: 'eCHO' });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds "echo" at 2/1, and is given "eCHO" at 2/2: its name at another address'
+      )
+    );
+
+    // its service at another revision
+    expect(() => {
+      resolve({ ...echo, procedureId: 3, procedureName: 'slow', serviceRevision: 4 });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds service 2 at revision 3, and is given 2/3 at revision 4: another revision of its service'
+      )
+    );
+
+    // it registered nothing: its address is free, for its own name
+    resolve({ ...echo, procedureId: 2, procedureName: 'twice' });
+
+    expect(() => {
+      return services.getCommand({ ...echo, procedureName: 'clock' }, { serializer: asking });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds 2/1 as "echo", and is given "clock": another name at its address'
+      )
+    );
   });
 });

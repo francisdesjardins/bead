@@ -17,7 +17,7 @@ export * from './client';
 /** A worker client's layers and options: the transport's, and the rest as a client takes them. */
 export interface IWorkerClientOptions
   extends Omit<IClientLayers<WorkerTransportClient>, 'transport'>, IClientOptions {
-  /** The transport's options: the worker the server runs in, at least. */
+  /** The transport's options: the worker the server runs in, at least; its clock, every layer's. */
   transport: IWorkerTransportClientOptions;
 }
 
@@ -45,6 +45,12 @@ export const createWorkerClient = (options: IWorkerClientOptions): WorkerClient 
       services: options.services,
       transport: createWorkerTransportClient(options.transport),
     },
-    { limits: options.limits }
+    {
+      credential: options.credential,
+      credentials: options.credentials,
+      devtools: options.devtools,
+      limits: options.limits,
+      metricsRegistry: options.metricsRegistry,
+    }
   );
 };

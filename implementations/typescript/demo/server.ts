@@ -5,13 +5,13 @@
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
+import { createMetricsRegistry } from '../src/router/shared/metrics-registry';
 import type { HealthStatus } from '../src/server/health';
 import { createHTTPServer } from '../src/server/http-server';
 import { createWSServer } from '../src/server/ws-server';
-import { isRole, offer } from './offer';
-import type { IClaims } from './procedures';
+import { isRole, offer, SILENCE_MILLISECONDS } from './offer';
 import { pathOf, relayExchanges, relayUpgrades } from './relay';
-import { issueToken, keyOf } from './token';
+import { credentialsOf, issueToken, keyOf, secretOf } from './token';
 
 // constants
 
@@ -21,14 +21,36 @@ const HTTP_PORT = Number(process.env['DEMO_PORT'] ?? 8_080);
 /** The address it listens on: this machine alone, which the demo serves. */
 const HTTP_ADDRESS = '127.0.0.1';
 
+/** The hosts a page names the public port by, which both Bead servers take, and no other. */
+const HOSTS = [`localhost:${String(HTTP_PORT)}`, `${HTTP_ADDRESS}:${String(HTTP_PORT)}`];
+
 /** Where the page reaches Bead: its WebSocket upgrades, and its HTTP exchanges. */
 const BEAD_PATHNAME = '/bead';
 
 /** Where a probe reads the health of both Bead servers, on this machine alone. */
 const HEALTH_PATHNAME = '/health';
 
-/** The identity provider's key, from a secret drawn at each start: no token outlives the demo. */
-const KEY = keyOf(crypto.getRandomValues(new Uint8Array(32)));
+/** Where a scraper reads both Bead servers' metrics, on this machine alone. */
+const METRICS_PATHNAME = '/metrics';
+
+/** What both Bead servers count into, summed: what `stats` and a scrape read. */
+const METRICS_REGISTRY = createMetricsRegistry();
+
+/**
+ * The identity provider's key: `DEMO_KEY`'s, in base64url, else one drawn at each start, so no token
+ * outlives the demo. A key refused says why, and the demo does not start.
+ */
+const SECRET = await secretOf(process.env['DEMO_KEY']).catch((reason: unknown): never => {
+  process.stderr.write(`DEMO_KEY is refused: ${(reason as Error).message}\n`);
+
+  return process.exit(1);
+});
+
+/** What the identity provider signs with. */
+const KEY = keyOf(SECRET);
+
+/** What both Bead servers verify each call's token with: the same key, as a JWK, and the audience. */
+const CREDENTIALS = credentialsOf(SECRET);
 
 // this module runs from `dist/`, where the launcher builds it next to the page's script
 const FILES = Object.freeze({
@@ -66,20 +88,30 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
 
 // definition
 
-const overWebSocket = createWSServer<IClaims>({ transport: { WebSocketServer } });
+// a connection gone silent is closed, as no session of its own times it; behind the relay, an
+// upgrade names the host a page named, as an HTTP exchange does
+const overWebSocket = createWSServer({
+  connectionInactivityTimeout: SILENCE_MILLISECONDS,
+  credentials: CREDENTIALS,
+  metricsRegistry: METRICS_REGISTRY,
+  transport: { hosts: HOSTS, WebSocketServer },
+});
 // behind the relay: the host a page named, and the address the relay says it came from
-const overHTTP = createHTTPServer<IClaims>({
+const overHTTP = createHTTPServer({
+  connectionInactivityTimeout: SILENCE_MILLISECONDS,
+  credentials: CREDENTIALS,
+  metricsRegistry: METRICS_REGISTRY,
   transport: {
     createServer: (listener) => {
       return createServer(listener);
     },
-    hosts: [`localhost:${String(HTTP_PORT)}`, `${HTTP_ADDRESS}:${String(HTTP_PORT)}`],
+    hosts: HOSTS,
     isProxyTrusted: true,
   },
 });
 
-offer(overWebSocket, KEY);
-offer(overHTTP, KEY);
+offer(overWebSocket, METRICS_REGISTRY);
+offer(overHTTP, METRICS_REGISTRY);
 
 // each Bead server on a local port the system picks, reached through the public one alone
 const [wsTarget, httpTarget] = await Promise.all([
@@ -118,6 +150,15 @@ const pages = createServer((request, reply) => {
 
   if (pathOf(request) === HEALTH_PATHNAME) {
     return (answerHealth(reply), undefined);
+  }
+
+  // the Prometheus text format 0.0.4, with its media type, as a scrape reads it
+  if (pathOf(request) === METRICS_PATHNAME) {
+    const { contentType, text } = METRICS_REGISTRY.exposition();
+
+    reply.writeHead(200, { 'cache-control': 'no-store', 'content-type': contentType });
+
+    return (reply.end(text), undefined);
   }
 
   // what went wrong stays on the server

@@ -1,12 +1,18 @@
 // dependencies
 
+import type { IMetricsRegistry } from '../router/shared/metrics-registry';
 import type {
   IRouterClient,
   IRouterClientOptions,
   IRouterClientTransportLike,
   RouterClientConnectionHandle,
 } from '../router/client/types';
-import type { IServiceManager, RouterLimitsOptions } from '../router/shared/types';
+import type {
+  DefaultCredential,
+  ICredentials,
+  IServiceManager,
+  RouterLimitsOptions,
+} from '../router/shared/types';
 
 // interfaces
 
@@ -39,8 +45,8 @@ export interface IClient<Transport extends IClientTransportLike = IClientTranspo
  */
 export interface IClientLayers<Transport extends IClientTransportLike> {
   /**
-   * Builds the router on the transport, with the client's limits; `createRouterClient` when not
-   * given.
+   * Builds the router on the transport, with the client's limits and the transport's clock, which it
+   * must run on; `createRouterClient` when not given.
    */
   router?:
     | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>)
@@ -54,10 +60,30 @@ export interface IClientLayers<Transport extends IClientTransportLike> {
 
 export interface IClientOptions {
   /**
+   * The credential every call presents by default, which its router keeps as its `credential`: a
+   * `JWT`, or an `ELSEWHERE` with what its transport carries beside each request; none when not
+   * given.
+   */
+  credential?: DefaultCredential | undefined;
+  /**
+   * What its router resolves a command presenting a `JWT` or an `ELSEWHERE` with, as a server does.
+   */
+  credentials?: ICredentials | undefined;
+  /**
+   * Whether it announces itself to a DevTools hook the page defines (decision 0015): it does unless
+   * this is `false`. Announced, it builds nothing for a `debug` event until the hook watches.
+   */
+  devtools?: boolean | undefined;
+  /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the client is a {@link ProgrammerError}.
    */
   limits?: RouterLimitsOptions | undefined;
+  /**
+   * The registry its router counts its calls and its notifications into, which it is built with;
+   * none counts nothing.
+   */
+  metricsRegistry?: IMetricsRegistry | undefined;
 }
 
 /**

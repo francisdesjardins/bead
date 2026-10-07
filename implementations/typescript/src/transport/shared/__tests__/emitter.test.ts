@@ -203,4 +203,33 @@ test.describe('createEmitter', () => {
     const emitter = createEmitter<{ error: [err: Error] }>();
     expect(emitter.emit('error', new Error('unheard'))).toBe(false);
   });
+
+  test('"emitEach" calls each listener within a guard: what one throws goes to its handler, and the next is called all the same', () => {
+    const emitter = createEmitter<{ debug: [step: string] }>();
+    const failure = new Error('listener bug');
+    const heard: string[] = [];
+    const thrown: unknown[] = [];
+
+    emitter.on('debug', () => {
+      throw failure;
+    });
+    emitter.on('debug', (step) => {
+      heard.push(step);
+    });
+
+    expect(
+      emitter.emitEach('debug', {
+        onError: (error) => {
+          thrown.push(error);
+        },
+        params: ['tx'],
+      })
+    ).toBe(true);
+    expect(heard).toEqual(['tx']);
+    expect(thrown).toEqual([failure]);
+    // `emit` guards none
+    expect(() => {
+      emitter.emit('debug', 'rx');
+    }).toThrow(failure);
+  });
 });

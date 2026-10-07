@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 
 namespace Bead;
 
@@ -23,6 +24,12 @@ public static partial class EnvelopeCodec
     // the largest value a 64-bit field holds: 2⁵³ − 1, the largest integer a double holds exactly
     private const long Uint53Maximum = (1L << 53) - 1;
 
+    // the most a header holds: the 255 words byte 3 counts
+    internal const int MaximumHeaderBytes = 1_020;
+
+    // the last character a JWT's token is written in: a byte a character
+    private const char LastLatin1 = '\u00FF';
+
     // what a request refused for its layout is told: the layouts this peer reads
     private const string LayoutsRead = "0xA1";
 
@@ -45,15 +52,15 @@ public static partial class EnvelopeCodec
     {
         return kind switch
         {
-            EnvelopeKind.Request => EnvelopeFlags.Session
-                | EnvelopeFlags.Destination
+            EnvelopeKind.Request => EnvelopeFlags.Destination
                 | EnvelopeFlags.Transfer
+                | EnvelopeFlags.Credential
                 | EnvelopeFlags.Subscription
                 | EnvelopeFlags.Paced,
 
             // an answer names its call alone: a destination means something to its relay only
-            EnvelopeKind.Result => EnvelopeFlags.Session | EnvelopeFlags.Transfer,
-            EnvelopeKind.Failure => EnvelopeFlags.Session,
+            EnvelopeKind.Result => EnvelopeFlags.Transfer | EnvelopeFlags.Credential,
+            EnvelopeKind.Failure => EnvelopeFlags.Credential,
             EnvelopeKind.Chunk => EnvelopeFlags.More,
 
             // a credit counts a subscription's notifications, or a transfer's bytes
@@ -62,15 +69,11 @@ public static partial class EnvelopeCodec
         };
     }
 
-    // how long a header of `kind` with `flags` is: the prefix, the kind's own part, then each block
-    private static int SizeOf(EnvelopeKind kind, EnvelopeFlags flags)
+    // where the CREDENTIAL block of a header of `kind` with `flags` starts, and where one without
+    // it ends: the prefix, the kind's own part, then each block of a fixed length
+    private static int FixedBytesOf(EnvelopeKind kind, EnvelopeFlags flags)
     {
         var bytes = PrefixBytes + KindPartBytesOf(kind);
-
-        if ((flags & EnvelopeFlags.Session) != 0)
-        {
-            bytes += SessionToken.Bytes;
-        }
 
         if ((flags & EnvelopeFlags.Destination) != 0)
         {
@@ -85,9 +88,124 @@ public static partial class EnvelopeCodec
         return bytes;
     }
 
+    // a CREDENTIAL block holding `length` bytes: its head, its bytes, then zero bytes to the next
+    // word, as a TLS extension is laid out (RFC 8446 §4.2), its padding aside
+    private static int BlockBytesOf(int length)
+    {
+        return Credential.HeadBytes + ((length + 3) & ~3);
+    }
+
+    // the bytes a credential's block holds, its head and its padding aside
+    private static int LengthOf(Credential credential)
+    {
+        return credential.Scheme switch
+        {
+            CredentialScheme.None or CredentialScheme.Elsewhere => 0,
+            CredentialScheme.Opaque => SessionToken.Bytes,
+            CredentialScheme.Jwt => credential.Token!.Length,
+            _ => credential.Bytes.Length,
+        };
+    }
+
+    // the credential a header carries in its block; none without one
+    private static Credential? CredentialOf(IEnvelopeHeader header)
+    {
+        return header switch
+        {
+            RequestHeader request => request.Credential,
+            ResultHeader result => result.Credential,
+            FailureHeader failure => failure.Credential,
+            _ => null,
+        };
+    }
+
+    // how long `header` is, with `flags`: to its CREDENTIAL block, then the block
+    private static int SizeOf(IEnvelopeHeader header, EnvelopeFlags flags)
+    {
+        var bytes = FixedBytesOf(header.Kind, flags);
+
+        return CredentialOf(header) is { } credential ? bytes + BlockBytesOf(LengthOf(credential)) : bytes;
+    }
+
+    // how `header` is laid out, its bound of 1,020 bytes unchecked: its flags, and its length to the
+    // end of its credential's padding. Throws for a header no kind of this layout is, a request
+    // paced that opens no subscription, and a credential its kind does not take or that is not its
+    // scheme's
+    private static (EnvelopeFlags Flags, int HeaderBytes) UnboundedLayoutOf(IEnvelopeHeader header)
+    {
+        var flags = FlagsOf(header);
+
+        if (CredentialOf(header) is { } credential)
+        {
+            AssertCredential(credential, header.Kind);
+        }
+
+        return (flags, SizeOf(header, flags));
+    }
+
+    // how `header` is laid out: its flags, and its length to the end of its credential's padding.
+    // Throws for a header no kind of this layout is, a request paced that opens no subscription, a
+    // credential its kind does not take or that is not its scheme's, and a header past 1,020 bytes
+    private static (EnvelopeFlags Flags, int HeaderBytes) LayoutOf(IEnvelopeHeader header)
+    {
+        var (flags, headerBytes) = UnboundedLayoutOf(header);
+
+        if (headerBytes > MaximumHeaderBytes)
+        {
+            throw new ArgumentException(
+                $"a header is {MaximumHeaderBytes} bytes at most, not {headerBytes}",
+                nameof(header));
+        }
+
+        return (flags, headerBytes);
+    }
+
     private static string HexadecimalOf(int value)
     {
         return $"0x{value:x2}";
+    }
+
+    /// <summary>A credential scheme's name, for a detail; its number for a scheme to come.</summary>
+    internal static string SchemeNameOf(CredentialScheme scheme)
+    {
+        return scheme switch
+        {
+            CredentialScheme.None => "NONE",
+            CredentialScheme.Opaque => "OPAQUE",
+            CredentialScheme.Jwt => "JWT",
+            CredentialScheme.Elsewhere => "ELSEWHERE",
+            _ => $"scheme {(ushort)scheme}",
+        };
+    }
+
+    // why a header of `kind` carries no credential of `scheme`: a request presents one, which NONE
+    // is not; an answer announces its connection's session, or its end, and nothing else. None
+    // when it carries one
+    private static string? KindRefusalOf(EnvelopeKind kind, CredentialScheme scheme)
+    {
+        return (kind, scheme) switch
+        {
+            (EnvelopeKind.Request, CredentialScheme.None) => "a request presents a credential, never NONE",
+            (not EnvelopeKind.Request, not (CredentialScheme.None or CredentialScheme.Opaque)) =>
+                $"an answer announces OPAQUE or NONE, not {SchemeNameOf(scheme)}",
+            _ => null,
+        };
+    }
+
+    // why `held`, the bytes of a credential of `scheme`, are not its scheme's: a length not its own,
+    // or an OPAQUE token of 16 zero bytes; none when they are
+    private static string? BrokenRuleOf(CredentialScheme scheme, ReadOnlySpan<byte> held)
+    {
+        return scheme switch
+        {
+            CredentialScheme.None or CredentialScheme.Elsewhere when !held.IsEmpty =>
+                $"{SchemeNameOf(scheme)} holds no byte, not {held.Length}",
+            CredentialScheme.Opaque when held.Length != SessionToken.Bytes =>
+                $"an OPAQUE token is {SessionToken.Bytes} bytes, not {held.Length}",
+            CredentialScheme.Opaque when !held.ContainsAnyExcept((byte)0) => "an OPAQUE token is never all zero",
+            CredentialScheme.Jwt when held.IsEmpty => "a JWT is 1 byte at least",
+            _ => null,
+        };
     }
 
     private static FailureException MalformedOf(RouterSide side, string detail)
@@ -130,9 +248,9 @@ public static partial class EnvelopeCodec
         return header switch
         {
             RequestHeader request => FlagsOfRequest(request),
-            ResultHeader result => (result.Session is null ? 0 : EnvelopeFlags.Session)
-                | (result.Total is null ? 0 : EnvelopeFlags.Transfer),
-            FailureHeader failure => failure.Session is null ? 0 : EnvelopeFlags.Session,
+            ResultHeader result => (result.Total is null ? 0 : EnvelopeFlags.Transfer)
+                | (result.Credential is null ? 0 : EnvelopeFlags.Credential),
+            FailureHeader failure => failure.Credential is null ? 0 : EnvelopeFlags.Credential,
             ChunkHeader chunk => chunk.IsLast ? 0 : EnvelopeFlags.More,
             CreditHeader credit => credit.Paced ? EnvelopeFlags.Paced : 0,
             NotificationHeader or CancelHeader => EnvelopeFlags.None,
@@ -144,9 +262,9 @@ public static partial class EnvelopeCodec
 
     private static EnvelopeFlags FlagsOfRequest(RequestHeader request)
     {
-        var flags = (request.SessionToken is null ? 0 : EnvelopeFlags.Session)
-            | (request.DestinationId is null ? 0 : EnvelopeFlags.Destination)
+        var flags = (request.DestinationId is null ? 0 : EnvelopeFlags.Destination)
             | (request.Total is null ? 0 : EnvelopeFlags.Transfer)
+            | (request.Credential is null ? 0 : EnvelopeFlags.Credential)
             | (request.OpensSubscription ? EnvelopeFlags.Subscription : 0);
 
         if (request.Paced)
@@ -205,7 +323,9 @@ public static partial class EnvelopeCodec
     }
 
     // the flags of a header of `kind`, and its length. Throws for a flag its kind does not carry,
-    // then for a length that is not its blocks', or that runs past the message
+    // then for a length that is not its blocks', to the end of its credential's padding, or that
+    // runs past the message; with a credential, for one past the message, then for one that does
+    // not hold the head of its CREDENTIAL block
     private static (EnvelopeFlags Flags, int HeaderBytes) CheckLength(
         ReadOnlySpan<byte> bytes,
         (EnvelopeKind Kind, RouterSide Side) reading)
@@ -222,7 +342,28 @@ public static partial class EnvelopeCodec
         }
 
         var headerBytes = bytes[3] * 4;
-        var expected = SizeOf(kind, flags);
+        var expected = FixedBytesOf(kind, flags);
+
+        if ((flags & EnvelopeFlags.Credential) != 0)
+        {
+            if (headerBytes > bytes.Length)
+            {
+                throw MalformedOf(
+                    side,
+                    $"a {HexadecimalOf((int)kind)} header of {headerBytes} bytes runs past its message of {bytes.Length}");
+            }
+
+            // ! the block's head states the block's length: a header that does not hold the head is
+            // refused before the head is read, which might lie past the header, or the message
+            if (headerBytes < expected + Credential.HeadBytes)
+            {
+                throw MalformedOf(
+                    side,
+                    $"a {HexadecimalOf((int)kind)} header of flags {HexadecimalOf((int)flags)} holds its credential's head: {expected + Credential.HeadBytes} bytes at least, not {headerBytes}");
+            }
+
+            expected += BlockBytesOf(BinaryPrimitives.ReadUInt16BigEndian(bytes[(expected + 2)..]));
+        }
 
         if (headerBytes != expected || headerBytes > bytes.Length)
         {
@@ -234,39 +375,54 @@ public static partial class EnvelopeCodec
         return (flags, headerBytes);
     }
 
+    // the credential of the block at `offset`, whose length the header's already holds. Throws
+    // for padding that is not zero, a scheme its kind does not take, a length that is not its
+    // scheme's, and an OPAQUE token of 16 zero bytes
+    private static Credential CredentialAt(ReadOnlySpan<byte> bytes, (int Offset, HeaderReading Header) reading)
+    {
+        var (offset, (_, kind, _, side)) = reading;
+        var scheme = (CredentialScheme)BinaryPrimitives.ReadUInt16BigEndian(bytes[offset..]);
+        var length = BinaryPrimitives.ReadUInt16BigEndian(bytes[(offset + 2)..]);
+        var credential = bytes.Slice(offset + Credential.HeadBytes, length);
+
+        if (bytes[(offset + Credential.HeadBytes + length)..(offset + BlockBytesOf(length))].ContainsAnyExcept((byte)0))
+        {
+            throw MalformedOf(side, "a credential's padding is zero bytes");
+        }
+
+        if (KindRefusalOf(kind, scheme) is { } kindRefusal)
+        {
+            throw MalformedOf(side, kindRefusal);
+        }
+
+        if (BrokenRuleOf(scheme, credential) is { } brokenRule)
+        {
+            throw MalformedOf(side, brokenRule);
+        }
+
+        return scheme switch
+        {
+            CredentialScheme.None => Credential.None,
+            CredentialScheme.Elsewhere => Credential.Elsewhere(),
+            CredentialScheme.Opaque => Credential.Opaque(SessionToken.FromBytes(credential)),
+
+            // a byte a character, whatever the byte: a relay passes on the very bytes it read
+            CredentialScheme.Jwt => Credential.Jwt(Encoding.Latin1.GetString(credential)),
+            _ => Credential.Of(scheme, credential),
+        };
+    }
+
     // the header of `kind`: its call, its kind's own part, and its blocks, in the order of their
-    // bits. Throws for the end of a session on a request, a destination of 0, a total of 2⁵³ or
-    // more, a procedure of 0, a request paced that opens no subscription, and an offset or an end
-    // of 2⁵³ or more
+    // bits. Throws for a destination of 0, a total of 2⁵³ or more, a credential its kind does not
+    // take or that is not its scheme's, a procedure of 0, a request paced that opens no
+    // subscription, and an offset or an end of 2⁵³ or more
     private static IEnvelopeHeader HeaderOf(ReadOnlySpan<byte> bytes, HeaderReading reading)
     {
         var (callId, kind, flags, side) = reading;
         var offset = PrefixBytes + KindPartBytesOf(kind);
-        SessionAnnouncement? session = null;
         uint? destinationId = null;
         long? total = null;
-
-        if ((flags & EnvelopeFlags.Session) != 0)
-        {
-            var token = bytes.Slice(offset, SessionToken.Bytes);
-
-            // 16 zero bytes announce that a session ended, which only an answer does
-            if (!token.ContainsAnyExcept((byte)0))
-            {
-                if (kind == EnvelopeKind.Request)
-                {
-                    throw MalformedOf(side, "a request presents no ended session");
-                }
-
-                session = SessionAnnouncement.Ended;
-            }
-            else
-            {
-                session = SessionToken.FromBytes(token);
-            }
-
-            offset += SessionToken.Bytes;
-        }
+        Credential? credential = null;
 
         if ((flags & EnvelopeFlags.Destination) != 0)
         {
@@ -283,6 +439,12 @@ public static partial class EnvelopeCodec
         if ((flags & EnvelopeFlags.Transfer) != 0)
         {
             total = ReadUint53(bytes[offset..]) ?? throw MalformedOf(side, "a total is below 2⁵³");
+            offset += 8;
+        }
+
+        if ((flags & EnvelopeFlags.Credential) != 0)
+        {
+            credential = CredentialAt(bytes, (offset, reading));
         }
 
         switch (kind)
@@ -310,18 +472,16 @@ public static partial class EnvelopeCodec
                         DestinationId = destinationId,
                         OpensSubscription = (flags & EnvelopeFlags.Subscription) != 0,
                         Paced = (flags & EnvelopeFlags.Paced) != 0,
-
-                        // a request's token is never the end of a session, refused above
-                        SessionToken = session?.Token,
                         Total = total,
+                        Credential = credential,
                     };
                 }
 
             // an answer carries no destination: its flag is refused with the others
             case EnvelopeKind.Result:
-                return new ResultHeader { CallId = callId, Session = session, Total = total };
+                return new ResultHeader { CallId = callId, Total = total, Credential = credential };
             case EnvelopeKind.Failure:
-                return new FailureHeader { CallId = callId, Session = session };
+                return new FailureHeader { CallId = callId, Credential = credential };
             case EnvelopeKind.Notification:
                 return new NotificationHeader { CallId = callId };
             case EnvelopeKind.Chunk:
@@ -391,28 +551,42 @@ public static partial class EnvelopeCodec
     }
 
     /// <summary>
-    /// How long <paramref name="header"/> is once written. Throws as <see cref="WriteHeader"/> does
-    /// for a header no kind of this layout is.
+    /// How long <paramref name="header"/> is once written. Throws an
+    /// <see cref="ArgumentException"/> as <see cref="WriteHeader"/> does for a header no kind of this
+    /// layout is, a request paced that opens no subscription, a credential its kind does not take or
+    /// that is not its scheme's, or a header past 1,020 bytes.
     /// </summary>
     public static int HeaderBytesOf(IEnvelopeHeader header)
     {
         ArgumentNullException.ThrowIfNull(header);
 
-        return SizeOf(header.Kind, FlagsOf(header));
+        return LayoutOf(header).HeaderBytes;
+    }
+
+    /// <summary>
+    /// The bytes <paramref name="header"/> takes, as <see cref="HeaderBytesOf"/> counts them, its
+    /// bound of 1,020 bytes unchecked: what a writer asks of a header it may refuse with a protocol
+    /// failure. Throws as <see cref="HeaderBytesOf"/> does for anything else.
+    /// </summary>
+    internal static int UnboundedHeaderBytesOf(IEnvelopeHeader header)
+    {
+        ArgumentNullException.ThrowIfNull(header);
+
+        return UnboundedLayoutOf(header).HeaderBytes;
     }
 
     /// <summary>
     /// Writes <paramref name="header"/> at the start of <paramref name="bytes"/>, and gives its
     /// length. Throws an <see cref="ArgumentException"/>, before anything is written, for a field
     /// that is not from 1 to its maximum — from 0 to 2⁵³ − 1 for an offset, an end or a total — a
-    /// request paced that opens no subscription, a token that is no token, or too few bytes.
+    /// request paced that opens no subscription, a credential its kind does not take or that is not
+    /// its scheme's, a header past 1,020 bytes, or too few bytes.
     /// </summary>
     public static int WriteHeader(IEnvelopeHeader header, Span<byte> bytes)
     {
         ArgumentNullException.ThrowIfNull(header);
 
-        var flags = FlagsOf(header);
-        var headerBytes = SizeOf(header.Kind, flags);
+        var (flags, headerBytes) = LayoutOf(header);
         var offset = PrefixBytes;
 
         AssertField("callId", header.CallId, uint.MaxValue);
@@ -437,22 +611,17 @@ public static partial class EnvelopeCodec
                 break;
         }
 
-        var (session, total) = header switch
+        var total = header switch
         {
-            RequestHeader request => (request.SessionToken is { } token ? token : (SessionAnnouncement?)null, request.Total),
-            ResultHeader result => (result.Session, result.Total),
-            FailureHeader failure => (failure.Session, null),
-            _ => ((SessionAnnouncement?)null, (long?)null),
+            RequestHeader request => request.Total,
+            ResultHeader result => result.Total,
+            _ => null,
         };
+        var credential = CredentialOf(header);
 
         if (total is { } declared)
         {
             AssertUint53("total", declared);
-        }
-
-        if (session is { Token: { IsDefault: true } })
-        {
-            throw new ArgumentException("a session token is 16 bytes, not all zero", nameof(header));
         }
 
         if (bytes.Length < headerBytes)
@@ -485,22 +654,6 @@ public static partial class EnvelopeCodec
                 break;
         }
 
-        if (session is { } announced)
-        {
-            var block = bytes.Slice(offset, SessionToken.Bytes);
-
-            if (announced.Token is { } token)
-            {
-                token.CopyTo(block);
-            }
-            else
-            {
-                block.Clear();
-            }
-
-            offset += SessionToken.Bytes;
-        }
-
         if (header is RequestHeader { DestinationId: { } destination })
         {
             BinaryPrimitives.WriteUInt32BigEndian(bytes[offset..], destination);
@@ -510,9 +663,79 @@ public static partial class EnvelopeCodec
         if (total is { } length)
         {
             BinaryPrimitives.WriteUInt64BigEndian(bytes[offset..], (ulong)length);
+            offset += 8;
+        }
+
+        if (credential is { } written)
+        {
+            WriteCredential(written, bytes[offset..headerBytes]);
         }
 
         return headerBytes;
+    }
+
+    // a credential a header of `kind` may carry, as section 4.10 of the spec has a writer write it:
+    // a scheme its kind takes, and a length its scheme's
+    private static void AssertCredential(Credential credential, EnvelopeKind kind)
+    {
+        if (KindRefusalOf(kind, credential.Scheme) is { } kindRefusal)
+        {
+            throw new ArgumentException(kindRefusal, nameof(credential));
+        }
+
+        if (credential.SessionToken is { IsDefault: true })
+        {
+            throw new ArgumentException("a session token is 16 bytes, not all zero", nameof(credential));
+        }
+
+        // a call's options' OPAQUE stands for a session its side fills in, and goes out with its token
+        if (credential is { Scheme: CredentialScheme.Opaque, SessionToken: null })
+        {
+            throw new ArgumentException("an OPAQUE carries its session's token", nameof(credential));
+        }
+
+        if (credential.Token is not { } token)
+        {
+            return;
+        }
+
+        if (token.Length == 0)
+        {
+            throw new ArgumentException("a JWT is one character at least", nameof(credential));
+        }
+
+        // ! a JWT is written a byte a character: one past U+00FF has no byte, and Latin-1 would
+        // write a question mark for it
+        if (token.AsSpan().ContainsAnyExceptInRange('\0', LastLatin1))
+        {
+            throw new ArgumentException(
+                "a JWT is written a byte a character, from U+0000 to U+00FF",
+                nameof(credential));
+        }
+    }
+
+    // writes `credential`'s CREDENTIAL block over `block`, its padding included
+    private static void WriteCredential(Credential credential, Span<byte> block)
+    {
+        var length = LengthOf(credential);
+        var bytes = block.Slice(Credential.HeadBytes, length);
+
+        BinaryPrimitives.WriteUInt16BigEndian(block, (ushort)credential.Scheme);
+        BinaryPrimitives.WriteUInt16BigEndian(block[2..], (ushort)length);
+        block[Credential.HeadBytes..].Clear();
+
+        switch (credential.Scheme)
+        {
+            case CredentialScheme.Opaque:
+                credential.SessionToken!.Value.CopyTo(bytes);
+                break;
+            case CredentialScheme.Jwt:
+                Encoding.Latin1.GetBytes(credential.Token, bytes);
+                break;
+            default:
+                credential.Bytes.Span.CopyTo(bytes);
+                break;
+        }
     }
 
     // what reading a header knows once its prefix and its length are checked

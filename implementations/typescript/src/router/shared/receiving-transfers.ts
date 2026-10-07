@@ -2,6 +2,7 @@
 
 // dependencies
 
+import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import { gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import {
@@ -30,7 +31,7 @@ interface IHeld {
   onStall: (() => void) | undefined;
   /** The bytes of the budget it holds: its opening's, then each credit's. */
   reserved: number;
-  timer: ReturnType<typeof setTimeout> | undefined;
+  timer: TimeoutId | undefined;
 }
 
 /**
@@ -81,14 +82,17 @@ export interface IReceivingTransfers<Handle extends string> {
  * them — the opening's first — so an opening holds only what its peer sends, and a transfer the
  * budget cannot credit waits until another gives some back. Each connection receives
  * `maximumTransfers` at once. `sendCredit` sends a credit a transfer is granted; a chunk before the
- * last carries `payloadBytesPerChunk` at least.
+ * last carries `payloadBytesPerChunk`, exactly, the last that many at most. A transfer's inactivity
+ * runs on `clock`.
  */
 export const createReceivingTransfers = <Handle extends string>({
+  clock,
   failures,
   limits,
   payloadBytesPerChunk,
   sendCredit,
 }: {
+  clock: IClock;
   failures: Pick<
     IRouterFailures,
     'capacityExceeded' | 'chunkInvalid' | 'creditExceeded' | 'payloadTooLarge'
@@ -113,10 +117,10 @@ export const createReceivingTransfers = <Handle extends string>({
 
   // sets a transfer's timer going again, when one governs it; it keeps no process alive
   const touch = (state: IHeld): void => {
-    clearTimeout(state.timer);
+    clock.clearTimeout(state.timer);
 
     if (state.onStall !== undefined) {
-      state.timer = setTimeout(state.onStall, limits.transferInactivityTimeout);
+      state.timer = clock.setTimeout(state.onStall, limits.transferInactivityTimeout);
       // a browser's timer has no `unref`
       (state.timer as { unref?: () => unknown }).unref?.();
     }
@@ -157,7 +161,7 @@ export const createReceivingTransfers = <Handle extends string>({
   // ends a transfer, and gives back what it holds: its bytes, its place, its timer
   const end = (receiving: IReceiving<Handle>, state: IHeld): void => {
     held.delete(receiving);
-    clearTimeout(state.timer);
+    clock.clearTimeout(state.timer);
     drain(state);
     state.connection.transfers -= 1;
 
@@ -200,7 +204,7 @@ export const createReceivingTransfers = <Handle extends string>({
 
       if (state !== undefined) {
         state.isComplete = true;
-        clearTimeout(state.timer);
+        clock.clearTimeout(state.timer);
         drain(state);
         grantStarved();
       }

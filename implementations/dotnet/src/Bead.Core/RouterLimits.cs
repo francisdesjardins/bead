@@ -9,9 +9,6 @@ public sealed record RouterLimits
 {
     // constants
 
-    // the longest a timer waits in milliseconds, as JavaScript's timers hold: 2³¹ − 1
-    private static readonly TimeSpan LongestTimer = TimeSpan.FromMilliseconds(int.MaxValue);
-
     /// <summary>The limits a router holds by when its options say nothing.</summary>
     public static RouterLimits Default { get; } = new();
 
@@ -61,17 +58,22 @@ public sealed record RouterLimits
     /// <summary>The transfers a connection receives at once; 0 sends and takes none.</summary>
     public int MaximumTransfers { get; init; } = 4;
 
-    /// <summary>How long a transfer waits for its next chunk or credit before it stalls.</summary>
+    /// <summary>
+    /// How long a transfer waits for its next chunk or credit before it stalls: from 1 to 2³¹ − 1
+    /// milliseconds, rounded to the nearest whole one, never zero nor infinite.
+    /// </summary>
     public TimeSpan TransferInactivityTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>How far past the bytes it received, contiguous, a receiver lets its sender send.</summary>
     public int WindowBytes { get; init; } = 4_194_304;
 
     /// <summary>
-    /// These limits, checked: whole numbers, positive but for the transfers and the detail; an
-    /// envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a window of two chunks
-    /// at least; a payload within the budget; a timeout a timer can hold. Throws an
-    /// <see cref="ArgumentException"/> for the first that does not hold.
+    /// These limits, checked, a transfer's inactivity held: whole numbers, positive but for the
+    /// transfers and the detail; an envelope of 64 bytes at least; a chunk from 64 bytes to an
+    /// envelope; a window of two chunks at least; a payload within the budget; a transfer's
+    /// inactivity from 1 to 2³¹ − 1 milliseconds, rounded to the nearest whole one. Throws an
+    /// <see cref="ArgumentException"/> for the first that does not hold, an
+    /// <see cref="ArgumentOutOfRangeException"/> for the inactivity.
     /// </summary>
     public RouterLimits Validate()
     {
@@ -80,16 +82,13 @@ public sealed record RouterLimits
             ("every limit is above 0, but for the transfers and the detail",
                 BufferedBytesBudget > 0 && ChunkBytes > 0 && MaximumChunkRuns > 0
                 && MaximumEnvelopeBytes > 0 && MaximumPayloadBytes > 0 && WindowBytes > 0
-                && MaximumDetailBytes >= 0 && MaximumTransfers >= 0
-                && TransferInactivityTimeout > TimeSpan.Zero),
+                && MaximumDetailBytes >= 0 && MaximumTransfers >= 0),
             ("an envelope is 64 bytes at least", MaximumEnvelopeBytes >= 64),
             ("a chunk's envelope is 64 bytes at least, and an envelope at most",
                 ChunkBytes >= 64 && ChunkBytes <= MaximumEnvelopeBytes),
             ("a window holds two chunks at least, so a sender waits for no credit it is owed",
                 (long)WindowBytes >= 2L * ChunkBytes),
             ("a payload fits in the budget of the transfers received", MaximumPayloadBytes <= BufferedBytesBudget),
-            ($"a transfer's inactivity is {int.MaxValue} milliseconds at most, as a timer holds",
-                TransferInactivityTimeout <= LongestTimer),
         ];
 
         foreach (var (rule, holds) in rules)
@@ -100,6 +99,10 @@ public sealed record RouterLimits
             }
         }
 
-        return this;
+        // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free;
+        // held, as its failures' details say it on the wire
+        var held = Clocks.AssertHeldFinite(("a transfer's inactivity", nameof(TransferInactivityTimeout)), TransferInactivityTimeout);
+
+        return held == TransferInactivityTimeout ? this : this with { TransferInactivityTimeout = held };
     }
 }

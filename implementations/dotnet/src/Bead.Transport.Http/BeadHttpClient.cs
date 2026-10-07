@@ -3,16 +3,34 @@ namespace Bead.Transport.Http;
 /// <summary>An HTTP client's options: its transport's, and its router's limits.</summary>
 public sealed record BeadHttpClientOptions
 {
-    /// <summary>The transport's options; the largest answer is the limits' envelope, which they set.</summary>
+    /// <summary>
+    /// The transport's options; the largest answer is the limits' envelope, which they set. Its
+    /// clock is every layer's.
+    /// </summary>
     public HttpTransportClientOptions? Transport { get; init; }
 
     /// <summary>What its router reads, writes and holds by: whole envelopes, and no transfer (see <see cref="RouterLimits.WholeEnvelopeOf"/>).</summary>
     public RouterLimits? Limits { get; init; }
+    /// <summary>
+    /// The credential every call presents by default, which its router keeps as its
+    /// <see cref="RouterClient.Credential"/>: a JWT, or an ELSEWHERE with what its transport carries
+    /// beside each request; none when not given.
+    /// </summary>
+    public Credential? Credential { get; init; }
+
+    /// <summary>What its router resolves a command presenting a JWT or an ELSEWHERE with, as a server does.</summary>
+    public Credentials? Credentials { get; init; }
+
+    /// <summary>
+    /// What its router counts its calls and its notifications into, as its own option of that name
+    /// says; none counts nothing.
+    /// </summary>
+    public MetricsRegistry? MetricsRegistry { get; init; }
 }
 
 /// <summary>
 /// A client over HTTP: its three layers, bottom up — the transport, the router built on it, the
-/// services built on the router — one envelope per exchange. It sends no transfer, and a payload is
+/// services built on the router — all on its transport's clock, one envelope per exchange. It sends no transfer, and a payload is
 /// what one envelope holds. It listens for what the server sends of its own — a subscription's
 /// notifications, a command — unless its transport is told not to. The TypeScript side's
 /// <c>createHTTPClient</c>, named apart from .NET's own <see cref="System.Net.Http.HttpClient"/>.
@@ -24,7 +42,7 @@ public sealed record BeadHttpClientOptions
 /// await client.Connect(new HttpConnectOptions { Host = host, Port = port });
 /// </code>
 /// </example>
-public sealed class BeadHttpClient : IAsyncDisposable
+public sealed class BeadHttpClient : IClient
 {
     // ends with the client: a reconnection it started must not outlive it
     private readonly CancellationTokenSource _lifetime = new();
@@ -38,7 +56,13 @@ public sealed class BeadHttpClient : IAsyncDisposable
         {
             MaximumBodyBytes = limits.MaximumEnvelopeBytes,
         });
-        Router = new RouterClient(Transport, new RouterClientOptions { Limits = limits });
+        Router = new RouterClient(Transport, new RouterClientOptions
+        {
+            Credential = options?.Credential,
+            Credentials = options?.Credentials,
+            Limits = limits,
+            MetricsRegistry = options?.MetricsRegistry,
+        });
         Services = new ServiceManager(Router);
     }
 

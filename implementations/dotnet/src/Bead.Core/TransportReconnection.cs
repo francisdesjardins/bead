@@ -18,11 +18,15 @@ internal static class TransportReconnection
     /// Attempts until one opens: the first at once, each next one after its delay. Attempts that run
     /// out are a <see cref="ReconnectException"/>, the last one's exception inside; a cancel is an
     /// <see cref="OperationCanceledException"/>; a delay that throws, an
-    /// <see cref="InvalidOperationException"/>. What the tap throws passes through.
+    /// <see cref="InvalidOperationException"/>; one neither zero nor from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, infinite among them, an
+    /// <see cref="ArgumentOutOfRangeException"/> before the tap hears it, no attempt made after it;
+    /// one held is rounded to the nearest whole millisecond, which the tap hears.
+    /// What the tap throws passes through.
     /// </summary>
-    public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Time) reconnection)
+    public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Clock) reconnection)
     {
-        var (reconnect, time) = reconnection;
+        var (reconnect, clock) = reconnection;
         var token = reconnect.CancellationToken;
         TimeSpan? previousDelay = null;
 
@@ -60,8 +64,12 @@ internal static class TransportReconnection
                 throw new InvalidOperationException(reason.Message, reason);
             }
 
+            // held before its tap hears it: zero waits none; never, refused, would wait for ever
+            // between two attempts
+            nextDelay = Clocks.AssertHeldDelay(("a delay", nameof(TransportReconnectOptions.Delay)), nextDelay);
+
             using var pausing = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var waiting = Task.Delay(nextDelay > TimeSpan.Zero ? nextDelay : TimeSpan.Zero, time, pausing.Token);
+            var waiting = Task.Delay(nextDelay, clock, pausing.Token);
 
             try
             {

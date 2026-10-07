@@ -3,6 +3,7 @@
 import { GenericError } from '../../transport/shared/errors';
 import { FailureScope, ProtocolCode } from './constants';
 import type {
+  Credential,
   DestinationId,
   EnvelopeHeader,
   FailureOrigin,
@@ -20,7 +21,7 @@ import type {
 /** Where a failure belongs, besides what it says: the call it failed and the envelope that said it. */
 interface IFailureErrorOptions extends ErrorOptions {
   destinationId?: DestinationId | undefined;
-  /** Kept redacted: a copy, without its session token. */
+  /** Kept redacted: a copy, without its credential. */
   header?: EnvelopeHeader | undefined;
   procedureAddress?: IProcedureAddress | undefined;
 }
@@ -40,17 +41,17 @@ const CODE_NAMES: ReadonlyMap<number, string> = new Map(
 const messageOf = ({
   code,
   detail,
-  hops,
   origin,
   procedureAddress,
+  relays,
   scope,
   side,
 }: {
   code: number;
   detail: string;
-  hops: number;
   origin: FailureOrigin;
   procedureAddress: IProcedureAddress | undefined;
+  relays: number;
   scope: FailureScope;
   side: RouterSide | undefined;
 }): string => {
@@ -64,21 +65,35 @@ const messageOf = ({
     isProtocol || procedureAddress === undefined
       ? ''
       : ` (service ${String(procedureAddress.serviceId)}, procedure ${String(procedureAddress.procedureId)})`,
-    hops > 0 ? `, relayed ${String(hops)} ${hops === 1 ? 'hop' : 'hops'}` : '',
+    relays > 0 ? `, through ${String(relays)} ${relays === 1 ? 'relay' : 'relays'}` : '',
     detail === '' ? '' : `: ${detail}`,
   ].join('');
 };
 
 /**
- * `header` fit to be traced or thrown: a copy without its session token, saying whether it had one.
+ * `header` fit to be traced or thrown: a copy without its credential, saying its scheme alone when it
+ * had one.
  */
 export const redactHeader = (header: EnvelopeHeader): RedactedHeader => {
-  const { sessionToken, ...rest } = header as EnvelopeHeader & { sessionToken?: unknown };
+  const { credential, ...rest } = header as EnvelopeHeader & { credential?: Credential };
 
-  return { ...rest, hasSessionToken: typeof sessionToken === 'string' };
+  return {
+    ...rest,
+    ...(credential === undefined ? {} : { credentialScheme: credential.scheme }),
+  };
 };
 
 // definition
+
+/**
+ * A call a bound of the side's own refuses as its credential resolves (spec 8.2): its router answers
+ * it `CAPACITY_EXCEEDED`, its message for detail, and reports nothing, since nothing failed and its
+ * requester withdraws nothing. Only the side's own resolver raises it: a key set's bound on the calls
+ * that wait for an issuer's deadline (spec 13.8).
+ */
+export class CapacityError extends GenericError {
+  public override readonly name: string = 'CapacityError';
+}
 
 /** A request whose connection closed before its answer came. */
 export class DisconnectError extends GenericError {
@@ -87,8 +102,8 @@ export class DisconnectError extends GenericError {
 
 /**
  * A failure, thrown: whose code it is, the code, why, and — deduced, never sent — which side raised
- * it and where. Raised here, it is `local`, of this router's side; received with no hop, it is the
- * peer's; received through a relay, whose side raised it is not known.
+ * it and where. Raised here, it is `local`, of this router's side; received through no relay, it is
+ * the peer's; received through a relay, whose side raised it is not known.
  */
 export class FailureError extends GenericError {
   public override readonly name: string = 'FailureError';
@@ -99,23 +114,38 @@ export class FailureError extends GenericError {
   public readonly detail: string;
   /** The envelope that said it, redacted; none for a failure raised before any envelope. */
   public readonly header: RedactedHeader | undefined;
-  /** The relays it crossed: 0 when the peer raised it. */
-  public readonly hops: number;
+  /**
+   * Whether it came by a way that keeps no order with the call's own answer, which it may overtake:
+   * over HTTP, a listen's batch (spec 15.9). Such a failure ends a subscription its server had
+   * answered, and withdraws no credential (spec 13.4).
+   */
+  public readonly mayOvertake: boolean;
   public readonly origin: FailureOrigin;
   /** The procedure the call asked for, which a failure envelope does not repeat. */
   public readonly procedureAddress: IProcedureAddress | undefined;
+  /** The relays it crossed: 0 when the peer raised it. */
+  public readonly relays: number;
   public readonly scope: FailureScope;
   public readonly side: RouterSide | undefined;
 
   public constructor(
     failure: IFailure & {
-      hops?: number | undefined;
+      mayOvertake?: boolean | undefined;
       origin?: FailureOrigin | undefined;
+      relays?: number | undefined;
       side?: RouterSide | undefined;
     },
     options?: IFailureErrorOptions
   ) {
-    const { code, detail = '', hops = 0, origin = 'local', scope, side } = failure;
+    const {
+      code,
+      detail = '',
+      mayOvertake = false,
+      origin = 'local',
+      relays = 0,
+      scope,
+      side,
+    } = failure;
     const { destinationId, header, procedureAddress, ...errorOptions } = options ?? {};
     const address =
       procedureAddress === undefined
@@ -123,7 +153,7 @@ export class FailureError extends GenericError {
         : { procedureId: procedureAddress.procedureId, serviceId: procedureAddress.serviceId };
 
     super(
-      messageOf({ code, detail, hops, origin, procedureAddress: address, scope, side }),
+      messageOf({ code, detail, origin, procedureAddress: address, relays, scope, side }),
       errorOptions
     );
 
@@ -131,9 +161,10 @@ export class FailureError extends GenericError {
     this.destinationId = destinationId;
     this.detail = detail;
     this.header = header === undefined ? undefined : redactHeader(header);
-    this.hops = hops;
+    this.mayOvertake = mayOvertake;
     this.origin = origin;
     this.procedureAddress = address;
+    this.relays = relays;
     this.scope = scope;
     this.side = side;
   }
@@ -161,9 +192,9 @@ export class FailureError extends GenericError {
 }
 
 /**
- * The error a failure received from the peer of a router with `failures` stands for: with no hop,
- * the peer's, of the other side; through a relay, of no known side. Where it came from is where
- * the call went.
+ * The error a failure received from the peer of a router with `failures` stands for: through no
+ * relay, the peer's, of the other side; through a relay, of no known side. Where it came from is
+ * where the call went.
  */
 export const failureErrorOf = (
   received: IReceivedFailure,
@@ -171,19 +202,22 @@ export const failureErrorOf = (
     destinationId,
     failures,
     header,
+    mayOvertake,
     procedureAddress,
   }: {
     destinationId?: DestinationId | undefined;
     failures: Pick<IRouterFailures, 'side'>;
     header: IFailureHeader;
+    mayOvertake?: boolean | undefined;
     procedureAddress?: IProcedureAddress | undefined;
   }
 ): FailureError => {
-  const isRelayed = received.hops > 0;
+  const isRelayed = received.relays > 0;
 
   return new FailureError(
     {
       ...received,
+      mayOvertake,
       origin: isRelayed ? 'relayed' : 'peer',
       side: isRelayed ? undefined : failures.side === 'client' ? 'server' : 'client',
     },

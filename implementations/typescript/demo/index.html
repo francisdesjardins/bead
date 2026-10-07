@@ -404,6 +404,39 @@
         background: none;
       }
 
+      .chip.failure {
+        background: var(--bad-soft);
+        color: var(--bad);
+        box-shadow: none;
+      }
+
+      /* a procedure's name is longer than a layer's */
+      .metrics li {
+        grid-template-columns: 84px minmax(0, 1fr);
+      }
+
+      /* its lines, long, scroll within it: the card keeps its width, and the chips wrap */
+      .exposition {
+        min-width: 0;
+      }
+
+      .exposition summary {
+        color: var(--muted);
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .exposition pre {
+        max-height: 40vh;
+        margin: 6px 0 0;
+        padding: 8px 10px;
+        overflow: auto;
+        border-radius: 8px;
+        background: var(--raised);
+        box-shadow: 0 0 0 1px var(--line);
+        font: 11px/1.5 var(--mono);
+      }
+
       /* ── the logs: newest first, each line by the way it went ───────────── */
 
       .log ol {
@@ -529,7 +562,7 @@
         </div>
         <div>
           <dt>Identity</dt>
-          <dd id="identity">no session</dd>
+          <dd id="identity">logged out</dd>
         </div>
       </dl>
     </header>
@@ -539,7 +572,8 @@
         <section class="card" aria-labelledby="identity-h">
           <h2 id="identity-h">Identity</h2>
           <p class="note">
-            A fake JWT: a read needs a session, a write the <code>write</code> right.
+            An access token, a JWT each call presents in its header: a read needs one that holds, a
+            write one whose scope holds <code>write</code>.
           </p>
           <div class="buttons">
             <button type="button" data-action="reader">Log in as a reader</button>
@@ -619,8 +653,9 @@
         <section class="card" aria-labelledby="server-h">
           <h2 id="server-h">Server</h2>
           <p class="note">
-            Read by a <code>stats</code> call every second, left out of the logs — and counted among
-            the calls it answers.
+            Read every second, its health and what each layer holds by a <code>stats</code> call,
+            the calls it answered by the <code>metrics</code> call below, both left out of the logs
+            and of those counts: a median estimated within its bucket.
           </p>
           <p class="note" id="tabs" hidden>
             Open this page in a second tab: each tab is a client of this one server, which counts
@@ -633,6 +668,37 @@
             <dd id="durations">—</dd>
           </dl>
           <ul id="gauges" class="gauges" aria-label="What each layer holds, and its ceiling"></ul>
+        </section>
+
+        <section class="card" aria-labelledby="metrics-h">
+          <h2 id="metrics-h">Metrics</h2>
+          <p class="note">
+            What each end's metrics registry counts, every second: the server's by a
+            <code>metrics</code> call, over Bead itself, so a server in a Web Worker answers it as a
+            Node one does<span data-served>, and <code>/metrics</code> serves it to a scraper</span
+            >; this tab's client's, in the page. The reads are left out, the durations estimated
+            within their buckets.
+          </p>
+          <p class="label">Server</p>
+          <ul
+            id="server-metrics"
+            class="gauges metrics"
+            aria-label="What the server counted, by procedure"
+          ></ul>
+          <p class="label">This tab's client</p>
+          <ul
+            id="client-metrics"
+            class="gauges metrics"
+            aria-label="What this tab's client counted, by procedure"
+          ></ul>
+          <details id="server-exposition" class="exposition">
+            <summary>The server's exposition, as a scrape reads it</summary>
+            <pre></pre>
+          </details>
+          <details id="client-exposition" class="exposition">
+            <summary>The client's exposition</summary>
+            <pre></pre>
+          </details>
         </section>
       </div>
 

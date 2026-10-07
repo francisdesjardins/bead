@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { CALL_ID_RANGES, CLIENT_FAILURES, EnvelopeKind, SERVER_FAILURES } from '../constants';
 import { bytesOf, writeEnvelope } from '../envelope';
+import type { IMetricsRegistry } from '../metrics-registry';
 import type { IRouterClientTransportLike } from '../../client/types';
 import type { IRouterServerTransportLike } from '../../server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
-import type { Data } from '../../../transport/shared/types';
+import type { ITransportMessage } from '../../../transport/shared/types';
 import { createRouterCore } from '../router-core';
 import type {
   CallId,
@@ -40,6 +41,21 @@ export const callIdsOf = (side: RouterSide): (() => CallId) => {
 
     return callId;
   };
+};
+
+/**
+ * What a registry counted: the line of each series its exposition writes at a count other than 0,
+ * buckets left out, in its order.
+ */
+export const countedOf = (registry: IMetricsRegistry): string[] => {
+  return registry
+    .exposition()
+    .text.split('\n')
+    .filter((line) => {
+      return (
+        line !== '' && !line.startsWith('#') && !line.includes('_bucket') && !line.endsWith(' 0')
+      );
+    });
 };
 
 /** `length` bytes that differ from one to the next, so a byte out of place shows. */
@@ -83,19 +99,22 @@ interface IQueued {
 }
 
 /**
- * Two cores built with `limits`, a client's on the connection `'server'` and a server's on `'a'`,
- * joined by one queue: what one sends waits there until `flush` hands it to the other, a turn
- * between each, until none is left. In order; or, from `seed`, the chunks and the credits taken in
- * any order and sent twice half the time — every other kind in order, and once. Each side records
- * what it reports, and the kind of each envelope it sends; `sizes` holds the bytes of every
- * envelope sent, and `traffic` every envelope as it was sent, once, and as it was handed over.
+ * Two cores built with `limits`, the server's with `serverLimits` when given, a client's on the
+ * connection `'server'` and a server's on `'a'`, joined by one queue: what one sends waits there
+ * until `flush` hands it to the other, a turn between each, until none is left. In order; or, from
+ * `seed`, the chunks and the credits taken in any order and sent twice half the time — every other
+ * kind in order, and once. Each side records what it reports, and the kind of each envelope it
+ * sends; `sizes` holds the bytes of every envelope sent, and `traffic` every envelope as it was
+ * sent, once, and as it was handed over.
  */
 export const createLoopback = ({
   limits,
   seed,
+  serverLimits = limits,
 }: {
   limits?: RouterLimitsOptions | undefined;
   seed?: number | undefined;
+  serverLimits?: RouterLimitsOptions | undefined;
 }) => {
   const queue: IQueued[] = [];
   const draws = seed === undefined ? undefined : drawsOf(seed);
@@ -116,10 +135,13 @@ export const createLoopback = ({
       activity: () => {
         return undefined;
       },
+      isTracing: () => {
+        return false;
+      },
       report: (error) => {
         recorded[side].reported.push(error);
       },
-      send: (bytes) => {
+      send: ({ data: bytes }) => {
         // the kind is an envelope's second byte, whatever its layout
         const kind = bytes[1] ?? 0;
         const isLoose = kind === EnvelopeKind.CHUNK || kind === EnvelopeKind.CREDIT;
@@ -149,7 +171,7 @@ export const createLoopback = ({
     }
   );
   const server: IRouterCore<'a'> = createRouterCore(portOf<'a'>('server', SERVER_FAILURES), {
-    limits,
+    limits: serverLimits,
   });
 
   // the next envelope to hand over: the first, in order; else any chunk or credit, or the first of
@@ -191,62 +213,6 @@ export const createLoopback = ({
   return { client, flush, recorded, server, sizes, traffic };
 };
 
-/** The timers armed and cleared from now on, each fired by hand and never by the clock, until restored. */
-export const spyTimers = () => {
-  const armed: { delay: unknown; fire: () => void; timeoutId: unknown }[] = [];
-  const cleared: unknown[] = [];
-  const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
-
-  globalThis.setTimeout = ((fire: () => void, delay?: number) => {
-    const timeoutId = realSet(() => {
-      return undefined;
-    }, 0);
-
-    armed.push({ delay, fire, timeoutId });
-
-    return timeoutId;
-  }) as typeof realSet;
-  globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-    cleared.push(timeoutId);
-    realClear(timeoutId);
-  };
-
-  return {
-    armed,
-    cleared,
-    restore: () => {
-      globalThis.setTimeout = realSet;
-      globalThis.clearTimeout = realClear;
-    },
-  };
-};
-
-/** The timers `run` arms, each fired by hand and never by the clock, and the timers it clears. */
-export const timersOf = (run: () => void) => {
-  const { armed, cleared, restore } = spyTimers();
-
-  try {
-    run();
-  } finally {
-    restore();
-  }
-
-  return { armed, cleared };
-};
-
-/** As {@link timersOf}, for a `run` that waits: the timers until it settles. */
-export const timersWhile = async (run: () => Promise<unknown>) => {
-  const { armed, cleared, restore } = spyTimers();
-
-  try {
-    await run();
-  } finally {
-    restore();
-  }
-
-  return { armed, cleared };
-};
-
 /**
  * A client transport and a server transport joined back to back, as one connection `connectionHandle`:
  * what the client sends the server takes from it, and the other way. A message is handed over within
@@ -262,7 +228,7 @@ export const createPipedTransports = ({
 }) => {
   const client = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
-    message: [data: Data];
+    message: [message: ITransportMessage];
     reconnect: [];
   }>();
   const server = createEmitter<{
@@ -272,7 +238,7 @@ export const createPipedTransports = ({
       request: unknown,
       connectionHandle: TransportServerConnectionHandle,
     ];
-    message: [data: Data, connectionHandle: TransportServerConnectionHandle];
+    message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
   }>();
   const sent = { client: [] as Uint8Array[], server: [] as Uint8Array[] };
   let isOpen = false;
@@ -293,12 +259,15 @@ export const createPipedTransports = ({
     return (deliver(), undefined);
   };
 
+  // in process, never leaving it: a credential is carried both ways, as it is given
   const clientTransport: IRouterClientTransportLike = {
+    carriesCredential: true,
+    isSecure: true,
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: client.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: client.on,
-    send: (data) => {
+    send: ({ credential, data }) => {
       if (!isOpen) {
         return Promise.reject(new Error(`${connectionHandle} is not open`));
       }
@@ -307,18 +276,24 @@ export const createPipedTransports = ({
 
       sent.client.push(bytes);
       hand(() => {
-        server.emit('message', bytes, connectionHandle);
+        server.emit('message', { credential, data: bytes }, connectionHandle);
       });
 
       return Promise.resolve();
     },
   };
   const serverTransport: IRouterServerTransportLike = {
+    carriesCredential: () => {
+      return true;
+    },
+    isSecure: () => {
+      return true;
+    },
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: server.off,
     // oxlint-disable-next-line typescript/unbound-method -- as above
     on: server.on,
-    send: (data, handle) => {
+    send: ({ credential, data }, handle) => {
       if (!isOpen || handle !== connectionHandle) {
         return Promise.reject(new Error(`${handle} is not open`));
       }
@@ -327,7 +302,7 @@ export const createPipedTransports = ({
 
       sent.server.push(bytes);
       hand(() => {
-        client.emit('message', bytes);
+        client.emit('message', { credential, data: bytes });
       });
 
       return Promise.resolve();

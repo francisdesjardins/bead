@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { createTestClock, hasRef } from '../../../transport/shared/__tests__/fixtures';
 import { createAnsweringCalls } from '../answering-calls';
 import { EnvelopeKind } from '../constants';
+import { CallEnding, type IProcedureSeries } from '../metrics-registry';
 import type { IRequestHeader } from '../types';
 
 // helpers
@@ -24,8 +26,51 @@ const receivingOf = (name: string, creditEnd = 0): IReceivingOf => {
 // definition
 
 test.describe('createAnsweringCalls', () => {
+  test('count a call opened with a series once: as its end says, else cancelled as it is taken, closed with its connection, an error as it is closed unanswered', async () => {
+    const clock = createTestClock();
+    const calls = createAnsweringCalls<Handle>({ clock });
+    const counted: string[] = [];
+    const series: IProcedureSeries = {
+      end: (ending, microseconds) => {
+        counted.push(`end ${String(ending)} ${String(microseconds)}`);
+      },
+      start: () => {
+        counted.push('start');
+      },
+    };
+    const [ended, taken, closed, unanswered] = [headerOf(1), headerOf(3), headerOf(5), headerOf(7)];
+
+    for (const header of [ended, taken, closed, unanswered]) {
+      calls.open({ connectionHandle: header === closed ? 'b' : 'a', header }, series);
+    }
+
+    await clock.tickAsync(2);
+
+    // its end once: a second, and its close after it, count nothing
+    calls.end({ connectionHandle: 'a', header: ended }, CallEnding.RESULT);
+    calls.end({ connectionHandle: 'a', header: ended }, CallEnding.ERROR);
+    calls.close({ callId: 1, connectionHandle: 'a' }, calls.controllerOf(ended) as AbortController);
+    calls.take({ callId: 3, connectionHandle: 'a' });
+    calls.takeAll('b');
+    calls.close(
+      { callId: 7, connectionHandle: 'a' },
+      calls.controllerOf(unanswered) as AbortController
+    );
+
+    expect(counted).toEqual([
+      'start',
+      'start',
+      'start',
+      'start',
+      `end ${String(CallEnding.RESULT)} 2000`,
+      `end ${String(CallEnding.CANCELLED)} 2000`,
+      `end ${String(CallEnding.CLOSED)} 2000`,
+      `end ${String(CallEnding.ERROR)} 2000`,
+    ]);
+  });
+
   test('open a call as its request is dispatched, and find it again by that very header alone', () => {
-    const calls = createAnsweringCalls();
+    const calls = createAnsweringCalls({ clock: createTestClock() });
     const header = headerOf(3);
     const controller = calls.open({ connectionHandle: 'a', header });
 
@@ -38,7 +83,7 @@ test.describe('createAnsweringCalls', () => {
   });
 
   test('answer a call no more once its answer goes out, while the call stays until closed; a copy of its header marks nothing', () => {
-    const calls = createAnsweringCalls();
+    const calls = createAnsweringCalls({ clock: createTestClock() });
     const header = headerOf(3);
     const controller = calls.open({ connectionHandle: 'a', header });
 
@@ -58,7 +103,7 @@ test.describe('createAnsweringCalls', () => {
   });
 
   test('answer a call no more once closed by its own controller, taken, or opened again', () => {
-    const calls = createAnsweringCalls();
+    const calls = createAnsweringCalls({ clock: createTestClock() });
     const call = { callId: 3, connectionHandle: 'a' };
     const first = headerOf(3);
     const controller = calls.open({ connectionHandle: 'a', header: first });
@@ -83,7 +128,7 @@ test.describe('createAnsweringCalls', () => {
   });
 
   test('take out every call of a connection, or of every one, giving their controllers', () => {
-    const calls = createAnsweringCalls();
+    const calls = createAnsweringCalls({ clock: createTestClock() });
     const first = calls.open({ connectionHandle: 'a', header: headerOf(3) });
     const second = calls.open({ connectionHandle: 'b', header: headerOf(3) });
 
@@ -98,6 +143,7 @@ test.describe('createAnsweringCalls', () => {
   test('give a call what it receives, and hear it leave once, whichever way the call leaves', () => {
     const removed: string[] = [];
     const calls = createAnsweringCalls<Handle, IReceivingOf>({
+      clock: createTestClock(),
       onRemove: ({ name }) => {
         removed.push(name);
       },
@@ -135,6 +181,7 @@ test.describe('createAnsweringCalls', () => {
 
   test('keep a call that received a transfer abandoned once it ends, the oldest of a connection yielding', () => {
     const calls = createAnsweringCalls<Handle, IReceivingOf>({
+      clock: createTestClock(),
       limits: { maximumTransfers: 2, transferInactivityTimeout: 250 },
     });
     const end = (
@@ -194,59 +241,43 @@ test.describe('createAnsweringCalls', () => {
     expect(endsOf('b', [1])).toEqual([undefined]);
   });
 
-  test('forget a call abandoned once its transfer’s inactivity is over, keeping no process alive', () => {
+  test('forget a call abandoned once its transfer’s inactivity is over, on its clock, keeping no process alive', () => {
+    const clock = createTestClock();
     const calls = createAnsweringCalls<Handle, IReceivingOf>({
+      clock,
       limits: { maximumTransfers: 4, transferInactivityTimeout: 250 },
     });
-    const armed: { delay: unknown; fire: () => void; timeoutId: unknown }[] = [];
-    const cleared: unknown[] = [];
-    const { clearTimeout: realClear, setTimeout: realSet } = globalThis;
 
-    try {
-      globalThis.setTimeout = ((fire: () => void, delay?: number) => {
-        const timeoutId = realSet(() => {
-          return undefined;
-        }, 0);
-
-        armed.push({ delay, fire, timeoutId });
-
-        return timeoutId;
-      }) as typeof realSet;
-      globalThis.clearTimeout = (timeoutId: Parameters<typeof realClear>[0]) => {
-        cleared.push(timeoutId);
-        realClear(timeoutId);
-      };
-
-      for (const callId of [1, 3]) {
-        calls.open({ connectionHandle: 'a', header: headerOf(callId) });
-        calls.attach({ callId, connectionHandle: 'a' }, receivingOf('', 10));
-        calls.take({ callId, connectionHandle: 'a' });
-      }
-
-      calls.open({ connectionHandle: 'a', header: headerOf(3) });
-    } finally {
-      globalThis.setTimeout = realSet;
-      globalThis.clearTimeout = realClear;
+    for (const callId of [1, 3]) {
+      calls.open({ connectionHandle: 'a', header: headerOf(callId) });
+      calls.attach({ callId, connectionHandle: 'a' }, receivingOf('', 10));
+      calls.take({ callId, connectionHandle: 'a' });
     }
 
+    calls.open({ connectionHandle: 'a', header: headerOf(3) });
+
     expect(
-      armed.map(({ delay, timeoutId }) => {
-        return [delay, (timeoutId as { hasRef: () => boolean }).hasRef()];
+      clock.armed.map(({ delay, handle }) => {
+        return [delay, hasRef(handle)];
       })
     ).toEqual([
       [250, false],
       [250, false],
     ]);
     // the call a request took stops its timer
-    expect(cleared).toEqual([armed[1]?.timeoutId]);
+    expect(clock.cleared).toEqual([clock.armed[1]?.handle]);
 
-    armed[0]?.fire();
+    clock.tick(249);
+
+    expect(calls.abandonedEndOf({ callId: 1, connectionHandle: 'a' })).toBe(10);
+
+    clock.tick(1);
 
     expect(calls.abandonedEndOf({ callId: 1, connectionHandle: 'a' })).toBeUndefined();
   });
 
   test('count the calls answered and those abandoned, and the connections they belong to', () => {
-    const calls = createAnsweringCalls<Handle, IReceivingOf>();
+    const calls = createAnsweringCalls<Handle, IReceivingOf>({ clock: createTestClock() });
     const call = { callId: 1, connectionHandle: 'a' } as const;
     const controller = calls.open({ connectionHandle: 'a', header: headerOf(1) });
 

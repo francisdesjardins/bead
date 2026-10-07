@@ -2,17 +2,23 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createRouterServer } from '../../router/server/router-server';
 import { createSessionManager } from '../../router/server/session-manager';
-import { EnvelopeKind } from '../../router/shared/constants';
+import { CredentialScheme, EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf, readEnvelope } from '../../router/shared/envelope';
 import { toSessionToken } from '../../router/shared/identifiers';
 import { createServiceManager } from '../../router/shared/service-manager';
 import type { IRouterServerOptions } from '../../router/server/types';
-import type { Envelope, IProcedure, IServiceManagerOptions } from '../../router/shared/types';
-import { callIdsOf, envelopeOf, spyTimers } from '../../router/shared/__tests__/fixtures';
+import type {
+  Credential,
+  Envelope,
+  IProcedure,
+  IServiceManagerOptions,
+} from '../../router/shared/types';
+import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
+import { createTestClock, delaysOn, duesOn } from '../../transport/shared/__tests__/fixtures';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
-import type { Data } from '../../transport/shared/types';
+import type { ITransportMessage } from '../../transport/shared/types';
 import {
   CLIENT_FAILURES,
   createServer,
@@ -59,7 +65,8 @@ const createScriptedTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [socket: unknown, request: unknown, connectionHandle: Handle];
-    message: [data: Data, connectionHandle: Handle];
+    listen: [isHeld: boolean, connectionHandle: Handle];
+    message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
   const sent: { connectionHandle: Handle; envelope: Envelope | undefined }[] = [];
   // the client's call ids, odd, one after the other
@@ -87,7 +94,7 @@ const createScriptedTransport = () => {
 
       return control.closeResult;
     },
-    send: (data, connectionHandle) => {
+    send: ({ data }, connectionHandle) => {
       sent.push({
         connectionHandle,
         envelope: readEnvelope(bytesOf(data), {
@@ -105,25 +112,34 @@ const createScriptedTransport = () => {
     },
   };
 
-  /** A request for `procedure` from `connectionHandle`, on the next of the client's call ids. */
-  // a request of `procedure`'s, one that opens a subscription when `opensSubscription` says so
+  /**
+   * A request for `procedure` from `connectionHandle`, on the next of the client's call ids,
+   * presenting `credential`; one that opens a subscription when `opensSubscription` says so.
+   */
   const ask = (
     connectionHandle: Handle,
-    { opensSubscription, procedure }: { opensSubscription?: true; procedure: IProcedure }
+    {
+      credential,
+      opensSubscription,
+      procedure,
+    }: { credential?: Credential; opensSubscription?: true; procedure: IProcedure }
   ) => {
     emitter.emit(
       'message',
-      envelopeOf({
-        header: {
-          callId: nextCallId(),
+      {
+        data: envelopeOf({
+          header: {
+            callId: nextCallId(),
+            credential,
+            kind: EnvelopeKind.REQUEST,
+            opensSubscription,
+            procedureId: procedure.procedureId,
+            serviceId: procedure.serviceId,
+          },
           kind: EnvelopeKind.REQUEST,
-          opensSubscription,
-          procedureId: procedure.procedureId,
-          serviceId: procedure.serviceId,
-        },
-        kind: EnvelopeKind.REQUEST,
-        payload: text.encode('hi'),
-      }),
+          payload: text.encode('hi'),
+        }),
+      },
       connectionHandle
     );
   };
@@ -132,7 +148,12 @@ const createScriptedTransport = () => {
     emitter.emit('connection', {}, {}, connectionHandle);
   };
 
-  return { ask, closed, control, emitter, open, sent, transport };
+  /** A listen held on `connectionHandle`, as an HTTP transport tells it, or its end. */
+  const listen = (connectionHandle: Handle, isHeld: boolean) => {
+    emitter.emit('listen', isHeld, connectionHandle);
+  };
+
+  return { ask, closed, control, emitter, listen, open, sent, transport };
 };
 
 /** A server whose `openSession` stores a session with `timeouts`, and whose `echo` needs one. */
@@ -166,19 +187,9 @@ const forever = { connectionInactivityTimeout: Infinity, sessionInactivityTimeou
 /** A procedure nobody answers: a request for it passes no `beforeRequest`. */
 const unknown: IProcedure = { ...echo, procedureId: 99, procedureName: 'unknown' };
 
-/**
- * The timers `spied` armed and nothing stopped since: those the clock would fire, each fired by
- * hand here, so a late machine moves no deadline past another.
- */
-const runningOf = ({ armed, cleared }: ReturnType<typeof spyTimers>) => {
-  return armed.filter(({ timeoutId }) => {
-    return !cleared.includes(timeoutId);
-  });
-};
-
-/** The delays of `timers`, in the order they were armed. */
-const delaysOf = (timers: ReturnType<typeof spyTimers>['armed']) => {
-  return timers.map(({ delay }) => {
+/** The delays of the timers armed on `clock`, in the order they were armed. */
+const delaysArmed = (clock: ReturnType<typeof createTestClock>) => {
+  return clock.armed.map(({ delay }) => {
     return delay;
   });
 };
@@ -224,7 +235,7 @@ test.describe('createServer', () => {
     expect(built).toEqual([['sessions'], ['router', true], ['services', true]]);
     // the router is built with the server's limits, and relays to a session alone unless told
     expect(routerOptions?.limits).toEqual({ maximumPayloadBytes: 8 });
-    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireSession });
+    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireSessionOrCredential });
     expect(server.router).toBe(builtRouter);
     expect(server.sessions).toBe(sessions);
     expect(server.transport).toBe(transport);
@@ -271,7 +282,14 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [{ callId: 1, kind: EnvelopeKind.FAILURE }, ProtocolCode.SESSION_REQUIRED],
-      [{ callId: 3, kind: EnvelopeKind.RESULT, sessionToken }, sessionToken],
+      [
+        {
+          callId: 3,
+          credential: { scheme: CredentialScheme.OPAQUE, token: sessionToken },
+          kind: EnvelopeKind.RESULT,
+        },
+        sessionToken,
+      ],
       [{ callId: 5, kind: EnvelopeKind.RESULT }, 'hi'],
     ]);
   });
@@ -306,155 +324,243 @@ test.describe('createServer', () => {
     expect(replaced).not.toBe(opened);
     expect(
       sent.map(({ envelope }) => {
-        const header = envelope?.header as { sessionToken?: unknown } | undefined;
+        const header = envelope?.header as { credential?: unknown } | undefined;
 
-        return header !== undefined && 'sessionToken' in header ? header.sessionToken : 'none';
+        return header !== undefined && 'credential' in header ? header.credential : 'none';
       })
-    ).toEqual([opened, replaced, null, 'none']);
+    ).toEqual([
+      { scheme: CredentialScheme.OPAQUE, token: opened },
+      { scheme: CredentialScheme.OPAQUE, token: replaced },
+      { scheme: CredentialScheme.NONE },
+      'none',
+    ]);
   });
 
-  test('requireSession refuses a connection without a session, with SESSION_REQUIRED', async () => {
+  test("requireSession refuses a call in none with SESSION_REQUIRED, testing the call's session, never its connection's", async () => {
     const { open, transport } = createScriptedTransport();
 
     await using server = createServer({ transport });
 
     open(first);
 
-    expect(server.requireSession({ connectionHandle: first })).toBe(false);
+    expect(server.requireSession({})).toBe(false);
     expect(server.requireSession.refusal).toBe(server.router.failures.sessionRequired);
 
     server.sessions.set({ ...server.sessions.create(first), ...forever });
 
-    expect(server.requireSession({ connectionHandle: first })).toBe(true);
+    // the connection's session is no call's until the call resolves to it
+    expect(server.requireSession({ session: undefined })).toBe(false);
+    expect(server.requireSession({ session: Object.freeze({ data: undefined }) })).toBe(true);
   });
 
   test('each message is activity: a connection that speaks keeps going, a silent one is closed', async () => {
+    const clock = createTestClock();
     const {
       ask,
       closed,
       emitter,
       server: sessionServer,
-    } = createSessionServer({
-      connectionInactivityTimeout: 80,
-      sessionInactivityTimeout: Infinity,
-    });
-    const spied = spyTimers();
+    } = createSessionServer(
+      { connectionInactivityTimeout: 80, sessionInactivityTimeout: Infinity },
+      { clock }
+    );
 
     await using server = sessionServer;
 
-    try {
-      ask(first, { procedure: openSession });
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    // requests for a procedure nobody answers, and a message that is not an envelope: activity all
+    // the same, each stopping the connection's timer and setting another going
+    for (let count = 0; count < 3; count += 1) {
+      if (count === 1) {
+        emitter.emit('message', { data: Uint8Array.of(0x0a, 0x02) }, first);
+      } else {
+        ask(first, { procedure: unknown });
+      }
+
       await sleep(0);
-
-      // requests for a procedure nobody answers, and a message that is not an envelope: activity all
-      // the same, each stopping the connection's timer and setting another going
-      for (let count = 0; count < 3; count += 1) {
-        if (count === 1) {
-          emitter.emit('message', Uint8Array.of(0x0a, 0x02), first);
-        } else {
-          ask(first, { procedure: unknown });
-        }
-
-        await sleep(0);
-      }
-
-      expect(delaysOf(spied.armed)).toEqual([80, 80, 80, 80]);
-      expect(delaysOf(runningOf(spied))).toEqual([80]);
-      expect(closed).toEqual([]);
-      expect(server.sessions.has(first)).toBe(true);
-
-      // silent past the last
-      for (const { fire } of runningOf(spied)) {
-        fire();
-      }
-    } finally {
-      spied.restore();
     }
+
+    expect(delaysArmed(clock)).toEqual([80, 80, 80, 80]);
+    expect(delaysOn(clock)).toEqual([80]);
+    expect(closed).toEqual([]);
+    expect(server.sessions.has(first)).toBe(true);
+
+    // silent past the last
+    clock.tick(80);
 
     expect(closed).toEqual([first]);
   });
 
   test('a session unused past its timeout ends, and its connection stays', async () => {
+    const clock = createTestClock();
     const {
       ask,
       closed,
       server: sessionServer,
-    } = createSessionServer({
-      connectionInactivityTimeout: Infinity,
-      sessionInactivityTimeout: 40,
-    });
-    const spied = spyTimers();
+    } = createSessionServer(
+      { connectionInactivityTimeout: Infinity, sessionInactivityTimeout: 40 },
+      { clock }
+    );
 
     await using server = sessionServer;
 
-    try {
-      ask(first, { procedure: openSession });
-      await sleep(0);
+    ask(first, { procedure: openSession });
+    await sleep(0);
 
-      expect(server.sessions.has(first)).toBe(true);
-      expect(delaysOf(runningOf(spied))).toEqual([40]);
+    expect(server.sessions.has(first)).toBe(true);
+    expect(delaysOn(clock)).toEqual([40]);
 
-      for (const { fire } of runningOf(spied)) {
-        fire();
-      }
-      await sleep(0);
+    clock.tick(40);
+    await sleep(0);
 
-      // no timer left to close the connection
-      expect(server.sessions.has(first)).toBe(false);
-      expect(runningOf(spied)).toEqual([]);
-    } finally {
-      spied.restore();
-    }
-
+    // no timer left to close the connection
+    expect(server.sessions.has(first)).toBe(false);
+    expect(delaysOn(clock)).toEqual([]);
     expect(closed).toEqual([]);
   });
 
-  test('a session that ended leaves its connection its connection timeout', async () => {
+  test('a session that ended leaves its connection the server’s own timeout, counted from its end', async () => {
+    const clock = createTestClock();
     const {
       ask,
       closed,
       server: sessionServer,
-    } = createSessionServer({ connectionInactivityTimeout: 100, sessionInactivityTimeout: 30 });
-    const spied = spyTimers();
+    } = createSessionServer(
+      { connectionInactivityTimeout: 100, sessionInactivityTimeout: 30 },
+      { clock, connectionInactivityTimeout: 60 }
+    );
 
     await using server = sessionServer;
 
-    try {
-      ask(first, { procedure: openSession });
-      await sleep(0);
+    ask(first, { procedure: openSession });
+    await sleep(0);
 
-      expect(delaysOf(runningOf(spied))).toEqual([100, 30]);
+    expect(delaysOn(clock)).toEqual([30, 100]);
 
-      // the session's own: it ends, and the connection waits its connection timeout from there
-      for (const { fire } of runningOf(spied).slice(1)) {
-        fire();
-      }
-      await sleep(0);
+    // the session's own: it ends, and the connection waits the server's timeout from there, not
+    // the session's
+    clock.tick(30);
+    await sleep(0);
 
-      expect(server.sessions.has(first)).toBe(false);
-      expect(closed).toEqual([]);
-      expect(delaysOf(runningOf(spied))).toEqual([100]);
+    expect(server.sessions.has(first)).toBe(false);
+    expect(closed).toEqual([]);
+    expect(delaysOn(clock)).toEqual([60]);
 
-      for (const { fire } of runningOf(spied)) {
-        fire();
-      }
-    } finally {
-      spied.restore();
-    }
+    clock.tick(59);
+
+    expect(closed).toEqual([]);
+
+    clock.tick(1);
 
     expect(closed).toEqual([first]);
   });
 
+  test("a request runs in its connection's session, presenting none or its token as OPAQUE, the session's data a copy the call keeps; another token is refused SESSION_REQUIRED, whatever its procedure requires", async () => {
+    const { ask, sent, server: sessionServer } = createSessionServer(forever);
+    const whoami: IProcedure = { ...echo, procedureId: 4, procedureName: 'whoami' };
+    const held: unknown[] = [];
+
+    await using server = sessionServer;
+
+    // a procedure that requires nothing: the session it runs in, or none
+    server.services.getRequestResolver(whoami, { serializer: text })((request, response) => {
+      held.push(request.session);
+
+      return response('');
+    });
+    ask(first, { procedure: whoami });
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const token = server.sessions.sessionTokenOf(first);
+    const stored = server.sessions.get(first);
+
+    if (token === undefined || stored === undefined) {
+      throw new Error('no session opened');
+    }
+
+    server.sessions.updateData({ ...stored, data: { name: 'ada' } });
+    ask(first, { procedure: whoami });
+    ask(first, { credential: { scheme: CredentialScheme.OPAQUE, token }, procedure: whoami });
+    ask(first, {
+      credential: {
+        scheme: CredentialScheme.OPAQUE,
+        token: toSessionToken(new Uint8Array(16).fill(9)),
+      },
+      procedure: whoami,
+    });
+    await sleep(0);
+    // what the call keeps is its own copy
+    server.sessions.updateData({ ...stored, data: { name: 'bob' } });
+
+    expect(held).toEqual([undefined, { data: { name: 'ada' } }, { data: { name: 'ada' } }]);
+    expect(Object.isFrozen(held[1])).toBe(true);
+    expect(
+      sent.flatMap(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [[envelope.header.callId, envelope.failure.code]]
+          : [];
+      })
+    ).toEqual([[9, ProtocolCode.SESSION_REQUIRED]]);
+  });
+
+  test("a call presenting its connection's OPAQUE and one presenting none hold one subscription to a procedure, the connection's session's", async () => {
+    const { ask, sent, server: sessionServer } = createSessionServer(forever);
+    const news: IProcedure = { ...echo, procedureId: 5, procedureName: 'news' };
+
+    await using server = sessionServer;
+
+    server.services.getNotificationResolver(news, {
+      beforeRequest: server.requireSession,
+      serializer: { ...text, encodeNotification: text.encode },
+    })((_request, response) => {
+      return response('');
+    });
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const token = server.sessions.sessionTokenOf(first);
+
+    if (token === undefined) {
+      throw new Error('no session opened');
+    }
+
+    ask(first, { opensSubscription: true, procedure: news });
+    ask(first, {
+      credential: { scheme: CredentialScheme.OPAQUE, token },
+      opensSubscription: true,
+      procedure: news,
+    });
+    await sleep(0);
+
+    // both answered; the first holds the place
+    expect(
+      sent.map(({ envelope }) => {
+        return [envelope?.kind, envelope?.header.callId];
+      })
+    ).toEqual([
+      [EnvelopeKind.RESULT, 1],
+      [EnvelopeKind.RESULT, 3],
+      [EnvelopeKind.RESULT, 5],
+    ]);
+    expect(server.router.notifications.subscriptions()).toEqual([
+      { callId: 3, connectionHandle: first, procedureId: 5, serviceId: 1 },
+    ]);
+  });
+
   test('a session that ended takes its connection’s subscriptions: nothing more reaches it', async () => {
+    const clock = createTestClock();
     const {
       ask,
       closed,
       sent,
       server: sessionServer,
-    } = createSessionServer({
-      connectionInactivityTimeout: Infinity,
-      sessionInactivityTimeout: 30,
-    });
+    } = createSessionServer(
+      { connectionInactivityTimeout: Infinity, sessionInactivityTimeout: 30 },
+      { clock }
+    );
     const news: IProcedure = { ...echo, procedureId: 5, procedureName: 'news' };
 
     await using server = sessionServer;
@@ -466,23 +572,19 @@ test.describe('createServer', () => {
       return response('');
     });
 
-    const spied = spyTimers();
+    ask(first, { procedure: openSession });
+    ask(first, { opensSubscription: true, procedure: news });
+    await sleep(0);
 
-    try {
-      ask(first, { procedure: openSession });
-      ask(first, { opensSubscription: true, procedure: news });
-      await sleep(0);
+    expect(
+      server.router.notifications.candidates(news).map(({ connectionHandle }) => {
+        return connectionHandle;
+      })
+    ).toEqual([first]);
+    expect(delaysOn(clock)).toEqual([30]);
 
-      expect([...server.router.notifications.candidates(news).keys()]).toEqual([first]);
-      expect(delaysOf(runningOf(spied))).toEqual([30]);
-
-      for (const { fire } of runningOf(spied)) {
-        fire();
-      }
-      await sleep(0);
-    } finally {
-      spied.restore();
-    }
+    clock.tick(30);
+    await sleep(0);
 
     // the session's end ended the subscription, with a failure that announced it
     expect(
@@ -493,7 +595,7 @@ test.describe('createServer', () => {
       })
     ).toEqual([
       [
-        { callId: 3, kind: EnvelopeKind.FAILURE, sessionToken: null },
+        { callId: 3, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
         ProtocolCode.SESSION_REQUIRED,
       ],
     ]);
@@ -508,43 +610,188 @@ test.describe('createServer', () => {
   });
 
   test('a connection that never opens a session is closed once silent, when the server says how long', async () => {
+    const clock = createTestClock();
     const quiet = createScriptedTransport();
     const told = createScriptedTransport();
 
     await using server = createServer(
       { transport: told.transport },
-      { connectionInactivityTimeout: 60 }
+      { clock, connectionInactivityTimeout: 60 }
     );
-    await using untold = createServer({ transport: quiet.transport });
+    await using untold = createServer({ transport: quiet.transport }, { clock });
 
-    const spied = spyTimers();
-
-    try {
-      for (const { open } of [told, quiet]) {
-        open(first);
-      }
-
-      // the server told how long arms a timer, the other none
-      expect(delaysOf(spied.armed)).toEqual([60]);
-
-      // a message is activity, with a session or without one
-      told.ask(first, { procedure: unknown });
-      await sleep(0);
-
-      expect(delaysOf(spied.armed)).toEqual([60, 60]);
-      expect(delaysOf(runningOf(spied))).toEqual([60]);
-      expect(told.closed).toEqual([]);
-
-      for (const { fire } of runningOf(spied)) {
-        fire();
-      }
-    } finally {
-      spied.restore();
+    for (const { open } of [told, quiet]) {
+      open(first);
     }
+
+    // the server told how long arms a timer, the other none
+    expect(delaysArmed(clock)).toEqual([60]);
+
+    // a message is activity, with a session or without one
+    told.ask(first, { procedure: unknown });
+    await sleep(0);
+
+    expect(delaysArmed(clock)).toEqual([60, 60]);
+    expect(delaysOn(clock)).toEqual([60]);
+    expect(told.closed).toEqual([]);
+
+    clock.tick(60);
 
     expect(told.closed).toEqual([first]);
     expect(quiet.closed).toEqual([]);
     expect([server.sessions.getAll(), untold.sessions.getAll()]).toEqual([[], []]);
+  });
+
+  test('a listen held is no silence: a connection with no session is not closed while one is, and is closed the server’s own timeout after the last ends', async () => {
+    const clock = createTestClock();
+    const { ask, closed, listen, open, transport } = createScriptedTransport();
+
+    await using server = createServer({ transport }, { clock, connectionInactivityTimeout: 60 });
+
+    open(first);
+    clock.tick(40);
+    listen(first, true);
+
+    // held: no timer runs, a message meanwhile arms none, and a second listen said before the
+    // first ends keeps the connection held
+    expect(delaysOn(clock)).toEqual([]);
+    ask(first, { procedure: unknown });
+    await sleep(0);
+    clock.tick(1_000);
+    listen(first, true);
+    listen(first, false);
+    clock.tick(1_000);
+
+    expect([closed, delaysOn(clock), server.gauges().server.counts['listening']]).toEqual([
+      [],
+      [],
+      1,
+    ]);
+
+    // the last ends: the silence counts anew from it
+    listen(first, false);
+
+    expect(delaysOn(clock)).toEqual([60]);
+
+    clock.tick(59);
+
+    expect(closed).toEqual([]);
+
+    clock.tick(1);
+
+    expect([closed, server.gauges().server.counts['listening']]).toEqual([[first], 0]);
+  });
+
+  test('a listen held is no silence for a session’s connection timeout either: a message meanwhile restarts its session timer alone, and the listen’s end counts anew', async () => {
+    const clock = createTestClock();
+    const {
+      ask,
+      closed,
+      listen,
+      open,
+      server: sessionServer,
+    } = createSessionServer(
+      { connectionInactivityTimeout: 100, sessionInactivityTimeout: 1_000 },
+      { clock }
+    );
+
+    await using server = sessionServer;
+
+    // a session opened while a listen is held, as a client over HTTP logs in: its session timer alone
+    open(first);
+    listen(first, true);
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    expect(delaysOn(clock)).toEqual([1_000]);
+
+    // a message, and a session opened anew, each restart the session timer alone
+    clock.tick(200);
+    ask(first, { procedure: unknown });
+    ask(first, { procedure: openSession });
+    await sleep(0);
+
+    const { lastActivity } = server.sessions.get(first) ?? {};
+
+    clock.tick(400);
+
+    expect([delaysOn(clock), closed]).toEqual([[1_000], []]);
+
+    // the listen's end starts the connection timer from it, and leaves the session timer and the
+    // session's activity to the messages: a listen is no message
+    listen(first, false);
+
+    expect(duesOn(clock)).toEqual([100, 600]);
+    expect(server.sessions.get(first)?.lastActivity).toBe(lastActivity);
+
+    clock.tick(99);
+
+    expect(closed).toEqual([]);
+
+    clock.tick(1);
+
+    expect(closed).toEqual([first]);
+
+    clock.tick(499);
+
+    expect(server.sessions.has(first)).toBe(true);
+
+    clock.tick(1);
+
+    expect(server.sessions.has(first)).toBe(false);
+  });
+
+  test('a session’s session timeout ends its session while a listen is held: its subscription’s failure goes out, and the connection stays held', async () => {
+    const clock = createTestClock();
+    const {
+      ask,
+      closed,
+      listen,
+      sent,
+      server: sessionServer,
+    } = createSessionServer(
+      { connectionInactivityTimeout: 100, sessionInactivityTimeout: 30 },
+      { clock, connectionInactivityTimeout: 60 }
+    );
+    const news: IProcedure = { ...echo, procedureId: 5, procedureName: 'news' };
+
+    await using server = sessionServer;
+
+    server.services.getNotificationResolver(news, {
+      beforeRequest: server.requireSession,
+      serializer: { ...text, encodeNotification: text.encode },
+    })((_request, response) => {
+      return response('');
+    });
+    ask(first, { procedure: openSession });
+    ask(first, { opensSubscription: true, procedure: news });
+    await sleep(0);
+    listen(first, true);
+
+    expect(delaysOn(clock)).toEqual([30]);
+
+    clock.tick(30);
+    await sleep(0);
+
+    // over HTTP, the failure is what the listen held brings back
+    expect(
+      sent.slice(-1).map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.header, envelope.failure.code]
+          : envelope;
+      })
+    ).toEqual([
+      [
+        { callId: 3, credential: { scheme: CredentialScheme.NONE }, kind: EnvelopeKind.FAILURE },
+        ProtocolCode.SESSION_REQUIRED,
+      ],
+    ]);
+    expect([server.sessions.has(first), delaysOn(clock), closed]).toEqual([false, [], []]);
+
+    // the listen's end: the server's own timeout, the session gone
+    listen(first, false);
+
+    expect(delaysOn(clock)).toEqual([60]);
   });
 
   test('a session stored once its connection closed goes at once, and a new connection of that handle has none', async () => {
@@ -572,7 +819,7 @@ test.describe('createServer', () => {
 
     open(first);
 
-    expect(server.requireSession({ connectionHandle: first })).toBe(false);
+    expect(server.sessions.has(first)).toBe(false);
   });
 
   test('a close that finds the connection gone already takes its session all the same', async () => {
@@ -610,15 +857,15 @@ test.describe('createServer', () => {
 
       return close(connectionHandle);
     };
-    transport.send = (data, connectionHandle) => {
-      const envelope = readEnvelope(bytesOf(data), {
+    transport.send = (message, connectionHandle) => {
+      const envelope = readEnvelope(bytesOf(message.data), {
         failures: CLIENT_FAILURES,
         maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
       });
 
       order.push(envelope?.kind === EnvelopeKind.CANCEL ? 'cancel' : 'other');
 
-      return send(data, connectionHandle);
+      return send(message, connectionHandle);
     };
 
     await using server = createServer({ transport }, { closeOnCommandTimeout: true });
@@ -678,7 +925,7 @@ test.describe('createServer', () => {
       connectionInactivityTimeout: 30,
       sessionInactivityTimeout: Infinity,
     });
-    const errors: [Error, string][] = [];
+    const errors: [Error, string | undefined][] = [];
 
     await using server = sessionServer;
 
@@ -785,11 +1032,12 @@ test.describe('createServer', () => {
       'created',
       'deleted',
       'sessionInactivityTimeoutReached',
+      'updated',
     ]);
     expect(inner.getAll()).toEqual([]);
   });
 
-  test('relays as its options say, its own admission and timeout kept, requireSession where it gives none', async () => {
+  test('relays as its options say, its own admission and timeout kept, requireSessionOrCredential where it gives none', async () => {
     const beforeRoute = () => {
       return true;
     };
@@ -813,7 +1061,7 @@ test.describe('createServer', () => {
 
     expect(relays).toEqual([
       { beforeRoute, timeout: 250 },
-      { beforeRoute: timed.requireSession, timeout: 250 },
+      { beforeRoute: timed.requireSessionOrCredential, timeout: 250 },
     ]);
     expect(server.router.destinations()).toEqual([]);
   });
@@ -825,23 +1073,67 @@ test.describe('createServer', () => {
       return createServer({ transport }, { limits: { chunkBytes: 63 } });
     }).toThrow(ProgrammerError);
     expect(
-      (['close', 'connection', 'message'] as const).map((event) => {
+      (['close', 'connection', 'listen', 'message'] as const).map((event) => {
         return emitter.listenerCount(event);
       })
-    ).toEqual([0, 0, 0]);
+    ).toEqual([0, 0, 0, 0]);
   });
 
-  test('a negative inactivity timeout refuses the server, which leaves nothing on its transport', () => {
+  test("runs every layer on its transport's clock: the sessions are built with it, and a layer on another is refused, leaving nothing on its transport", async () => {
+    const clock = createTestClock();
     const { emitter, transport } = createScriptedTransport();
+    const clocked = { ...transport, clock };
+    const given: unknown[] = [];
 
-    expect(() => {
-      return createServer({ transport }, { connectionInactivityTimeout: -2_000 });
-    }).toThrow(ProgrammerError);
-    expect(
-      (['close', 'connection', 'message'] as const).map((event) => {
-        return emitter.listenerCount(event);
-      })
-    ).toEqual([0, 0, 0]);
+    await using server = createServer({
+      sessions: (options) => {
+        given.push(options.clock);
+
+        return createSessionManager(options);
+      },
+      transport: clocked,
+    });
+
+    expect([given, server.router.clock, server.sessions.clock]).toEqual([[clock], clock, clock]);
+
+    for (const [refused, message] of [
+      [
+        () => {
+          return createServer({ transport: clocked }, { clock: createTestClock() });
+        },
+        'a server runs on the clock of its transport, one of its own, and was given another, one of its own',
+      ],
+      [
+        () => {
+          return createServer({
+            sessions: () => {
+              return createSessionManager();
+            },
+            transport: clocked,
+          });
+        },
+        "a server's session manager runs on the clock of its server, one of its own, and was given another, the platform's",
+      ],
+      [
+        () => {
+          return createServer(
+            {
+              router: (below, options) => {
+                return createRouterServer(below, { ...options, clock: undefined });
+              },
+              transport: { ...transport },
+            },
+            { clock }
+          );
+        },
+        "a server's router runs on the clock of its server, one of its own, and was given another, the platform's",
+      ],
+    ] as const) {
+      expect(refused).toThrow(new ProgrammerError(message));
+    }
+
+    // the server built on it is the one listening: the refused ones let go
+    expect(emitter.listenerCount('message')).toBe(2);
   });
 
   test('dispose stops the timer of a connection with no session: nothing is closed after it', async () => {
@@ -871,10 +1163,10 @@ test.describe('createServer', () => {
     expect(server.sessions.has(first)).toBe(false);
     expect(control.stops).toBe(1);
     expect(
-      (['close', 'connection', 'message'] as const).map((event) => {
+      (['close', 'connection', 'listen', 'message'] as const).map((event) => {
         return emitter.listenerCount(event);
       })
-    ).toEqual([0, 0, 0]);
+    ).toEqual([0, 0, 0, 0]);
   });
 
   test.describe('gauges and health', () => {
@@ -884,7 +1176,12 @@ test.describe('createServer', () => {
       open(first);
 
       // no session yet: idle, until its timeout closes it
-      expect(server.gauges().server.counts).toEqual({ closing: 0, connections: 1, idle: 1 });
+      expect(server.gauges().server.counts).toEqual({
+        closing: 0,
+        connections: 1,
+        idle: 1,
+        listening: 0,
+      });
 
       ask(first, { procedure: openSession });
       await expect
@@ -899,7 +1196,7 @@ test.describe('createServer', () => {
         {
           anomalies: [],
           ceilings: {},
-          counts: { closing: 0, connections: 1, idle: 0 },
+          counts: { closing: 0, connections: 1, idle: 0, listening: 0 },
           orphans: 0,
         },
         { anomalies: [], ceilings: {}, counts: { sessions: 1, timedConnections: 1 }, orphans: 0 },
@@ -910,7 +1207,12 @@ test.describe('createServer', () => {
 
       emitter.emit('close', true, first);
 
-      expect(server.gauges().server.counts).toEqual({ closing: 0, connections: 0, idle: 0 });
+      expect(server.gauges().server.counts).toEqual({
+        closing: 0,
+        connections: 0,
+        idle: 0,
+        listening: 0,
+      });
       expect(server.gauges().sessions.counts).toEqual({ sessions: 0, timedConnections: 0 });
       expect(server.health().status).toBe('pass');
       await server[Symbol.asyncDispose]();

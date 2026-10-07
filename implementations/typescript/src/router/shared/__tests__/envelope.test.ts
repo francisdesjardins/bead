@@ -51,6 +51,9 @@ const envelopeOf = ({ failure, header, kind, payload }: IEnvelopeVector): Envelo
 
 // definition
 
+// the vectors play once, as the C# side plays them: a retry would hide what fails there
+test.describe.configure({ retries: 0 });
+
 test.describe('readEnvelope and writeEnvelope', () => {
   for (const { bytes, envelope, name } of VECTORS.envelopes) {
     test(`read ${name}, and write it back`, () => {
@@ -184,7 +187,7 @@ test.describe('readEnvelope and writeEnvelope', () => {
 
     expect(
       describe({
-        failure: { code: 19, detail: 'd', hops: 0, scope: 0 },
+        failure: { code: 19, detail: 'd', relays: 0, scope: 0 },
         header: { callId: 1, kind: 0x12 },
         kind: 0x12,
       })
@@ -268,21 +271,21 @@ test.describe('writeFailure', () => {
   });
 
   test('writes the relays a failure crossed, from 0 to 255, and refuses any other count', () => {
-    for (const hops of [0, 1, 255]) {
-      const record = writeFailure({ code: 19, hops, scope: FailureScope.PROTOCOL });
+    for (const relays of [0, 1, 255]) {
+      const record = writeFailure({ code: 19, relays, scope: FailureScope.PROTOCOL });
 
-      expect(record[2], String(hops)).toBe(hops);
-      expect(readFailure(record, { failures: SERVER_FAILURES }).hops).toBe(hops);
+      expect(record[2], String(relays)).toBe(relays);
+      expect(readFailure(record, { failures: SERVER_FAILURES }).relays).toBe(relays);
     }
 
     expect(writeFailure({ code: 19, scope: FailureScope.PROTOCOL })[2]).toBe(0);
 
-    for (const hops of [256, -1, 1.5, Number.NaN]) {
+    for (const relays of [256, -1, 1.5, Number.NaN]) {
       expect(() => {
-        return writeFailure({ code: 19, hops, scope: FailureScope.PROTOCOL });
-      }, String(hops)).toThrow(
+        return writeFailure({ code: 19, relays, scope: FailureScope.PROTOCOL });
+      }, String(relays)).toThrow(
         new ProgrammerError(
-          `a failure crossed an integer from 0 to 255 relays, not ${String(hops)}`
+          `a failure crossed an integer from 0 to 255 relays, not ${String(relays)}`
         )
       );
     }

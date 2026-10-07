@@ -3,17 +3,20 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import { assertHeld } from '../../transport/shared/clock';
 import { ProgrammerError, reasonMessage, toError } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { IGauges } from '../../transport/shared/types';
 import { admissionOf, isAdmissionFailure } from '../shared/admission';
-import { EnvelopeKind, FailureScope, ProtocolCode, TIMEOUT_MAX } from '../shared/constants';
+import { CredentialScheme, EnvelopeKind, FailureScope, ProtocolCode } from '../shared/constants';
 import { FailureError } from '../shared/errors';
 import { headerBytesOf } from '../shared/header';
 import { drawDestinationId } from '../shared/identifiers';
+import { audiencesOf, readJwt } from '../shared/jwt-verifier';
 import type {
   AdmissionFailure,
+  Credential,
   DestinationId,
   IAdmissionRequest,
   IFailure,
@@ -23,6 +26,7 @@ import type {
   IRequestResolverProps,
   IRouterFailures,
   IRouterLimits,
+  RequestCredential,
   RouterAnswer,
 } from '../shared/types';
 import type {
@@ -37,16 +41,32 @@ import type {
 
 // interfaces
 
-/** A destination registered: its target, how long leg B waits, whether its connection closed. */
+/**
+ * A destination registered: its target, the audience it verifies, how long leg B waits, whether its
+ * connection closed.
+ */
 interface IRegistration extends IDestination {
+  /** The audience a `JWT` names for it (RFC 8707); none takes no `JWT` and no `ELSEWHERE`. */
+  audience: string | undefined;
   /** For a connection of the relay's own: set once it closed, whoever takes its handle next. */
   isClosed: boolean;
   target: RelayTarget;
   timeout: number;
 }
 
+/** What a leg B's transport carries beside a request: a credential, and whether in the clear. */
+interface ICarriage {
+  carriesCredential: boolean;
+  isSecure: boolean;
+}
+
 /** What a server router relays by: its destinations, and the handler of each request to one. */
 export interface IRelay {
+  /**
+   * The audiences its destinations were registered with, each once: those a `JWT` is verified
+   * against by a relay that verifies.
+   */
+  audiences(): string[];
   /**
    * Marks the destinations on a connection of the relay's own that closed: each is unreachable
    * until the application unregisters it and registers it anew, so a newcomer under the same
@@ -74,35 +94,42 @@ export interface IRelay {
 
 type Handle = TransportServerConnectionHandle;
 
-// constants
-
-// a request's header on leg B: no block, since it names no destination and presents no session
-const REQUEST_HEADER_BYTES = headerBytesOf({
-  callId: 1,
-  kind: EnvelopeKind.REQUEST,
-  procedureId: 1,
-  serviceId: 1,
-});
-
 // helpers
 
 const isConnectionTarget = (target: RelayTarget): target is IConnectionTarget => {
   return 'connectionHandle' in target;
 };
 
-/** Whether `timeout` is one a timer holds, or none at all. */
-const isTimeout = (timeout: number): boolean => {
-  return (
-    timeout === Infinity || (Number.isFinite(timeout) && timeout > 0 && timeout <= TIMEOUT_MAX)
-  );
+/**
+ * What leg B presents of what leg A does (spec 14.2): a `JWT`, its same bytes; an `ELSEWHERE`, its
+ * scheme, its credential beside it; none for none or `OPAQUE`, which run in leg B's session.
+ */
+const forwardedOf = (credential: Credential | undefined): Credential | undefined => {
+  return credential?.scheme === CredentialScheme.JWT ||
+    credential?.scheme === CredentialScheme.ELSEWHERE
+    ? credential
+    : undefined;
 };
 
-const assertTimeout = (timeout: number): void => {
-  if (!isTimeout(timeout)) {
-    throw new ProgrammerError(
-      `a relay's timeout is above 0 and ${String(TIMEOUT_MAX)} milliseconds at most, or none, not ${String(timeout)}`
-    );
-  }
+/**
+ * A request's header on leg B, counted with its credential, call by call (spec 14.3, step 6): no
+ * destination, and the credential leg A presents, when leg B presents it.
+ */
+const legHeaderBytesOf = (credential: Credential | undefined): number => {
+  const forwarded = forwardedOf(credential);
+
+  return headerBytesOf({
+    callId: 1,
+    kind: EnvelopeKind.REQUEST,
+    procedureId: 1,
+    serviceId: 1,
+    ...(forwarded === undefined ? {} : { credential: forwarded }),
+  });
+};
+
+// the relay's timeout, or a destination's, held: never 0, and `Infinity` without end
+const heldTimeoutOf = (timeout: number): number => {
+  return assertHeld("a relay's timeout", timeout);
 };
 
 // definition
@@ -114,16 +141,21 @@ const assertTimeout = (timeout: number): void => {
  * id, limits and session — and passes on the payload's bytes, undecoded, and the answer: a failure
  * of the target's counted one relay more; one of its own with none.
  *
- * A request is asked `beforeRoute` on its header first, then its destination is looked up, then it
- * is held to the smaller of the two legs' limits: every refusal falls on the opening, before any of
- * its payload crosses, and a requester not admitted learns only whether any destination is
- * registered. When leg B fails, leg A hears how far the request went: `DESTINATION_UNREACHABLE`
+ * A request is asked `beforeRoute` on its header first, its credential resolved before — a `JWT`,
+ * and an `ELSEWHERE` its transport carried, forwarded unresolved unless the relay `verifies` them —
+ * then its destination is looked up, then its credential is held to what leg B carries, then it is
+ * held to the smaller of the two legs' limits, leg B's header counted with its credential: every
+ * refusal falls on the opening, before any of its payload crosses, and a requester presenting none
+ * or `OPAQUE`, not admitted, learns only whether any destination is registered. Leg B presents what
+ * leg A does (spec 14.2): none for none or `OPAQUE`, a `JWT`'s same bytes, an `ELSEWHERE` with what
+ * leg A's transport carried. When leg B fails, leg A hears how far the request went: `DESTINATION_UNREACHABLE`
  * while the relay's transport never had it, or refused it, so nothing was tried, and
  * `DESTINATION_LOST` once it was handed to that transport, the procedure run or not. What leg B
  * failed with is reported, not passed on: leg A hears no address behind the relay. A cancel on
  * leg A — or its connection gone — cancels leg B.
  */
 export const createRelay = ({
+  carriageOf,
   failures,
   isTwoWay,
   limits,
@@ -132,6 +164,11 @@ export const createRelay = ({
   request,
   respond,
 }: {
+  /**
+   * What a connection of the relay's own carries beside a request of the relay's: a credential, and
+   * whether off the machine in the clear; neither, without it.
+   */
+  carriageOf?: ((connectionHandle: Handle) => ICarriage) | undefined;
   failures: IRouterFailures;
   /** Whether a connection of the relay's own takes a request of the relay's: HTTP's does not. */
   isTwoWay?: ((connectionHandle: Handle) => boolean) | undefined;
@@ -148,7 +185,7 @@ export const createRelay = ({
     target: { connectionHandle: Handle; header: IRequestHeader }
   ) => Promise<void>;
 }): IRelay => {
-  const { beforeRoute, timeout: relayTimeout = Infinity } = options ?? {};
+  const { beforeRoute, timeout: givenTimeout = Infinity, verifies = false } = options ?? {};
   const registrations = new Map<DestinationId, IRegistration>();
 
   if (beforeRoute?.refusal !== undefined && !isAdmissionFailure(beforeRoute.refusal, failures)) {
@@ -157,7 +194,7 @@ export const createRelay = ({
     );
   }
 
-  assertTimeout(relayTimeout);
+  const relayTimeout = heldTimeoutOf(givenTimeout);
 
   // without a `beforeRoute`, the relay admits nobody: it is a door to what is behind it
   const admission =
@@ -171,15 +208,16 @@ export const createRelay = ({
       : admissionOf(beforeRoute, failures);
 
   // the largest payload a target takes, and answers: its router's limit, or what one of its
-  // envelopes holds when it takes no transfer; the relay's own where that one is smaller
-  const payloadLimitOf = (target: RelayTarget): number => {
+  // envelopes holds behind leg B's header, with the credential it presents, when it takes no
+  // transfer; the relay's own where that one is smaller
+  const payloadLimitOf = (target: RelayTarget, credential?: Credential): number => {
     const { chunkBytes, maximumEnvelopeBytes, maximumPayloadBytes, maximumTransfers } =
       isConnectionTarget(target) ? limits : target.limits;
     const limit =
       maximumTransfers === 0
         ? Math.min(
             maximumPayloadBytes,
-            Math.min(chunkBytes, maximumEnvelopeBytes) - REQUEST_HEADER_BYTES
+            Math.min(chunkBytes, maximumEnvelopeBytes) - legHeaderBytesOf(credential)
           )
         : maximumPayloadBytes;
 
@@ -191,6 +229,65 @@ export const createRelay = ({
       ...failures.destinationUnreachable,
       detail: `destination ${String(destinationId)} is unreachable: ${why}`,
     };
+  };
+
+  // what leg B's transport carries: a connection's, as the relay's transport says; a router's, as
+  // the transport it calls through says
+  const carriageOfTarget = (target: RelayTarget): ICarriage => {
+    if (isConnectionTarget(target)) {
+      return carriageOf?.(target.connectionHandle) ?? { carriesCredential: false, isSecure: false };
+    }
+
+    return {
+      carriesCredential: target.transport?.carriesCredential === true,
+      isSecure: target.transport?.isSecure === true,
+    };
+  };
+
+  // a call leg B cannot carry, its credential holding or not, as section 14.3's step 5 lists them
+  const uncarriedOf = (
+    { credential }: IRequestHeader,
+    { audience, destinationId, target }: IRegistration
+  ): IFailure | undefined => {
+    if (credential?.scheme === CredentialScheme.JWT && 'token' in credential) {
+      // read as a token's aud is read, verified or not: a token that does not read names none
+      const claims = readJwt(credential.token)?.claims;
+
+      if (audience === undefined || !audiencesOf(claims?.['aud']).includes(audience)) {
+        return unreachableOf(destinationId, "it verifies no audience the JWT's aud names");
+      }
+    } else if (credential?.scheme === CredentialScheme.ELSEWHERE) {
+      if (audience === undefined) {
+        return unreachableOf(destinationId, 'it verifies no audience, which ELSEWHERE crosses to');
+      }
+
+      if (!carriageOfTarget(target).carriesCredential) {
+        return unreachableOf(destinationId, 'its transport carries no credential beside a request');
+      }
+    } else {
+      return undefined;
+    }
+
+    return carriageOfTarget(target).isSecure
+      ? undefined
+      : unreachableOf(destinationId, 'its transport leaves the machine in the clear');
+  };
+
+  // what leg B presents: a JWT, as leg A does; an ELSEWHERE, with what leg A's transport carried;
+  // none, said so, for none or OPAQUE, whatever a router it calls through presents by default
+  const legCredentialOf = ({
+    header,
+    transportCredential,
+  }: IRequestResolverProps<Handle>): RequestCredential => {
+    const { credential } = header;
+
+    if (credential?.scheme === CredentialScheme.JWT && 'token' in credential) {
+      return { scheme: CredentialScheme.JWT, token: credential.token };
+    }
+
+    return credential?.scheme === CredentialScheme.ELSEWHERE && transportCredential !== undefined
+      ? { carried: transportCredential, scheme: CredentialScheme.ELSEWHERE }
+      : { scheme: CredentialScheme.NONE };
   };
 
   // what leg A answers when leg B fails: the target's failure, one relay more; before the relay's
@@ -205,9 +302,9 @@ export const createRelay = ({
     }: { connectionHandle: Handle; destinationId: DestinationId; isSent: boolean }
   ): IFailure => {
     if (reason instanceof FailureError && reason.origin !== 'local') {
-      const { code, detail, hops, scope } = reason;
+      const { code, detail, relays, scope } = reason;
 
-      return { code, detail, hops: Math.min(hops + 1, 0xff), scope };
+      return { code, detail, relays: Math.min(relays + 1, 0xff), scope };
     }
 
     if (!isSent && reason instanceof FailureError && reason.scope === FailureScope.PROTOCOL) {
@@ -239,11 +336,13 @@ export const createRelay = ({
   // `undefined` once leg A ended
   const answerOf = async (
     { destinationId, target, timeout }: IRegistration,
-    { connectionHandle, header, payload, signal }: IRequestResolverProps<Handle>
+    props: IRequestResolverProps<Handle>
   ): Promise<RouterAnswer | undefined> => {
+    const { connectionHandle, header, payload, signal } = props;
     const { procedureId, serviceId } = header;
+    const credential = legCredentialOf(props);
     const procedure: IProcedure = {
-      maximumPayloadBytes: payloadLimitOf(target),
+      maximumPayloadBytes: payloadLimitOf(target, header.credential),
       procedureId,
       procedureName: `${String(serviceId)}/${String(procedureId)} to ${String(destinationId)}`,
       serviceId,
@@ -259,12 +358,13 @@ export const createRelay = ({
         },
         procedure,
       };
+      const asked = { credential, signal, timeout };
       const { payload: result } = await (isConnectionTarget(target)
         ? request(payload, {
             ...leg,
-            options: { connectionHandle: target.connectionHandle, signal, timeout },
+            options: { ...asked, connectionHandle: target.connectionHandle },
           })
-        : target.request(payload, { ...leg, options: { signal, timeout } }));
+        : target.request(payload, { ...leg, options: asked }));
 
       return { payload: result };
     } catch (reason) {
@@ -278,14 +378,33 @@ export const createRelay = ({
     }
   };
 
-  // leg B, then leg A's answer; a connection that closed while the payload came takes nothing
+  // a payload past what leg B takes behind its header, with the credential it presents
+  const tooLargeOf = (
+    length: number,
+    { header, registration }: { header: IRequestHeader; registration: IRegistration }
+  ): IFailure | undefined => {
+    const limit = payloadLimitOf(registration.target, header.credential);
+
+    return length > limit
+      ? {
+          ...failures.payloadTooLarge,
+          detail: `a payload is ${String(limit)} bytes at most, not ${String(length)}`,
+        }
+      : undefined;
+  };
+
+  // leg B, then leg A's answer; a connection that closed while the payload came takes nothing, and
+  // a payload that came whole past what leg B takes behind its header goes nowhere
   const forward = async (
     registration: IRegistration,
     props: IRequestResolverProps<Handle>
   ): Promise<void> => {
+    const tooLarge = tooLargeOf(props.payload.length, { header: props.header, registration });
     const answer = registration.isClosed
       ? { failure: unreachableOf(registration.destinationId, 'its connection closed') }
-      : await answerOf(registration, props);
+      : tooLarge === undefined
+        ? await answerOf(registration, props)
+        : { failure: tooLarge };
 
     if (answer === undefined) {
       return;
@@ -308,9 +427,12 @@ export const createRelay = ({
   };
 
   const register = (target: RelayTarget, options?: IDestinationOptions) => {
-    const { destinationId: given, label, timeout = Infinity } = options ?? {};
+    const { audience, destinationId: given, label } = options ?? {};
+    const timeout = heldTimeoutOf(options?.timeout ?? Infinity);
 
-    assertTimeout(timeout);
+    if (audience !== undefined && (typeof audience !== 'string' || !audience.isWellFormed())) {
+      throw new ProgrammerError('an audience is a string of well-formed Unicode');
+    }
 
     if (given !== undefined && (!Number.isInteger(given) || given < 1 || given > 0xffffffff)) {
       throw new ProgrammerError(
@@ -329,6 +451,7 @@ export const createRelay = ({
       });
     // the relay's timeout is the longest any leg B waits: a destination's own stays under it
     const registration: IRegistration = {
+      audience,
       destinationId,
       isClosed: false,
       label,
@@ -351,6 +474,20 @@ export const createRelay = ({
   };
 
   return {
+    audiences: () => {
+      return [
+        ...new Set(
+          registrations
+            .values()
+            .map(({ audience }) => {
+              return audience;
+            })
+            .filter((audience) => {
+              return audience !== undefined;
+            })
+        ),
+      ];
+    },
     closeConnection: (connectionHandle) => {
       for (const registration of registrations.values()) {
         if (
@@ -400,12 +537,13 @@ export const createRelay = ({
           (props: IRequestResolverProps<Handle>) => {
             return respond({ failure: refusalOf(props) }, props);
           },
-          { admit: refusalOf }
+          { admit: refusalOf, forwardsCredentials: !verifies }
         );
       }
 
       // what refuses an admitted request to this destination: nothing, for one that goes on
-      const refusalOfRoute = ({ opensSubscription }: IRequestHeader): IFailure | undefined => {
+      const refusalOfRoute = (header: IRequestHeader): IFailure | undefined => {
+        const { opensSubscription, total } = header;
         const { target } = registration;
 
         if (opensSubscription === true) {
@@ -423,7 +561,11 @@ export const createRelay = ({
           return unreachableOf(destinationId, 'its connection carries no request');
         }
 
-        return undefined;
+        // a transfer's total is held before any credit; a payload that came whole, as it comes
+        return (
+          uncarriedOf(header, registration) ??
+          (total === undefined ? undefined : tooLargeOf(total, { header, registration }))
+        );
       };
 
       const admit = (admissionRequest: IAdmissionRequest<Handle>): IFailure | undefined => {
@@ -438,7 +580,11 @@ export const createRelay = ({
             ? forward(registration, props)
             : respond({ failure: refusal }, props);
         },
-        { admit, maximumPayloadBytes: payloadLimitOf(registration.target) }
+        {
+          admit,
+          forwardsCredentials: !verifies,
+          maximumPayloadBytes: payloadLimitOf(registration.target),
+        }
       );
     },
     register,

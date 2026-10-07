@@ -1,0 +1,314 @@
+{
+  "$schema": "schemas/clocks.schema.json",
+  "$comment": [
+    "Bead's clock cases: what every side's test clock does when a case advances it, so that advance means one thing in every conformance file (decision 0011). A side plays them on the test clock its harnesses give the side under test, with nothing else running on it.",
+    "arm arms a timer now, named timer, due in due milliseconds, every period after that when given; its callback notes its firing and its monotonic reading, then arms then, when given, counted from that reading.",
+    "advance steps the clock: it settles the side, takes the earliest timer due within its milliseconds, sets both readings to that due, fires it, settles, and so on; then it sets both readings to the advance's end. A callback reads its own due; timers due at once fire in the order they were armed; and a periodic timer fires once for each period crossed, each at its own due, armed again as it is taken, before its callback runs, so it fires after every timer armed before it fired and before any its callback arms.",
+    "A timer is due in whole milliseconds, a fraction dropped, from 1 to 2147483647 (2³¹ − 1), and repeats every as many: a test clock refuses a timer for less than a millisecond or past that ceiling, and an advance within another, as Bead arms none.",
+    "fired is the list of the timers that fired since the case began or since the last fired, in their order, each with the monotonic reading its callback read, in milliseconds since the case began.",
+    "wall moves the wall clock alone, forward or back, in milliseconds, and moves no timer. readings checks the monotonic reading, in milliseconds since the case began, and the wall one, an RFC 3339 instant in UTC.",
+    "wallClock is where the wall clock starts."
+  ],
+  "specVersion": "0.2.0",
+  "wallClock": "2026-01-01T00:00:00Z",
+  "cases": [
+    {
+      "name": "a timer fires at its due, and its callback reads it",
+      "steps": [
+        {
+          "arm": {
+            "timer": "a",
+            "due": 1000
+          }
+        },
+        {
+          "advance": 3000
+        },
+        {
+          "fired": [
+            {
+              "timer": "a",
+              "at": 1000
+            }
+          ]
+        },
+        {
+          "readings": {
+            "monotonic": 3000
+          }
+        }
+      ]
+    },
+    {
+      "name": "two timers chained in one advance each fire at their own due",
+      "steps": [
+        {
+          "arm": {
+            "timer": "a",
+            "due": 1000,
+            "then": {
+              "timer": "b",
+              "due": 1000
+            }
+          }
+        },
+        {
+          "advance": 3000
+        },
+        {
+          "fired": [
+            {
+              "timer": "a",
+              "at": 1000
+            },
+            {
+              "timer": "b",
+              "at": 2000
+            }
+          ]
+        },
+        {
+          "readings": {
+            "monotonic": 3000
+          }
+        }
+      ]
+    },
+    {
+      "name": "a periodic timer fires once for each period crossed, each at its own due",
+      "steps": [
+        {
+          "arm": {
+            "timer": "p",
+            "due": 1000,
+            "period": 1000
+          }
+        },
+        {
+          "advance": 3500
+        },
+        {
+          "fired": [
+            {
+              "timer": "p",
+              "at": 1000
+            },
+            {
+              "timer": "p",
+              "at": 2000
+            },
+            {
+              "timer": "p",
+              "at": 3000
+            }
+          ]
+        },
+        {
+          "readings": {
+            "monotonic": 3500
+          }
+        }
+      ]
+    },
+    {
+      "name": "timers due at once fire in the order they were armed",
+      "steps": [
+        {
+          "arm": {
+            "timer": "a",
+            "due": 1000
+          }
+        },
+        {
+          "arm": {
+            "timer": "b",
+            "due": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "fired": [
+            {
+              "timer": "a",
+              "at": 1000
+            },
+            {
+              "timer": "b",
+              "at": 1000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a periodic timer is armed again as it is taken: it fires after the timers armed before it fired",
+      "steps": [
+        {
+          "arm": {
+            "timer": "p",
+            "due": 1000,
+            "period": 1000
+          }
+        },
+        {
+          "arm": {
+            "timer": "a",
+            "due": 2000
+          }
+        },
+        {
+          "advance": 2000
+        },
+        {
+          "fired": [
+            {
+              "timer": "p",
+              "at": 1000
+            },
+            {
+              "timer": "a",
+              "at": 2000
+            },
+            {
+              "timer": "p",
+              "at": 2000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a periodic timer is armed again before its callback runs: it fires before the timers its callback arms",
+      "steps": [
+        {
+          "arm": {
+            "timer": "p",
+            "due": 1000,
+            "period": 1000,
+            "then": {
+              "timer": "q",
+              "due": 1000
+            }
+          }
+        },
+        {
+          "advance": 2000
+        },
+        {
+          "fired": [
+            {
+              "timer": "p",
+              "at": 1000
+            },
+            {
+              "timer": "p",
+              "at": 2000
+            },
+            {
+              "timer": "q",
+              "at": 2000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a timer due past an advance waits for the next one",
+      "steps": [
+        {
+          "arm": {
+            "timer": "a",
+            "due": 2000
+          }
+        },
+        {
+          "advance": 1999
+        },
+        {
+          "fired": []
+        },
+        {
+          "advance": 1
+        },
+        {
+          "fired": [
+            {
+              "timer": "a",
+              "at": 2000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the wall clock starts where the file says, and moves with the monotonic one",
+      "steps": [
+        {
+          "readings": {
+            "monotonic": 0,
+            "wall": "2026-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "advance": 1500
+        },
+        {
+          "readings": {
+            "monotonic": 1500,
+            "wall": "2026-01-01T00:00:01.500Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "the wall clock moves alone, back or forward, and moves no timer",
+      "steps": [
+        {
+          "arm": {
+            "timer": "a",
+            "due": 1000
+          }
+        },
+        {
+          "wall": -3600000
+        },
+        {
+          "readings": {
+            "monotonic": 0,
+            "wall": "2025-12-31T23:00:00.000Z"
+          }
+        },
+        {
+          "wall": 7200000
+        },
+        {
+          "readings": {
+            "monotonic": 0,
+            "wall": "2026-01-01T01:00:00.000Z"
+          }
+        },
+        {
+          "fired": []
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "fired": [
+            {
+              "timer": "a",
+              "at": 1000
+            }
+          ]
+        },
+        {
+          "readings": {
+            "wall": "2026-01-01T01:00:01.000Z"
+          }
+        }
+      ]
+    }
+  ]
+}

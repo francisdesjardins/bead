@@ -34,7 +34,8 @@ public sealed class TransferTests
         })];
     }
 
-    // a transfer received, failing the test when it does not open; its chunks carry a byte at least
+    // a transfer received, failing the test when it does not open; its chunks before the last carry
+    // a byte, exactly, unless the options say more
     private static IncomingTransfer IncomingOf(
         ReadOnlyMemory<byte> opening,
         (long Total, int PayloadBytesPerChunk, int WindowBytes, int MaximumChunkRuns) options)
@@ -69,11 +70,21 @@ public sealed class TransferTests
         Assert.Equal(1_048_560, Transfer.ChunkPayloadBytes(limits, ChunkHeaderBytes));
         Assert.Equal(1_008, Transfer.ChunkPayloadBytes(limits with { ChunkBytes = 1_024 }, ChunkHeaderBytes));
 
-        // an opening: a request, with and without a destination, and an answer with its session
-        int[] openings = [20, 24, 32];
+        // an opening: a request, without and with a destination, and a result announcing a session
+        IEnvelopeHeader[] openingHeaders =
+        [
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, Total = 0 },
+            new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1, DestinationId = 1, Total = 0 },
+            new ResultHeader { CallId = 2, Total = 0, Credential = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw") },
+        ];
+        var openings = openingHeaders.Select((header) =>
+        {
+            return EnvelopeCodec.HeaderBytesOf(header);
+        }).ToArray();
 
+        Assert.Equal([20, 24, 36], openings);
         Assert.Equal(
-            [1_048_556, 1_048_552, 1_048_544],
+            [1_048_556, 1_048_552, 1_048_540],
             openings.Select((bytes) =>
             {
                 return Transfer.ChunkPayloadBytes(limits, bytes);
@@ -198,21 +209,28 @@ public sealed class TransferTests
     }
 
     [Fact]
-    public void Refuses_an_opening_that_holds_its_whole_total_and_takes_one_without_a_byte()
+    public void Refuses_an_opening_that_holds_its_whole_total_and_one_without_a_byte_of_its_payload()
     {
-        var (refused, refusal) = IncomingTransfer.Open(PatternOf(4), (new RouterLimits { MaximumChunkRuns = 4, WindowBytes = 8 }, 1, 4));
-        var empty = IncomingOf(ReadOnlyMemory<byte>.Empty, 4);
+        var limits = new RouterLimits { MaximumChunkRuns = 4, WindowBytes = 8 };
+        var (whole, wholeRefusal) = IncomingTransfer.Open(PatternOf(4), (limits, 1, 4));
+        var (empty, emptyRefusal) = IncomingTransfer.Open(ReadOnlyMemory<byte>.Empty, (limits, 1, 4));
+        var one = IncomingOf(PatternOf(1), 4);
 
-        Assert.Null(refused);
-        Assert.Equal((ushort)ProtocolCode.ChunkInvalid, refusal!.Code);
-        Assert.Equal(FailureScope.Protocol, refusal.Scope);
-        Assert.Equal((0L, 0L, 4L), (empty.Contiguous, empty.CreditEnd, empty.Total));
+        Assert.Null(whole);
+        Assert.Null(empty);
+        Assert.Equal(
+            [((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol), ((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol)],
+            new[] { wholeRefusal!, emptyRefusal! }.Select((refusal) =>
+            {
+                return (refusal.Code, refusal.Scope);
+            }));
+        Assert.Equal((1L, 1L, 4L), (one.Contiguous, one.CreditEnd, one.Total));
     }
 
     [Fact]
     public void Checks_a_chunk_in_order_its_bounds_its_bytes_its_last_then_its_credit_then_whether_it_came()
     {
-        var incoming = IncomingOf(PatternOf(2), 10);
+        var incoming = IncomingOf(PatternOf(2), (10, 2, 8, 1_024));
 
         // past the total, even without credit, then without a byte, then with a last that lies
         Assert.Equal(ProtocolCode.ChunkInvalid, CodeOf(incoming.Place(PatternOf(3), (true, 10))));
@@ -255,12 +273,12 @@ public sealed class TransferTests
     [Fact]
     public void Refuses_a_chunk_before_the_last_that_is_not_full_and_one_over_bytes_received_in_part()
     {
-        var whole = PatternOf(20);
-        var incoming = IncomingOf(whole.AsMemory(0, 4), (20, 4, 40, 1_024));
+        var whole = PatternOf(19);
+        var incoming = IncomingOf(whole.AsMemory(0, 4), (19, 4, 40, 1_024));
 
         object Place(int offset, int length)
         {
-            return CodeOf(incoming.Place(whole.AsMemory(offset, length), (offset + length == 20, offset)));
+            return CodeOf(incoming.Place(whole.AsMemory(offset, length), (offset + length == 19, offset)));
         }
 
         incoming.CreditToGrant(Unbounded);
@@ -292,10 +310,39 @@ public sealed class TransferTests
                 Place(0, 4),
 
                 // the last carries what is left, however little
-                Place(17, 3),
+                Place(16, 3),
                 Place(4, 4),
-                Place(12, 5),
+                Place(12, 4),
             });
+        Assert.Equal(whole, incoming.Payload().ToArray());
+    }
+
+    [Fact]
+    public void Refuses_a_chunk_past_full_before_the_last_or_the_last_CHUNK_INVALID_and_places_a_full_one_and_a_last_one_full_at_most()
+    {
+        var whole = PatternOf(16);
+        var incoming = IncomingOf(whole.AsMemory(0, 4), (16, 4, 40, 1_024));
+
+        Assert.Equal(16, incoming.CreditToGrant(Unbounded));
+
+        // a byte past full, before the last and as the last: no CHUNK's envelope passes chunkBytes
+        var (_, before) = incoming.Place(PatternOf(5), (false, 4));
+        var (_, last) = incoming.Place(PatternOf(5), (true, 11));
+
+        Assert.Equal(
+            [
+                (ProtocolCode.ChunkInvalid, "a chunk before the last carries 4 bytes, not 5"),
+                (ProtocolCode.ChunkInvalid, "a last chunk carries 4 bytes at most, not 5"),
+            ],
+            new[] { before!, last! }.Select((refusal) =>
+            {
+                return ((ProtocolCode)refusal.Code, refusal.Detail);
+            }));
+
+        // full, then the last, full at most
+        Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(whole.AsMemory(4, 4), (false, 4))));
+        Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(whole.AsMemory(8, 4), (false, 8))));
+        Assert.Equal(ChunkOutcome.Complete, CodeOf(incoming.Place(whole.AsMemory(12, 4), (true, 12))));
         Assert.Equal(whole, incoming.Payload().ToArray());
     }
 
@@ -314,19 +361,28 @@ public sealed class TransferTests
     [Fact]
     public void Grants_a_window_past_the_bytes_received_once_half_of_it_can_go_the_rest_at_the_end()
     {
-        var incoming = IncomingOf(PatternOf(4), (22, 1, 8, 1_024));
+        var incoming = IncomingOf(PatternOf(4), (22, 2, 8, 1_024));
 
         Assert.Equal(12, incoming.CreditToGrant(Unbounded));
 
         // nothing received since: nothing more to grant
         Assert.Null(incoming.CreditToGrant(Unbounded));
-        Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(3), (false, 4))));
+        Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(2), (false, 4))));
 
-        // 7 received: 15 would grant 3 more, less than half a window
+        // 6 received: 14 would grant 2 more, less than half a window
         Assert.Null(incoming.CreditToGrant(Unbounded));
-        Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(5), (false, 7))));
+
+        foreach (var offset in new[] { 6, 8, 10 })
+        {
+            Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(2), (false, offset))));
+        }
+
         Assert.Equal(20, incoming.CreditToGrant(Unbounded));
-        Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(8), (false, 12))));
+
+        foreach (var offset in new[] { 12, 14, 16, 18 })
+        {
+            Assert.Equal(ChunkOutcome.Placed, CodeOf(incoming.Place(PatternOf(2), (false, offset))));
+        }
 
         // 2 bytes are left, less than half a window: granted all the same
         Assert.Equal(22, incoming.CreditToGrant(Unbounded));

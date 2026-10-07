@@ -1,0 +1,1517 @@
+{
+  "$schema": "schemas/codecs.schema.json",
+  "$comment": [
+    "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0018), which every implementation's harness plays through its side's codecs.",
+    "payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.",
+    "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, the bound of 17.9.3 set in the call as generated code sets it. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; and nested, how many messages nest below it through child. A harness checks those three and nothing else, since protobuf fixes no message's bytes whole.",
+    "values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.",
+    "json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file.",
+    "double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity.",
+    "number: a JSON number's text, parsed as JSON: a double on the TypeScript side, its digits as they are written on the C# side, which its writer reads to the double nearest them.",
+    "text: a string, given to a text writer. bytes: bytes in hexadecimal, given to a raw writer.",
+    "form: a value no JSON text holds. loneSurrogate is the string a, U+D800, b, which the C# side gives a json writer as a JsonElement of the bytes of its escape, and a text writer as a string; loneSurrogateName, an object whose one member is named so, its value 1; nameTwice, an object of two members both named a, 1 then 2, which the C# side parses with JsonElement.Parse's defaults and the TypeScript side cannot hold; undefined, JavaScript's undefined on the TypeScript side, default(JsonElement), of kind Undefined, on the C# side.",
+    "nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th.",
+    "probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; or child, set to the empty message, {}.",
+    "A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message and nested past 100 of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side's.",
+    "differs names the row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
+    "clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7."
+  ],
+  "specVersion": "0.2.0",
+  "payloads": [
+    {
+      "name": "a string outside ASCII, written as it is",
+      "encoding": "json",
+      "clauses": [
+        "17.7.3",
+        "17.7.7"
+      ],
+      "bytes": "22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22",
+      "written": "22 4A 6F 73 C3 A9 20 61 2B 62 20 3C 78 3E 22"
+    },
+    {
+      "name": "escapes read, written as the canonical form writes them",
+      "encoding": "json",
+      "clauses": [
+        "17.7.3"
+      ],
+      "bytes": "22 5C 75 30 30 65 39 5C 2F 22",
+      "written": "22 C3 A9 2F 22"
+    },
+    {
+      "name": "control characters: five as short escapes, the others in lower-case hexadecimal",
+      "encoding": "json",
+      "clauses": [
+        "17.7.3"
+      ],
+      "bytes": "22 5C 75 30 30 30 38 5C 75 30 30 30 39 5C 75 30 30 30 41 5C 75 30 30 30 43 5C 75 30 30 30 44 5C 75 30 30 30 42 5C 75 30 30 31 46 5C 22 5C 5C 22",
+      "written": "22 5C 62 5C 74 5C 6E 5C 66 5C 72 5C 75 30 30 30 62 5C 75 30 30 31 66 5C 22 5C 5C 22"
+    },
+    {
+      "name": "U+007F, U+2028, U+2029 and U+FEFF within a string, written as they are",
+      "encoding": "json",
+      "clauses": [
+        "17.7.3"
+      ],
+      "bytes": "22 5C 75 30 30 37 46 5C 75 32 30 32 38 5C 75 32 30 32 39 5C 75 46 45 46 46 22",
+      "written": "22 7F E2 80 A8 E2 80 A9 EF BB BF 22"
+    },
+    {
+      "name": "a pair of surrogates escaped, written as its character",
+      "encoding": "json",
+      "clauses": [
+        "17.7.3",
+        "17.7.7"
+      ],
+      "bytes": "22 5C 75 44 38 33 44 5C 75 44 45 30 30 22",
+      "written": "22 F0 9F 98 80 22"
+    },
+    {
+      "name": "a noncharacter escaped, taken",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "22 5C 75 46 46 46 46 22",
+      "written": "22 EF BF BF 22"
+    },
+    {
+      "name": "a noncharacter in UTF-8, taken",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "22 EF BF BF 22",
+      "written": "22 EF BF BF 22"
+    },
+    {
+      "name": "1.0 is 1",
+      "encoding": "json",
+      "clauses": [
+        "17.6",
+        "17.7.4"
+      ],
+      "bytes": "31 2E 30",
+      "written": "31"
+    },
+    {
+      "name": "1E2 is 100",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "bytes": "31 45 32",
+      "written": "31 30 30"
+    },
+    {
+      "name": "-0 is 0",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "bytes": "2D 30",
+      "written": "30"
+    },
+    {
+      "name": "1e21 in exponent form",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "bytes": "31 65 32 31",
+      "written": "31 65 2B 32 31"
+    },
+    {
+      "name": "1e20 in full",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "bytes": "31 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30",
+      "written": "31 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30"
+    },
+    {
+      "name": "1e-7 in exponent form",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "bytes": "30 2E 30 30 30 30 30 30 31",
+      "written": "31 65 2D 37"
+    },
+    {
+      "name": "0.000001 in full",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "bytes": "31 65 2D 36",
+      "written": "30 2E 30 30 30 30 30 31"
+    },
+    {
+      "name": "an integer past 2^53 rounded to its double",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30",
+      "written": "31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 30 30 30"
+    },
+    {
+      "name": "2^53 + 1 rounded to 2^53",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "39 30 30 37 31 39 39 32 35 34 37 34 30 39 39 33",
+      "written": "39 30 30 37 31 39 39 32 35 34 37 34 30 39 39 32"
+    },
+    {
+      "name": "a number under the smallest double reads as 0",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "31 65 2D 34 30 30",
+      "written": "30"
+    },
+    {
+      "name": "a negative number under the smallest double reads as 0",
+      "encoding": "json",
+      "clauses": [
+        "17.6",
+        "17.7.4"
+      ],
+      "bytes": "2D 31 65 2D 34 30 30",
+      "written": "30"
+    },
+    {
+      "name": "a number just under half the smallest double reads as 0",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "32 2E 34 37 30 33 32 38 32 32 39 32 30 36 32 33 32 37 65 2D 33 32 34",
+      "written": "30"
+    },
+    {
+      "name": "a number just over half the smallest double reads as the smallest",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "32 2E 34 37 30 33 32 38 32 32 39 32 30 36 32 33 32 38 65 2D 33 32 34",
+      "written": "35 65 2D 33 32 34"
+    },
+    {
+      "name": "more digits than a double holds, rounded",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "33 2E 31 34 31 35 39 32 36 35 33 35 38 39 37 39 33 32 33 38 34 36 32 36 34 33 33 38 33 32 37 39",
+      "written": "33 2E 31 34 31 35 39 32 36 35 33 35 38 39 37 39 33"
+    },
+    {
+      "name": "a tie between two doubles, read to the even",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "31 2E 30 35 33 38 30 35 32 36 36 32 38 35 33 32 39 38 34 37 35 36 32 32 31 36 39 34 35 37 36 38 35 38 37 38 32 39 39 36 32 31 35 37 35 30 36 34 33 39 35 35 38 38 36 31 30 37 33 30 38 39 36 32 37 30 35 31 35 36 39 32 32 32 38 32 33 31 33 39 38 37 36 31 36 37 33 31 33 39 36 33 37 37 39 30 37 30 36 33 36 39 33 32 38 31 35 32 33 35 39 30 33 35 36 33 33 37 34 38 38 34 37 35 38 37 35 39 33 30 35 35 30 37 31 30 34 32 32 31 33 33 30 33 35 32 37 36 31 38 31 30 38 33 38 36 38 39 33 35 34 30 30 38 37 31 32 32 31 37 39 38 39 39 38 36 37 33 35 36 38 37 34 36 36 38 39 32 39 31 30 35 35 38 31 31 33 38 32 31 35 31 38 35 39 35 31 32 39 39 36 35 39 38 37 30 39 35 39 30 33 31 35 34 39 39 30 39 39 33 39 39 37 37 35 30 39 39 36 31 32 30 30 30 35 36 35 39 30 36 35 38 36 39 30 32 34 36 35 31 39 34 34 38 33 38 37 38 31 32 34 37 33 32 33 32 35 30 35 30 38 33 30 39 36 38 39 31 30 34 35 37 39 34 36 30 35 35 39 38 31 32 35 39 38 36 36 33 35 39 39 30 30 33 39 39 33 36 34 39 37 34 39 37 36 32 33 37 31 37 30 37 35 33 32 35 39 39 32 36 30 33 35 31 30 37 36 33 38 39 36 33 31 36 31 31 36 38 34 34 36 38 31 35 31 33 39 32 34 36 31 31 31 35 34 32 39 31 37 39 30 31 34 31 31 38 35 30 33 33 35 31 31 33 36 33 36 37 39 32 36 31 35 33 38 30 32 38 30 32 30 35 30 36 33 34 39 35 30 35 30 31 34 37 37 37 34 37 37 39 33 37 36 30 38 31 35 39 33 32 34 30 30 31 31 31 34 39 39 35 39 36 32 36 37 36 32 39 31 35 31 30 32 37 35 37 39 35 37 34 30 39 31 38 35 31 30 30 31 38 33 33 35 38 30 39 32 34 37 31 34 32 37 31 39 36 30 37 33 35 35 36 34 33 37 38 31 37 32 33 33 33 37 39 35 32 31 38 31 31 34 38 32 33 30 38 30 33 30 39 36 38 36 32 36 30 30 38 38 32 39 37 31 35 33 37 32 35 39 38 30 34 39 37 36 32 39 37 39 33 30 31 33 30 33 39 31 34 39 33 36 34 39 32 32 38 30 33 39 33 37 32 34 33 39 30 30 30 30 36 31 38 35 34 39 35 30 31 36 30 35 38 30 38 35 37 30 32 31 36 37 32 33 34 36 38 34 30 33 30 30 36 31 30 30 34 35 38 36 30 35 35 35 33 31 34 35 35 30 39 31 35 37 39 34 38 33 39 39 31 31 34 33 34 31 36 31 35 39 34 39 39 31 38 31 34 34 32 31 36 37 37 34 35 32 32 33 35 34 32 32 34 33 33 35 31 31 39 34 39 36 38 35 35 30 32 31 34 39 33 36 30 31 31 36 31 38 38 34 39 36 38 34 36 30 35 32 32 39 39 39 34 33 33 31 30 30 33 38 34 32 37 30 30 32 33 33 39 37 34 34 38 33 31 32 36 30 37 35 39 33 38 33 34 34 30 30 31 37 37 30 30 31 39 35 33 31 32 35 65 2D 33 30 38",
+      "written": "31 2E 30 35 33 38 30 35 32 36 36 32 38 35 33 32 39 36 65 2D 33 30 38"
+    },
+    {
+      "name": "a digit past a tie, read to the neighbour above",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "31 2E 30 35 33 38 30 35 32 36 36 32 38 35 33 32 39 38 34 37 35 36 32 32 31 36 39 34 35 37 36 38 35 38 37 38 32 39 39 36 32 31 35 37 35 30 36 34 33 39 35 35 38 38 36 31 30 37 33 30 38 39 36 32 37 30 35 31 35 36 39 32 32 32 38 32 33 31 33 39 38 37 36 31 36 37 33 31 33 39 36 33 37 37 39 30 37 30 36 33 36 39 33 32 38 31 35 32 33 35 39 30 33 35 36 33 33 37 34 38 38 34 37 35 38 37 35 39 33 30 35 35 30 37 31 30 34 32 32 31 33 33 30 33 35 32 37 36 31 38 31 30 38 33 38 36 38 39 33 35 34 30 30 38 37 31 32 32 31 37 39 38 39 39 38 36 37 33 35 36 38 37 34 36 36 38 39 32 39 31 30 35 35 38 31 31 33 38 32 31 35 31 38 35 39 35 31 32 39 39 36 35 39 38 37 30 39 35 39 30 33 31 35 34 39 39 30 39 39 33 39 39 37 37 35 30 39 39 36 31 32 30 30 30 35 36 35 39 30 36 35 38 36 39 30 32 34 36 35 31 39 34 34 38 33 38 37 38 31 32 34 37 33 32 33 32 35 30 35 30 38 33 30 39 36 38 39 31 30 34 35 37 39 34 36 30 35 35 39 38 31 32 35 39 38 36 36 33 35 39 39 30 30 33 39 39 33 36 34 39 37 34 39 37 36 32 33 37 31 37 30 37 35 33 32 35 39 39 32 36 30 33 35 31 30 37 36 33 38 39 36 33 31 36 31 31 36 38 34 34 36 38 31 35 31 33 39 32 34 36 31 31 31 35 34 32 39 31 37 39 30 31 34 31 31 38 35 30 33 33 35 31 31 33 36 33 36 37 39 32 36 31 35 33 38 30 32 38 30 32 30 35 30 36 33 34 39 35 30 35 30 31 34 37 37 37 34 37 37 39 33 37 36 30 38 31 35 39 33 32 34 30 30 31 31 31 34 39 39 35 39 36 32 36 37 36 32 39 31 35 31 30 32 37 35 37 39 35 37 34 30 39 31 38 35 31 30 30 31 38 33 33 35 38 30 39 32 34 37 31 34 32 37 31 39 36 30 37 33 35 35 36 34 33 37 38 31 37 32 33 33 33 37 39 35 32 31 38 31 31 34 38 32 33 30 38 30 33 30 39 36 38 36 32 36 30 30 38 38 32 39 37 31 35 33 37 32 35 39 38 30 34 39 37 36 32 39 37 39 33 30 31 33 30 33 39 31 34 39 33 36 34 39 32 32 38 30 33 39 33 37 32 34 33 39 30 30 30 30 36 31 38 35 34 39 35 30 31 36 30 35 38 30 38 35 37 30 32 31 36 37 32 33 34 36 38 34 30 33 30 30 36 31 30 30 34 35 38 36 30 35 35 35 33 31 34 35 35 30 39 31 35 37 39 34 38 33 39 39 31 31 34 33 34 31 36 31 35 39 34 39 39 31 38 31 34 34 32 31 36 37 37 34 35 32 32 33 35 34 32 32 34 33 33 35 31 31 39 34 39 36 38 35 35 30 32 31 34 39 33 36 30 31 31 36 31 38 38 34 39 36 38 34 36 30 35 32 32 39 39 39 34 33 33 31 30 30 33 38 34 32 37 30 30 32 33 33 39 37 34 34 38 33 31 32 36 30 37 35 39 33 38 33 34 34 30 30 31 37 37 30 30 31 39 35 33 31 32 35 30 30 30 31 65 2D 33 30 38",
+      "written": "31 2E 30 35 33 38 30 35 32 36 36 32 38 35 33 33 65 2D 33 30 38"
+    },
+    {
+      "name": "members sorted",
+      "encoding": "json",
+      "clauses": [
+        "17.7.6"
+      ],
+      "bytes": "7B 22 62 22 3A 31 2C 22 61 22 3A 32 7D",
+      "written": "7B 22 61 22 3A 32 2C 22 62 22 3A 31 7D"
+    },
+    {
+      "name": "members sorted by their UTF-16 code units, RFC 8785's example",
+      "encoding": "json",
+      "clauses": [
+        "17.7.6"
+      ],
+      "bytes": "7B 22 5C 75 32 30 61 63 22 3A 30 2C 22 5C 72 22 3A 31 2C 22 5C 75 66 62 33 33 22 3A 32 2C 22 31 22 3A 33 2C 22 5C 75 64 38 33 64 5C 75 64 65 30 30 22 3A 34 2C 22 5C 75 30 30 38 30 22 3A 35 2C 22 5C 75 30 30 66 36 22 3A 36 7D",
+      "written": "7B 22 5C 72 22 3A 31 2C 22 31 22 3A 33 2C 22 C2 80 22 3A 35 2C 22 C3 B6 22 3A 36 2C 22 E2 82 AC 22 3A 30 2C 22 F0 9F 98 80 22 3A 34 2C 22 EF AC B3 22 3A 32 7D"
+    },
+    {
+      "name": "names an ECMAScript object holds first, sorted as any other",
+      "encoding": "json",
+      "clauses": [
+        "17.7.6"
+      ],
+      "bytes": "7B 22 62 22 3A 31 2C 22 31 30 22 3A 32 2C 22 39 22 3A 33 7D",
+      "written": "7B 22 31 30 22 3A 32 2C 22 39 22 3A 33 2C 22 62 22 3A 31 7D"
+    },
+    {
+      "name": "a member named __proto__, written as any other",
+      "encoding": "json",
+      "clauses": [
+        "17.7.6"
+      ],
+      "bytes": "7B 22 5F 5F 70 72 6F 74 6F 5F 5F 22 3A 7B 22 61 22 3A 31 7D 2C 22 62 22 3A 32 7D",
+      "written": "7B 22 5F 5F 70 72 6F 74 6F 5F 5F 22 3A 7B 22 61 22 3A 31 7D 2C 22 62 22 3A 32 7D"
+    },
+    {
+      "name": "members sorted within an array, its elements in their order",
+      "encoding": "json",
+      "clauses": [
+        "17.7.5",
+        "17.7.6"
+      ],
+      "bytes": "5B 7B 22 62 22 3A 31 2C 22 61 22 3A 32 7D 2C 5B 33 2C 31 5D 5D",
+      "written": "5B 7B 22 61 22 3A 32 2C 22 62 22 3A 31 7D 2C 5B 33 2C 31 5D 5D"
+    },
+    {
+      "name": "white space between tokens dropped",
+      "encoding": "json",
+      "clauses": [
+        "17.7.1"
+      ],
+      "bytes": "5B 20 31 20 2C 20 32 20 5D",
+      "written": "5B 31 2C 32 5D"
+    },
+    {
+      "name": "white space of each kind dropped",
+      "encoding": "json",
+      "clauses": [
+        "17.7.1"
+      ],
+      "bytes": "20 5B 20 31 20 2C 09 32 20 2C 0D 0A 33 20 5D 20",
+      "written": "5B 31 2C 32 2C 33 5D"
+    },
+    {
+      "name": "literals",
+      "encoding": "json",
+      "clauses": [
+        "17.7.2"
+      ],
+      "bytes": "5B 74 72 75 65 2C 66 61 6C 73 65 2C 6E 75 6C 6C 5D",
+      "written": "5B 74 72 75 65 2C 66 61 6C 73 65 2C 6E 75 6C 6C 5D"
+    },
+    {
+      "name": "empty containers",
+      "encoding": "json",
+      "clauses": [
+        "17.7.5",
+        "17.7.6"
+      ],
+      "bytes": "5B 7B 7D 2C 5B 5D 5D",
+      "written": "5B 7B 7D 2C 5B 5D 5D"
+    },
+    {
+      "name": "a string alone",
+      "encoding": "json",
+      "clauses": [
+        "17.5"
+      ],
+      "bytes": "22 78 22",
+      "written": "22 78 22"
+    },
+    {
+      "name": "64 arrays nested",
+      "encoding": "json",
+      "clauses": [
+        "17.5.7"
+      ],
+      "bytes": "5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D",
+      "written": "5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D"
+    },
+    {
+      "name": "64 objects nested",
+      "encoding": "json",
+      "clauses": [
+        "17.5.7"
+      ],
+      "bytes": "7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D",
+      "written": "7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D"
+    },
+    {
+      "name": "a canonical payload, written back to its bytes",
+      "encoding": "json",
+      "clauses": [
+        "17.8"
+      ],
+      "bytes": "7B 22 61 22 3A 31 2C 22 62 22 3A 22 4A 6F 73 C3 A9 22 7D",
+      "written": "7B 22 61 22 3A 31 2C 22 62 22 3A 22 4A 6F 73 C3 A9 22 7D"
+    },
+    {
+      "name": "section 17.8's example",
+      "encoding": "json",
+      "clauses": [
+        "17.8"
+      ],
+      "bytes": "7B 20 22 62 22 20 3A 20 22 4A 6F 73 5C 75 30 30 65 39 22 2C 20 22 61 22 20 3A 20 31 2E 30 20 7D",
+      "written": "7B 22 61 22 3A 31 2C 22 62 22 3A 22 4A 6F 73 C3 A9 22 7D"
+    },
+    {
+      "name": "empty",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a byte that is no JSON",
+      "encoding": "json",
+      "clauses": [
+        "17.5.1"
+      ],
+      "bytes": "FF",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "a byte not UTF-8 within a string",
+      "encoding": "json",
+      "clauses": [
+        "17.5.1"
+      ],
+      "bytes": "22 FF 22",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "a surrogate's code point in UTF-8",
+      "encoding": "json",
+      "clauses": [
+        "17.5.1"
+      ],
+      "bytes": "22 ED A0 80 22",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "an overlong form",
+      "encoding": "json",
+      "clauses": [
+        "17.5.1"
+      ],
+      "bytes": "22 C0 80 22",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "a byte order mark",
+      "encoding": "json",
+      "clauses": [
+        "17.5.2"
+      ],
+      "bytes": "EF BB BF 31",
+      "refused": "a byte order mark"
+    },
+    {
+      "name": "a name twice",
+      "encoding": "json",
+      "clauses": [
+        "17.5.4"
+      ],
+      "bytes": "7B 22 61 22 3A 31 2C 22 61 22 3A 32 7D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a name twice, one of them escaped",
+      "encoding": "json",
+      "clauses": [
+        "17.5.4"
+      ],
+      "bytes": "7B 22 61 22 3A 31 2C 22 5C 75 30 30 36 31 22 3A 32 7D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a name twice, nested",
+      "encoding": "json",
+      "clauses": [
+        "17.5.4"
+      ],
+      "bytes": "5B 7B 22 61 22 3A 31 7D 2C 7B 22 62 22 3A 7B 22 63 22 3A 31 2C 22 63 22 3A 31 7D 7D 5D",
+      "refused": "a name twice"
+    },
+    {
+      "name": "a surrogate alone, escaped",
+      "encoding": "json",
+      "clauses": [
+        "17.5.5"
+      ],
+      "bytes": "22 5C 75 44 38 30 30 22",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a surrogate alone, escaped in a name",
+      "encoding": "json",
+      "clauses": [
+        "17.5.5"
+      ],
+      "bytes": "7B 22 5C 75 44 43 30 30 22 3A 31 7D",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "two surrogates in the wrong order",
+      "encoding": "json",
+      "clauses": [
+        "17.5.5"
+      ],
+      "bytes": "22 5C 75 44 43 30 30 5C 75 44 38 30 30 22",
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a number past the largest double",
+      "encoding": "json",
+      "clauses": [
+        "17.5.6"
+      ],
+      "bytes": "31 45 34 30 30",
+      "refused": "a number past a double"
+    },
+    {
+      "name": "a negative number past the largest double",
+      "encoding": "json",
+      "clauses": [
+        "17.5.6"
+      ],
+      "bytes": "2D 31 45 34 30 30",
+      "refused": "a number past a double"
+    },
+    {
+      "name": "65 arrays nested",
+      "encoding": "json",
+      "clauses": [
+        "17.5.7"
+      ],
+      "bytes": "5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D",
+      "refused": "nested past 64"
+    },
+    {
+      "name": "65 objects nested",
+      "encoding": "json",
+      "clauses": [
+        "17.5.7"
+      ],
+      "bytes": "7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 22 61 22 3A 7B 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D 7D",
+      "refused": "nested past 64"
+    },
+    {
+      "name": "a trailing comma",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "5B 31 2C 5D",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a comment",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "5B 31 2F 2A 78 2A 2F 5D",
+      "refused": "not JSON"
+    },
+    {
+      "name": "the word NaN",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "4E 61 4E",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a leading zero",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "30 31",
+      "refused": "not JSON"
+    },
+    {
+      "name": "two values",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "31 20 32",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a no-break space",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "C2 A0 31",
+      "refused": "not JSON"
+    },
+    {
+      "name": "cut short",
+      "encoding": "json",
+      "clauses": [
+        "17.5.3"
+      ],
+      "bytes": "5B 31",
+      "refused": "not JSON"
+    },
+    {
+      "name": "a string outside ASCII",
+      "encoding": "text",
+      "clauses": [
+        "17.4"
+      ],
+      "bytes": "4A 6F 73 C3 A9",
+      "written": "4A 6F 73 C3 A9"
+    },
+    {
+      "name": "an empty string",
+      "encoding": "text",
+      "clauses": [
+        "17.4"
+      ],
+      "bytes": "",
+      "written": ""
+    },
+    {
+      "name": "a leading U+FEFF, kept",
+      "encoding": "text",
+      "clauses": [
+        "17.4.2"
+      ],
+      "bytes": "EF BB BF 31",
+      "written": "EF BB BF 31"
+    },
+    {
+      "name": "a noncharacter",
+      "encoding": "text",
+      "clauses": [
+        "17.4"
+      ],
+      "bytes": "EF BF BF",
+      "written": "EF BF BF"
+    },
+    {
+      "name": "a byte not UTF-8",
+      "encoding": "text",
+      "clauses": [
+        "17.4.1"
+      ],
+      "bytes": "FF",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "a surrogate's code point",
+      "encoding": "text",
+      "clauses": [
+        "17.4.1"
+      ],
+      "bytes": "ED A0 80",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "an overlong form, in a text",
+      "encoding": "text",
+      "clauses": [
+        "17.4.1"
+      ],
+      "bytes": "C0 80",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "a sequence cut short",
+      "encoding": "text",
+      "clauses": [
+        "17.4.1"
+      ],
+      "bytes": "C3",
+      "refused": "not UTF-8"
+    },
+    {
+      "name": "bytes no text holds",
+      "encoding": "raw",
+      "clauses": [
+        "17.3"
+      ],
+      "bytes": "FF 00",
+      "written": "FF 00"
+    },
+    {
+      "name": "no bytes",
+      "encoding": "raw",
+      "clauses": [
+        "17.3"
+      ],
+      "bytes": "",
+      "written": ""
+    },
+    {
+      "name": "a byte order mark, a byte like any other",
+      "encoding": "raw",
+      "clauses": [
+        "17.3"
+      ],
+      "bytes": "EF BB BF",
+      "written": "EF BB BF"
+    },
+    {
+      "name": "an empty payload",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.2"
+      ],
+      "bytes": "",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a string and a number",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "0A 01 61 10 07",
+      "read": {
+        "text": "0061",
+        "number": 7,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a length past the bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A 05 61 62",
+      "refused": "not its message"
+    },
+    {
+      "name": "a varint cut short",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "10 80",
+      "refused": "not its message"
+    },
+    {
+      "name": "a tag alone",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A",
+      "refused": "not its message"
+    },
+    {
+      "name": "a string that is not UTF-8",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A 01 FF",
+      "refused": "not its message"
+    },
+    {
+      "name": "an overlong form in a string",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A 02 C0 AF",
+      "refused": "not its message"
+    },
+    {
+      "name": "a surrogate in UTF-8",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A 03 ED A0 80",
+      "refused": "not its message"
+    },
+    {
+      "name": "a string's leading U+FEFF",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.4"
+      ],
+      "bytes": "0A 04 EF BB BF 61",
+      "read": {
+        "text": "FEFF 0061",
+        "number": 0,
+        "nested": 0
+      },
+      "differs": [
+        {
+          "row": "A string's leading U+FEFF in a proto payload",
+          "language": "TypeScript"
+        }
+      ]
+    },
+    {
+      "name": "U+FEFF after a string's first character",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "0A 04 61 EF BB BF",
+      "read": {
+        "text": "0061 FEFF",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a noncharacter, U+FFFF",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "0A 03 EF BF BF",
+      "read": {
+        "text": "FFFF",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "U+0000",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "0A 01 00",
+      "read": {
+        "text": "0000",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "an unknown field after the known",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "0A 01 61 78 07",
+      "read": {
+        "text": "0061",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "an unknown field before the known",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "78 07 0A 01 61",
+      "read": {
+        "text": "0061",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "an unknown field of each wire type",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "21 01 02 03 04 05 06 07 08 2A 01 7A 35 01 02 03 04",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a number given at its default",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "10 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a scalar given twice",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "10 01 10 02",
+      "read": {
+        "text": "",
+        "number": 2,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a message given twice",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "1A 02 1A 00 1A 02 10 01",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 2
+      }
+    },
+    {
+      "name": "a message field set to the empty message",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "1A 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 1
+      }
+    },
+    {
+      "name": "field number 0",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "00 01",
+      "refused": "not its message"
+    },
+    {
+      "name": "a varint of 10 bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "10 FF FF FF FF FF FF FF FF FF 01",
+      "read": {
+        "text": "",
+        "number": 4294967295,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a varint of 11 bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "10 80 80 80 80 80 80 80 80 80 80 01",
+      "refused": "not its message"
+    },
+    {
+      "name": "an end group no group opened",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "24",
+      "refused": "not its message"
+    },
+    {
+      "name": "an unknown group, closed",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "23 24",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "an unknown group never closed",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "23",
+      "refused": "not its message"
+    },
+    {
+      "name": "99 messages below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 1A 06 1A 04 1A 02 1A 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 99
+      }
+    },
+    {
+      "name": "100 messages below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "1A E9 01 1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 1A 06 1A 04 1A 02 1A 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 100
+      }
+    },
+    {
+      "name": "101 messages below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "1A EC 01 1A E9 01 1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 1A 06 1A 04 1A 02 1A 00",
+      "refused": "nested past 100"
+    }
+  ],
+  "values": [
+    {
+      "name": "zero",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "0000000000000000"
+      },
+      "written": "30"
+    },
+    {
+      "name": "minus zero",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "8000000000000000"
+      },
+      "written": "30"
+    },
+    {
+      "name": "the smallest positive double",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "0000000000000001"
+      },
+      "written": "35 65 2D 33 32 34"
+    },
+    {
+      "name": "the negative double nearest 0",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "8000000000000001"
+      },
+      "written": "2D 35 65 2D 33 32 34"
+    },
+    {
+      "name": "the largest double",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "7fefffffffffffff"
+      },
+      "written": "31 2E 37 39 37 36 39 33 31 33 34 38 36 32 33 31 35 37 65 2B 33 30 38"
+    },
+    {
+      "name": "the most negative double",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "ffefffffffffffff"
+      },
+      "written": "2D 31 2E 37 39 37 36 39 33 31 33 34 38 36 32 33 31 35 37 65 2B 33 30 38"
+    },
+    {
+      "name": "2^53",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "4340000000000000"
+      },
+      "written": "39 30 30 37 31 39 39 32 35 34 37 34 30 39 39 32"
+    },
+    {
+      "name": "-2^53",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "c340000000000000"
+      },
+      "written": "2D 39 30 30 37 31 39 39 32 35 34 37 34 30 39 39 32"
+    },
+    {
+      "name": "about 2^68",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "4430000000000000"
+      },
+      "written": "32 39 35 31 34 37 39 30 35 31 37 39 33 35 32 38 33 30 30 30 30"
+    },
+    {
+      "name": "NaN",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "double": "7fffffffffffffff"
+      },
+      "refused": "not a finite number",
+      "differs": [
+        {
+          "row": "A value a side's type cannot hold",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "Infinity",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "double": "7ff0000000000000"
+      },
+      "refused": "not a finite number",
+      "differs": [
+        {
+          "row": "A value a side's type cannot hold",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "the double below 1e+23",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "44b52d02c7e14af5"
+      },
+      "written": "39 2E 39 39 39 39 39 39 39 39 39 39 39 39 39 39 37 65 2B 32 32"
+    },
+    {
+      "name": "1e+23",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "44b52d02c7e14af6"
+      },
+      "written": "31 65 2B 32 33"
+    },
+    {
+      "name": "the double above 1e+23",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "44b52d02c7e14af7"
+      },
+      "written": "31 2E 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 31 65 2B 32 33"
+    },
+    {
+      "name": "two doubles below 1e+21",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "444b1ae4d6e2ef4e"
+      },
+      "written": "39 39 39 39 39 39 39 39 39 39 39 39 39 39 39 37 30 30 30 30 30"
+    },
+    {
+      "name": "the double below 1e+21",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "444b1ae4d6e2ef4f"
+      },
+      "written": "39 39 39 39 39 39 39 39 39 39 39 39 39 39 39 39 30 30 30 30 30"
+    },
+    {
+      "name": "1e+21",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "444b1ae4d6e2ef50"
+      },
+      "written": "31 65 2B 32 31"
+    },
+    {
+      "name": "the double below 0.000001",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "3eb0c6f7a0b5ed8c"
+      },
+      "written": "39 2E 39 39 39 39 39 39 39 39 39 39 39 39 39 39 37 65 2D 37"
+    },
+    {
+      "name": "0.000001",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "3eb0c6f7a0b5ed8d"
+      },
+      "written": "30 2E 30 30 30 30 30 31"
+    },
+    {
+      "name": "333333333.3333332",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "41b3de4355555553"
+      },
+      "written": "33 33 33 33 33 33 33 33 33 2E 33 33 33 33 33 33 32"
+    },
+    {
+      "name": "333333333.33333325",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "41b3de4355555554"
+      },
+      "written": "33 33 33 33 33 33 33 33 33 2E 33 33 33 33 33 33 32 35"
+    },
+    {
+      "name": "333333333.3333333",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "41b3de4355555555"
+      },
+      "written": "33 33 33 33 33 33 33 33 33 2E 33 33 33 33 33 33 33"
+    },
+    {
+      "name": "333333333.3333334",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "41b3de4355555556"
+      },
+      "written": "33 33 33 33 33 33 33 33 33 2E 33 33 33 33 33 33 34"
+    },
+    {
+      "name": "333333333.33333343",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "41b3de4355555557"
+      },
+      "written": "33 33 33 33 33 33 33 33 33 2E 33 33 33 33 33 33 34 33"
+    },
+    {
+      "name": "-0.0000033333333333333333",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "becbf647612f3696"
+      },
+      "written": "2D 30 2E 30 30 30 30 30 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33"
+    },
+    {
+      "name": "1424953923781206.2, a tie written to the even",
+      "encoding": "json",
+      "clauses": [
+        "17.7.4"
+      ],
+      "value": {
+        "double": "43143ff3c1cb0959"
+      },
+      "written": "31 34 32 34 39 35 33 39 32 33 37 38 31 32 30 36 2E 32"
+    },
+    {
+      "name": "a surrogate alone",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "form": "loneSurrogate"
+      },
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "a surrogate alone in a name",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "form": "loneSurrogateName"
+      },
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "an object naming a member twice",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "form": "nameTwice"
+      },
+      "refused": "a name twice",
+      "differs": [
+        {
+          "row": "A value a side's type cannot hold",
+          "language": "TypeScript"
+        }
+      ]
+    },
+    {
+      "name": "64 arrays nested",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "nested": 64
+      },
+      "written": "5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5B 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D 5D"
+    },
+    {
+      "name": "65 arrays nested",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "nested": 65
+      },
+      "refused": "nested past 64"
+    },
+    {
+      "name": "undefined",
+      "encoding": "json",
+      "clauses": [
+        "17.7"
+      ],
+      "value": {
+        "form": "undefined"
+      },
+      "refused": "no JSON value"
+    },
+    {
+      "name": "names an ECMAScript object holds first, sorted as any other",
+      "encoding": "json",
+      "clauses": [
+        "17.7.6"
+      ],
+      "value": {
+        "json": {
+          "b": 1,
+          "10": 2,
+          "9": 3
+        }
+      },
+      "written": "7B 22 31 30 22 3A 32 2C 22 39 22 3A 33 2C 22 62 22 3A 31 7D"
+    },
+    {
+      "name": "a member named __proto__, written as any other",
+      "encoding": "json",
+      "clauses": [
+        "17.7.6"
+      ],
+      "value": {
+        "json": {
+          "__proto__": {
+            "a": 1
+          },
+          "b": 2
+        }
+      },
+      "written": "7B 22 5F 5F 70 72 6F 74 6F 5F 5F 22 3A 7B 22 61 22 3A 31 7D 2C 22 62 22 3A 32 7D"
+    },
+    {
+      "name": "a tie given as its digits, written as the even neighbour",
+      "encoding": "json",
+      "clauses": [
+        "17.6",
+        "17.7.4"
+      ],
+      "value": {
+        "number": "1.05380526628532984756221694576858782996215750643955886107308962705156922282313987616731396377907063693281523590356337488475875930550710422133035276181083868935400871221798998673568746689291055811382151859512996598709590315499099399775099612000565906586902465194483878124732325050830968910457946055981259866359900399364974976237170753259926035107638963161168446815139246111542917901411850335113636792615380280205063495050147774779376081593240011149959626762915102757957409185100183358092471427196073556437817233379521811482308030968626008829715372598049762979301303914936492280393724390000618549501605808570216723468403006100458605553145509157948399114341615949918144216774522354224335119496855021493601161884968460522999433100384270023397448312607593834400177001953125e-308"
+      },
+      "written": "31 2E 30 35 33 38 30 35 32 36 36 32 38 35 33 32 39 36 65 2D 33 30 38"
+    },
+    {
+      "name": "a string outside ASCII",
+      "encoding": "text",
+      "clauses": [
+        "17.4"
+      ],
+      "value": {
+        "text": "José"
+      },
+      "written": "4A 6F 73 C3 A9"
+    },
+    {
+      "name": "a surrogate alone in a text",
+      "encoding": "text",
+      "clauses": [
+        "17.4.3"
+      ],
+      "value": {
+        "form": "loneSurrogate"
+      },
+      "refused": "a surrogate alone"
+    },
+    {
+      "name": "bytes no text holds",
+      "encoding": "raw",
+      "clauses": [
+        "17.3"
+      ],
+      "value": {
+        "bytes": "FF 00"
+      },
+      "written": "FF 00"
+    },
+    {
+      "name": "text set to a",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "value": {
+        "probe": {
+          "text": "0061"
+        }
+      },
+      "written": "0A 01 61"
+    },
+    {
+      "name": "number set to 7",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "value": {
+        "probe": {
+          "number": 7
+        }
+      },
+      "written": "10 07"
+    },
+    {
+      "name": "number set to 0, its default",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "value": {
+        "probe": {
+          "number": 0
+        }
+      },
+      "written": ""
+    },
+    {
+      "name": "no field set",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.2"
+      ],
+      "value": {
+        "probe": {}
+      },
+      "written": ""
+    },
+    {
+      "name": "child set to the empty message",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "value": {
+        "probe": {
+          "child": {}
+        }
+      },
+      "written": "1A 00"
+    },
+    {
+      "name": "text set to a leading U+FEFF and a",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.4"
+      ],
+      "value": {
+        "probe": {
+          "text": "FEFF 0061"
+        }
+      },
+      "written": "0A 04 EF BB BF 61"
+    }
+  ]
+}

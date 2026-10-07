@@ -53,9 +53,10 @@ export interface IIncomingTransfer {
   payload(): Uint8Array;
   /**
    * Places a chunk's bytes, checked in this order: within the total, not empty, `isLast` when it
-   * reaches the total and only then, full when it does not — or `chunkInvalid`; within the credit —
-   * or `creditExceeded`; received already, whole — a duplicate; clear of every byte received — or
-   * `chunkInvalid`. Too many runs of bytes apart is `chunkInvalid` too.
+   * reaches the total and only then, full when it does not and full at most when it does — or
+   * `chunkInvalid`; within the credit — or `creditExceeded`; received already, whole — a duplicate;
+   * clear of every byte received — or `chunkInvalid`. Too many runs of bytes apart is `chunkInvalid`
+   * too.
    */
   place(
     bytes: Uint8Array,
@@ -139,8 +140,9 @@ export const createOutgoingTransfer = (
  * A payload as its receiver receives it: `total` bytes, the opening's first, each chunk after placed
  * at its offset, in any order, and joined once whole. Credit is granted a `windowBytes` at a time;
  * `maximumChunkRuns` bounds the runs of bytes apart it holds. A chunk before the last carries
- * `payloadBytesPerChunk` at least, as its sender sends them, and a chunk comes whole again or not at
- * all over bytes received: each piece it holds is a chunk's own bytes, never a sliver of them.
+ * `payloadBytesPerChunk`, exactly, and the last that many at most, as its sender sends them, and a
+ * chunk comes whole again or not at all over bytes received: each piece it holds is a chunk's own
+ * bytes, never a sliver of them.
  */
 export const createIncomingTransfer = (
   opening: Uint8Array,
@@ -167,6 +169,11 @@ export const createIncomingTransfer = (
   const invalid = (detail: string): IProtocolFailure => {
     return { ...failures.chunkInvalid, detail };
   };
+
+  // an opening carries one byte of its payload at least (spec 12.3)
+  if (opening.length === 0) {
+    return invalid('an opening carries one byte of its payload at least, not none');
+  }
 
   // an opening that holds the whole payload opens no transfer
   if (opening.length >= total) {
@@ -264,10 +271,13 @@ export const createIncomingTransfer = (
         );
       }
 
-      // one before the last is full, as its sender sends them, so no small chunk is held
-      if (!isLast && bytes.length < payloadBytesPerChunk) {
+      // ! a chunk before the last is full, exactly, and the last full at most, as its sender sends
+      // them: no small chunk is held, and no CHUNK's envelope passes chunkBytes (spec 12.6.1)
+      if (isLast ? bytes.length > payloadBytesPerChunk : bytes.length !== payloadBytesPerChunk) {
         return invalid(
-          `a chunk before the last carries ${String(payloadBytesPerChunk)} bytes at least, not ${String(bytes.length)}`
+          isLast
+            ? `a last chunk carries ${String(payloadBytesPerChunk)} bytes at most, not ${String(bytes.length)}`
+            : `a chunk before the last carries ${String(payloadBytesPerChunk)} bytes, not ${String(bytes.length)}`
         );
       }
 

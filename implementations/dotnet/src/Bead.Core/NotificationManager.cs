@@ -1,29 +1,65 @@
 namespace Bead;
 
-/// <summary>A call that subscribes: where it is, and whether its request asked it paced.</summary>
+/// <summary>
+/// A call that subscribes: where it is, whether its request asked it paced, and the session it runs
+/// in, which bounds what it subscribes.
+/// </summary>
 /// <param name="CallId">Its call id.</param>
 /// <param name="ConnectionHandle">Its connection.</param>
 /// <param name="Paced">Whether it is paced.</param>
-internal readonly record struct SubscribingCall(uint CallId, string ConnectionHandle, bool Paced);
+internal readonly record struct SubscribingCall(uint CallId, string ConnectionHandle, bool Paced)
+{
+    /// <summary>Its call's session: a credential's, by its identifier, or none for its connection's.</summary>
+    public CallSession? Session { get; init; }
+
+    /// <summary>
+    /// Who it subscribes, the place of its subscription (spec 11.3): its connection, and its session's
+    /// identifier, none for its connection's, which a call presenting none or OPAQUE counts as.
+    /// </summary>
+    public Subscriber Subscriber
+    {
+        get
+        {
+            return new Subscriber { ConnectionHandle = ConnectionHandle, Identifier = Session?.Identifier };
+        }
+    }
+}
 
 /// <summary>One subscription: which procedure, which connection, under which call id.</summary>
 /// <param name="CallId">The call id it travels on.</param>
 /// <param name="ConnectionHandle">Its connection.</param>
 /// <param name="Procedure">The procedure it is to.</param>
-internal readonly record struct Subscription(uint CallId, string ConnectionHandle, ProcedureAddress Procedure);
+internal readonly record struct Subscription(uint CallId, string ConnectionHandle, ProcedureAddress Procedure)
+{
+    /// <summary>The credential's session that bounds it, by its identifier; none for its connection's.</summary>
+    public SessionIdentifier? Session { get; init; }
+}
 
 /// <summary>
 /// Who asked to be notified of which procedure, each subscription under the call id of the request
-/// that made it — two connections may each hold the same one. A subscription whose request asked to
-/// be paced holds its pacing, which goes with it, queue and all, however it goes. Touched on its
-/// router's scheduler alone.
+/// that made it — two connections may each hold the same one, and two sessions of one connection
+/// each their own (spec 11.3). A subscription whose request asked to be paced holds its pacing,
+/// which goes with it, queue and all, however it goes. Touched on its router's scheduler alone.
 /// </summary>
 internal sealed class NotificationManager(PacingLimits limits)
 {
     // in the order they were made, as a JavaScript map keeps them: a session's end fails them, and a
     // notification goes to them, in that order
-    private readonly Dictionary<ProcedureAddress, OrderedDictionary<string, uint>> _candidates = [];
+    private readonly Dictionary<ProcedureAddress, OrderedDictionary<Subscriber, uint>> _candidates = [];
     private readonly Dictionary<string, OrderedDictionary<uint, Target>> _targets = [];
+
+    /// <summary>What hears each subscription as it goes, however it goes.</summary>
+    public Action<Subscription>? OnRemove { get; set; }
+
+    /// <summary>What hears each call as it subscribes, however it came to.</summary>
+    public Action<SubscribingCall>? OnRegister { get; set; }
+
+    /// <summary>
+    /// The series a procedure's notifications count into, asked once as a subscription to it is
+    /// made, so each notification reaches them through the subscription it goes under; none counts
+    /// nothing.
+    /// </summary>
+    public Func<ProcedureAddress, NotifyingSeries?>? SeriesOf { get; set; }
 
     /// <summary>The connections subscribed to <paramref name="procedure"/>, each with its call id; a copy.</summary>
     public List<(string ConnectionHandle, uint CallId)> Candidates(ProcedureAddress procedure)
@@ -31,9 +67,17 @@ internal sealed class NotificationManager(PacingLimits limits)
         return _candidates.TryGetValue(procedure, out var candidates)
             ? [.. candidates.Select((candidate) =>
             {
-                return (candidate.Key, candidate.Value);
+                return (candidate.Key.ConnectionHandle, candidate.Value);
             })]
             : [];
+    }
+
+    /// <summary>The subscription a connection holds under <paramref name="callId"/>; none for none.</summary>
+    public Subscription? SubscriptionAt(uint callId, string connectionHandle)
+    {
+        return _targets.TryGetValue(connectionHandle, out var targets) && targets.TryGetValue(callId, out var target)
+            ? target.Subscription
+            : null;
     }
 
     /// <summary>Forgets every subscription of a connection.</summary>
@@ -107,6 +151,17 @@ internal sealed class NotificationManager(PacingLimits limits)
         return _targets.TryGetValue(connectionHandle, out var targets) && targets.ContainsKey(callId);
     }
 
+    /// <summary>
+    /// The subscription under <paramref name="callId"/>, as a notification goes under it: its pacing,
+    /// when it is paced, and the series it counts into; none of either for none.
+    /// </summary>
+    public (NotificationPacing? Pacing, NotifyingSeries? Series) TargetOf(uint callId, string connectionHandle)
+    {
+        return _targets.TryGetValue(connectionHandle, out var targets) && targets.TryGetValue(callId, out var target)
+            ? (target.Pacing, target.Series)
+            : (null, null);
+    }
+
     /// <summary>The pacing of the subscription under <paramref name="callId"/>, when it is paced.</summary>
     public NotificationPacing? PacingOf(uint callId, string connectionHandle)
     {
@@ -122,10 +177,10 @@ internal sealed class NotificationManager(PacingLimits limits)
     /// </summary>
     public uint Register(ProcedureAddress procedure, SubscribingCall call)
     {
-        if (SubscriptionOf(procedure, call.ConnectionHandle) is { } holder)
+        if (SubscriptionOf(procedure, call.Subscriber) is { } holder)
         {
             throw new InvalidOperationException(
-                $"{call.ConnectionHandle} is subscribed to {procedure.ServiceId}/{procedure.ProcedureId} under call {holder} already");
+                $"{call.ConnectionHandle} is subscribed to {procedure.ServiceId}/{procedure.ProcedureId} under call {holder} already, in that session");
         }
 
         if (Has(call.CallId, call.ConnectionHandle))
@@ -145,20 +200,45 @@ internal sealed class NotificationManager(PacingLimits limits)
             _targets[call.ConnectionHandle] = targets;
         }
 
-        candidates[call.ConnectionHandle] = call.CallId;
+        candidates[call.Subscriber] = call.CallId;
         targets[call.CallId] = new Target(
-            new Subscription(call.CallId, call.ConnectionHandle, procedure),
-            call.Paced ? new NotificationPacing(limits) : null);
+            new Subscription(call.CallId, call.ConnectionHandle, procedure) { Session = call.Session?.Identifier },
+            call.Paced ? new NotificationPacing(limits) : null)
+        {
+            Series = SeriesOf?.Invoke(procedure),
+        };
+        OnRegister?.Invoke(call);
 
         return call.CallId;
     }
 
-    /// <summary>The call id a connection holds its subscription to <paramref name="procedure"/> under.</summary>
+    /// <summary>
+    /// The call id a connection holds its subscription to <paramref name="procedure"/> under, for its
+    /// connection's session.
+    /// </summary>
     public uint? SubscriptionOf(ProcedureAddress procedure, string connectionHandle)
     {
-        return _candidates.TryGetValue(procedure, out var candidates) && candidates.TryGetValue(connectionHandle, out var callId)
+        return SubscriptionOf(procedure, new Subscriber { ConnectionHandle = connectionHandle });
+    }
+
+    /// <summary>The call id a place holds its subscription to <paramref name="procedure"/> under.</summary>
+    public uint? SubscriptionOf(ProcedureAddress procedure, Subscriber place)
+    {
+        return _candidates.TryGetValue(procedure, out var candidates) && candidates.TryGetValue(place, out var callId)
             ? callId
             : null;
+    }
+
+    /// <summary>Every subscription, of every connection.</summary>
+    public List<Subscription> Subscriptions()
+    {
+        return [.. _targets.Values.SelectMany((targets) =>
+        {
+            return targets.Values.Select((target) =>
+            {
+                return target.Subscription;
+            });
+        })];
     }
 
     /// <summary>The subscriptions a connection holds.</summary>
@@ -188,6 +268,7 @@ internal sealed class NotificationManager(PacingLimits limits)
     private void Remove(Target target)
     {
         var (callId, connectionHandle, procedure) = target.Subscription;
+        var place = new Subscriber { ConnectionHandle = connectionHandle, Identifier = target.Subscription.Session };
 
         if (_targets.TryGetValue(connectionHandle, out var targets))
         {
@@ -201,15 +282,21 @@ internal sealed class NotificationManager(PacingLimits limits)
 
         if (_candidates.TryGetValue(procedure, out var candidates))
         {
-            candidates.Remove(connectionHandle);
+            candidates.Remove(place);
 
             if (candidates.Count == 0)
             {
                 _candidates.Remove(procedure);
             }
         }
+
+        OnRemove?.Invoke(target.Subscription);
     }
 
-    // one subscription, and its pacing when its request asked for one
-    private sealed record Target(Subscription Subscription, NotificationPacing? Pacing);
+    // one subscription, its pacing when its request asked for one, and the series its
+    // notifications count into
+    private sealed record Target(Subscription Subscription, NotificationPacing? Pacing)
+    {
+        public NotifyingSeries? Series { get; init; }
+    }
 }

@@ -26,6 +26,9 @@
   // oxc never reads this file on its own: it is not named `.oxlintrc.json`, so it applies only
   // through that file's `extends`.
   "plugins": ["react", "typescript", "unicorn"],
+  // The lint's own rules, `tools/oxlint-plugin.mjs`, under the name `bead`. oxlint calls its JS
+  // plugins alpha, outside semver, so the version they run on is the lockfile's.
+  "jsPlugins": ["./tools/oxlint-plugin.mjs"],
   // Type-aware lives here rather than only on the CLI, because the editor never sees the CLI.
   // Every invocation in this repo already passes `--type-aware`, so this changes nothing for a
   // terminal; what it changes is the language server, which runs the syntax half by default and
@@ -44,16 +47,22 @@
     // No implicit returns — every arrow function uses a block body with an explicit `return`.
     // A concise body hides the return value and makes the arrow awkward to extend.
     "arrow-body-style": ["error", "always"],
-    // Two parameters, and **an options object is one of the two** — `f(a, { b, c })`, never
-    // `f(a, b, { c })`. Deno's rule, and the reason to take it whole rather than as "2 + options"
-    // is that the second form has no stopping point: every parameter added positionally reads as
-    // the last one that could be. So a third thing to say goes in the object, where it is named at
-    // the call site, and the call reads the same whether it passes two of them or six.
+    // At most two parameters, then the options — `findIn(haystack, needle, { fromIndex: 10 })`.
+    // Deno's count ("0-2 required arguments, plus (if necessary) an options object (so max 3
+    // total)") and its rule on optionals: an optional parameter goes in the options, and one alone
+    // may stay positional where no second could come. Bead's own: the rule holds every function,
+    // exported or not; the options object is always last, optional when every member is; a third
+    // essential thing is a design to revisit, never a third positional parameter; and a bag of a
+    // call's essentials is a parameter like any other, where Deno keeps a plain object for the
+    // options alone.
     //
-    // A signature a framework calls is the exception, and the only one: a Playwright fixture and a
-    // Connect middleware are shapes handed to us. Both carry `oxlint-disable-next-line max-params`
-    // and a line saying whose signature it is.
-    "max-params": ["error", 2],
+    // `max-params` counts the parameters written. `bead/options-last` judges what a third may be,
+    // and counts where `max-params` does not read: a rest tuple, a type's signature, an event map. A
+    // callback aliased under a name ending in `Options` passes it, and stays review's. A signature
+    // this package does not own takes what it takes, with `oxlint-disable-next-line max-params` or
+    // `bead/options-last` and whose signature it is.
+    "max-params": ["error", 3],
+    "bead/options-last": "error",
     "no-unused-vars": "off",
     "typescript/no-unused-vars": [
       "error",
@@ -283,6 +292,11 @@
     "**/test-results/**",
     "**/coverage/**",
     "**/*.d.ts",
+    // protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to its
+    // generator
+    "**/*_pb.ts",
+    // the plugin's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
+    "tools/oxlint-plugin.cases.ts",
     ".yarn/**"
   ]
 }

@@ -63,8 +63,10 @@ the test that shows it, and a difference that can close is work to do.
 ## The Tenth Man Rule
 
 For every change that reaches across the languages — an addition to or a change of the protocol, a
-renaming, any behaviour the implementations share, down to the order of a status's values — when
-the others agree, one agent is bound to disagree, at **xhigh** effort. It argues that the consensus is wrong. Each of its
+renaming, any behaviour the implementations share, down to the order of a status's values — and for
+every change to what every language's tests answer to — the spec, its conformance files, their
+shape and their tooling, the gates the implementations share; not CI's mechanics — when the others
+agree, one agent is bound to disagree, at **xhigh** effort. It argues that the consensus is wrong. Each of its
 objections is answered, accepted or refused with its reason, before the user decides. Not ten
 opinions: as many as the change needs, plus the one that dissents.
 
@@ -79,11 +81,23 @@ standard it follows.
 Comments are written in the voice of the code around them. Keep each implementation's inside as it
 is: its own toolchain, lockfile, linter, formatter and test runner, run from its own folder.
 
+**Comment tags**, as the Better Comments extension (`aaron-bond.better-comments`) shows them: a
+comment that a reader must not miss opens with its tag, after its marker (`//`, `#`):
+
+- `!` an alert: a trap, or an invariant that breaks something when changed;
+- `?` an open question;
+- `TODO` work to do beside the code, the plan keeping the larger work;
+- `*` the key point of a block.
+
+Every other comment stays plain, and doc comments (JSDoc, `///`) carry no tag.
+
 **C#** (`implementations/dotnet`, decision 0007):
 
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,
   indexers and lambdas, never an expression body; a block for every branch;
-- at most two parameters to a function;
+- at most two parameters to a function, then at most one options record, always last (`TOptions?
+options = null` when every member is optional, a `CancellationToken` inside it); a third
+  essential thing is a design to revisit, never a third parameter;
 - `TreatWarningsAsErrors`, the analyzers at `latest-recommended`, the code style enforced in the
   build, a doc comment on every public member;
 - `_camelCase` private fields; PascalCase constants and static readonly fields;
@@ -94,7 +108,7 @@ is: its own toolchain, lockfile, linter, formatter and test runner, run from its
 
 - oxlint and oxfmt as configured there, and `yarn check` passes;
 - the author's style: section comments, `I`-prefixed interfaces, block-bodied arrow functions, at
-  most two parameters, frozen objects over `enum`;
+  most two parameters then at most one options object, always last, frozen objects over `enum`;
 - one test file per module, named after it, in a `__tests__/` folder beside it
   (`src/transport/create-promise.ts` → `src/transport/__tests__/create-promise.test.ts`).
 

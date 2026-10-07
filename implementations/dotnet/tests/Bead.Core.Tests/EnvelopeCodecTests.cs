@@ -161,10 +161,10 @@ public sealed class EnvelopeCodecTests
     }
 
     [Fact]
-    public void Writes_the_hops_and_the_scope_of_an_application_failure()
+    public void Writes_the_relays_and_the_scope_of_an_application_failure()
     {
         var record = EnvelopeCodec.WriteFailure(
-            new Failure { Code = 21, Hops = 2, Scope = FailureScope.Application });
+            new Failure { Code = 21, Relays = 2, Scope = FailureScope.Application });
 
         Assert.Equal(Vectors.FromHexadecimal("00 15 02 01"), record);
     }

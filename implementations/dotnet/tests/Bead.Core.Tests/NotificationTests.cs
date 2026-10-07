@@ -524,6 +524,8 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ClientEnd : IRouterClientTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<TransportMessage>? Message;
 
         public event Action<bool, bool>? Close;
@@ -540,8 +542,10 @@ public sealed class NotificationTests : IDisposable
             Close?.Invoke(false, false);
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes)
+        public Task Send(TransportMessage message)
         {
+            var bytes = message.Bytes;
+
             Peer!.Deliver(bytes);
 
             return Task.CompletedTask;
@@ -550,6 +554,8 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ServerEnd : IServerTransport
     {
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;
@@ -583,8 +589,10 @@ public sealed class NotificationTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public Task Send(ReadOnlyMemory<byte> bytes, string connectionHandle)
+        public Task Send(TransportMessage message, string connectionHandle)
         {
+            var bytes = message.Bytes;
+
             Peer!.Deliver(bytes);
 
             return Task.CompletedTask;

@@ -5,6 +5,7 @@ import {
   createSequence,
   drawDestinationId,
   drawSessionToken,
+  isSameSessionToken,
   isSessionToken,
   sideOfCallId,
   toSessionToken,
@@ -164,6 +165,28 @@ test.describe('session tokens', () => {
     expect(() => {
       return toSessionTokenBytes('AAAAAAAAAAAAAAAAAAAAAA' as SessionToken);
     }).toThrow(ProgrammerError);
+  });
+
+  test('are one token only when every byte is: one byte apart, at either end, is another', () => {
+    const bytes = Uint8Array.from({ length: 16 }, (_, index) => {
+      return index * 17;
+    });
+    const held = toSessionToken(bytes);
+
+    expect(isSameSessionToken(toSessionToken(bytes.slice()), held)).toBe(true);
+
+    for (const index of [0, 15]) {
+      const other = bytes.slice();
+
+      other[index] = (other[index] ?? 0) ^ 1;
+
+      expect(isSameSessionToken(toSessionToken(other), held), String(index)).toBe(false);
+    }
+
+    // what is no token, shorter or longer, is none
+    for (const presented of ['', held.slice(0, -1), `${held}A`]) {
+      expect(isSameSessionToken(presented, held), presented).toBe(false);
+    }
   });
 
   test('are drawn distinct, from crypto', () => {

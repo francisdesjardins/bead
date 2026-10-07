@@ -2,9 +2,15 @@
 
 // dependencies
 
+import {
+  assertHeld,
+  type IClock,
+  LONGEST_TIMER,
+  type TimeoutId,
+} from '../../transport/shared/clock';
 import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
-import { CALL_ID_RANGES, RESERVATION_MILLISECONDS, TIMEOUT_MAX } from './constants';
+import { CALL_ID_RANGES, RESERVATION_MILLISECONDS } from './constants';
 import { createSequence } from './identifiers';
 import type { IReceiving } from './receiving-transfers';
 import type { ISending } from './sending-transfers';
@@ -40,7 +46,7 @@ export interface IPendingRequest<Handle extends string = ConnectionHandle> {
   resolve: (result: IRouterResult) => void;
   sending?: ISending<Handle> | undefined;
   timeout: number | undefined;
-  timer?: ReturnType<typeof setTimeout> | undefined;
+  timer?: TimeoutId | undefined;
 }
 
 /** A result that comes in a transfer: the header that opened it, and its transfer. */
@@ -49,10 +55,10 @@ export interface IResultReceiving<Handle extends string> {
   transfer: IReceiving<Handle>;
 }
 
-/** A call id reserved: when it is free again, and what frees it. */
+/** A call id reserved: when it is free again, on its clock's monotonic reading, and what frees it. */
 interface IReservation {
   ends: number;
-  timer: ReturnType<typeof setTimeout>;
+  timer: TimeoutId;
 }
 
 /** The calls one side opened and waits on, and the call ids it reserved, by connection. */
@@ -70,7 +76,7 @@ export interface IPendingCalls<Handle extends string> {
   get(call: ICallAddress<Handle>): IPendingRequest<Handle> | undefined;
   isReserved(callId: CallId, connectionHandle: Handle): boolean;
   /**
-   * Reserves a call id for `timeout`, or for the default time when it is none a timer can hold;
+   * Reserves a call id for `timeout`, held already, or for the default time for none or `Infinity`;
    * reserved twice, the later end stands. Nothing waits on a reservation: it keeps no process alive.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
@@ -85,11 +91,19 @@ export interface IPendingCalls<Handle extends string> {
 
 // helpers
 
-/** How long a call id stays reserved: its call's timeout, or the default one when it had none. */
+/**
+ * A reservation held: rounded to the nearest whole millisecond, or none, for the default. One that
+ * is neither `Infinity` — a call that waited on, which reserves for the default too, since nothing
+ * is reserved for ever — nor from 1 to {@link LONGEST_TIMER}, 0 among them, is a
+ * {@link ProgrammerError}.
+ */
+export const assertReservation = (timeout: number | undefined): number | undefined => {
+  return timeout === undefined ? undefined : assertHeld("a call id's reservation", timeout);
+};
+
+/** How long a call id stays reserved: its call's timeout, held, or the default for none or never. */
 export const reservationOf = (timeout: number | undefined): number => {
-  return timeout !== undefined && Number.isFinite(timeout) && timeout > 0 && timeout <= TIMEOUT_MAX
-    ? timeout
-    : RESERVATION_MILLISECONDS;
+  return timeout !== undefined && timeout <= LONGEST_TIMER ? timeout : RESERVATION_MILLISECONDS;
 };
 
 // definition
@@ -101,18 +115,20 @@ export const reservationOf = (timeout: number | undefined): number => {
  * even, as the side's `failures` say, from the first once past the last.
  *
  * `onRemove` hears each call as it leaves, once, whichever way it leaves, for what it holds to go
- * with it.
+ * with it. A reservation runs on `clock`, and its end is compared on its monotonic reading.
  */
 export const createPendingCalls = <Handle extends string>(
   port: Pick<IRouterCorePort<Handle>, 'failures' | 'isCallIdInUse'>,
-  options?: Pick<IRouterCoreOptions, 'lastCallId'> & {
+  options: Pick<IRouterCoreOptions, 'lastCallId'> & {
+    clock: IClock;
     onRemove?: ((pendingRequest: IPendingRequest<Handle>) => void) | undefined;
   }
 ): IPendingCalls<Handle> => {
+  const { clock } = options;
   const range = CALL_ID_RANGES[port.failures.side];
   const nextCallId = createSequence({
     first: range.first,
-    last: options?.lastCallId ?? range.last,
+    last: options.lastCallId ?? range.last,
     step: range.step,
   });
   const pending = new Map<Handle, Map<CallId, IPendingRequest<Handle>>>();
@@ -164,7 +180,7 @@ export const createPendingCalls = <Handle extends string>(
       const pendingRequest = forgetIn(pending, { ...call, only });
 
       if (pendingRequest !== undefined) {
-        options?.onRemove?.(pendingRequest);
+        options.onRemove?.(pendingRequest);
       }
     },
     gauges: () => {
@@ -179,7 +195,7 @@ export const createPendingCalls = <Handle extends string>(
     isReserved,
     reserve: ({ callId, connectionHandle, timeout }) => {
       const lasts = reservationOf(timeout);
-      const ends = Date.now() + lasts;
+      const ends = clock.performance.now() + lasts;
       const reserved = reservations.get(connectionHandle) ?? new Map<CallId, IReservation>();
       const previous = reserved.get(callId);
 
@@ -187,11 +203,11 @@ export const createPendingCalls = <Handle extends string>(
         return;
       }
 
-      clearTimeout(previous?.timer);
+      clock.clearTimeout(previous?.timer);
 
       const reservation: IReservation = {
         ends,
-        timer: setTimeout(() => {
+        timer: clock.setTimeout(() => {
           forgetIn(reservations, { callId, connectionHandle, only: reservation });
         }, lasts),
       };
@@ -212,7 +228,7 @@ export const createPendingCalls = <Handle extends string>(
       const waiting = valuesOf(pending);
 
       for (const reservation of valuesOf(reservations)) {
-        clearTimeout(reservation.timer);
+        clock.clearTimeout(reservation.timer);
       }
 
       for (const calls of [pending, reservations]) {
@@ -224,7 +240,7 @@ export const createPendingCalls = <Handle extends string>(
       }
 
       for (const pendingRequest of waiting) {
-        options?.onRemove?.(pendingRequest);
+        options.onRemove?.(pendingRequest);
       }
 
       return waiting;

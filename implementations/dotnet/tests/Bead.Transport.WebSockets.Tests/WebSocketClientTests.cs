@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Bead.Interop;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.WebSockets.Tests;
 
@@ -42,7 +43,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         return document.RootElement.Clone();
     }
 
-    private Func<JsonElement, Requester<JsonElement>> RequesterOf(string procedureName)
+    private Func<JsonElement, BoundCall<JsonElement>> RequesterOf(string procedureName)
     {
         return _client.Services.GetRequest(
             InteropService.ProcedureOf(procedureName),
@@ -61,6 +62,48 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         await _client.DisposeAsync();
         await _server.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Each_client_is_an_IClient()
+    {
+        await using var client = new WebSocketClient();
+
+        var beadClient = Assert.IsAssignableFrom<IClient>(client);
+
+        Assert.Same(client.Router, beadClient.Router);
+        Assert.Same(client.Services, beadClient.Services);
+    }
+
+    [Fact]
+    public async Task Runs_its_router_on_its_transport_s_clock_which_times_a_request_out()
+    {
+        var time = new FakeTimeProvider();
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var client = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Clock = time } });
+
+        Assert.Equal((time, time), (client.Transport.Clock, client.Router.Clock));
+        await client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = _port }, Cancelled);
+
+        // its timer is armed before its request goes out
+        client.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Tx && envelope.Header is RequestHeader)
+            {
+                sent.TrySetResult();
+            }
+        };
+
+        var slow = client.Services.GetRequest(
+            InteropService.ProcedureOf("slow"),
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked })(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { Timeout = TimeSpan.FromSeconds(1) });
+
+        await sent.Task.WaitAsync(Patience, Cancelled);
+        time.Advance(TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return slow.WaitAsync(Patience, Cancelled);
+        });
     }
 
     [Fact]
@@ -160,6 +203,20 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         Assert.Throws<ArgumentException>(() =>
         {
             return new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { MaximumMessageBytes = 64 } });
+        });
+    }
+
+    [Fact]
+    public async Task Takes_a_message_of_an_envelope_at_most_more_when_the_transport_says_so_and_never_less()
+    {
+        var limits = new RouterLimits { ChunkBytes = 128, MaximumEnvelopeBytes = 256, WindowBytes = 256 };
+        await using var byDefault = new WebSocketClient(new WebSocketClientOptions { Limits = limits });
+        await using var more = new WebSocketClient(new WebSocketClientOptions { Limits = limits, Transport = new WebSocketTransportClientOptions { MaximumMessageBytes = 257 } });
+
+        Assert.Equal((RouterLimits.Default.MaximumEnvelopeBytes, 256, 257), (_client.Transport.MaximumMessageBytes, byDefault.Transport.MaximumMessageBytes, more.Transport.MaximumMessageBytes));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketClient(new WebSocketClientOptions { Limits = limits, Transport = new WebSocketTransportClientOptions { MaximumMessageBytes = 255 } });
         });
     }
 
