@@ -108,9 +108,10 @@ so:
 }
 ```
 
-What turns on a real transport — a destination over HTTP that does not listen, an outbox past its
-bound, a WebSocket that closes as leg B goes — plays in `spec/transports.json`, not on a scripted
-connection: a scripted refusal would test the router against its harness.
+What turns on a real transport at a destination on a connection of the relay's own — one over HTTP
+that does not listen, its outbox past its bound, a WebSocket that closes as leg B goes — plays in
+`spec/transports.json`, not on a scripted connection: a scripted refusal would test the router
+against its harness.
 
 **The transports' file plays a server in exact octets.** The implementation is the server, the
 interop service behind it, and the test is a peer of its own, over sockets of its own. The generator
@@ -255,7 +256,9 @@ that differs, or on any file a generator writes that is not committed.
 destination that is a router the relay calls through, with its two legs' limits and the session
 every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 14.7), until the
 interop plays a relay across languages, which is open work
-([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); HTTP/2 and TLS, which both
+([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), and its leg B refused or
+lost there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script,
+until the transports' file has a client part; HTTP/2 and TLS, which both
 servers serve, an open row of the matrix naming both; keep-alive, pipelining and a connection used
 again, which one socket per exchange leaves out; and the transport's contract with its router — its
 events, its handles, its gauges.
@@ -313,7 +316,7 @@ sentence on a client's behaviour.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
-in four rounds. Its objections, each with its answer:
+in five rounds. Its objections, each with its answer:
 
 ### On the files' schemas, their version and their check
 
@@ -392,3 +395,18 @@ nothing; and one parser of a loopback host for both sides comes with the transpo
 | 9.7's "a failure on the call id of a subscription the side holds ends it" binds a server, which reports such a failure `CALL_UNKNOWN` and keeps the subscription                                        | Accepted: 9.7 says a failure a client receives on a subscription it holds, as 11.7's second item has it.                                                                                                                                                                                                                                                              |
 | "No decision changes" is not so: the conformance contract, the companion's subject, the `ELSEWHERE` the default admission passes, and the page                                                          | Accepted: this record's Decision says that what no entry cites binds all the same, and keeps the round; [0010](0010-a-request-presents-a-credential-of-a-scheme.md) names the `ELSEWHERE` beside the `JWT` and points here; the companion keeps [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s subject, which stays as it is; the page is rebuilt. |
 | 13.4's new sentence splits a sentence before its colon; a transfer credits nothing; a listen's count is read once its query is decoded                                                                  | Accepted: the sentence follows the one it continues and names `OPAQUE`; the budget is what a side reserves for its transfers, each opening's and each credit it grants; the count is read once the query is decoded.                                                                                                                                                  |
+
+### On a relay's leg B on a real transport
+
+A relay's destination on a connection of its own plays in `spec/transports.json`: one over HTTP
+that does not listen, answered `DESTINATION_UNREACHABLE`; a request past its outbox, and a WebSocket
+that closes as leg B goes, each answered `DESTINATION_LOST`. Section 15.9 says that an envelope past
+an outbox is one its transport had. A leg B through a router the relay calls over HTTP stays with
+the twins.
+
+| Objection                                                                                                                                                                                      | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The outbox at a relay is not racy: both sides answer `DESTINATION_LOST` by construction, while the procedure cannot have run; a case would choose between section 14.5's fourth and fifth rows | Accepted in part: the outbox's turn is reported whichever row it takes, and the text, not a case, decides which, by the user's decision: section 15.9 says that an envelope past its outbox is one its transport had, as a notification handed to its transport counts as sent (`debugging.md` section 10.1) and as a transport's send settles on queueing, never on delivery. A send that rejected would answer the fourth row only if the connection closed after the rejection, and would add a report to the outbox's own case. |
+| Totals written by several changes at once collide                                                                                                                                              | Accepted: a change names what it adds, the totals stay in `docs/support.md` and the README's table of files, the change that merges last counts them again, and a release checks them against the files; the changelog states none.                                                                                                                                                                                                                                                                                                 |
+| A destination over HTTP that does not listen is played over real sockets already, by twins                                                                                                     | Accepted: the case adds its registration on the wire, its exact octets and the citation of section 14.5's fourth row, and carries the twins' detail; the matrix's cell names it beside them, and they stay for what the client hears, which the file does not hold.                                                                                                                                                                                                                                                                 |
+| Leaving a leg B through a router called over HTTP to scripted twins widens an exception this record bounded, with no row saying so                                                             | Accepted: the widening is a decision of its own, kept here with its reason — the transports' file plays a server, never the client a relay calls through, until it has a client part — and the record's list of what no entry plays, and the matrix's, are extended, not doubled.                                                                                                                                                                                                                                                   |

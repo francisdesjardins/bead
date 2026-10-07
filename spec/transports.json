@@ -3414,6 +3414,269 @@
       ]
     },
     {
+      "name": "a relay answers DESTINATION_UNREACHABLE for a destination over HTTP that does not listen, nothing tried",
+      "clauses": [
+        "14.3.4",
+        "14.5.4",
+        "15.8"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "device"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "device",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 30\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+          },
+          "on": "register"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "31 32"
+            }
+          },
+          "on": "register"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 26\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+          },
+          "on": "login"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22",
+              "credential": "OPAQUE"
+            }
+          },
+          "on": "login"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 19\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+          },
+          "on": "relayed"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 18,
+              "callId": 3,
+              "failure": {
+                "code": 17,
+                "scope": 0,
+                "relays": 0,
+                "detail": "destination 12 is unreachable: its connection carries no request"
+              }
+            }
+          },
+          "on": "relayed"
+        }
+      ]
+    },
+    {
+      "name": "a relay's request past its destination's outbox closes that connection, and leg A is answered DESTINATION_LOST, reported",
+      "clauses": [
+        "14.5.5",
+        "15.9"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumOutboxBytes": 12
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "device"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "device",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 30\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+          },
+          "on": "register"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "31 32"
+            }
+          },
+          "on": "register"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 26\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+          },
+          "on": "login"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22",
+              "credential": "OPAQUE"
+            }
+          },
+          "on": "login"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 19\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+          },
+          "on": "relayed"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 18,
+              "callId": 3,
+              "failure": {
+                "code": 65,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "relayed"
+        },
+        {
+          "report": "exception"
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 1
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 78 22"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "after"
+        }
+      ]
+    },
+    {
       "name": "a binary message is one envelope, and its answer one binary message",
       "clauses": [
         "15.2"
@@ -4728,6 +4991,131 @@
             "gauge": "connections",
             "is": 0
           }
+        }
+      ]
+    },
+    {
+      "name": "a relay's destination over WebSocket that closes as leg B goes is lost: leg A is answered DESTINATION_LOST, reported",
+      "clauses": [
+        "14.5.5",
+        "14.6",
+        "15.3"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "client"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "device"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
+          },
+          "on": "client"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22",
+              "credential": "OPAQUE"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+          },
+          "on": "device"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "31 32"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": {
+            "binary": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+          },
+          "on": "client"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 16,
+              "callId": 2,
+              "flags": 0,
+              "serviceId": 1,
+              "procedureId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "device"
+        },
+        {
+          "send": {
+            "close": 1000
+          },
+          "on": "device"
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "device"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 3,
+              "failure": {
+                "code": 65,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "client"
+        },
+        {
+          "report": "exception",
+          "on": "client"
         }
       ]
     }
