@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A blueprint of Bead's builder, bead-blueprint/1: the services a .proto declares, resolved, in the runtime's words (decision 0022)",
+  "description": "What one entry holds, in no language's words: no file option, no class, no path of a target's. What spans entries — one id and one name a scope, folded as spec 16.6 folds; the reservations; a failure its service lacks; a proto binding whose message proto does not list — is beadc check's, by rule name. A reader refuses a format it does not know, and a feature of requires it does not know.",
+  "type": "object",
+  "required": ["format", "specVersion", "requires", "reservedServices", "services"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "description": "The format and its major: a reader refuses another.",
+      "const": "bead-blueprint/1"
+    },
+    "specVersion": {
+      "description": "The version of spec/spec.md whose sections 16 and 17 its producer follows.",
+      "$ref": "common.schema.json#/$defs/specVersion"
+    },
+    "requires": {
+      "description": "The features it uses beyond the base, each by its name, as JOSE's crit lists them (RFC 7515 §4.1.11): a reader refuses one it does not know, and names it.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?![\\s\\S])"
+      }
+    },
+    "proto": {
+      "description": "What a front end read from a .proto, when it read one: the files that declare a service or a message a binding names, and those messages. Absent from a blueprint written by hand, whose bindings are all native.",
+      "type": "object",
+      "required": ["files", "messages"],
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "description": "The .proto files that declare one of its services or one of its messages, by path.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file"
+          }
+        },
+        "messages": {
+          "description": "The messages a binding names, by full name, each with the file that declares it: what a target imports, never their fields.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/message"
+          }
+        }
+      }
+    },
+    "reservedServices": {
+      "description": "The service ids and names its files' packages retired, which none of its services takes.",
+      "type": "object",
+      "required": ["ids", "names"],
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "$ref": "#/$defs/ranges"
+        },
+        "names": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/serviceName"
+          }
+        }
+      }
+    },
+    "services": {
+      "description": "Its services, by id: one blueprint is one id space.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/service"
+      }
+    }
+  },
+  "$defs": {
+    "file": {
+      "type": "object",
+      "required": ["path", "package"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Its path from its root, as an import names it, parts by /.",
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\\.proto(?![\\s\\S])"
+        },
+        "package": {
+          "description": "Its protobuf package; empty for none.",
+          "type": "string",
+          "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)?(?![\\s\\S])"
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["fullName", "file"],
+      "additionalProperties": false,
+      "properties": {
+        "fullName": {
+          "$ref": "#/$defs/fullName"
+        },
+        "file": {
+          "description": "The path, among its files, of the file that declares it.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "required": [
+        "serviceName",
+        "serviceId",
+        "serviceRevision",
+        "failures",
+        "reserved",
+        "procedures"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "serviceName": {
+          "description": "What its classes and routes are named after: its .proto name, a trailing Service taken off.",
+          "$ref": "#/$defs/serviceName"
+        },
+        "serviceId": {
+          "$ref": "common.schema.json#/$defs/serviceId"
+        },
+        "serviceRevision": {
+          "$ref": "common.schema.json#/$defs/serviceRevision"
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
+        "deprecation": {
+          "$ref": "#/$defs/deprecation"
+        },
+        "failures": {
+          "description": "Its catalogue (spec 9.5), by code: what its procedures answer, each by its name.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "failureName"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "common.schema.json#/$defs/code"
+              },
+              "failureName": {
+                "$ref": "#/$defs/failureName"
+              },
+              "description": {
+                "$ref": "#/$defs/description"
+              }
+            }
+          }
+        },
+        "reserved": {
+          "description": "The procedure ids and names, and the failure codes, it retired, which none of its procedures and failures takes.",
+          "type": "object",
+          "required": ["procedureIds", "procedureNames", "failureCodes"],
+          "additionalProperties": false,
+          "properties": {
+            "procedureIds": {
+              "$ref": "#/$defs/ranges"
+            },
+            "procedureNames": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "common.schema.json#/$defs/procedureName"
+              }
+            },
+            "failureCodes": {
+              "$ref": "#/$defs/ranges"
+            }
+          }
+        },
+        "procedures": {
+          "description": "Its procedures, by id.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/procedure"
+          }
+        },
+        "proto": {
+          "description": "Where a front end read it: its file's path, among proto's files, and its full name.",
+          "type": "object",
+          "required": ["file", "fullName"],
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "description": "The path, among its files, of the file that declares it.",
+              "type": "string",
+              "minLength": 1
+            },
+            "fullName": {
+              "$ref": "#/$defs/fullName"
+            }
+          }
+        }
+      }
+    },
+    "procedure": {
+      "type": "object",
+      "required": [
+        "procedureId",
+        "procedureName",
+        "procedureKind",
+        "request",
+        "result",
+        "admission",
+        "failures"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "procedureId": {
+          "$ref": "common.schema.json#/$defs/procedureId"
+        },
+        "procedureName": {
+          "$ref": "common.schema.json#/$defs/procedureName"
+        },
+        "procedureKind": {
+          "description": "How it is called (spec 16.11): never its envelopes' kind.",
+          "enum": ["request", "notifies", "command"]
+        },
+        "request": {
+          "$ref": "#/$defs/binding"
+        },
+        "result": {
+          "$ref": "#/$defs/binding"
+        },
+        "notification": {
+          "$ref": "#/$defs/binding"
+        },
+        "admission": {
+          "$ref": "#/$defs/admission"
+        },
+        "failures": {
+          "description": "The names of its service's catalogue it may answer, in their codes' order.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/failureName"
+          }
+        },
+        "maximumPayloadBytes": {
+          "description": "The most bytes a payload of it holds, its request's and its result's; left out, the router's alone.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
+        "deprecation": {
+          "$ref": "#/$defs/deprecation"
+        }
+      },
+      "if": {
+        "properties": {
+          "procedureKind": {
+            "const": "notifies"
+          }
+        }
+      },
+      "then": {
+        "required": ["notification"]
+      },
+      "else": {
+        "not": {
+          "required": ["notification"]
+        }
+      }
+    },
+    "binding": {
+      "description": "A payload's encoding (spec 17), and for proto alone its message: raw, text and json are bead.Raw's, bead.Text's and bead.Json's, which the blueprint does not repeat.",
+      "type": "object",
+      "required": ["encoding"],
+      "additionalProperties": false,
+      "properties": {
+        "encoding": {
+          "enum": ["raw", "text", "json", "proto"]
+        },
+        "message": {
+          "$ref": "#/$defs/fullName"
+        }
+      },
+      "if": {
+        "properties": {
+          "encoding": {
+            "const": "proto"
+          }
+        }
+      },
+      "then": {
+        "required": ["message"]
+      },
+      "else": {
+        "not": {
+          "required": ["message"]
+        }
+      }
+    },
+    "admission": {
+      "description": "Who may call it, its file's and its service's resolved: every call, a call with a session, or a hook the side that answers is given by its name — the runtime's AdmissionRule.",
+      "oneOf": [
+        {
+          "enum": ["none", "session"]
+        },
+        {
+          "type": "object",
+          "required": ["hook"],
+          "additionalProperties": false,
+          "properties": {
+            "hook": {
+              "$ref": "common.schema.json#/$defs/procedureName"
+            }
+          }
+        }
+      ]
+    },
+    "deprecation": {
+      "description": "Deprecated, with what to use instead when it says.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "description": {
+      "description": "Its leading comment, by the description rule of builder/README.md: documentation, which no rule of beadc breaking reads.",
+      "type": "string",
+      "minLength": 1
+    },
+    "fullName": {
+      "description": "A protobuf full name, its package and its nesting parted by dots.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*(?![\\s\\S])"
+    },
+    "serviceName": {
+      "description": "An upper-case ASCII letter, then 62 ASCII letters or digits at most.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]{0,62}(?![\\s\\S])"
+    },
+    "failureName": {
+      "description": "Its enum value's name, the enum's prefix taken off: upper-case ASCII letters and digits in words parted by one underscore.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*(?![\\s\\S])"
+    },
+    "ranges": {
+      "description": "Ids from first to last, both included, in ascending order.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["first", "last"],
+        "additionalProperties": false,
+        "properties": {
+          "first": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "last": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      }
+    }
+  }
+}

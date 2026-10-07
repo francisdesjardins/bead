@@ -13,6 +13,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on both sides with its integration and a commit plan, and an adversarial review by lens.
 - `tools/check-format.mjs`, the root's files in the layout the TypeScript side's formatter gives
   them: CI runs it, and the pre-commit hook over the staged files.
+- `spec/interop-blueprint.json`, the interop service's API in the builder's format,
+  `bead-blueprint/1`, under `spec/schemas/bead-blueprint.schema.json`: its service's id and
+  revision, and each procedure's id, kind, bindings, admission and failures. `spec/check.py` holds
+  it to its schema and its form, its members and its arrays in their order, and
+  `interop-service.json` to its procedures; `--write-blueprints` lays it out (decision 0022).
 
 ### Fixed
 

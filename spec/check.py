@@ -26,13 +26,20 @@ name, give every place an outcome for every input in their order, cite at each p
 observes, and name, where they cross a row of docs/support.md, a row that names the file and them;
 each implementation plays them in one harness, which names every place, through one helper, which
 alone reads the file; and no file git lists outside spec/, the tests and the interop service names a
-published test key.
+published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
+integers alone, laid out two spaces with a final newline; and interop-service.json states the
+interop blueprint's procedures, by name and in their order, what each admits where its admission is not
+none and what it notifies where it notifies.
 Exit 1 on any of them.
 
   python spec/check.py --write-uncited
 
 writes spec/uncited.txt and spec/debugging-uncited.txt from the files as they stand, for a change
 that cites or leaves a unit.
+
+  python spec/check.py --write-blueprints
+
+writes each blueprint of spec/ in its form from its value, and nothing else.
 
 It needs jsonschema, locked in spec/requirements.txt.
 """
@@ -55,8 +62,13 @@ SPEC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SPEC)
 SCHEMAS = os.path.join(SPEC, 'schemas')
 
-# the schema the others take their definitions from, which describes no file of its own
-COMMON = 'common'
+# the schemas the others take their definitions from, which describe no file of their own: what the
+# conformance files share, and the builder's blueprint, which the interop's takes whole (0022)
+SHARED = {'common', 'bead-blueprint'}
+
+# the blueprints of spec/, each held to its form (0022)
+BLUEPRINTS = ('interop-blueprint',)
+WRITE_BLUEPRINTS = '--write-blueprints' in sys.argv[1:]
 
 # what vectors.json holds beside its groups
 META = {'$schema', '$comment', 'specVersion'}
@@ -165,7 +177,7 @@ schema_names = {name[:-len('.schema.json')] for name in os.listdir(SCHEMAS) if n
 for name in sorted(files - schema_names):
     problems.append(f'{name}.json has no schema in spec/schemas/')
 
-for name in sorted(schema_names - files - {COMMON}):
+for name in sorted(schema_names - files - SHARED):
     problems.append(f'schemas/{name}.schema.json describes no file of spec/')
 
 schemas = {}
@@ -216,6 +228,125 @@ for name, document in documents.items():
         problems.append(f'{name}.json: no {key}, the version of {by}, which it belongs to')
     elif document[key] != stated:
         problems.append(f'{name}.json: {key} {document[key]}, where {by} states {stated}')
+
+
+def fraction(number):
+    raise ValueError(f'the number {number} has a fraction or an exponent, which a blueprint never writes')
+
+
+def surrogates(value, place=''):
+    # every place of a value whose string, a member's name or its value, holds a surrogate alone
+    if isinstance(value, dict):
+        for key, member in value.items():
+            yield from surrogates(key, place)
+            yield from surrogates(member, f'{place}/{key}' if place else key)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from surrogates(item, f'{place}/{index}' if place else str(index))
+    elif isinstance(value, str) and any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        yield place or '(root)'
+
+
+def arrays(blueprint):
+    # each array the form sorts, by its place, with the key that sorts it: files by path, messages by
+    # full name, services by id, procedures by id, failures by code, a procedure's failures in their
+    # codes' order, ranges ascending, names in their code points' order
+    names = lambda name: name
+    ranges = lambda span: (span['first'], span['last'])
+    yield 'requires', blueprint['requires'], names
+    if 'proto' in blueprint:
+        yield 'proto/files', blueprint['proto']['files'], lambda file: file['path']
+        yield 'proto/messages', blueprint['proto']['messages'], lambda message: message['fullName']
+    yield 'reservedServices/ids', blueprint['reservedServices']['ids'], ranges
+    yield 'reservedServices/names', blueprint['reservedServices']['names'], names
+    yield 'services', blueprint['services'], lambda service: service['serviceId']
+    for index, service in enumerate(blueprint['services']):
+        codes = {failure['failureName']: failure['code'] for failure in service['failures']}
+        place = f'services/{index}'
+        yield f'{place}/failures', service['failures'], lambda failure: failure['code']
+        yield f'{place}/reserved/procedureIds', service['reserved']['procedureIds'], ranges
+        yield f'{place}/reserved/procedureNames', service['reserved']['procedureNames'], names
+        yield f'{place}/reserved/failureCodes', service['reserved']['failureCodes'], ranges
+        yield f'{place}/procedures', service['procedures'], lambda procedure: procedure['procedureId']
+        for at, procedure in enumerate(service['procedures']):
+            # a name its catalogue lacks is beadc check's; here it sorts last, by its name
+            yield (f'{place}/procedures/{at}/failures', procedure['failures'],
+                   lambda name, codes=codes: (codes.get(name, 65536), name))
+
+
+def sort(blueprint):
+    for _, array, key in arrays(blueprint):
+        array.sort(key=key)
+
+
+# a blueprint is written in its form, which writing its value again gives: RFC 8785's member order and
+# string escapes, integers alone, its arrays in their order, two spaces, a final newline. Its names are
+# ASCII, where Python's order of code points is UTF-16's
+for name in BLUEPRINTS:
+    path = os.path.join(SPEC, f'{name}.json')
+
+    with open(path, encoding='utf-8', newline='') as file:
+        written = file.read()
+
+    try:
+        json.loads(written, parse_float=fraction)
+    except ValueError as error:
+        problems.append(f'{name}.json: {error}')
+        continue
+
+    # ! I-JSON (RFC 7493 §2.1), which RFC 8785 takes as its input, admits no surrogate alone, and UTF-8
+    # cannot write one: the form is never written for such a file
+    alone = list(surrogates(documents[name]))
+
+    for place in alone:
+        problems.append(f'{name}.json at {place}: a surrogate alone, which I-JSON forbids (RFC 7493 §2.1)')
+
+    if alone:
+        continue
+
+    unsorted = [place for place, array, key in arrays(documents[name]) if array != sorted(array, key=key)]
+
+    if not WRITE_BLUEPRINTS:
+        for place in unsorted:
+            problems.append(f'{name}.json at {place}: out of its order; --write-blueprints sorts it')
+
+    # the form from a sorted copy: what follows reads the value as the file holds it
+    value = json.loads(json.dumps(documents[name]))
+    sort(value)
+    form = json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + '\n'
+
+    if WRITE_BLUEPRINTS and written != form:
+        # ! encoded whole first, then written beside the file and moved over it: a failure never
+        # shortens the author's file
+        data = form.encode('utf-8')
+        temporary = f'{path}.tmp'
+        with open(temporary, 'wb') as file:
+            file.write(data)
+        os.replace(temporary, path)
+        documents[name] = value
+    elif written != form and not unsorted:
+        lines = zip(written.split('\n'), form.split('\n'))
+        line = next((number for number, (one, other) in enumerate(lines, 1) if one != other), None)
+        where = 'its last line ends with no newline' if line is None else f'line {line} is off its form'
+        problems.append(f'{name}.json: {where}; --write-blueprints writes it in its form')
+
+# the interop service's prose is its blueprint's procedures, by name and in their order: what each
+# admits where its admission is not none, and what it notifies where its kind is notifies
+api = documents['interop-blueprint']['services'][0]['procedures']
+prose = documents['interop-service']['procedures']
+
+if [entry['procedureName'] for entry in prose] != [entry['procedureName'] for entry in api]:
+    problems.append('interop-service.json: its procedures are not interop-blueprint.json\'s, by name and in '
+                    'their order')
+
+for entry, declared in zip(prose, api):
+    if ('admits' in entry) != (declared['admission'] != 'none'):
+        problems.append(f'interop-service.json: {entry["procedureName"]!r} states what it admits where its '
+                        f'admission is none, or does not where it is not')
+
+    if ('notifies' in entry) != (declared['procedureKind'] == 'notifies'):
+        problems.append(f'interop-service.json: {entry["procedureName"]!r} states what it notifies where '
+                        f'its kind is not notifies, or does not where it is')
 
 vectors = documents['vectors']
 groups = [group for group in vectors if group not in META]

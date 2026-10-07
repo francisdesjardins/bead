@@ -506,15 +506,15 @@ def interop_registry():
     registry = Registry()
     registry.give('server')
 
-    for procedure in talk.SERVICE['procedures']:
+    for procedure in talk.API['procedures']:
         address = (SERVICE, procedure['procedureId'])
 
-        if procedure.get('offeredBy') == 'client':
+        if procedure['procedureKind'] == 'command':
             registry.declare('server', 'requester', address, procedure['procedureName'],
-                             revision=talk.SERVICE['serviceRevision'])
+                             revision=talk.API['serviceRevision'])
         else:
-            registry.declare('server', 'resolver', address, procedure['procedureName'], 'notifies' in procedure,
-                             talk.SERVICE['serviceRevision'])
+            registry.declare('server', 'resolver', address, procedure['procedureName'],
+                             procedure['procedureKind'] == 'notifies', talk.API['serviceRevision'])
 
     return registry
 
