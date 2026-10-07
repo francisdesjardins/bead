@@ -48,7 +48,7 @@ public sealed partial class RouterCoreTests
     // definition
 
     [Fact]
-    public async Task Counts_a_call_made_refused_before_it_goes_no_call_id_free_PAYLOAD_TOO_LARGE_or_ENVELOPE_TOO_LARGE_as_started_and_ended_in_the_turn_it_started_and_a_programmer_s_error_or_an_aborted_signal_as_nothing()
+    public async Task Counts_a_call_made_refused_before_it_goes_no_call_id_free_or_PAYLOAD_TOO_LARGE_as_started_and_ended_in_the_turn_it_started_and_a_programmer_s_error_or_an_aborted_signal_as_nothing()
     {
         var registry = new MetricsRegistry();
         var port = new CountedPort((RouterSide.Client, registry)) { IsCarrying = false, IsSecureConnection = false, LastCallId = 3 };
@@ -72,7 +72,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, CodeOf(await Refused(call with { Procedure = Echo with { MaximumPayloadBytes = 4 } }, 8)));
         port.IsSecureConnection = true;
         Assert.Equal(
-            (ushort)ProtocolCode.EnvelopeTooLarge,
+            (ushort)ProtocolCode.PayloadTooLarge,
             CodeOf(await Refused(call with { Options = call.Options with { Credential = Credential.Jwt(new string('a', 40)) } }, 9)));
 
         // a connection not open fails as one that closes
@@ -91,10 +91,9 @@ public sealed partial class RouterCoreTests
             [
                 "bead_client_call_duration_seconds_bucket{le=\"0.0\"} 6",
                 "bead_client_call_duration_seconds_count{} 6",
-                "bead_client_call_handled_total{outcome=\"failure\",code=\"ENVELOPE_TOO_LARGE\"} 1",
                 "bead_client_call_handled_total{outcome=\"failure\",code=\"DESTINATION_UNREACHABLE\"} 1",
                 "bead_client_call_handled_total{outcome=\"failure\",code=\"SESSION_REQUIRED\"} 1",
-                "bead_client_call_handled_total{outcome=\"failure\",code=\"PAYLOAD_TOO_LARGE\"} 1",
+                "bead_client_call_handled_total{outcome=\"failure\",code=\"PAYLOAD_TOO_LARGE\"} 2",
                 "bead_client_call_handled_total{outcome=\"failure\",code=\"CAPACITY_EXCEEDED\"} 1",
                 "bead_client_call_handled_total{outcome=\"closed\"} 1",
                 "bead_client_call_started_total{} 8",
@@ -111,6 +110,9 @@ public sealed partial class RouterCoreTests
         port.IsConnected = false;
         Assert.IsType<ArgumentOutOfRangeException>(await Refused(call with { Options = call.Options with { Timeout = TimeSpan.Zero } }));
         Assert.IsType<ArgumentException>(await Refused(call with { Procedure = Echo with { MaximumPayloadBytes = 0 } }));
+
+        // a credential no header of its request holds, whatever its payload
+        Assert.IsType<ArgumentException>(await Refused(call with { Options = call.Options with { Credential = Credential.Jwt(new string('a', 1_005)) } }));
         Assert.IsType<OperationCanceledException>(await Refused(call with { Options = call.Options with { CancellationToken = aborted.Token } }));
         Assert.Contains("bead_client_call_started_total{} 8", MadeOf(registry));
     }

@@ -388,6 +388,11 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal(["rejected first", "thrown second", "EnvelopeMalformed first", "gone second"], Reported());
         Assert.Same(gone, _errors[3].Reason);
+
+        // each failed resolver answered PROCEDURE_FAILED, beside the refusal the transport refused
+        Assert.Equal(
+            ["first failure 1 ProcedureFailed", "second failure 1 ProcedureFailed", "second failure 3 ServiceUnknown"],
+            SentSince());
     }
 
     [Fact]

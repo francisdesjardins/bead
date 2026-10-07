@@ -45,6 +45,39 @@ public static partial class EnvelopeCodec
         return index < bytes.Length && (bytes[index] & 0xC0) == 0x80;
     }
 
+    // the bytes of the character `lead` starts, as UTF-8 writes one (RFC 3629, section 4): 2 from C2
+    // to DF, 3 from E0 to EF, 4 from F0 to F4; 1 for any other byte
+    private static int SequenceBytesOf(byte lead)
+    {
+        return lead switch
+        {
+            >= 0xC2 and <= 0xDF => 2,
+            >= 0xE0 and <= 0xEF => 3,
+            >= 0xF0 and <= 0xF4 => 4,
+            _ => 1,
+        };
+    }
+
+    // where `detail` cut at `cut` ends: at the lead byte of the character the cut fell in, at most
+    // three continuation bytes back; where it fell for anything else
+    private static int CutOf(ReadOnlySpan<byte> detail, int cut)
+    {
+        // past the end there is nothing to continue
+        if (cut >= detail.Length)
+        {
+            return cut;
+        }
+
+        var lead = cut - 1;
+
+        while (lead >= 0 && cut - lead <= 3 && IsContinuation(detail, lead))
+        {
+            lead -= 1;
+        }
+
+        return lead >= 0 && SequenceBytesOf(detail[lead]) > cut - lead ? lead : cut;
+    }
+
     // definition
 
     /// <summary>
@@ -79,20 +112,18 @@ public static partial class EnvelopeCodec
                 $"a failure's record carries no flag 0x{flags & ~Application:x}");
         }
 
-        var end = Math.Min(payload.Length, RecordBytes + options.MaximumDetailBytes);
+        var detail = payload[RecordBytes..];
 
-        // a cut inside a character drops the whole character
-        while (end > RecordBytes && IsContinuation(payload, end))
-        {
-            end -= 1;
-        }
+        // ! a cut inside a character drops that character alone: a lead byte at most three bytes back
+        // whose sequence crosses the cut; a stray continuation byte at the cut drops nothing (spec 7.3)
+        var end = CutOf(detail, Math.Min(detail.Length, options.MaximumDetailBytes));
 
         return new Failure
         {
             Code = code,
 
             // GetString keeps a leading U+FEFF, and reads what is not UTF-8 as U+FFFD
-            Detail = Encoding.UTF8.GetString(payload[RecordBytes..end]),
+            Detail = Encoding.UTF8.GetString(detail[..end]),
             Relays = payload[2],
             Scope = (flags & Application) == 0 ? FailureScope.Protocol : FailureScope.Application,
         };

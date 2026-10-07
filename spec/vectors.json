@@ -1755,6 +1755,34 @@
       }
     },
     {
+      "name": "a stray continuation byte at the cut, the character before it kept whole",
+      "clauses": [
+        "7.3"
+      ],
+      "record": "00 13 00 00  E2 82 AC 80 61",
+      "maximumDetailBytes": 3,
+      "failure": {
+        "code": 19,
+        "detail": "€",
+        "relays": 0,
+        "scope": 0
+      }
+    },
+    {
+      "name": "continuation bytes past three before the cut, read as U+FFFD each, the cut kept",
+      "clauses": [
+        "7.3"
+      ],
+      "record": "00 13 00 00  61 80 80 80 80 80",
+      "maximumDetailBytes": 5,
+      "failure": {
+        "code": 19,
+        "detail": "a����",
+        "relays": 0,
+        "scope": 0
+      }
+    },
+    {
       "name": "a leading U+FEFF kept",
       "clauses": [
         "7.3"

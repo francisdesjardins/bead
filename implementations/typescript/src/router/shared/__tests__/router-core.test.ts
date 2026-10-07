@@ -828,7 +828,7 @@ test.describe('createRouterCore', () => {
     });
 
     test('lets go of the call id of a resolver that fails without answering, and of that one alone', async () => {
-      const { port, reported } = createPort();
+      const { port, reported, sent } = createPort();
       using core = createRouterCore(port);
       const seen: number[] = [];
       const failing = Promise.withResolvers<void>();
@@ -848,6 +848,8 @@ test.describe('createRouterCore', () => {
 
       expect(seen).toEqual([5, 5]);
       expect(codesOf(reported)).toEqual([['rejected', 'a']]);
+      // the first answered PROCEDURE_FAILED; the second resolves without answering
+      expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
     });
 
     test('send nothing for an answer whose call its connection took away, though the peer opens its call id again', async () => {
@@ -1479,6 +1481,49 @@ test.describe('createRouterCore', () => {
       expect(sent).toEqual([]);
     });
 
+    test('of a JWT or an ELSEWHERE its handler forwards resolves to none in a later turn all the same, a request presenting none delivered behind it taken first', async () => {
+      const admitted: number[] = [];
+      const asked: number[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }) => {
+          asked.push(header.callId);
+
+          return undefined;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: ({ header }: IAdmissionRequest<Handle>) => {
+            admitted.push(header.callId);
+
+            return undefined;
+          },
+          forwardsCredentials: true,
+        })
+      );
+      // one turn: a JWT, none, an ELSEWHERE its transport carried, none
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(requestOf(3), 'a');
+      core.receive(
+        { credential: 'Bearer mF_9.B5f-4.1JqM', data: requestOf(5, { credential: ELSEWHERE }) },
+        'a'
+      );
+      core.receive(requestOf(7), 'a');
+
+      expect(admitted).toEqual([3, 7]);
+
+      await sleep(0);
+
+      // read from its scheme alone, a forwarded one is never asked of this side's sessionOf
+      expect(admitted).toEqual([3, 7, 1, 5]);
+      expect(asked).toEqual([3, 7]);
+      expect(reported).toEqual([]);
+      expect(sent).toEqual([]);
+    });
+
     test('resolving, its call’s cancel or its connection’s close tells sessionOf by the call’s signal, and what it settles to then is dropped', async () => {
       const pending = new Map<number, PromiseWithResolvers<ICallSession | undefined>>();
       const signals = new Map<number, AbortSignal>();
@@ -1552,7 +1597,7 @@ test.describe('createRouterCore', () => {
       expect(answersOf(sent)).toEqual([['a', 'credit', 1, 100]]);
     });
 
-    test('this side presents is the one its side resolved, and one that leaves a transfer’s opening no byte fails it before it goes, ENVELOPE_TOO_LARGE', async () => {
+    test('this side presents is the one its side resolved, and one that leaves a transfer’s opening no byte fails it before it goes, PAYLOAD_TOO_LARGE', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port, { limits });
       // 8 bytes of prefix, 4 of service and procedure, 8 of total, 4 of the block's head: 36 of
@@ -1576,7 +1621,9 @@ test.describe('createRouterCore', () => {
           procedure: echo,
         })
       ).rejects.toMatchObject({
-        code: ProtocolCode.ENVELOPE_TOO_LARGE,
+        code: ProtocolCode.PAYLOAD_TOO_LARGE,
+        detail:
+          "a payload of 100 bytes goes as a transfer, whose opening's header of 64 bytes leaves it no byte within 64",
         origin: 'local',
         procedureAddress: { procedureId: 1, serviceId: 2 },
       });
@@ -1601,6 +1648,77 @@ test.describe('createRouterCore', () => {
 
       core.rejectPending('done', 'a');
       await Promise.allSettled([answering, whole]);
+    });
+
+    test('a JWT its header holds whole fails its call before it goes, PAYLOAD_TOO_LARGE, once a transfer’s header would pass 1,020 bytes, and goes as a transfer a word shorter', async () => {
+      const { port, sent } = createPort({ failures: CLIENT_FAILURES });
+      // the default limits: a payload of 1 MiB passes an envelope of chunkBytes whole
+      using core = createRouterCore(port);
+      const payload = patternOf(1_048_576);
+      const ask = (
+        length: number,
+        {
+          destinationId,
+          given = payload,
+        }: {
+          destinationId?: number | undefined;
+          given?: Uint8Array;
+        } = {}
+      ) => {
+        return core.request(given, {
+          connectionHandle: 'a',
+          credential: { scheme: CredentialScheme.JWT, token: 'x'.repeat(length) },
+          options: { ...options, destinationId },
+          procedure: echo,
+        });
+      };
+      const going: Promise<unknown>[] = [];
+
+      // 12 bytes of header, 4 of destination, 8 of total, 4 of the credential's head, its token
+      // padded to 4: an opening's header holds 996 bytes of token, 992 beside a destination
+      for (const [length, destinationId, opening] of [
+        [1_004, undefined, 1_028],
+        [997, undefined, 1_024],
+        [1_000, 7, 1_028],
+        [993, 7, 1_024],
+      ] as const) {
+        await expect(ask(length, { destinationId }), String(length)).rejects.toMatchObject({
+          code: ProtocolCode.PAYLOAD_TOO_LARGE,
+          detail: `a payload of 1048576 bytes goes as a transfer, whose opening's header of ${String(opening)} bytes passes 1020`,
+          origin: 'local',
+          side: 'client',
+        });
+      }
+
+      expect(sent).toEqual([]);
+
+      going.push(ask(996), ask(992, { destinationId: 7 }), ask(1_004, { given: Uint8Array.of(1) }));
+
+      expect(
+        sent.map(({ envelope }) => {
+          const credential =
+            envelope?.kind === EnvelopeKind.REQUEST ? envelope.header.credential : undefined;
+
+          return envelope?.kind === EnvelopeKind.REQUEST
+            ? [
+                credential !== undefined && 'token' in credential
+                  ? credential.token.length
+                  : undefined,
+                envelope.header.destinationId,
+                envelope.header.total,
+                envelope.payload.length,
+              ]
+            : envelope?.kind;
+        })
+      ).toEqual([
+        [996, undefined, 1_048_576, 1_047_556],
+        [992, 7, 1_048_576, 1_047_556],
+        // a payload its header leaves room for goes whole
+        [1_004, undefined, undefined, 1],
+      ]);
+
+      core.rejectPending('done', 'a');
+      await Promise.allSettled(going);
     });
   });
 
@@ -3957,6 +4075,72 @@ test.describe('createRouterCore', () => {
         ).toEqual([reservation]);
       }
     });
+
+    test('refuses CHUNK_INVALID the chunks of a sender whose chunkBytes is larger than its own, and smaller, both ends setting their limits alike', async () => {
+      const payload = patternOf(300);
+
+      for (const [requester, receiver, chunks, detail] of [
+        // its opening of 108 bytes taken, its first chunk of 112 past the receiver's full of 48
+        [
+          { chunkBytes: 128, windowBytes: 256 },
+          { chunkBytes: 64, windowBytes: 128 },
+          [112],
+          'a chunk before the last carries 48 bytes, not 112',
+        ],
+        // its chunks of 48 under the receiver's full of 112, every one under the credit
+        [
+          { chunkBytes: 64, windowBytes: 128 },
+          { chunkBytes: 128, windowBytes: 256 },
+          [48, 48, 48, 48, 48, 16],
+          'a chunk before the last carries 112 bytes, not 48',
+        ],
+      ] as const) {
+        const loop = createLoopback({ limits: requester, serverLimits: receiver });
+        const heard: string[] = [];
+
+        loop.server.registerResolver(
+          Object.assign((props: IRequestResolverProps<'a'>) => {
+            heard.push(digestOf(props.payload));
+
+            return Promise.resolve();
+          }, echo)
+        );
+
+        const failed = loop.client
+          .request(payload, { connectionHandle: 'server', options, procedure: echo })
+          .catch((error: unknown) => {
+            return error;
+          });
+
+        await loop.flush();
+
+        const label = `${String(requester.chunkBytes)} to ${String(receiver.chunkBytes)}`;
+
+        expect(await failed, label).toMatchObject({
+          code: ProtocolCode.CHUNK_INVALID,
+          detail,
+          origin: 'peer',
+        });
+        // the opening taken and credited, then the first chunk refused
+        expect(
+          loop.traffic.sent.map(({ bytes, to }) => {
+            return [to, bytes[1], bytes.length];
+          }),
+          label
+        ).toEqual([
+          ['server', EnvelopeKind.REQUEST, requester.chunkBytes],
+          ['client', EnvelopeKind.CREDIT, 16],
+          ...chunks.map((bytes) => {
+            return ['server', EnvelopeKind.CHUNK, 16 + bytes];
+          }),
+          ['client', EnvelopeKind.FAILURE, expect.any(Number)],
+        ]);
+        expect(heard, label).toEqual([]);
+
+        loop.client[Symbol.dispose]();
+        loop.server[Symbol.dispose]();
+      }
+    });
   });
 
   test.describe('the transfers it sends', () => {
@@ -4806,7 +4990,7 @@ test.describe('createRouterCore', () => {
     const made = lineOf('bead_client_call_', 'service="2",procedure="echo",type="command"');
     const answered = lineOf('bead_server_call_', 'service="2",procedure="echo",type="request"');
 
-    test('count a call made refused before it goes, no call id free, PAYLOAD_TOO_LARGE or ENVELOPE_TOO_LARGE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
+    test('count a call made refused before it goes, no call id free or PAYLOAD_TOO_LARGE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
       const registry = createMetricsRegistry();
       const metrics = registry.attach('server');
       const { port } = createPort();
@@ -4847,16 +5031,19 @@ test.describe('createRouterCore', () => {
 
       expect(countedOf(registry)).toEqual([
         made('duration_seconds_count{} 3'),
-        made('handled_total{outcome="failure",code="ENVELOPE_TOO_LARGE"} 1'),
-        made('handled_total{outcome="failure",code="PAYLOAD_TOO_LARGE"} 1'),
+        made('handled_total{outcome="failure",code="PAYLOAD_TOO_LARGE"} 2'),
         made('handled_total{outcome="failure",code="CAPACITY_EXCEEDED"} 1'),
         made('started_total{} 4'),
       ]);
 
-      // a programmer's error, and a signal aborted already: neither is a call
+      // a programmer's error, a credential no header of its request holds among them, and a signal
+      // aborted already: none is a call
       const refused = await Promise.all([
         ask(new Uint8Array(0), { options: { timeout: 0 } }),
         ask(new Uint8Array(0), { procedure: { ...echo, maximumPayloadBytes: 0 } }),
+        ask(new Uint8Array(0), {
+          credential: { scheme: CredentialScheme.JWT, token: 'x'.repeat(1_005) },
+        }),
         ask(new Uint8Array(0), { options: { ...options, signal: AbortSignal.abort() } }),
       ]);
 
@@ -4864,7 +5051,7 @@ test.describe('createRouterCore', () => {
         refused.map((reason) => {
           return (reason as Error).name;
         })
-      ).toEqual(['ProgrammerError', 'ProgrammerError', 'CancelError']);
+      ).toEqual(['ProgrammerError', 'ProgrammerError', 'ProgrammerError', 'CancelError']);
       expect(countedOf(registry)).toContain(made('started_total{} 4'));
 
       core.receive(resultOf(2), 'a');

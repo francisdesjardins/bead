@@ -489,7 +489,9 @@ always go in one envelope. A side that sends no transfer fails a request whose p
 one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a result with
 `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
 
-12.2. Both ends of a connection set their limits alike: nothing announces them.
+12.2. Both ends of a connection set their limits alike: nothing announces them. A receiver holds
+`chunkBytes` to a CHUNK (section 12.6); an opening, and a payload that came whole, it holds to
+`maximumEnvelopeBytes`.
 
 | Limit                       | By default  | Bounds                                                                       |
 | --------------------------- | ----------- | ---------------------------------------------------------------------------- |
@@ -513,8 +515,10 @@ together only so.
 
 12.3. The opening is the request or the result itself, with the TRANSFER block: the payload's total
 on 8 bytes, and its first bytes, one at least, as many as fill the envelope to `chunkBytes`, sent
-without credit. A requester whose header leaves its opening no byte within `chunkBytes` fails its
-call before it goes, with `ENVELOPE_TOO_LARGE`. A side receiving an opening:
+without credit. A requester whose header, its TRANSFER block added, passes 1,020 bytes
+(section 4.3) or leaves its opening no byte within `chunkBytes` fails its call before it goes, with
+`PAYLOAD_TOO_LARGE`, as section 12.1 fails a payload its side sends no transfer of: a `JWT` of 997
+bytes or more, 993 or more beside a destination, goes whole only. A side receiving an opening:
 
 1. of a request, takes the steps of section 9.2 on it — its credential's resolution, its admission
    and the total it declares held to the procedure's limit included — before any credit goes: none
@@ -522,10 +526,10 @@ call before it goes, with `ENVELOPE_TOO_LARGE`. A side receiving an opening:
    follows;
 2. of a result, ends the call with `PAYLOAD_TOO_LARGE`, and cancels it, for a total past the
    call's limit;
-3. refuses a total of 0, and a total past what it takes, with `PAYLOAD_TOO_LARGE`; an opening that
-   carries no byte of its payload, or holds its whole total, which needed no transfer, with
-   `CHUNK_INVALID`; an opening past the transfers its connection receives at once, or past the
-   budget left, with `CAPACITY_EXCEEDED`.
+3. refuses, in this order, a total of 0, and a total past what it takes, with `PAYLOAD_TOO_LARGE`;
+   an opening past the transfers its connection receives at once, or past the budget left, with
+   `CAPACITY_EXCEEDED`; an opening that carries no byte of its payload, or holds its whole total,
+   which needed no transfer, with `CHUNK_INVALID`.
 
 12.4. A CREDIT without PACED, on the call id of a transfer, carries the end below which its sender
 may send: absolute, so a credit repeated, late or out of order never grants too much. A credit
@@ -535,13 +539,15 @@ when less is left — and never past the budget left. A transfer the budget cann
 the budget frees, the transfers opened first credited first.
 
 12.5. A CHUNK carries its offset on 8 bytes, and MORE on all but the last. A sender MUST send full
-chunks only — `chunkBytes` less the chunk's own 16 bytes of header — and the last, which reaches the
-total; it waits for credit when a full one does not fit under it.
+chunks only — `chunkBytes` less the chunk's own 16 bytes of header, exactly — and the last,
+which reaches the total and is full at most; it waits for credit when a full one does not fit
+under it.
 
 12.6. A side receiving a chunk of a transfer places it in any order, checked in this order:
 
 1. its bytes within the total, one at least; MORE clear when it reaches the total, and only then;
-   full when it does not: otherwise `CHUNK_INVALID`;
+   full when it does not, and full at most when it does, so no CHUNK's envelope passes
+   `chunkBytes`: otherwise `CHUNK_INVALID`;
 2. its bytes within the credit: otherwise `CREDIT_EXCEEDED`;
 3. its bytes received already, whole: dropped in silence;
 4. its bytes clear of every byte received, so each byte is held once, in whole chunks: otherwise
@@ -887,13 +893,15 @@ opening, before any of its payload crosses — as section 9.2's credential, admi
       resolves them. An `OPAQUE` that does not hold, and an `ELSEWHERE` whose transport carried
       nothing, are answered with `SESSION_REQUIRED`, with the detail section 9.2 gives each. A
       `JWT`, and an `ELSEWHERE` its transport carried, the relay forwards, read from the header's
-      credential scheme alone: they resolve to no session at the relay. With `verifies`, it verifies them besides, with its side's
-      credentials, as section 9.2 does: a `JWT` as section 13.8 does, against the set of audiences
-      its destinations were registered with. One that does not hold — a `JWT` that names none of
-      those audiences, say — is answered with `SESSION_REQUIRED`, with the detail section 9.2 gives
-      it; a verifier that fails, with `PROCEDURE_FAILED`, and reported; a `JWT` that would wait for
-      its issuer's deadline past the calls the relay lets wait for it, with `CAPACITY_EXCEEDED`, not
-      reported; one that holds resolves to its credential's session;
+      credential scheme alone: they resolve to no session at the relay, in a later turn, as
+      section 9.2 has a `JWT` and an `ELSEWHERE` resolve: a call presenting none that came after one
+      may be taken first. With `verifies`, it verifies them besides, with its side's credentials, as
+      section 9.2 does: a `JWT` as section 13.8 does, against the set of audiences its destinations
+      were registered with. One that does not hold — a `JWT` that names none of those audiences,
+      say — is answered with `SESSION_REQUIRED`, with the detail section 9.2 gives it; a verifier
+      that fails, with `PROCEDURE_FAILED`, and reported; a `JWT` that would wait for its issuer's
+      deadline past the calls the relay lets wait for it, with `CAPACITY_EXCEEDED`, not reported;
+      one that holds resolves to its credential's session;
    3. `beforeRoute`, synchronous, on the call's session. A relay with no `beforeRoute` admits
       nobody: `ACCESS_DENIED`. A server's relay admits by default with `requireSessionOrCredential`:
       a call in leg A's connection's session, or one whose header presents a `JWT`, or an

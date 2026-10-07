@@ -44,8 +44,8 @@ const CHUNK_HEADER_BYTES = headerBytesOf({
 });
 
 /**
- * A transfer received, from `opening`, failing the test when it does not open; its chunks carry a
- * byte at least, unless `payloadBytesPerChunk` says more.
+ * A transfer received, from `opening`, failing the test when it does not open; its chunks before the
+ * last carry a byte, exactly, unless `payloadBytesPerChunk` says more.
  */
 const incomingOf = (
   opening: Uint8Array,
@@ -301,7 +301,7 @@ test.describe('createIncomingTransfer', () => {
   });
 
   test('checks a chunk in order: its bounds, its bytes, its last, then its credit, then whether it came', () => {
-    const incoming = incomingOf(patternOf(2), { total: 10 });
+    const incoming = incomingOf(patternOf(2), { payloadBytesPerChunk: 2, total: 10 });
 
     // past the total, even without credit, then without a byte, then with a last that lies
     expect(codeOf(incoming.place(patternOf(3), { isLast: true, offset: 10 }))).toBe(
@@ -362,16 +362,16 @@ test.describe('createIncomingTransfer', () => {
   });
 
   test('refuses a chunk before the last that is not full, and one over bytes received in part', () => {
-    const whole = patternOf(20);
+    const whole = patternOf(19);
     const incoming = incomingOf(whole.subarray(0, 4), {
       payloadBytesPerChunk: 4,
-      total: 20,
+      total: 19,
       windowBytes: 40,
     });
     const place = (offset: number, length: number) => {
       return codeOf(
         incoming.place(whole.slice(offset, offset + length), {
-          isLast: offset + length === 20,
+          isLast: offset + length === 19,
           offset,
         })
       );
@@ -390,9 +390,9 @@ test.describe('createIncomingTransfer', () => {
       place(8, 4),
       place(0, 4),
       // the last carries what is left, however little
-      place(17, 3),
+      place(16, 3),
       place(4, 4),
-      place(12, 5),
+      place(12, 4),
     ]).toEqual([
       ProtocolCode.CHUNK_INVALID,
       ChunkOutcome.PLACED,
@@ -400,6 +400,38 @@ test.describe('createIncomingTransfer', () => {
       ProtocolCode.CHUNK_INVALID,
       ChunkOutcome.DUPLICATE,
       ChunkOutcome.DUPLICATE,
+      ChunkOutcome.PLACED,
+      ChunkOutcome.PLACED,
+      ChunkOutcome.COMPLETE,
+    ]);
+    expect(incoming.payload()).toEqual(whole);
+  });
+
+  test('refuses a chunk past full, before the last or the last, CHUNK_INVALID, and places a full one and a last one full at most', () => {
+    const whole = patternOf(16);
+    const incoming = incomingOf(whole.subarray(0, 4), {
+      payloadBytesPerChunk: 4,
+      total: 16,
+      windowBytes: 40,
+    });
+    const place = (offset: number, length: number) => {
+      return incoming.place(whole.slice(offset, offset + length), {
+        isLast: offset + length === 16,
+        offset,
+      });
+    };
+
+    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(16);
+    // a byte past full, before the last and as the last, though it reaches the total
+    expect(place(4, 5)).toMatchObject({
+      code: ProtocolCode.CHUNK_INVALID,
+      detail: 'a chunk before the last carries 4 bytes, not 5',
+    });
+    expect(place(11, 5)).toMatchObject({
+      code: ProtocolCode.CHUNK_INVALID,
+      detail: 'a last chunk carries 4 bytes at most, not 5',
+    });
+    expect([place(4, 4), place(8, 4), place(12, 4)]).toEqual([
       ChunkOutcome.PLACED,
       ChunkOutcome.PLACED,
       ChunkOutcome.COMPLETE,
@@ -423,17 +455,35 @@ test.describe('createIncomingTransfer', () => {
   });
 
   test('grants a window past the bytes received, once half of it can go, the rest at the end', () => {
-    const incoming = incomingOf(patternOf(4), { total: 22, windowBytes: 8 });
+    const incoming = incomingOf(patternOf(4), {
+      payloadBytesPerChunk: 2,
+      total: 22,
+      windowBytes: 8,
+    });
+    const placeAll = (offsets: number[]) => {
+      return offsets.map((offset) => {
+        return incoming.place(patternOf(2), { isLast: false, offset });
+      });
+    };
 
     expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(12);
     // nothing received since: nothing more to grant
     expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBeUndefined();
-    expect(incoming.place(patternOf(3), { isLast: false, offset: 4 })).toBe(ChunkOutcome.PLACED);
-    // 7 received: 15 would grant 3 more, less than half a window
+    expect(placeAll([4])).toEqual([ChunkOutcome.PLACED]);
+    // 6 received: 14 would grant 2 more, less than half a window
     expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBeUndefined();
-    expect(incoming.place(patternOf(5), { isLast: false, offset: 7 })).toBe(ChunkOutcome.PLACED);
+    expect(placeAll([6, 8, 10])).toEqual([
+      ChunkOutcome.PLACED,
+      ChunkOutcome.PLACED,
+      ChunkOutcome.PLACED,
+    ]);
     expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(20);
-    expect(incoming.place(patternOf(8), { isLast: false, offset: 12 })).toBe(ChunkOutcome.PLACED);
+    expect(placeAll([12, 14, 16, 18])).toEqual([
+      ChunkOutcome.PLACED,
+      ChunkOutcome.PLACED,
+      ChunkOutcome.PLACED,
+      ChunkOutcome.PLACED,
+    ]);
     // 2 bytes are left, less than half a window: granted all the same
     expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(22);
     expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBeUndefined();

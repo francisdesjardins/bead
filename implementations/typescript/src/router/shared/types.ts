@@ -460,7 +460,7 @@ export interface IRequestHandler<Handle extends string = ConnectionHandle> {
 
 /**
  * A procedure as a resolver answers it: the router calls it with each request, once its payload is
- * whole.
+ * whole, and answers `PROCEDURE_FAILED` for one that fails before it answers.
  */
 export interface IRequestResolver<Handle extends string = ConnectionHandle>
   extends IRequestHandler<Handle>, IProcedure {}
@@ -571,12 +571,12 @@ export interface IRouterCore<Handle extends string> {
    * envelope goes as a transfer, as the peer's credit lets it, and a result may come as one; the
    * payload is read until the call settles, and must not change meanwhile. Rejects with a
    * {@link FailureError} for a failure answered, a payload too large — past its procedure's limit
-   * or the router's, or a transfer where this side sends none — a header that leaves a transfer's
-   * opening no byte, `ENVELOPE_TOO_LARGE`, or every call id taken; with a
-   * {@link ProgrammerError}, drawing nothing, for a procedure's limit that is not a whole number
-   * above 0, or a timeout no timer holds. Ended once it went out — its timeout passed, a transfer
-   * silent too long, its signal aborted, a chunk that cannot go out — it cancels its call, before
-   * its caller hears of it.
+   * or the router's, a transfer where this side sends none, or one whose opening's header passes
+   * 1,020 bytes or leaves it no byte — or every call id taken; with a {@link ProgrammerError},
+   * drawing nothing, for a procedure's limit that is not a whole number above 0, a timeout no timer
+   * holds, or a credential no header of its request holds. Ended once it went out — its timeout
+   * passed, a transfer silent too long, its signal aborted, a chunk that cannot go out — it cancels
+   * its call, before its caller hears of it.
    */
   request(
     payload: Uint8Array,

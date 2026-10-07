@@ -391,6 +391,36 @@ test.describe('createRelay, credentials', () => {
     ]);
     expect(own).toHaveLength(2);
   });
+
+  test('answers leg A PAYLOAD_TOO_LARGE, the relay’s own and not reported, for a JWT that came whole and leaves leg B’s opening no room', async () => {
+    // leg B: a router whose envelopes hold 1,024 bytes, so 100 bytes behind a JWT of 1,000 go as a
+    // transfer, whose opening's header of 1,024 bytes passes 1,020
+    const pipe = createPipedTransports({ connectionHandle: device });
+    using legB = createRouterClient(pipe.client, {
+      limits: { chunkBytes: 1_024, maximumEnvelopeBytes: 1_024 },
+    });
+    const { answers, relay, reports } = createTestRelay();
+    const named = tokenNaming('bead-interop');
+    const jwt = { scheme: CredentialScheme.JWT, token: named.padEnd(1_000, 'A') } as const;
+
+    pipe.open();
+    relay.register(legB, { audience: 'bead-interop', destinationId: 7 });
+
+    // whole on leg A: 1,020 bytes of header beside its destination, then its payload
+    await relay.handlerOf(7)?.(
+      propsOf(presentingOf(1, { credential: jwt }), { payload: new Uint8Array(100) })
+    );
+
+    expect(failuresOf(answers)).toEqual([
+      [
+        ProtocolCode.PAYLOAD_TOO_LARGE,
+        undefined,
+        "a payload of 100 bytes goes as a transfer, whose opening's header of 1024 bytes passes 1020",
+      ],
+    ]);
+    expect(reports).toEqual([]);
+    expect(pipe.sent.client).toEqual([]);
+  });
 });
 
 test.describe('createRelay, over HTTP', () => {

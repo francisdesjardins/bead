@@ -99,19 +99,22 @@ interface IQueued {
 }
 
 /**
- * Two cores built with `limits`, a client's on the connection `'server'` and a server's on `'a'`,
- * joined by one queue: what one sends waits there until `flush` hands it to the other, a turn
- * between each, until none is left. In order; or, from `seed`, the chunks and the credits taken in
- * any order and sent twice half the time — every other kind in order, and once. Each side records
- * what it reports, and the kind of each envelope it sends; `sizes` holds the bytes of every
- * envelope sent, and `traffic` every envelope as it was sent, once, and as it was handed over.
+ * Two cores built with `limits`, the server's with `serverLimits` when given, a client's on the
+ * connection `'server'` and a server's on `'a'`, joined by one queue: what one sends waits there
+ * until `flush` hands it to the other, a turn between each, until none is left. In order; or, from
+ * `seed`, the chunks and the credits taken in any order and sent twice half the time — every other
+ * kind in order, and once. Each side records what it reports, and the kind of each envelope it
+ * sends; `sizes` holds the bytes of every envelope sent, and `traffic` every envelope as it was
+ * sent, once, and as it was handed over.
  */
 export const createLoopback = ({
   limits,
   seed,
+  serverLimits = limits,
 }: {
   limits?: RouterLimitsOptions | undefined;
   seed?: number | undefined;
+  serverLimits?: RouterLimitsOptions | undefined;
 }) => {
   const queue: IQueued[] = [];
   const draws = seed === undefined ? undefined : drawsOf(seed);
@@ -168,7 +171,7 @@ export const createLoopback = ({
     }
   );
   const server: IRouterCore<'a'> = createRouterCore(portOf<'a'>('server', SERVER_FAILURES), {
-    limits,
+    limits: serverLimits,
   });
 
   // the next envelope to hand over: the first, in order; else any chunk or credit, or the first of

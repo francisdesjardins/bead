@@ -10,7 +10,8 @@ public sealed class ReceivingTransfersTests
 {
     // helpers
 
-    // receiving transfers under limits, chunks of a byte at least, which record each credit they send
+    // receiving transfers under limits, their chunks before the last of a byte, exactly, which record
+    // each credit they send
     private static (List<string> Credits, ReceivingTransfers Receiving, FakeTimeProvider Time) ReceivingOf(RouterLimits limits)
     {
         var credits = new List<string>();
@@ -135,7 +136,8 @@ public sealed class ReceivingTransfersTests
         var opened = OpenedOf(receiving.Open(new byte[] { 1, 2 }, (CallOf(1, "a"), null, 4)));
 
         receiving.Grant(opened);
-        Assert.Equal(ChunkOutcome.Complete, receiving.Place(opened, new Chunk(new byte[] { 3, 4 }, true, 2)).Outcome);
+        Assert.Equal(ChunkOutcome.Placed, receiving.Place(opened, new Chunk(new byte[] { 3 }, false, 2)).Outcome);
+        Assert.Equal(ChunkOutcome.Complete, receiving.Place(opened, new Chunk(new byte[] { 4 }, true, 3)).Outcome);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, receiving.Complete(opened).ToArray());
         Assert.Equal(100, receiving.Available);
 

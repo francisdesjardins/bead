@@ -651,7 +651,7 @@ test.describe('createRouterServer', () => {
     });
 
     test('that fail in their resolver, or do not read, are reported with their connection', async () => {
-      const { control, deliver, emitter, transport } = createScriptedTransport();
+      const { control, deliver, emitter, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
       const errors = recordErrors(router);
 
@@ -680,6 +680,13 @@ test.describe('createRouterServer', () => {
         [ProtocolCode.ENVELOPE_MALFORMED, first],
         ['rejected', first],
         ['gone', second],
+      ]);
+      // each resolver that failed answered PROCEDURE_FAILED: the one that threw within its
+      // delivery, before its connection's sends fail, then the one that rejected
+      expect(answersOf(sent)).toEqual([
+        [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
+        [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
       ]);
     });
 
@@ -4567,7 +4574,7 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
-  test('counts a call whose handler fails with no answer handed to its transport as an error', async () => {
+  test('answers a call whose handler fails before it answers PROCEDURE_FAILED, and counts it so', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
@@ -4575,7 +4582,7 @@ test.describe('createRouterServer, its metrics', () => {
     const other: IProcedure = { ...echo, procedureId: 7, procedureName: 'other' };
     const answered = lineOf('bead_server_call_', 'service="2",procedure="other",type="request"');
 
-    // a resolver of its own whose handler fails before it answers, and answers nothing
+    // a resolver of its own whose handler fails before it answers: its router answers it
     router.registerResolver(
       Object.assign(() => {
         return Promise.reject(new Error('this handler breaks, on purpose'));
@@ -4585,14 +4592,14 @@ test.describe('createRouterServer, its metrics', () => {
     deliver(first, requestOf(1, { procedure: other }));
     await sleep(0);
 
-    expect(sent).toEqual([]);
+    expect(answersOf(sent)).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
     expect(reportedOf(errors)).toEqual([['this handler breaks, on purpose', first]]);
     expect(metricsRegistry.exposition().text).toContain(
       'bead_server_call_duration_seconds_bucket{service="2",procedure="other",type="request",le="0.0"} 1\n'
     );
     expect(countedOf(metricsRegistry)).toEqual([
       answered('duration_seconds_count{} 1'),
-      answered('handled_total{outcome="error"} 1'),
+      answered('handled_total{outcome="failure",code="PROCEDURE_FAILED"} 1'),
       answered('started_total{} 1'),
     ]);
   });

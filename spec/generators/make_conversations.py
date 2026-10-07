@@ -931,6 +931,12 @@ conversations = [
     ('a chunk before the last that is not full is answered CHUNK_INVALID', ['12.6.1'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 44, LONG[44:60], False), failure(1, CHUNK_INVALID)]),
+    ('a chunk before the last one byte past full is answered CHUNK_INVALID', ['12.5', '12.6.1'], CHUNKED, [
+        opening(1, 'echo', LONG[:44], 300), credited(1, 172),
+        chunk_in(1, 44, LONG[44:93], False), failure(1, CHUNK_INVALID)]),
+    ('a last chunk past full is answered CHUNK_INVALID, though it reaches the total', ['12.5', '12.6.1'], CHUNKED, [
+        opening(1, 'echo', ECHOED[:44], 100), credited(1, 100),
+        chunk_in(1, 44, ECHOED[44:], True), failure(1, CHUNK_INVALID)]),
     ('a chunk that says more follow though it reaches the total is answered CHUNK_INVALID', ['12.6.1'], CHUNKED, [
         opening(1, 'echo', ECHOED[:44], 100), credited(1, 100),
         chunk_in(1, 44, ECHOED[44:92], False), chunk_in(1, 92, ECHOED[92:], False), failure(1, CHUNK_INVALID)]),
@@ -950,6 +956,10 @@ conversations = [
     ('a transfer past those a connection receives at once is answered CAPACITY_EXCEEDED', ['12.3.3'], {**CHUNKED, 'maximumTransfers': 1}, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         opening(3, 'echo', LONG[:44], 300), failure(3, CAPACITY_EXCEEDED), cancel(1)]),
+    ('an opening refused for two reasons is answered with the first of 12.3.3\'s order', ['12.3.3'], {**CHUNKED, 'maximumTransfers': 1}, [
+        opening(1, 'echo', LONG[:44], 300), credited(1, 172),
+        opening(3, 'echo', b'', 0), failure(3, PAYLOAD_TOO_LARGE),
+        opening(5, 'echo', b'"ab"', 4), failure(5, CAPACITY_EXCEEDED), cancel(1)]),
     ('an opening past the budget left is answered CAPACITY_EXCEEDED, and a transfer it starves is credited once it frees', ['12.3.3', '12.4'], {
         **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
         opening(1, 'echo', LONG[:44], 200), credited(1, 172),

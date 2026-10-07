@@ -160,7 +160,7 @@ far a request went:
 | 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                           |
 | 35   | `CAPACITY_EXCEEDED`        | every call id of the side is in use or reserved, or the transfers received hold every place or the budget                                                                                 |
 | 36   | `CREDENTIAL_UNSUPPORTED`   | the request presents a credential of a scheme the side takes none of, and its detail names those it takes                                                                                 |
-| 48   | `CHUNK_INVALID`            | a chunk runs past the total, is empty, does not read, is not full though more follow, says wrongly whether it is the last, overlaps bytes received in part, or leaves too many runs apart |
+| 48   | `CHUNK_INVALID`            | a chunk runs past the total or past full, is empty, does not read, is short with MORE set, says wrongly if it is the last, overlaps bytes received in part, or leaves too many runs apart |
 | 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                      |
 | 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                        |
 | 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                |
@@ -511,10 +511,11 @@ layout. The REQUEST or RESULT that opens it carries the TRANSFER block, the payl
 bytes, and its first bytes, sent without credit. The receiver answers with a CREDIT: the offset
 below which the sender may send, absolute, so a credit repeated, late or out of order never grants
 too much, as QUIC's `MAX_STREAM_DATA` does. The sender sends CHUNKs — each its offset on eight bytes,
-MORE on all but the last — full ones only, the last reaching the total, and waits for credit when a
-full one does not fit. The receiver places them in any order, drops what it has, refuses a chunk
-before the last that is not full, or one over bytes it holds in part — so it holds each byte once,
-in whole chunks — grants a window past what it holds from the start each time half of the last one
+MORE on all but the last — full ones only, exactly, the last reaching the total and full at most,
+and waits for credit when a full one does not fit. The receiver places them in any order, drops what
+it has, refuses a chunk before the last that is not exactly full, a last one past full, or one over
+bytes it holds in part — so it holds each byte once, in whole chunks, and no CHUNK's envelope passes
+`chunkBytes` — grants a window past what it holds from the start each time half of the last one
 is used, and hands the payload on once whole: to the resolver, or to the caller as the call's
 result.
 
@@ -533,12 +534,13 @@ A transfer is refused before its bulk crosses. Its opening is routed, its creden
 admitted — `beforeRequest` sees the header and the call's session, never the payload — and held to
 its procedure's limit and the router's before anything is granted: a refusal falls on the opening,
 and no chunk follows it. An opening carries one byte of its payload at least, and one that holds its
-whole total needed no transfer: either is refused with `CHUNK_INVALID`. A requester whose header
-leaves its opening no byte fails the call before it goes, with `ENVELOPE_TOO_LARGE`. A receiver
-holds `maximumTransfers` transfers per connection at once, each until its call ends, and all of them
-together hold at most `bufferedBytesBudget` bytes, reserved as each credit grants them; an opening
-past either is refused with `CAPACITY_EXCEEDED`, and a transfer the budget cannot credit waits until
-the budget frees, or its inactivity ends it.
+whole total needed no transfer: either is refused with `CHUNK_INVALID`. A requester whose header,
+its TRANSFER block added, passes 1,020 bytes or leaves its opening no byte fails the call before it
+goes, with `PAYLOAD_TOO_LARGE`: a `JWT` of 997 bytes or more, 993 beside a destination, goes whole
+only. A receiver holds `maximumTransfers` transfers per connection at once, each until its call
+ends, and all of them together hold at most `bufferedBytesBudget` bytes, reserved as each credit
+grants them; an opening past either is refused with `CAPACITY_EXCEEDED`, and a transfer the budget
+cannot credit waits until the budget frees, or its inactivity ends it.
 
 The requester ends a transfer with a cancel, the side that answers with a failure:
 `TRANSFER_STALLED` when nothing came for `transferInactivityTimeout`, `CHUNK_INVALID` or

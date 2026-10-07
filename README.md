@@ -43,7 +43,7 @@ publish/subscribe broker (coming).
 - **Everything a conversation needs**: cancel, sessions, a credential on each call — a JWT, or
   what its transport carries — relays that forward it to the destination that verifies it, and
   commands, the server's own calls to the client.
-- **One behaviour in every language.** The spec, its 221 vectors and 150 conversations are the
+- **One behaviour in every language.** The spec, its 223 vectors and 153 conversations are the
   contract. The TypeScript and C# implementations both play them, and call each other in CI over
   both transports.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
@@ -88,8 +88,8 @@ wire, under a version of its own. Beside them:
 
 | File                                                | What it holds                                                                                                                                                                                         |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                 | 221 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
-| [`conversations.json`](spec/conversations.json)     | 150 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
+| [`vectors.json`](spec/vectors.json)                 | 223 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
+| [`conversations.json`](spec/conversations.json)     | 153 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
 | [`transports.json`](spec/transports.json)           | 56 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                              |
 | [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
 | [`durations.json`](spec/durations.json)             | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |

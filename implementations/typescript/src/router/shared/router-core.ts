@@ -31,7 +31,7 @@ import {
   failureErrorOf,
   redactHeader,
 } from './errors';
-import { headerBytesOf, readPrefix } from './header';
+import { headerBytesOf, MAXIMUM_HEADER_BYTES, readPrefix, unboundedHeaderBytesOf } from './header';
 import { sideOfCallId } from './identifiers';
 import { checkDeclaration } from './identity';
 import { CallEnding, endingOf, type IResolverSeries, microsecondsOf } from './metrics-registry';
@@ -251,6 +251,42 @@ const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
 /** Whether `value` limits a procedure's payloads: none, or a whole number above 0. */
 const isPayloadLimit = (value: unknown): boolean => {
   return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 1);
+};
+
+/**
+ * Throws a {@link ProgrammerError} for a credential no header of its request holds, whatever its
+ * payload (spec 4.4): its header laid out on call id 1, whole, with its credential when its caller
+ * gives its bytes, a `JWT` or a scheme to come; an `OPAQUE`, 16 bytes, and an `ELSEWHERE`, none,
+ * always fit.
+ */
+const assertHeaderHolds = ({
+  credential,
+  destinationId,
+  opensSubscription,
+  paced,
+  procedure: { procedureId, serviceId },
+}: {
+  credential?: Credential | undefined;
+  destinationId?: number | undefined;
+  opensSubscription?: boolean | undefined;
+  paced?: boolean | undefined;
+  procedure: Pick<IProcedure, 'procedureId' | 'serviceId'>;
+}): void => {
+  const isAsked =
+    credential !== undefined &&
+    credential.scheme !== CredentialScheme.OPAQUE &&
+    credential.scheme !== CredentialScheme.ELSEWHERE;
+
+  headerBytesOf({
+    callId: 1,
+    destinationId,
+    kind: EnvelopeKind.REQUEST,
+    procedureId,
+    serviceId,
+    ...(opensSubscription === true ? { opensSubscription } : {}),
+    ...(paced === true ? { paced } : {}),
+    ...(isAsked ? { credential } : {}),
+  });
 };
 
 /** How a call this side made ended, by what its router settled it with (spec/debugging.md 9.6). */
@@ -644,14 +680,18 @@ export const createRouterCore = <Handle extends string>(
       };
     }
 
-    const openingBytes =
-      wholeBytes - headerBytesOf({ ...header, total: payload.length }) - announcementBytes;
+    const openingHeaderBytes = unboundedHeaderBytesOf({ ...header, total: payload.length });
+    const openingBytes = wholeBytes - openingHeaderBytes - announcementBytes;
 
-    // its reader would refuse an opening without a byte of its payload, its header too long
-    if (openingBytes < 1) {
+    // ! a header past 1,020 bytes no reader takes, and an opening without a byte of its payload
+    // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
+    if (openingHeaderBytes > MAXIMUM_HEADER_BYTES || openingBytes < 1) {
       return {
-        ...failures.envelopeTooLarge,
-        detail: `a header of ${String(wholeBytes - openingBytes)} bytes leaves a transfer's opening no byte of its payload within ${String(wholeBytes)}`,
+        ...failures.payloadTooLarge,
+        detail:
+          openingHeaderBytes > MAXIMUM_HEADER_BYTES
+            ? `a payload of ${String(payload.length)} bytes goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes passes ${String(MAXIMUM_HEADER_BYTES)}`
+            : `a payload of ${String(payload.length)} bytes goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes leaves it no byte within ${String(wholeBytes)}`,
       };
     }
 
@@ -1038,27 +1078,30 @@ export const createRouterCore = <Handle extends string>(
     });
   };
 
-  // hands a request to its resolver: one that throws before it returns is reported as one that
-  // rejects; either frees its call id unless its answer went out, which closes the call itself; a
-  // call cancelled, or gone with its connection, is not reported
+  // hands a request to its resolver: one that throws before it returns fails as one that rejects,
+  // reported unless its call was cancelled or went with its connection
   const dispatch = (
     resolver: IRequestHandler<Handle>,
-    {
-      connectionHandle,
-      controller,
-      header,
-      payload,
-      session,
-      transportCredential,
-    }: IDispatched<Handle> & { payload: Uint8Array }
+    dispatched: IDispatched<Handle> & { payload: Uint8Array }
   ): void => {
+    const { connectionHandle, controller, header, payload, session, transportCredential } =
+      dispatched;
     const fail = (reason: unknown): void => {
-      if (answeringCalls.isAnswering({ connectionHandle, header })) {
-        answeringCalls.close({ callId: header.callId, connectionHandle }, controller);
-      }
+      const isAnswering = answeringCalls.isAnswering({ connectionHandle, header });
 
       if (!controller.signal.aborted) {
         port.report(toError(reason), connectionHandle);
+      }
+
+      // ! a resolver that fails before it answers is answered PROCEDURE_FAILED, so its requester
+      // does not wait out its timeout (spec 9.5); a call cancelled, or gone with its connection, is
+      // answered nothing, and one answered keeps its answer
+      if (isAnswering && !controller.signal.aborted) {
+        return (refuse(failures.procedureFailed, dispatched), undefined);
+      }
+
+      if (isAnswering) {
+        answeringCalls.close({ callId: header.callId, connectionHandle }, controller);
       }
     };
 
@@ -1951,6 +1994,10 @@ export const createRouterCore = <Handle extends string>(
 
           // held, which its timer, its reservation and its TimeoutError all take
           const timeout = assertHeld("a call's timeout", givenTimeout);
+
+          // ! a credential no header of its request holds, whatever its payload, is a programmer's
+          // error, thrown before the call starts and not counted (spec 4.4)
+          assertHeaderHolds({ credential, destinationId, opensSubscription, paced, procedure });
 
           // * the call starts once nothing makes it a programmer's error and its signal is not
           // aborted, and ends wherever its router settles it, each refusal after in this turn

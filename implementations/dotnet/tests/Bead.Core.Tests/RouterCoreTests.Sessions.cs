@@ -304,6 +304,41 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task A_credential_of_a_JWT_or_an_ELSEWHERE_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
+    {
+        var server = new Peer(RouterSide.Server);
+        var resolver = new Held(server.Core) { ForwardsCredentials = true };
+        var admitted = new List<uint>();
+
+        server.Core.RegisterResolver(resolver);
+        resolver.Admission = (request) =>
+        {
+            admitted.Add(request.Header.CallId);
+
+            return null;
+        };
+
+        // ! in one turn of the router's scheduler, as one read brings them
+        server.Loop.Post(() =>
+        {
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, Credential.Jwt("a.b.c"))), Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(3, null)), Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Elsewhere())), false) { Credential = "Bearer a.b.c" }, Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(7, null)), Handle);
+        });
+        await server.Settle();
+
+        // read from their scheme alone, the JWT and the ELSEWHERE resolve to none, and later
+        Assert.Equal([3u, 7u, 1u, 5u], admitted);
+        Assert.Equal(
+            [3u, 7u],
+            server.Resolved.Select((resolved) =>
+            {
+                return resolved.Request.Header.CallId;
+            }));
+    }
+
+    [Fact]
     public async Task A_credential_resolving_its_call_s_cancel_or_its_connection_s_close_tells_sessionOf_by_the_call_s_signal_and_what_it_settles_to_then_is_dropped()
     {
         var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
@@ -375,7 +410,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task The_credential_this_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfer_s_opening_no_byte_fails_it_before_it_goes_ENVELOPE_TOO_LARGE()
+    public async Task The_credential_this_side_presents_is_the_one_its_side_resolved_and_one_that_leaves_a_transfer_s_opening_no_byte_fails_it_before_it_goes_PAYLOAD_TOO_LARGE()
     {
         var client = new Peer(RouterSide.Client);
         var known = SessionToken.FromBytes(PatternOf(16));
@@ -418,13 +453,69 @@ public sealed partial class RouterCoreTests
 
         await client.Settle();
         Assert.Equal(
-            ((ushort)ProtocolCode.EnvelopeTooLarge, FailureOrigin.Local, (RouterSide?)RouterSide.Client),
-            (tooLarge.Code, tooLarge.Origin, tooLarge.Side));
+            (
+                (ushort)ProtocolCode.PayloadTooLarge,
+                "a payload of 9 bytes goes as a transfer, whose opening's header of 64 bytes leaves it no byte within 64",
+                FailureOrigin.Local,
+                (RouterSide?)RouterSide.Client),
+            (tooLarge.Code, tooLarge.Detail, tooLarge.Origin, tooLarge.Side));
         // the header thrown keeps its credential's scheme alone, never its token
         Assert.Equal(Credential.SchemeOf(CredentialScheme.Jwt), Assert.IsType<RequestHeader>(tooLarge.Header).Credential);
         Assert.Null(((RequestHeader)tooLarge.Header!).Credential!.Value.Token);
         Assert.Equal(5, client.Sent.Count);
         Assert.Equal(long40, ((RequestHeader)client.Sent[4].Header).Credential);
+    }
+
+    [Fact]
+    public async Task A_JWT_its_header_holds_whole_fails_its_call_before_it_goes_PAYLOAD_TOO_LARGE_once_a_transfer_s_header_would_pass_1020_bytes_and_goes_as_a_transfer_a_word_shorter()
+    {
+        // the default limits: a payload of 1 MiB passes an envelope of chunkBytes whole
+        var client = new Peer(RouterSide.Client, RouterLimits.Default);
+        var payload = PatternOf(1_048_576);
+
+        Task<RouterResult> Ask(int length, (uint? DestinationId, byte[] Payload) asked)
+        {
+            var call = PresentingCallOf(Credential.Jwt(new string('x', length)));
+
+            return client.Core.Request(asked.Payload, call with { Options = call.Options with { DestinationId = asked.DestinationId } });
+        }
+
+        // 12 bytes of header, 4 of destination, 8 of total, 4 of the credential's head, its token
+        // padded to 4: an opening's header holds 996 bytes of token, 992 beside a destination
+        foreach (var (length, destinationId, opening) in new (int, uint?, int)[] { (1_004, null, 1_028), (997, null, 1_024), (1_000, 7, 1_028), (993, 7, 1_024) })
+        {
+            var refused = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return Ask(length, (destinationId, payload)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Equal(
+                (
+                    (ushort)ProtocolCode.PayloadTooLarge,
+                    $"a payload of 1048576 bytes goes as a transfer, whose opening's header of {opening} bytes passes 1020",
+                    FailureOrigin.Local,
+                    (RouterSide?)RouterSide.Client),
+                (refused.Code, refused.Detail, refused.Origin, refused.Side));
+        }
+
+        await client.Settle();
+        Assert.Empty(client.Sent);
+
+        _ = Ask(996, (null, payload));
+        _ = Ask(992, (7, payload));
+
+        // a payload its header leaves room for goes whole
+        _ = Ask(1_004, (null, new byte[] { 1 }));
+        await client.Settle();
+        Assert.Equal(
+            [(996, null, 1_048_576L, 1_047_556), (992, 7u, 1_048_576L, 1_047_556), (1_004, null, null, 1)],
+            client.Sent.Select((envelope) =>
+            {
+                var header = (RequestHeader)envelope.Header;
+
+                return (header.Credential!.Value.Token!.Length, header.DestinationId, header.Total, envelope.Payload.Length);
+            }));
+        client.Core.RejectPending("done", Handle);
     }
 
     [Fact]

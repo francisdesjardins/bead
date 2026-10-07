@@ -338,11 +338,11 @@ _Metrics: `spec/metrics.json`._
 counted at its hand-off, and the refusal is reported (`spec.md` 9.0).
 
 9.3. A router takes a call it makes in this order: first what makes it a programmer's error, a
-timeout or a payload's limit that does not hold, a subscription its router does not hold, a command
-that names no connection, and a signal aborted already, each refused and not counted; then the call
-starts; then every check that can refuse it, each ending it in the turn it started. A request whose
-header does not read, answered at the gate (`spec.md` 9.6.2), starts and ends in one turn too, under
-`_OTHER`.
+timeout or a payload's limit that does not hold, a credential no header of its request holds
+(`spec.md` 4.4), a subscription its router does not hold, a command that names no connection, and
+a signal aborted already, each refused and not counted; then the call starts; then every check that
+can refuse it, each ending it in the turn it started. A request whose header does not read,
+answered at the gate (`spec.md` 9.6.2), starts and ends in one turn too, under `_OTHER`.
 
 9.4. Each call a side answers ends as one of these, the sections `spec.md`'s:
 
@@ -375,20 +375,19 @@ subscription and is refused in its own answer, its queue past its bounds before 
 
 9.6. Each call a side makes ends as one of these, the sections `spec.md`'s:
 
-| A call this side makes                                                                                            | `outcome`   | `code`                            |
-| ----------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
-| it asks for `OPAQUE` and its side knows no session, before it goes (13.4)                                         | `failure`   | `SESSION_REQUIRED`                |
-| it presents a credential its transport cannot carry, before it goes (13.4)                                        | `failure`   | `DESTINATION_UNREACHABLE`         |
-| no call id is free (9.1)                                                                                          | `failure`   | `CAPACITY_EXCEEDED`               |
-| its payload past its limit, or a transfer its side sends none of (12.1, 12.2)                                     | `failure`   | `PAYLOAD_TOO_LARGE`               |
-| its header leaves its opening no byte within `chunkBytes` (12.3)                                                  | `failure`   | `ENVELOPE_TOO_LARGE`              |
-| a result comes whole (9.7, 12.6), whether its requester decodes it or not                                         | `result`    |                                   |
-| a failure comes (9.7), passed on by relays or not (7.5)                                                           | `failure`   | its name, `application`, `_OTHER` |
-| its router ends it once it went: an answer that does not read (9.6.3), its result's transfer refused (12.3, 12.6) | `failure`   | its name                          |
-| its time passes (9.9), or its transfer's inactivity (12.7, 12.8)                                                  | `timeout`   |                                   |
-| its caller cancels it (10.1)                                                                                      | `cancelled` |                                   |
-| its connection is not open as it starts, or closes, or the side is disposed (9.10)                                | `closed`    |                                   |
-| anything else its router fails it with: a transport that refuses its request                                      | `error`     |                                   |
+| A call this side makes                                                                                                                                                        | `outcome`   | `code`                            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
+| it asks for `OPAQUE` and its side knows no session, before it goes (13.4)                                                                                                     | `failure`   | `SESSION_REQUIRED`                |
+| it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                    | `failure`   | `DESTINATION_UNREACHABLE`         |
+| no call id is free (9.1)                                                                                                                                                      | `failure`   | `CAPACITY_EXCEEDED`               |
+| its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3) | `failure`   | `PAYLOAD_TOO_LARGE`               |
+| a result comes whole (9.7, 12.6), whether its requester decodes it or not                                                                                                     | `result`    |                                   |
+| a failure comes (9.7), passed on by relays or not (7.5)                                                                                                                       | `failure`   | its name, `application`, `_OTHER` |
+| its router ends it once it went: an answer that does not read (9.6.3), its result's transfer refused (12.3, 12.6)                                                             | `failure`   | its name                          |
+| its time passes (9.9), or its transfer's inactivity (12.7, 12.8)                                                                                                              | `timeout`   |                                   |
+| its caller cancels it (10.1)                                                                                                                                                  | `cancelled` |                                   |
+| its connection is not open as it starts, or closes, or the side is disposed (9.10)                                                                                            | `closed`    |                                   |
+| anything else its router fails it with: a transport that refuses its request                                                                                                  | `error`     |                                   |
 
 9.7. A call to a connection that is not open fails with the type a connection that closes fails it
 with, `DisconnectError`, `DisconnectException`, and counts alike, `closed`: the two are one race with

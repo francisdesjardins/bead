@@ -10,8 +10,8 @@ import type { IProtocolFailure, IRouterLimits } from '../types';
 type Handle = 'a' | 'b';
 
 /**
- * Receiving transfers under `limits`, chunks of a byte at least, on a test clock, which record each
- * credit they send.
+ * Receiving transfers under `limits`, chunks before the last of a byte, exactly, and the last of a
+ * byte at most, on a test clock, which record each credit they send.
  */
 const createReceiving = (limits: Partial<IRouterLimits> = {}) => {
   const clock = createTestClock();
@@ -133,7 +133,10 @@ test.describe('createReceivingTransfers', () => {
 
     receiving.grant(opened);
 
-    expect(receiving.place(opened, { bytes: Uint8Array.of(3, 4), isLast: true, offset: 2 })).toBe(
+    expect(receiving.place(opened, { bytes: Uint8Array.of(3), isLast: false, offset: 2 })).toBe(
+      ChunkOutcome.PLACED
+    );
+    expect(receiving.place(opened, { bytes: Uint8Array.of(4), isLast: true, offset: 3 })).toBe(
       ChunkOutcome.COMPLETE
     );
     expect(receiving.complete(opened)).toEqual(Uint8Array.of(1, 2, 3, 4));

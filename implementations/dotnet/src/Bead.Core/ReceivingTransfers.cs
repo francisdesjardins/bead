@@ -16,7 +16,7 @@ internal sealed record ReceivingTransfersOptions
     /// <summary>The limits they hold by: the budget, the transfers at once, the window, the runs, the payload, the inactivity.</summary>
     public required RouterLimits Limits { get; init; }
 
-    /// <summary>The bytes a chunk before the last carries at least.</summary>
+    /// <summary>The bytes a chunk before the last carries, exactly, and the last at most.</summary>
     public required int PayloadBytesPerChunk { get; init; }
 
     /// <summary>Sends a credit a transfer is granted, on its call.</summary>

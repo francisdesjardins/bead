@@ -356,6 +356,12 @@ failures = [
      {'code': 19, 'detail': 'abcd', 'relays': 0, 'scope': 0}),
     ('a detail cut at 3 bytes, on a character boundary', ['7.3'], f'00 13 00 00  {ascii_hex("abcdéf")}', 3,
      {'code': 19, 'detail': 'abc', 'relays': 0, 'scope': 0}),
+    # the cut steps back over one character at most, to a lead byte three bytes back at most whose
+    # sequence crosses it; a cut that falls on a stray continuation byte stays where it fell
+    ('a stray continuation byte at the cut, the character before it kept whole', ['7.3'], '00 13 00 00  E2 82 AC 80 61', 3,
+     {'code': 19, 'detail': '€', 'relays': 0, 'scope': 0}),
+    ('continuation bytes past three before the cut, read as U+FFFD each, the cut kept', ['7.3'], '00 13 00 00  61 80 80 80 80 80', 5,
+     {'code': 19, 'detail': 'a����', 'relays': 0, 'scope': 0}),
     ('a leading U+FEFF kept', ['7.3'], '00 13 00 00  EF BB BF 61', None, {'code': 19, 'detail': '\ufeffa', 'relays': 0, 'scope': 0}),
     ('a byte that is not UTF-8, read as U+FFFD', ['7.3'], '00 13 00 00  61 FF', None, {'code': 19, 'detail': 'a\ufffd', 'relays': 0, 'scope': 0}),
     # the maximal subparts of the WHATWG decoder: one U+FFFD for each run that could have begun a character

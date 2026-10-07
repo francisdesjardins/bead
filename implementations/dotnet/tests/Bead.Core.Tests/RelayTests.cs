@@ -239,6 +239,32 @@ public sealed class RelayTests
     }
 
     [Fact]
+    public async Task Answers_leg_A_PAYLOAD_TOO_LARGE_the_relay_s_own_and_not_reported_for_a_JWT_that_came_whole_and_leaves_leg_B_s_opening_no_room()
+    {
+        // leg B: a router whose envelopes hold 1,024 bytes, so 100 bytes behind a JWT of 1,000 go as a
+        // transfer, whose opening's header of 1,024 bytes passes 1,020
+        var transport = new SilentTransport();
+        using var legB = new RouterClient(
+            transport,
+            new RouterClientOptions { Limits = new RouterLimits { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_024, WindowBytes = 2_048 } });
+        var test = new TestRelay();
+        var jwt = Credential.Jwt(JwtFor("bead-interop").Token!.PadRight(1_000, 'A'));
+
+        test.Relay.Register(legB, Seven with { Audience = "bead-interop" });
+
+        // whole on leg A: 1,020 bytes of header beside its destination, then its payload
+        var header = HeaderOf(1) with { Credential = jwt };
+
+        await Handled(test.Relay.HandlerOf(header), PropsOf(header) with { Payload = new byte[100] });
+
+        Assert.Equal<object>(
+            [Failure.OfProtocol(ProtocolCode.PayloadTooLarge, "a payload of 100 bytes goes as a transfer, whose opening's header of 1024 bytes passes 1020")],
+            FailuresOf(test.Answers));
+        Assert.Empty(test.Reports);
+        Assert.Equal(0, transport.Sent);
+    }
+
+    [Fact]
     public void Holds_a_payload_to_what_one_envelope_holds_behind_leg_B_s_header_with_its_credential_call_by_call_for_a_target_that_takes_no_transfer()
     {
         var relay = new TestRelay().Relay;
@@ -898,6 +924,57 @@ public sealed class RelayTests
             Asked.Add(new Asked(request.Options, payload, request.Procedure));
 
             return Settle(request.OnSent ?? Unheard);
+        }
+    }
+
+    // a client's transport that counts what it is handed and hears nothing: secure, in process
+    private sealed class SilentTransport : IRouterClientTransport
+    {
+        public TimeProvider Clock
+        {
+            get
+            {
+                return TimeProvider.System;
+            }
+        }
+
+        public bool IsSecure
+        {
+            get
+            {
+                return true;
+            }
+        }
+
+        public int Sent { get; private set; }
+
+        public event Action<TransportMessage>? Message
+        {
+            add
+            {
+            }
+
+            remove
+            {
+            }
+        }
+
+        public event Action<bool, bool>? Close
+        {
+            add
+            {
+            }
+
+            remove
+            {
+            }
+        }
+
+        public Task Send(TransportMessage message)
+        {
+            Sent += 1;
+
+            return Task.CompletedTask;
         }
     }
 

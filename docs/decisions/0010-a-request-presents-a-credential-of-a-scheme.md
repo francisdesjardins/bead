@@ -75,10 +75,13 @@ leaves: 992 bytes on a request that names a destination and opens a transfer (28
 service and procedure, destination, total and the block's own head), 1,004 on one that does neither.
 The limits hold such a header: a side that takes or presents a `JWT` sets `chunkBytes` and
 `maximumEnvelopeBytes` to 1,024 bytes at least (section 12.2), and a transfer's opening carries one
-byte of its payload at least (section 12.3). A writer whose header leaves its payload no room fails
-the call before it goes, with `ENVELOPE_TOO_LARGE`, the code its reader would answer. A token past
-what the header holds is exchanged at the edge for one that fits, or for a session of the server's,
-as OAuth's token exchange does (RFC 8693).
+byte of its payload at least (section 12.3). A writer whose payload needs a transfer, and whose
+header, its TRANSFER block added, passes 1,020 bytes or leaves the opening no byte, fails the call
+before it goes with `PAYLOAD_TOO_LARGE`, as a side that sends no transfer fails one (section 12.1):
+its payload is too large for the one envelope its header leaves it. A credential no header of its
+request holds is a programmer's error, before the call starts. A token past what the header holds
+is exchanged at the edge for one that fits, or for a session of the server's, as OAuth's token
+exchange does (RFC 8693).
 
 ### Two sessions, and the one a call runs in
 
@@ -140,8 +143,9 @@ by its signal (section 10.2), as its connection closing does; a transfer's openi
 until resolution and admission settle (section 12.3); and the call runs in the session it resolved
 to, whatever befell its connection's meanwhile. A request that presents none or `OPAQUE` resolves in
 the turn it came; one that presents `JWT` or `ELSEWHERE` resolves in a later turn, on every side,
-whether its verifier waits or not. A resolution that settles once its call ended, cancelled or its
-connection closed, opens no session, moves no end, and is dropped.
+whether its verifier waits or not, or a relay forwards it unverified, resolving it to no session. A
+resolution that settles once its call ended, cancelled or its connection closed, opens no session,
+moves no end, and is dropped.
 
 **A credential that does not hold is refused, whatever the procedure requires**, with
 `SESSION_REQUIRED`, as a bearer token found invalid is answered 401 (RFC 6750 §3.1); `ACCESS_DENIED`
@@ -450,8 +454,10 @@ verifier refuses one ([0006](0006-a-rule-has-its-gate.md)).
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-six rounds, a later one answering an earlier one's answers. Its objections, each with the answer
-that holds:
+six rounds, a later one answering an earlier one's answers; the round on a forwarded credential's
+turn and on a credential that leaves a transfer no room is kept in
+[0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges. The decision's objections,
+each with the answer that holds:
 
 ### The block and the sessions
 
@@ -466,7 +472,7 @@ that holds:
 | A subscription bounded by its token's lifetime breaks at every renewal and misses a session ended early                                                      | Accepted: it is bounded by its credential's session, which a renewal under the same identifier extends and the side may end.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Refusing a credential that does not hold refuses the call that renews it, and an `OPAQUE` presented by default fails every call in flight across a rotation  | Accepted: `OPAQUE` is presented per call only, and a default credential is withdrawn once refused, the application told.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | The conformance files cannot play a transport's credential, a relay's table or a lifetime                                                                    | Accepted: a step says what the transport carried, another advances the server's clock, `JWT` verdicts are vectors, and two vectors of header length are added; the relays play in the conversations and `Authorization` in the transports' file.                                                                                                                                                                                                                                                                                                          |
-| A header of 1,020 bytes passes the limits: the writer's code, 12.2's minimum and the relay's fixed header                                                    | Accepted: `ENVELOPE_TOO_LARGE` at the writer, limits of 1,024 bytes at least with a `JWT`, an opening of one byte at least, and leg B's header counted call by call.                                                                                                                                                                                                                                                                                                                                                                                      |
+| A header of 1,020 bytes passes the limits: the writer's code, 12.2's minimum and the relay's fixed header                                                    | Accepted: `PAYLOAD_TOO_LARGE` at the writer, limits of 1,024 bytes at least with a `JWT`, an opening of one byte at least, and leg B's header counted call by call.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `SESSION` flags what is often no session, `ENDED` is no scheme, and a bare scheme is a URI's                                                                 | Accepted: the flag is `CREDENTIAL`, its first field the credential scheme, 0 is `NONE`, 2 is `JWT`, and section 13.1 names the two sessions.                                                                                                                                                                                                                                                                                                                                                                                                              |
 | The spec's version moves in this change, against 0008, and the list misses what the change contradicts                                                       | Accepted: the version moves in the release commit ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).                                                                                                                                                                                                                                                                                                                                                                                                                                |
 

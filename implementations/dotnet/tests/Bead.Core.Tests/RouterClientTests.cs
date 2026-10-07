@@ -1281,7 +1281,12 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         transport.Deliver(new Envelope { Header = RequestHeaderOf(6) with { ServiceId = 99 } });
         await scripted.Settle();
-        Assert.Equal([failure, failure, refusal], scripted.Errors);
+
+        // each failed resolver answered PROCEDURE_FAILED, the one the transport refused reported too
+        Assert.Equal([failure, failure, refusal, refusal], scripted.Errors);
+        Assert.Equal(
+            [(2u, ProtocolCode.ProcedureFailed), (4u, ProtocolCode.ProcedureFailed), (6u, ProtocolCode.ServiceUnknown)],
+            transport.Failures);
     }
 
     [Fact]
