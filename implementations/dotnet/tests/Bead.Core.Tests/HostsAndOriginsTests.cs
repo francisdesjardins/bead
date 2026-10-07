@@ -16,6 +16,70 @@ public sealed class HostsAndOriginsTests
 
     private static readonly string[] Origins = ["https://bead.example", "null"];
 
+    // a Host's value HTTP takes (RFC 9110 §7.2): a reg-name, an IPv4 address or an IP-literal, and
+    // an optional port, whitespace around it; empty, and a name of invalid punycode, among them
+    private static readonly string[] WellFormedHosts =
+    [
+        "bead.test",
+        "bead.test:8080",
+        "BEAD.test:8080",
+        "bead.test:",
+        "BEAD.TEST",
+        "",
+        ":8080",
+        "127.0.0.1",
+        "127.0.0.1:8080",
+        "[::1]",
+        "[::1]:8080",
+        "[2001:db8::7]",
+        "[::ffff:127.0.0.1]",
+        "[::ffff:192.0.2.1]",
+        "[v1.fe80::a+en1]",
+        "xn--a",
+        "xn---bad-cpa.test",
+        "bead%2Etest",
+        "b%C3%A9ad.test",
+        "bead_test~",
+        "!$&'()*+,;=",
+        "a-._~!$&'()*+,;=b",
+        " bead.test\t",
+    ];
+
+    // and one it does not: a space, a userinfo, a path, a port not of digits or twice, an
+    // IP-literal unclosed, followed by what is no port, or of what is no IPv6 address, a zone among
+    // them, a percent that encodes nothing, a character past ASCII
+    private static readonly string[] OtherHostValues =
+    [
+        "bad host",
+        "user@bead.test",
+        "bead/test",
+        "bead.test/path",
+        "bead.test?query",
+        "bead.test#fragment",
+        "bead.test:80x",
+        "bead.test:80a",
+        "bead.test:80:80",
+        "bead.test:8080:1",
+        "bead.test:-1",
+        "[::1",
+        "[::1]x",
+        "[::1]:a",
+        "[]",
+        "[bead.test]",
+        "[127.0.0.1]",
+        "[::1%eth0]",
+        "[::1%25eth0]",
+        "[fe80::1%25eth0]",
+        "[::1/64]",
+        "[v.x]",
+        "[v1.]",
+        "bead%2test",
+        "%zz.test",
+        "bead.test%",
+        "béad.test",
+        "::1",
+    ];
+
     // an origin, and the Host of a request that comes from it: the server's own, http:// or https://
     // followed by its Host, in any ASCII case, as a browser writes both from one URL first
     private static readonly (string Origin, string Host)[] Own =
@@ -78,6 +142,25 @@ public sealed class HostsAndOriginsTests
     ];
 
     // definition
+
+    [Fact]
+    public void Takes_a_Host_HTTP_takes_one_field_line_of_a_host_and_an_optional_port_none_where_the_request_asks_none()
+    {
+        Assert.All(WellFormedHosts, (host) =>
+        {
+            Assert.True(HostsAndOrigins.IsWellFormedHost([host], true), host);
+        });
+        Assert.All(OtherHostValues, (host) =>
+        {
+            Assert.False(HostsAndOrigins.IsWellFormedHost([host], true), host);
+        });
+
+        // none, which an HTTP/1.1 request must send and an HTTP/1.0 one need not; two, even alike
+        Assert.False(HostsAndOrigins.IsWellFormedHost([], true));
+        Assert.True(HostsAndOrigins.IsWellFormedHost([], false));
+        Assert.False(HostsAndOrigins.IsWellFormedHost(["bead.test", "bead.test"], true));
+        Assert.False(HostsAndOrigins.IsWellFormedHost(["bead.test", "elsewhere.test"], false));
+    }
 
     [Fact]
     public void Takes_every_host_when_given_none_and_among_those_given_in_any_ASCII_case()

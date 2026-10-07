@@ -32,6 +32,24 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    // RFC 6455 §1.3's key, 16 bytes in base64
+    private const string Key = "dGhlIHNhbXBsZSBub25jZQ==";
+
+    // RFC 6455 §1.3's handshake, at a host the tests' servers take
+    private static readonly string[] Handshake =
+    [
+        "Host: bead.test",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        $"Sec-WebSocket-Key: {Key}",
+        "Sec-WebSocket-Version: 13",
+    ];
+
+    // where the tests' clock stands, and the date a refusal carries from it
+    private static readonly DateTimeOffset Now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private const string Today = "Thu, 01 Jan 2026 00:00:00 GMT";
+
     private static readonly WebSocketTransportStartOptions Loopback = new() { Address = "127.0.0.1", FindOpenPort = true };
 
     private readonly Channel<(TransportMessage Message, string ConnectionHandle)> _messages = Channel.CreateUnbounded<(TransportMessage, string)>();
@@ -199,6 +217,88 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         return (int.Parse(lines[0].Split(' ')[1], CultureInfo.InvariantCulture), fields, text[(end + 4)..]);
     }
 
+    // RFC 6455 §1.3's handshake at bead.test, under the start line given: each field line given in
+    // place of those of its name, which a name alone leaves out
+    private static byte[] HandshakeOf(string start, params string[] fields)
+    {
+        var named = fields.Select(NameOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var lines = Handshake.Where((line) =>
+        {
+            return !named.Contains(NameOf(line));
+        }).Concat(fields.Where((field) =>
+        {
+            return field.Contains(':', StringComparison.Ordinal);
+        }));
+
+        return Encoding.ASCII.GetBytes($"{start}\r\n{string.Concat(lines.Select((line) =>
+        {
+            return $"{line}\r\n";
+        }))}\r\n");
+    }
+
+    // a field line's name, or the name given alone
+    private static string NameOf(string field)
+    {
+        var colon = field.IndexOf(':', StringComparison.Ordinal);
+
+        return colon < 0 ? field : field[..colon];
+    }
+
+    // the whole head of a refusal of the transport's own: marked, never stored nor sniffed, dated by
+    // the tests' clock, its body empty, its connection closed, and the fields given beside or in
+    // place of those
+    private static Dictionary<string, string> RefusedWith(string reason, params (string Name, string Value)[] beside)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["bead-refusal"] = reason,
+            ["cache-control"] = "no-store",
+            ["x-content-type-options"] = "nosniff",
+            ["content-length"] = "0",
+            ["connection"] = "close",
+            ["date"] = Today,
+        };
+
+        foreach (var (name, value) in beside)
+        {
+            fields[name] = value;
+        }
+
+        return fields;
+    }
+
+    // a server started on the tests' clock, which dates its refusals
+    private async Task StartDated(WebSocketTransportServerOptions options)
+    {
+        await Start(options with { Clock = new FakeTimeProvider(Now) });
+    }
+
+    // that the server answers each request with the status and the whole head given, its body empty,
+    // and lets go of its socket; each told by its own octets
+    private async Task AssertAnswered(IEnumerable<byte[]> requests, (int Status, Dictionary<string, string> Fields) expected)
+    {
+        static string FieldsOf(Dictionary<string, string> fields)
+        {
+            return string.Join("; ", fields.OrderBy((field) =>
+            {
+                return field.Key;
+            }, StringComparer.Ordinal).Select((field) =>
+            {
+                return $"{field.Key}: {field.Value}";
+            }));
+        }
+
+        foreach (var request in requests)
+        {
+            var asked = Encoding.ASCII.GetString(request).Replace("\r\n", " | ", StringComparison.Ordinal);
+            var answer = await AnswerOf(request);
+
+            Assert.Equal(
+                (asked, expected.Status, FieldsOf(expected.Fields), ""),
+                (asked, answer.Status, FieldsOf(answer.Fields), answer.Body));
+        }
+    }
+
     // reads an answer's head, byte by byte, so nothing after it is taken with it
     private static async Task ReadHead(NetworkStream stream)
     {
@@ -359,27 +459,32 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Refuses_an_upgrade_403_before_its_handshake_marked_host_refused_for_a_host_it_does_not_take_and_origin_refused_for_an_origin_neither_its_own_nor_among_those_it_takes_its_body_empty_its_date_written()
+    public async Task Refuses_an_upgrade_403_before_its_handshake_marked_host_refused_for_a_host_it_does_not_take_and_origin_refused_for_an_origin_neither_its_own_nor_among_those_it_takes_its_body_empty_its_date_written_whatever_its_method_its_upgrade_or_its_form()
     {
-        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"], Origins = ["https://bead.example"] });
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"], Origins = ["https://bead.example"] });
 
-        var refusals = new[]
-        {
-            await AnswerOf(("elsewhere.test", null)),
-            await AnswerOf(("bead.test", "https://elsewhere.test")),
-            await AnswerOf(("bead.test", "http://elsewhere.test:80")),
-        };
+        // a host not taken, whatever else the request holds: a page that rebinds its name reaches
+        // the address with any method and no upgrade
+        await AssertAnswered(
+            [
+                UpgradeRequest(("elsewhere.test", null)),
+                UpgradeRequest(("elsewhere.test", "http://elsewhere.test")),
+                HandshakeOf("POST / HTTP/1.1", "Host: elsewhere.test"),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("POST / HTTP/1.1", "Host: elsewhere.test", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Content-Length: 0"),
+                HandshakeOf("PUT /bead HTTP/1.1", "Host: elsewhere.test", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Content-Length: 0"),
+                HandshakeOf("HEAD / HTTP/1.1", "Host: elsewhere.test"),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Sec-WebSocket-Key: dGVzdA=="),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Sec-WebSocket-Version: 14"),
+                HandshakeOf("GET / HTTP/1.1", "Host: "),
+            ],
+            (403, RefusedWith(WebSocketRefusals.Host)));
 
-        Assert.Equal(["host-refused", "origin-refused", "origin-refused"], refusals.Select((refusal) =>
-        {
-            return refusal.Fields["bead-refusal"];
-        }));
-        Assert.All(refusals, (refusal) =>
-        {
-            Assert.Equal(403, refusal.Status);
-            Assert.Equal(("no-store", "nosniff", "0", ""), (refusal.Fields["cache-control"], refusal.Fields["x-content-type-options"], refusal.Fields["content-length"], refusal.Body));
-            Assert.True(DateTimeOffset.TryParseExact(refusal.Fields["date"], "r", CultureInfo.InvariantCulture, DateTimeStyles.None, out _), refusal.Fields["date"]);
-        });
+        // a host taken, from an origin neither its own nor among those it takes
+        await AssertAnswered(
+            [UpgradeRequest(("bead.test", "https://elsewhere.test")), UpgradeRequest(("bead.test", "http://elsewhere.test:80"))],
+            (403, RefusedWith(WebSocketRefusals.Origin)));
         Assert.True(_connections.Reader.Count == 0);
     }
 
@@ -442,39 +547,103 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Answers_426_to_an_upgrade_of_a_version_but_13_before_its_host_and_its_origin_are_judged_naming_version_13()
+    public async Task Refuses_a_method_but_GET_or_HEAD_405_after_its_host_and_before_its_upgrade_is_read_its_Allow_naming_GET_and_HEAD_marked_method_refused()
     {
-        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test", "bead.test:80"] });
 
-        // a handshake with the fields given, its version among them: version 8, which RFC 6455 left
-        // behind and no browser sends, any other, or none
-        static byte[] HandshakeOf(string host, string fields)
-        {
-            return Encoding.ASCII.GetBytes(
-                $"GET / HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n{fields}" +
-                $"Sec-WebSocket-Key: {Convert.ToBase64String(RandomNumberGenerator.GetBytes(16))}\r\n\r\n");
-        }
+        // a handshake under another method, one of version 8 among them, or none at all; a CONNECT,
+        // whose Host Kestrel holds to its target
+        await AssertAnswered(
+            [
+                HandshakeOf("POST / HTTP/1.1"),
+                HandshakeOf("PUT / HTTP/1.1"),
+                HandshakeOf("OPTIONS / HTTP/1.1"),
+                HandshakeOf("POST / HTTP/1.1", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("DELETE / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("POST / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Content-Length: 0"),
+                HandshakeOf("CONNECT bead.test:80 HTTP/1.1", "Host: bead.test:80"),
+            ],
+            (405, RefusedWith(WebSocketRefusals.Method, ("allow", "GET, HEAD"))));
+        Assert.True(_connections.Reader.Count == 0);
+    }
 
-        var answers = new[]
-        {
-            await AnswerOf(HandshakeOf("bead.test", "Origin: https://elsewhere.test\r\nSec-WebSocket-Version: 8\r\n")),
-            await AnswerOf(HandshakeOf("bead.test", "Sec-WebSocket-Origin: http://bead.test\r\nSec-WebSocket-Version: 8\r\n")),
-            await AnswerOf(HandshakeOf("bead.test", "Sec-WebSocket-Version: 8\r\n")),
-            await AnswerOf(HandshakeOf("elsewhere.test", "Sec-WebSocket-Version: 8\r\n")),
+    [Fact]
+    public async Task Answers_a_request_that_asks_no_WebSocket_426_marked_upgrade_required_its_Upgrade_naming_websocket_its_Connection_upgrade_and_close()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
 
-            // any other version, or none
-            await AnswerOf(HandshakeOf("bead.test", "Origin: https://elsewhere.test\r\nSec-WebSocket-Version: 7\r\n")),
-            await AnswerOf(HandshakeOf("elsewhere.test", "Sec-WebSocket-Version: 14\r\n")),
-            await AnswerOf(HandshakeOf("bead.test", "")),
-        };
+        // no upgrade at all; an Upgrade missing or naming no websocket; a Connection missing or
+        // naming no upgrade; a HEAD, which cannot switch, its body none and its length 0; an
+        // HTTP/1.0 request, whose Upgrade is ignored
+        await AssertAnswered(
+            [
+                HandshakeOf("GET / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade: websocket/13"),
+                HandshakeOf("GET / HTTP/1.1", "Connection"),
+                HandshakeOf("GET / HTTP/1.1", "Connection: keep-alive"),
+                HandshakeOf("GET / HTTP/1.1", "Connection: upgraded"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Upgrade", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("HEAD / HTTP/1.1"),
+                HandshakeOf("HEAD / HTTP/1.1", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+                HandshakeOf("GET / HTTP/1.0"),
+                HandshakeOf("GET / HTTP/1.0", "Upgrade: websocket, h2c"),
+                HandshakeOf("GET / HTTP/1.0", "Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"),
+            ],
+            (426, RefusedWith(WebSocketRefusals.Upgrade, ("connection", "upgrade, close"), ("upgrade", "websocket"))));
+        Assert.True(_connections.Reader.Count == 0);
+    }
 
-        Assert.All(answers, (answer) =>
-        {
-            Assert.Equal(
-                (426, "13", "0", "close", ""),
-                (answer.Status, answer.Fields["sec-websocket-version"], answer.Fields["content-length"], answer.Fields["connection"], answer.Body));
-            Assert.True(DateTimeOffset.TryParseExact(answer.Fields["date"], "r", CultureInfo.InvariantCulture, DateTimeStyles.None, out _), answer.Fields["date"]);
-        });
+    [Fact]
+    public async Task Refuses_a_malformed_upgrade_400_marked_malformed_before_its_origin_is_judged_its_body_empty()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // a key missing, not base64, of 4 or 17 bytes, twice, empty, or with a space inside; two
+        // versions; subprotocols that are no list of tokens, or none; content, by its length or in
+        // chunks; a bad key from an origin not taken
+        await AssertAnswered(
+            [
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: not a key at all!!!!!=="),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGVzdA=="),
+                HandshakeOf("GET / HTTP/1.1", $"Sec-WebSocket-Key: {Convert.ToBase64String(new byte[17])}"),
+                HandshakeOf("GET / HTTP/1.1", $"Sec-WebSocket-Key: {Key}", $"Sec-WebSocket-Key: {Key}"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: "),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGhlIHNhbXBs ZSBub25jZQ=="),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 13", "Sec-WebSocket-Version: 13"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Protocol: a b"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Protocol: "),
+                [.. HandshakeOf("GET / HTTP/1.1", "Content-Length: 5"), .. "hello"u8],
+                [.. HandshakeOf("GET / HTTP/1.1", "Transfer-Encoding: chunked"), .. "5\r\nhello\r\n0\r\n\r\n"u8],
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGVzdA==", "Origin: https://elsewhere.test"),
+            ],
+            (400, RefusedWith(WebSocketRefusals.Malformed)));
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Answers_426_to_an_upgrade_of_a_version_but_13_or_of_none_marked_version_refused_naming_version_13_and_websocket_before_its_key_and_its_origin_are_judged()
+    {
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // version 8, which RFC 6455 left behind and no browser sends, from an origin not taken, with
+        // its own origin's field, or with a bad key; any other, none, or a list in one field line
+        await AssertAnswered(
+            [
+                HandshakeOf("GET / HTTP/1.1", "Origin: https://elsewhere.test", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Origin: http://bead.test", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGVzdA==", "Sec-WebSocket-Version: 8"),
+                HandshakeOf("GET / HTTP/1.1", "Origin: https://elsewhere.test", "Sec-WebSocket-Version: 7"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 013"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 13, 8"),
+                HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Version: 8, 13"),
+            ],
+            (426, RefusedWith(WebSocketRefusals.Version, ("connection", "upgrade, close"), ("upgrade", "websocket"), ("sec-websocket-version", "13"))));
         Assert.True(_connections.Reader.Count == 0);
 
         // version 13, from the server's own origin, upgrades
@@ -488,13 +657,59 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Answers_a_request_that_does_not_upgrade_with_426()
+    public async Task Answers_a_request_without_a_Host_with_two_or_with_one_that_is_no_host_400_as_HTTP_does_unmarked()
     {
-        // the TypeScript side's ws library answers the same to a request that asks no WebSocket
-        using var http = new HttpClient();
-        using var answered = await http.GetAsync(new Uri($"http://127.0.0.1:{_port}/"), Cancelled);
+        var requests = new[]
+        {
+            HandshakeOf("GET / HTTP/1.1", "Host"),
+            HandshakeOf("GET / HTTP/1.1", "Host: bead.test", "Host: elsewhere.test"),
+            HandshakeOf("GET / HTTP/1.1", "Host: elsewhere.test", "Host: bead.test"),
+            HandshakeOf("GET / HTTP/1.1", "Host: bad host"),
+        };
 
-        Assert.Equal(426, (int)answered.StatusCode);
+        // its head is the HTTP server's own, whether the server takes every host or names some
+        foreach (var hosts in new[] { null, new[] { "bead.test" } })
+        {
+            await Start(new WebSocketTransportServerOptions { Hosts = hosts });
+
+            foreach (var request in requests)
+            {
+                var answer = await AnswerOf(request);
+
+                Assert.Equal((400, false, ""), (answer.Status, answer.Fields.ContainsKey("bead-refusal"), answer.Body));
+            }
+        }
+
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Takes_an_upgrade_whose_Upgrade_lists_websocket_in_any_case_in_one_field_line_or_several_whose_Connection_names_upgrade_among_other_tokens_with_no_content()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        foreach (var request in new[]
+        {
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: WebSocket"),
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c, websocket"),
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: websocket, h2c"),
+            HandshakeOf("GET / HTTP/1.1", "Upgrade: h2c", "Upgrade: websocket"),
+            HandshakeOf("GET / HTTP/1.1", "Connection: keep-alive, upgrade"),
+            HandshakeOf("GET / HTTP/1.1", "Connection: UPGRADE"),
+            HandshakeOf("GET / HTTP/1.1", "Connection: keep-alive", "Connection: upgrade"),
+            HandshakeOf("GET / HTTP/1.1", "Content-Length: 0"),
+            HandshakeOf("GET / HTTP/1.1", "Content-Length: 00"),
+            HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA=="),
+        })
+        {
+            using var tcp = await OpenTcp();
+            var stream = tcp.GetStream();
+
+            await stream.WriteAsync(request, Cancelled);
+            await ReadHead(stream);
+
+            Assert.StartsWith("type=WS;", await Next(_connections), StringComparison.Ordinal);
+        }
     }
 
     [Fact]

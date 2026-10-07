@@ -1522,6 +1522,32 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Answers_a_request_without_a_Host_with_two_or_with_one_that_is_no_host_400_as_HTTP_does_unmarked()
+    {
+        // a connect with the Host field lines given: none, two in either order, or one that is no host
+        var hosts = new[] { "", "Host: bead.test\r\nHost: elsewhere.test\r\n", "Host: elsewhere.test\r\nHost: bead.test\r\n", "Host: bad host\r\n" };
+
+        // its head is the HTTP server's own, whether the server takes every host or names some
+        foreach (var options in new[] { new HttpTransportServerOptions(), new HttpTransportServerOptions { Hosts = ["bead.test"] } })
+        {
+            await Start(options);
+
+            foreach (var host in hosts)
+            {
+                using var wire = await Wire.Open(_port);
+
+                await wire.Write($"POST /bead HTTP/1.1\r\n{host}Content-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+
+                var (head, body) = await wire.Read();
+
+                Assert.Equal((host, 400, false, 0), (host, head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), body.Length));
+            }
+        }
+
+        Assert.Empty(_connections);
+    }
+
+    [Fact]
     public async Task Takes_a_proxy_s_last_forwarded_address_when_told_to_and_bounds_the_connections_of_each_address()
     {
         await Start(new HttpTransportServerOptions { IsProxyTrusted = true, MaximumConnectionsPerAddress = 1 });

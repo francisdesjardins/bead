@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
 using Microsoft.AspNetCore.Builder;
@@ -55,19 +56,19 @@ public sealed record WebSocketTransportServerOptions
     public bool? Secure { get; init; }
 
     /// <summary>
-    /// The hosts an upgrade may name, in any ASCII case, in the form the field carries, an IDN host
-    /// in punycode, checked before its handshake; any when none. The server judges its own origin by
-    /// the request's <c>Host</c>, so this is what refuses a page that rebinds its name to the
-    /// server's address.
+    /// The hosts a request may name, in any ASCII case, in the form the field carries, an IDN host
+    /// in punycode, checked before anything else of the request but its <c>Host</c>'s form; any when
+    /// none. The server judges its own origin by the request's <c>Host</c>, so this is what refuses a
+    /// page that rebinds its name to the server's address, whatever it sends.
     /// </summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
     /// <summary>
     /// The origins an upgrade that sends an <c>Origin</c> may come from besides the server's own,
     /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly, checked
-    /// before its handshake: none by default. <c>null</c> among them takes every upgrade that sends
-    /// it. No same-origin policy guards an upgrade, so a page of an origin named here is served
-    /// outright.
+    /// once its version and its form are a handshake's: none by default. <c>null</c> among them
+    /// takes every upgrade that sends it. No same-origin policy guards an upgrade, so a page of an
+    /// origin named here is served outright.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 }
@@ -91,7 +92,10 @@ public sealed record WebSocketTransportStartOptions
 /// cref="WebSocketTransportServerOptions.Heartbeat"/>. A text message is delivered as text, which
 /// a router reports. What goes out to one connection goes in order, one message at a time. It goes
 /// from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed,
-/// and starts again once Closed.
+/// and starts again once Closed. A request it does not upgrade it refuses in the order spec 15.2
+/// states, each refusal of its own marked as <see cref="WebSocketRefusals"/> names it: a host not
+/// taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, or a version but
+/// 13, 426; a malformed upgrade, 400; an origin not taken, 403.
 /// </summary>
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -409,68 +413,51 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
-    // whether a request asks a WebSocket of a version other than 13, which ASP.NET Core does not take
-    private static bool IsUpgradeOfAnotherVersion(HttpRequest request)
+    // a refusal written: its status, its fields, its mark when it has one, its date from the
+    // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be
+    private void Refuse(HttpResponse response, HandshakeRefusal refusal)
     {
-        return request.Headers.Upgrade.ToString().Contains("websocket", StringComparison.OrdinalIgnoreCase)
-            && request.Headers.SecWebSocketVersion.ToString() != "13";
-    }
+        response.StatusCode = refusal.Status;
 
-    // the refusal of an upgrade from a host or an origin the server does not take, before its
-    // handshake, if it is one: 403, marked, never stored nor sniffed, its body empty (spec 15.2)
-    private string? RefusalOf(HttpRequest request)
-    {
-        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
-        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
-        var host = request.Headers.Host.ToString();
-        var origin = request.Headers.Origin;
-
-        if (!HostsAndOrigins.IsTakenHost(host, _options.Hosts))
+        foreach (var (name, value) in refusal.Fields)
         {
-            return HostsAndOrigins.HostRefusal;
+            response.Headers[name] = value;
         }
 
-        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (host, _options.Origins)))
+        if (refusal.Refusal is { } reason)
         {
-            return HostsAndOrigins.OriginRefusal;
+            response.Headers[HostsAndOrigins.RefusalHeader] = reason;
         }
 
-        return null;
+        // ! Kestrel keeps the date and the length the application writes: without the length it
+        // leaves it out of a HEAD's answer
+        response.Headers.Date = _clock.GetUtcNow().ToString("r", CultureInfo.InvariantCulture);
+        response.ContentLength = 0;
     }
 
     // a request: one that upgrades becomes a connection, until its socket closes; none is taken once
-    // a stop began, nor one from a host or an origin the server does not take
+    // a stop began, and any other is refused in the order spec 15.2 states, the connection going
+    // with the refusal, as the TypeScript side's does
     private async Task Accept(HttpContext context)
     {
-        var isStopping = _life.IsStopping;
-
-        if (!context.WebSockets.IsWebSocketRequest || isStopping)
+        if (_life.IsStopping)
         {
-            context.Response.StatusCode = isStopping ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status426UpgradeRequired;
-
-            // an upgrade of another version than 13, before its host and its origin are judged: the
-            // answer names the one version the transport speaks (RFC 6455 §4.4), and the connection
-            // goes with it, as the TypeScript side's does
-            if (!isStopping && IsUpgradeOfAnotherVersion(context.Request))
-            {
-                context.Response.Headers.SecWebSocketVersion = "13";
-                context.Response.Headers.Connection = "close";
-            }
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
 
             return;
         }
 
-        if (RefusalOf(context.Request) is { } refusal)
+        if (WebSocketHandshake.RefusalOf(context.Request, _options) is { } refusal)
         {
-            var response = context.Response;
+            Refuse(context.Response, refusal);
 
-            // Kestrel writes its date and an empty length; the connection goes with the refusal, as
-            // the TypeScript side's does
-            response.StatusCode = StatusCodes.Status403Forbidden;
-            response.Headers[HostsAndOrigins.RefusalHeader] = refusal;
-            response.Headers.CacheControl = "no-store";
-            response.Headers.XContentTypeOptions = "nosniff";
-            response.Headers.Connection = "close";
+            return;
+        }
+
+        // ! a guard: what the judgement takes Kestrel upgrades, and its accept throws on any other
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            Refuse(context.Response, WebSocketHandshake.Malformed);
 
             return;
         }
