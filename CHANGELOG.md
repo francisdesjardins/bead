@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `.claude/workflows/`: three workflows launched by name, a round of the Tenth Man, an implementation
+  on both sides with its integration and a commit plan, and an adversarial review by lens.
+
 ### Fixed
 
 - A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
