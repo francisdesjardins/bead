@@ -184,7 +184,7 @@
       }
     },
     "request": {
-      "description": "A request of HTTP/1.1, an opening handshake among them.",
+      "description": "A request of HTTP/1.1, an opening handshake among them, or of HTTP/1.0.",
       "type": "object",
       "required": ["head"],
       "additionalProperties": false,
@@ -192,7 +192,7 @@
         "head": {
           "description": "The request's line and fields, as text, CRLF after each and one more after the last; {host} and a captured value's {name} put in.",
           "type": "string",
-          "pattern": "^[A-Z]+ \\S+ HTTP/1\\.1\\r\\n(?:[a-z0-9-]+: [^\\r\\n]*\\r\\n)*\\r\\n$"
+          "pattern": "^[A-Z]+ \\S+ HTTP/1\\.[01]\\r\\n(?:[a-z0-9-]+: [^\\r\\n]*\\r\\n)*\\r\\n$"
         },
         "body": { "$ref": "common.schema.json#/$defs/bytes" }
       }

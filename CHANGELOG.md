@@ -547,17 +547,36 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   §4.2.2): the TypeScript side's where `ws` took version 8, whose handshake carries its origin in
   `Sec-WebSocket-Origin`, and answered any other 400; the C# side's where it answered 426 alone. An
   upgrade is judged by the `Origin` an exchange is.
+- A WebSocket server judges a request at its address in the order spec 15.2 states: 400 as HTTP
+  answers it to a `Host` missing, repeated or no host; 403, `host-refused`, to a host not taken,
+  whatever the request; 405, `method-refused`, to a method but `GET` or `HEAD`, its `Allow` naming
+  both; 426, `upgrade-required`, to a request that asks no WebSocket, a `HEAD` and an `HTTP/1.0`
+  request among them; 426, `version-refused`, to a version but 13, or a version listed; 400,
+  `malformed`, to a malformed upgrade, a key with a space inside, two version fields, a malformed
+  `Sec-WebSocket-Protocol` and content among them; each 426 naming `websocket` in its `Upgrade`
+  (RFC 9110 §15.5.22), each refusal marked, never stored nor sniffed, its body empty, its connection
+  closed. An `Upgrade` listing `websocket` among other protocols is taken. The TypeScript side
+  answered such requests 400 or 405 unmarked, or 426 with `ws`'s own body; the C# side answered them
+  426 alone, and took a key with a space inside, a version listed in one field, two version fields
+  and a malformed `Sec-WebSocket-Protocol`.
+- An HTTP server answers 400 an HTTP/1.1 request without a `Host`, and one with two `Host` field
+  lines or a `Host` that is no host (spec 15.12, RFC 9112 §3.2), unmarked, on both transports.
+- The TypeScript side asks Node 24.9 or later, whose `shouldUpgradeCallback` its WebSocket server
+  judges a request through before `ws` reads it.
 - The TypeScript side's WebSocket transports take a message of an envelope's limit by default,
   16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, as the C# side's do: the server where `ws` took
   104,857,600, the client wherever its `WebSocket` takes a bound, `ws`'s; `createWSClient` holds it
   to its limits, as `createWSServer` does.
-- The TypeScript side's `IIncomingMessageLike`, the request a `WebSocketServer` hands its
-  transport, gives its headers and its method, and a socket that answers a refused upgrade, `end`,
-  `destroy` and `once`, as Node's request does; and the server is built with `verifyClient`, which
-  judges an upgrade's host and origin, in `ws`'s asynchronous form, and listens for `wsClientError`,
-  which `ws` emits for an upgrade it cannot read and leaves to its listener to answer: a
-  `WebSocketServer` given in place of `ws`'s hands such a request, and calls `verifyClient` before
-  each handshake, or takes every upgrade.
+- The TypeScript side's `IIncomingMessageLike`, the request a `WebSocketServer` hands its transport,
+  gives its headers, its raw headers, its HTTP version and its method, and its socket's address, as
+  Node's request does; the socket the transport answers raw, a `CONNECT`'s or an upgrade `ws` cannot
+  read, is an `IUpgradeSocketLike`, `end`, `destroy`, `on` and `once`. `IHTTPRequestLike` gives its
+  `httpVersion`. The WebSocket transport builds its own `node:http` server and hands it to its
+  `WebSocketServer` as `server`, beside `maxPayload`, what `IWebSocketServerConstructor` takes:
+  Node's `shouldUpgradeCallback` hands `ws` only the upgrades the transport takes, and the transport
+  answers every other request itself. It listens for `wsClientError` as a guard, answering 400
+  `malformed`. A `WebSocketServer` given in place of `ws`'s takes its upgrades from that server, as
+  `ws` does.
 
 ### Removed
 
@@ -595,6 +614,10 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   that pinned the silence are reversed.
 - The TypeScript side's HTTP server takes its own origin with a `Host` in any ASCII case, as the C#
   side does, and both take a host among `hosts` in any ASCII case (RFC 9110 §4.2.3).
+- A WebSocket server upgrades no `HTTP/1.0` request, whose `Upgrade` it ignores (RFC 9110 §7.8).
+  The TypeScript WebSocket server refuses an upgrade with content, whose body it read as frames, and
+  an upgrade without a `Host`, which it took; both TypeScript servers refuse a request with two
+  `Host` field lines, which they took by the first, or with a `Host` that is no host.
 - The C# side's servers read the `Host` field as it came, as the TypeScript side's do, where
   ASP.NET Core's `HttpRequest.Host` turned its punycode into Unicode: a page on an IDN host, its
   `Host` and its `Origin` in punycode as a browser sends them, is its own where the HTTP server
@@ -604,10 +627,11 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 ### Security
 
 - A WebSocket server takes an upgrade only from the hosts and origins it takes, `hosts`, `Hosts`,
-  and `origins`, `Origins`, as the HTTP server does, and refuses any other 403 before its handshake,
-  `host-refused` or `origin-refused`, its body empty: a page of another origin no longer calls a
-  server on the loopback. It judges its own origin by `Host`: `hosts` refuses a page that rebinds
-  its name to the server's address.
+  and `origins`, `Origins`, as the HTTP server does, and refuses any other 403, `host-refused` or
+  `origin-refused`, its body empty: a page of another origin no longer calls a server on the
+  loopback. It judges its own origin by `Host`, and refuses a host it does not take whatever the
+  request, as the HTTP server does: `hosts` refuses a page that rebinds its name to the server's
+  address.
 - The C# side's `TransportMessage`, `SessionRequest` and `Session<TData>` write whether a
   credential or a session's token is there in their strings, never it.
 

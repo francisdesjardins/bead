@@ -1133,6 +1133,68 @@
       ]
     },
     {
+      "name": "an HTTP/1.1 request without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked, before its host is judged",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "none"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: bead.test\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "two"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "two"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: bad host\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "bad"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "bad"
+        }
+      ]
+    },
+    {
       "name": "an exchange from an origin the server does not take is refused 403, marked",
       "clauses": [
         "15.6.5",
@@ -1469,7 +1531,7 @@
     {
       "name": "past the connections a server holds, a connect is refused 503, with Retry-After",
       "clauses": [
-        "15.6.12",
+        "15.6.13",
         "15.12.1"
       ],
       "transport": "http",
@@ -1520,7 +1582,7 @@
     {
       "name": "past the connections one address holds, behind a proxy trusted, a connect is refused 503",
       "clauses": [
-        "15.6.12",
+        "15.6.13",
         "15.12",
         "15.12.2"
       ],
@@ -1578,7 +1640,7 @@
     {
       "name": "past the requests waiting on one connection, a request is refused 429, marked",
       "clauses": [
-        "15.6.11",
+        "15.6.12",
         "15.12.3"
       ],
       "transport": "http",
@@ -3910,7 +3972,70 @@
       ]
     },
     {
-      "name": "an upgrade naming a host the server does not take is refused 403, marked, before its handshake",
+      "name": "a request at a WebSocket's address without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked",
+      "clauses": [
+        "15.2",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "none"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: bead.test\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "two"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "two"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: bad host\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "bad"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "bad"
+        }
+      ]
+    },
+    {
+      "name": "a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form",
       "clauses": [
         "15.2",
         "15.6.5",
@@ -3940,6 +4065,78 @@
             "body": ""
           },
           "on": "elsewhere"
+        },
+        {
+          "send": {
+            "head": "POST / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "post"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "post"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\n\r\n"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "plain"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGVzdA==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "short"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "short"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 8\r\n\r\n"
+          },
+          "on": "eighth"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "eighth"
         },
         {
           "send": {
@@ -4532,9 +4729,315 @@
       ]
     },
     {
-      "name": "an upgrade of a version but 13 is answered 426, naming 13, whatever its Origin",
+      "name": "a request at a WebSocket's address of a method but GET or HEAD is refused 405, its Allow naming GET and HEAD, before its handshake is read",
       "clauses": [
-        "15.2"
+        "15.2",
+        "15.6.7"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "POST / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "post"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": ""
+          },
+          "on": "post"
+        },
+        {
+          "send": {
+            "head": "PUT / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "put"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": ""
+          },
+          "on": "put"
+        },
+        {
+          "send": {
+            "head": "OPTIONS / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "options"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": ""
+          },
+          "on": "options"
+        },
+        {
+          "send": {
+            "head": "DELETE / HTTP/1.1\r\nhost: {host}\r\n\r\n"
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": ""
+          },
+          "on": "delete"
+        },
+        {
+          "send": {
+            "head": "POST / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 8\r\n\r\n"
+          },
+          "on": "eighth"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": ""
+          },
+          "on": "eighth"
+        }
+      ]
+    },
+    {
+      "name": "a request at a WebSocket's address that asks no WebSocket is answered 426, marked, its Upgrade naming websocket",
+      "clauses": [
+        "15.2",
+        "15.6.11"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\n\r\n"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "plain"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "unupgraded"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "unupgraded"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: h2c\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "h2c"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "h2c"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket/13\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "versioned"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "versioned"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "unconnected"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "unconnected"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: keep-alive\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "kept"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "kept"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: h2c\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 8\r\n\r\n"
+          },
+          "on": "eighth"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "eighth"
+        },
+        {
+          "send": {
+            "head": "HEAD / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "head"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "head"
+        },
+        {
+          "send": {
+            "head": "HEAD / HTTP/1.1\r\nhost: {host}\r\n\r\n"
+          },
+          "on": "plainhead"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "plainhead"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.0\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "old"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "old"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade of a version but 13, or of none, is refused 426, marked, naming 13 and websocket, whatever its Origin or its key",
+      "clauses": [
+        "15.2",
+        "15.6.11"
       ],
       "transport": "websocket",
       "steps": [
@@ -4548,8 +5051,13 @@
           "expect": {
             "status": 426,
             "fields": {
+              "bead-refusal": "version-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket",
               "sec-websocket-version": "13"
-            }
+            },
+            "body": ""
           },
           "on": "foreign"
         },
@@ -4563,8 +5071,13 @@
           "expect": {
             "status": 426,
             "fields": {
+              "bead-refusal": "version-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket",
               "sec-websocket-version": "13"
-            }
+            },
+            "body": ""
           },
           "on": "none"
         },
@@ -4578,8 +5091,13 @@
           "expect": {
             "status": 426,
             "fields": {
+              "bead-refusal": "version-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket",
               "sec-websocket-version": "13"
-            }
+            },
+            "body": ""
           },
           "on": "seventh"
         },
@@ -4593,10 +5111,388 @@
           "expect": {
             "status": 426,
             "fields": {
+              "bead-refusal": "version-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket",
               "sec-websocket-version": "13"
-            }
+            },
+            "body": ""
           },
           "on": "unversioned"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 013\r\n\r\n"
+          },
+          "on": "padded"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "version-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket",
+              "sec-websocket-version": "13"
+            },
+            "body": ""
+          },
+          "on": "padded"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13, 8\r\n\r\n"
+          },
+          "on": "listed"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "version-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket",
+              "sec-websocket-version": "13"
+            },
+            "body": ""
+          },
+          "on": "listed"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGVzdA==\r\nsec-websocket-version: 8\r\n\r\n"
+          },
+          "on": "short"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "version-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket",
+              "sec-websocket-version": "13"
+            },
+            "body": ""
+          },
+          "on": "short"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose key is not one field of 16 bytes in base64, whose version comes twice, whose subprotocols are no list of tokens, or that has content, is refused 400, marked, before its origin is judged",
+      "clauses": [
+        "15.2",
+        "15.6.4"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "keyless"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "keyless"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: not a key at all!!!!!==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "unencoded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "unencoded"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGVzdA==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "short"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "short"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "keys"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "keys"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBs ZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "spaced"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "spaced"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "versions"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "versions"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nsec-websocket-protocol: a b\r\n\r\n"
+          },
+          "on": "protocols"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "protocols"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 5\r\n\r\n",
+            "body": "68 65 6C 6C 6F"
+          },
+          "on": "content"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "content"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ntransfer-encoding: chunked\r\n\r\n",
+            "body": "35 0D 0A 68 65 6C 6C 6F 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "chunked"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "chunked"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGVzdA==\r\nsec-websocket-version: 13\r\norigin: https://elsewhere.test\r\n\r\n"
+          },
+          "on": "foreign"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "foreign"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade is taken whose Upgrade lists websocket in any case, in one field line or several, whose Connection names upgrade among other tokens, with no content",
+      "clauses": [
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: WebSocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "cased"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "cased"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: h2c, websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "listed"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "listed"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: h2c\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "lines"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "lines"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: keep-alive, upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "kept"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "kept"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: keep-alive\r\nconnection: upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "connections"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "connections"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\ncontent-length: 0\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "empty"
         }
       ]
     },
