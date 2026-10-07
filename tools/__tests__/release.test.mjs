@@ -218,6 +218,8 @@ const TREE = {
   'spec/spec.md': '# Spec\n\n**Version: 0.1.0**, of layout 0xA1.\n',
   'spec/vectors.json': json({ specVersion: '0.1.0', headers: [] }),
   'spec/interop-service.json': json({ specVersion: '0.1.0', id: 'interop' }),
+  'spec/interop-blueprint.json':
+    '{\n  "format": "bead-blueprint/1",\n  "requires": [],\n  "specVersion": "0.1.0"\n}\n',
   'spec/debugging.md': '# Companion\n\n**Version: 0.1.0**.\n',
   'spec/metrics.json': json({ debuggingVersion: '0.1.0', expositions: [] }),
   'spec/generators/make_vectors.py': '',
@@ -366,7 +368,9 @@ describe('prepare', () => {
       'implementations/typescript/package.json',
       'implementations/dotnet/Directory.Build.props',
       'spec/spec.md',
+      'spec/interop-blueprint.json',
       'spec/interop-service.json',
+      'spec/vectors.json',
       'implementations/dotnet/src/Http/packages.lock.json',
       'CHANGELOG.md',
     ]);
@@ -387,6 +391,11 @@ describe('prepare', () => {
       /^## \[Unreleased\]\n\n## \[0\.2\.0\] - 2026-10-07\n\n### Added\n\n- A rule\.\n/m
     );
     assert.match(read(root, 'spec/vectors.json'), /"specVersion": "0\.2\.0"/);
+    // the blueprint's form is its own, which the move keeps: its key alone changes
+    assert.equal(
+      read(root, 'spec/interop-blueprint.json'),
+      TREE['spec/interop-blueprint.json'].replace('"0.1.0"', '"0.2.0"')
+    );
     assert.deepEqual(logged, [
       'release 0.2.0: spec 0.2.0, debugging 0.1.0 (2 project ranges in 1 lock files)',
       "owed by hand: the [0.2.0] line on the spec's 0.2.0 (spec-v0.2.0)",

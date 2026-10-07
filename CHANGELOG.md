@@ -19,6 +19,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it to its schema and its form, its members and its arrays in their order, and
   `interop-service.json` to its procedures; `--write-blueprints` lays it out (decision 0022).
 
+### Changed
+
+- `tools/release.mjs prepare` moves the version of every conformance file that repeats one, as
+  `tools/check-versions.mjs` finds them, the interop's blueprint among them.
+
 ### Fixed
 
 - A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
