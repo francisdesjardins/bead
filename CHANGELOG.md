@@ -25,10 +25,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The units of `spec/spec.md` each vector and conversation checks, cited in its `clauses`: a clause,
   an item of its numbered list, a row of its table. `spec/uncited.txt` lists the units none cites,
   and `spec/check.py` fails when that list and the files disagree.
-- Relays in the conversations, across the connections a conversation opens, each step naming its
-  own: twelve of them, for section 14. The interop service's `register` and `unregister` register a
-  caller's connection as a destination on the wire, and `interop-service.json` states what its
-  relay admits.
+- Relays in the conversations, for section 14, across the connections a conversation opens, each
+  step naming its own. The interop service's `register` and `unregister` register a caller's
+  connection as a destination on the wire, and `interop-service.json` states what its relay admits.
 - `spec/transports.json`, its schema and its generator: what a server of the interop service does at
   its HTTP transport's edge, which each side's tests play against their own server with a peer that
   writes HTTP/1.1 in exact octets, the bounds' defaults each side checks, and responses cut across
@@ -61,11 +60,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `HMACSHA256`, and play the group, its audience one or a set.
 - `spec/check.py` refuses a published test key outside `spec/`, the tests and the interop service:
   its parameters, or its thumbprint (RFC 7638), in any file git lists.
-- A transport carries a credential beside an envelope, both ways, as one argument: on the
-  TypeScript side, the message event's first argument and `send`'s are `{ data, credential }`; on
-  the C# side, `TransportMessage` has its `Credential`. Over HTTP it is the `Authorization` field of
-  the `POST /bead` that carries a request, as it came, its surrounding whitespace removed: an empty
-  one carries none, and a `POST /bead` with two is refused 400, `malformed`.
+- A transport carries a credential beside an envelope, both ways, as one argument: on the TypeScript
+  side, the message event's first argument and `send`'s are `{ data, credential }`; on the C# side,
+  `TransportMessage` has its `Credential`. Over HTTP it is the `Authorization` field of the
+  `POST /bead` that carries a request, as it came, its surrounding whitespace removed: an empty one
+  carries none, and a `POST /bead` with two is refused 400, `malformed`. A router hands its resolver
+  what a request's transport carried for an `ELSEWHERE` alone, on both sides: what came beside any
+  other stays at the router (spec 14.2).
 - A conversation names the token an answer announced, `token`, and writes it in a later send as
   `<name>`; a failure's detail is compared where a conversation gives one. A send says what its
   transport carried beside it, `carried`, and so does a request leg B sends; a connection may carry
@@ -87,20 +88,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is shared, a `kid` that comes while its issuer's minute runs waits for the ask its deadline lets
   go, a token without a `kid` waits on its issuer's keys while none serve, and at most
   `maximumWaitingCalls`, `MaximumWaitingCalls`, 64 by default, wait for an issuer's deadline at
-  once, one past them refused `CAPACITY_EXCEEDED`; and an `ELSEWHERE`'s verifier, `verify`,
-  `Verify`, given what the transport carried and the call's signal. A side given a `JWT`'s keys
-  holds its limits to 1,024 bytes at least (section 12.2), and keys or a key set given without an
-  audience are refused as the side is built. A `JWT`'s verdict reads the wall clock once its
-  signature has verified.
+  once, one past them refused `CAPACITY_EXCEEDED`, which section 8.2 says, as it says a requester's
+  call with no call id free; and an `ELSEWHERE`'s verifier, `verify`, `Verify`, given what the
+  transport carried and the call's signal. A side given a `JWT`'s keys holds its limits to 1,024
+  bytes at least (section 12.2), and keys or a key set given without an audience are refused as the
+  side is built. A `JWT`'s verdict reads the wall clock once its signature has verified.
 - A client's credential, `credential`, `Credential`, by default and per call: `NONE`, `OPAQUE`, a
   `JWT` or an `ELSEWHERE`. A default withdrawn once a call that presented it is refused
   `SESSION_REQUIRED`, while it is still, by value, the credential that call presented, tells its
-  application, `credentialWithdrawn`, `CredentialWithdrawn`; a call
-  presenting an `ELSEWHERE` over a transport that carries none, or a bearer credential in the clear
-  off the machine, fails before it goes, `DESTINATION_UNREACHABLE`, as does a server's command over
-  HTTP. A transport says whether it carries a credential and whether it is secure,
-  `carriesCredential` and `isSecure`, on both sides, and a server's transport may be told what
-  stands in front of it, `secure`, `Secure`: TLS terminated before it, or a proxy in the clear.
+  application, `credentialWithdrawn`, `CredentialWithdrawn`; a call presenting an `ELSEWHERE` over a
+  transport that carries none, or a bearer credential in the clear off the machine, fails before it
+  goes, `DESTINATION_UNREACHABLE`, as does a server's command over HTTP; a call that asks for
+  `OPAQUE` while its client knows no session fails before it goes, `SESSION_REQUIRED`, and withdraws
+  nothing. Section 13.4 names the IPv6 loopback as a URL writes it, `[::1]`, and takes a `localhost`
+  name on the loopback without resolving it, as Secure Contexts does. A transport says whether it
+  carries a credential and whether it is secure, `carriesCredential` and `isSecure`, on both sides,
+  and a server's transport may be told what stands in front of it, `secure`, `Secure`: TLS
+  terminated before it, or a proxy in the clear.
 - A relay forwards a credential, and its destination verifies it (section 14): its default
   admission is `requireSessionOrCredential`, `RequireSessionOrCredential`, and an admission never
   answers `SESSION_REQUIRED` to a call that presented a credential, but `ACCESS_DENIED`, so its
@@ -111,12 +115,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is refused `DESTINATION_UNREACHABLE` at a step of its own, 14.3's fifth; leg B's header counts its
   credential, at the sixth; a `JWT` and an `ELSEWHERE` a relay forwards without verifying resolve to
   no session in a later turn, as section 9.2's do: a call presenting none that came after one may be
-  taken first.
+  taken first. A `JWT`, and an `ELSEWHERE` its transport carried, pass the default admission of a
+  relay that does not verify on their scheme alone, and learn which destinations exist; a
+  conversation plays the `ELSEWHERE`.
 - The interop service verifies a `JWT` under two issuers' published test keys and a key set's third,
   and an `ELSEWHERE` of its own auth-scheme, `Interop`; `endSession` ends a credential's session by
   its identifier, and `endSessionsOf` an issuer's, `register` takes the audience its destination
-  verifies, and `ticks` and `tick` hold per session. 221 vectors in 10 groups, where 123 were in 9;
-  142 conversations, where 89 were; 56 transports' cases, where 50 were.
+  verifies, and `ticks` and `tick` hold per session. The vectors, the conversations and the
+  transports' cases this release plays are counted in `docs/support.md`.
 - `spec/durations.json`, its schema and its generator (decision 0014): what each of the 21 places
   that take a duration an application gives a side makes of each of 19 inputs, by each of the 31
   ways its surface takes it — held, at once, never, its default, or refused and why — which each
@@ -127,7 +133,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   input, to the clauses it observes and nothing else, and to a harness on each side that names it;
   a `differs` names a row that names its entry between backticks, and moves to
   `common.schema.json`; the `spec` job regenerates the file, and the bounds' defaults it shares with
-  the transports' file come from one module of the generators.
+  the transports' file come from one module of the generators. Section 1.4 refuses a value that is
+  no number, and says what a delay is: a wait before an act — a pause, a reconnection's wait, the
+  `wait` a client's listens ask — never without end; section 15.12 says that a client times its own
+  inactivity by `inactivityTimeout`, 5 minutes by default, which section 15.10 names; section 15.9
+  reads a listen's `after` and `wait` as counts, 0 when left out, one to fifteen ASCII digits
+  otherwise; section 1 names its file. The support matrix gains three rows — a duration finer than
+  a tick and a duration that is not a number, platform, and a reconnection's delay given as a
+  number, open — and the rows of -1 ms and of the Web Worker name what of the file crosses them.
 - `spec/debugging.md`, the spec's companion (decision 0013), at version 0.1.0 of its own: what a
   side traces, filters and counts beside the wire, which a constrained profile may leave out and
   still conform to the wire. It states the trace of calls and of envelopes, each step of a call
@@ -136,9 +149,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reason; and a registry of metrics, its declarations, its ceiling, nine families under
   OpenTelemetry's RPC names, `bead` for `rpc`, every series made at 0, the router's gates and every
   exit of a call, A66's buckets in whole microseconds with each `le` OpenMetrics' canonical number,
-  and its exposition's bytes in the Prometheus text format 0.0.4. `spec/spec.md` says where it
-  stands beside it, and decision 0008's spec axis carries its version, which moves as the spec's
-  does, a release whose companion moved tagging `debugging-v` and that version.
+  and its exposition's bytes in the Prometheus text format 0.0.4. It names spec sections 16 and 17
+  where it reads a name: no procedure is named `_OTHER`, and every procedure's name is a pattern a
+  debug filter reads. A side that carries the protocol whole is one built with neither of its two
+  switches, which a constrained profile uses to leave out what it does not build, and a listener is
+  synchronous. Sections 6 to 12 name the file that checks each, and the support matrix the twin
+  tests that hold what a test can of sections 1 to 5. `spec/spec.md` says where it stands beside it,
+  and decision 0008's spec axis carries its version, which moves as the spec's does, a release whose
+  companion moved tagging `debugging-v` and that version.
 - `spec/debug-filters.json` and `spec/metrics.json`, their schemas and their generators, each
   repeating the companion's version as its `debuggingVersion`: 52 filters, what each reads as and
   keeps of fixed calls and envelopes, or its refusal's reason and what it names, and 5 filters given
@@ -156,9 +174,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resolver as it is registered, a notification as it is registered, and a requester as it is made,
   through its router's `declareRequester`, `DeclareRequester`, whose series each of its calls
   carries to its router's request as `series`, `Series`. A declaration of an address the registry
-  holds under another name, of a name its service holds at another address, or past
-  `maximumProcedures`, `MaximumProcedures`, 1,000 by default, is refused as it is made, a
-  `ProgrammerError` and an `ArgumentException`. Its exposition, `exposition()` and `Exposition()`,
+  holds under another name, of a name its service holds at another address, its ASCII letters
+  compared in either case as section 16 compares names, of its service at another revision than the
+  one it holds, `another revision of its service`, or past `maximumProcedures`,
+  `MaximumProcedures`, 1,000 by default, is refused as it is made, a `ProgrammerError` and an
+  `ArgumentException`; `spec/metrics.json` pins each refusal, and the TypeScript side's
+  `DeclaredProcedure` carries `serviceRevision`. Its exposition, `exposition()` and `Exposition()`,
   writes its nine families in the Prometheus text format 0.0.4 and gives its media type with it,
   `{ contentType, text }` and `MetricsExposition(ContentType, Text)`, for an application to serve at
   `/metrics` or append to its own 0.0.4 scrape: Bead opens no port.
@@ -166,7 +187,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   DevTools extension defines under `Symbol.for('@francisdesjardins/bead/devtools-hook')`,
   `DEVTOOLS_HOOK_KEY`, handing it a source of protocol 1 — its `debug` events while the extension
   watches, and its registry's exposition, never the client or its credential — and attaches nothing
-  until it is watched; `devtools: false` among a client's options refuses.
+  until it is watched; `devtools: false` among a client's options refuses. A hook that is none, or
+  whose read or whose `register` throws, is ignored, the client built all the same.
 - The DevTools extension, Chrome's first, in `implementations/typescript/devtools/` (decision
   0015): `yarn devtools:build` builds it unpacked, and a Bead panel shows the calls, each by its
   call id and its connection, and envelopes of each client the page announced, filtered by client
@@ -186,31 +208,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   digits at most, read whole, a character at a time, never by a platform's regular expression or
   case mapping; two names one when equal once each ASCII upper-case letter is read as its lower-case
   one; one name an address and one revision a service where a side counts; ids and names for life
-  within a service, and a revision counting its contract's releases, as SHOULDs `beadc breaking`
-  holds. `spec/identities.json`, its schema and its generator, `make_identities.py`, pin what a
-  router refuses with no memory: 31 names and 28 ids and revisions, each declared every way a side
-  declares, and 8 folds. Both sides play it, `identities.test.ts` and `IdentitiesTests`, the C#
-  side excused from the 17 inputs no `ushort` or `int` holds, a platform row of the support matrix,
-  "An id or a revision no C# type holds". `common.schema.json` gains the ids, the revision and the
-  name, which `interop-service.schema.json` takes.
+  within a service, and a revision counting its contract's releases, as SHOULDs the builder's
+  `beadc breaking` is to hold, a gate decision 0006 owes. `spec/identities.json`, its schema and its
+  generator, `make_identities.py`, pin what a router refuses with no memory: 31 names and 28 ids and
+  revisions, each declared every way a side declares, and 8 folds. Both sides play it,
+  `identities.test.ts` and `IdentitiesTests`, the C# side excused from the 17 inputs no `ushort` or
+  `int` holds, a platform row of the support matrix, "An id or a revision no C# type holds".
+  `common.schema.json` gains the ids, the revision and the name, which `interop-service.schema.json`
+  takes.
 - Spec section 17, payloads (decision 0016): `raw`, its bytes; `text`, UTF-8 read strictly, its
   leading U+FEFF kept; `json`, one JSON text in UTF-8 read as I-JSON (RFC 7493), a noncharacter
-  taken, nested 64 deep at most, each number the double nearest it, and written in the canonical
-  form of the JSON Canonicalization Scheme (RFC 8785): one value, one sequence of bytes, from every
-  language. `spec/codecs.json`, its schema and its generator, `make_codecs.py`, pin 69 payloads read
-  and 38 values written, RFC 8785's Appendix B among them: the bytes written back, or refused and
-  why. Both sides play it, `codecs.test.ts` and `CodecsTests`, through each runtime's codecs,
+  taken, nested 64 deep at most, each number the double nearest it, one of magnitude 2⁻¹⁰⁷⁵ or less,
+  half the smallest positive double, read as 0, and written in the canonical form of the JSON
+  Canonicalization Scheme (RFC 8785): one value, one sequence of bytes, from every language.
+  `spec/codecs.json`, its schema and its generator, `make_codecs.py`, pin payloads read and values
+  written, RFC 8785's Appendix B among them: the bytes written back, or refused and why. Both sides
+  play it, `codecs.test.ts` and `CodecsTests`, through each runtime's codecs,
   `router/shared/payloads.ts` and `Bead.Core`'s `Payloads`, which the interop's serializers delegate
   to, and which the service layer makes public. A platform row of the support matrix, "A value a
   side's type cannot hold", excuses the TypeScript side from an object naming a member twice and the
   C# side from `NaN` and `Infinity`. Eight conversations play it over the wire, a payload echoed in
-  its own characters, one echoed in its canonical form, and six answered `PAYLOAD_UNDECODABLE`: 150
-  conversations. The interop gains a case each way, a value outside ASCII, its members in another
-  order, echoed equal.
+  its own characters, one echoed in its canonical form, and six answered `PAYLOAD_UNDECODABLE`. The
+  interop gains a case each way, a value outside ASCII, its members in another order, echoed equal.
 - `spec/check.py` holds both new files: each under its schema, a name once in its group, every unit
   an entry cites one of the spec's, a `differs` naming a row of the support matrix that names the
   file and the entry, the `_Identities:` and `_Codecs:` lines naming files of `spec/`, and each
   side's tests reading both. The `spec` job regenerates them.
+- Spec 8.3, an open point of this version: nothing bounds the calls a peer holds open over a
+  WebSocket or a Web Worker; the support matrix gives it a row.
 
 - Decision 0021: a topic-based publish/subscribe broker is one more transport, and Bead is never a
   network of its own. It routes nothing past one relay and shares no session's state between
@@ -329,7 +354,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that end, where it kept the session's; a session stored without its timeouts holds both without
   end, where it held 600 ms and 30 s (decision 0012). The server's gauges count `listening`, the C#
   session manager gains `ResetConnectionInactivityTimeout` and `ResetSessionInactivityTimeout`, and
-  section 15.12 names the HTTP server's own `connectionInactivityTimeout`, 30 s.
+  section 15.12 names the HTTP server's own `connectionInactivityTimeout`, 30 s; section 13.7 says
+  that a timeout neither the application nor its transport gives is without end.
 - The interop service's `login` takes `sessionTimeout` and `connectionTimeout`, and `register`'s
   timeout is held as every duration is.
 - Every layer of both sides takes its time from a clock it is given, exposes it, and refuses one
@@ -379,8 +405,7 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 - Spec 15.1: on a connection, a transport hands each envelope on once, in the order its side sent
   it, unless its section says otherwise, stating what may overtake and what a copy is; 15.9: over
   HTTP, a failure that ends a subscription may come before its call's result, which the client then
-  reports as `CALL_UNKNOWN`. Every transport and both sides keep it as they are. Debugging 3.4: a
-  latency bench measures, and gates nothing.
+  reports as `CALL_UNKNOWN`. Every transport and both sides keep it as they are.
 - The Tenth Man's objections are kept in the repository, in the record whose decision a change makes
   or changes, or whose Scope holds what it changes; 0007 holds the parameter rule's.
 - The conversations' steps are named by who acts, `send` and `expect` where they said `in` and
@@ -394,13 +419,6 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
 - Section 15.4 says that a connect is of Bead's type, as both servers take it.
 - Section 15.7 says that a request handed on is never refused, and that a cut which overtakes its
   200 head leaves its exchange lost; a transports' case may expect a status `orLost`.
-- Section 1.4 refuses a value that is no number, and says what a delay is: a wait before an act —
-  a pause, a reconnection's wait, the `wait` a client's listens ask — never without end. Section
-  15.12 says that a client times its own inactivity by `inactivityTimeout`, 5 minutes by default,
-  which section 15.10 names; section 1 names its file, `spec/durations.json`. The support matrix
-  gains three rows — a duration finer than a tick and a duration that is not a number, platform, and
-  a reconnection's delay given as a number, open — and the rows of -1 ms and of the Web Worker name
-  what of the file crosses them.
 - The traces are `spec/debugging.md`'s, sections 4 and 5, and built only for a listener (decision
   0013): while nobody listens, a call reads no clock and builds no step, no copy of its options or
   its payloads, and an envelope no redacted header, one check each. The TypeScript client's router
@@ -429,19 +447,28 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   `SESSION_REQUIRED` and `DESTINATION_UNREACHABLE` before it goes among them, and a command to a
   connection not open, which fails `DisconnectError`, `DisconnectException`, as one whose
   connection closes does.
-- The spec's preamble: a side conforms to the wire by sections 1 to 15, to what it declares by
-  section 16, and to what its codecs write and read by section 17, for each encoding it offers; a
-  relay, which reads no payload, offers none. Sections 6.1 and 9.5 point to section 17.
+- The spec's preamble: each file of entries is named by a section whose clauses it plays, a group of
+  vectors by its name, and each entry cites the units it checks; a side conforms to the wire by
+  sections 1 to 15, to what it declares by section 16, and to what its codecs write and read by
+  section 17, for each encoding it offers, a relay offering none; it does what each entry says, but
+  an entry whose `differs` names a row of the support matrix and its language, and a unit no entry
+  cites binds it all the same. Sections 6.1 and 9.5 point to section 17.
+- Spec 9.2: step 3 answers `DESTINATION_UNKNOWN` to a request that names a destination at a receiver
+  that relays nothing, and a receiver that relays takes section 14.3's steps in place of steps 3 to
+  7, and goes on as section 14.2 says in place of step 8, as both sides do; a conversation plays a
+  relay that verifies presented an `ELSEWHERE`.
+- Spec 11.6: the result of a request that opens a subscription, too large for one envelope, is
+  answered `PROCEDURE_FAILED` and reported `PAYLOAD_TOO_LARGE`, as 12.1 has it and both sides do;
+  a conversation plays it.
+- Spec 9.1, 9.7, 11.10, 12.1, 12.2 and 15.5 say what both sides do where their words fell short: a
+  requester with no call id free, a failure that ends a subscription at the client that holds it,
+  the application that sets a queue's bounds, a result's header counted with an announcement, the
+  bytes a receiver reserves for its transfers, how long a cancelled call id stays reserved.
 - A router refuses a declaration as it is made — a resolver registered, a requester made, a
   notification registered — out of its range or off its form (spec 16.10), on both sides, before
   any reason of its own and its registry's: a `ProgrammerError` and an `ArgumentException`, where a
   requester's and a notification's checked nothing, and a resolver's revision and name were
   anything. A service manager's `getNotification`, `GetNotification`, checks before its own reason.
-- The metrics registry, on both sides (`spec/debugging.md` 7.3): "its name at another address"
-  compares names as section 16 does, its ASCII letters in either case, where it compared them
-  exactly; and it holds one revision a service, refusing a declaration at another,
-  `another revision of its service`, before the ceiling. The TypeScript side's `DeclaredProcedure`
-  takes `serviceRevision`, and `spec/metrics.json` pins both refusals.
 - The C# side writes a JSON payload in RFC 8785's canonical form, where it wrote
   `JsonSerializer`'s: a character outside ASCII as it is, and `+`, `<` and `>` too, where it escaped
   them; a number as ECMAScript writes its double, `1e+21` and `0` where it wrote `1E+21` and `-0`;
@@ -460,8 +487,6 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   each and reported once by its router, and notifying fails no caller. A router's notify takes the
   reason in its payload's place: the TypeScript side's `IRouterLike.notify` takes
   `Uint8Array | Error`, and the C# side's `IRouterLike.Notify` has an overload of an `Exception`.
-- `spec/debugging.md` 1.2, 6.10 and 8.3 name sections 16 and 17: no procedure is named `_OTHER`, and
-  every procedure's name is a pattern a debug filter reads.
 
 - A notify filter takes one argument, the subscriber: `ISubscriber`, its `connectionHandle` and
   its session's `identifier`, and `Subscriber`, a record of `init` properties, which replaces the

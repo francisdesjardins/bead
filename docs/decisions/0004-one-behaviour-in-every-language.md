@@ -19,22 +19,24 @@ copies do.
 ## Decision
 
 **The conformance files are the contract.** [`spec/spec.md`](../../spec/spec.md) states what every
-implementation does, in the RFC 2119 sense. Beside it, `spec/vectors.json` holds the bytes of
-envelopes and what they say, and what a reader refuses with which code; `spec/conversations.json`
-holds what a server of the interop service, `spec/interop-service.json`, does with what its clients
-send, over one connection or several: the envelopes it answers, what it reports, and the silence it
-keeps; `spec/transports.json` holds what a transport's server does at its edge, over HTTP and over a
-WebSocket: the exchanges and the messages it takes, and what it gives back; `spec/clocks.json` holds
-what every side's test clock does when a case advances it; `spec/durations.json` holds what every
-place that takes a duration an application gives a side makes of every input;
-`spec/identities.json` holds what a router takes, or refuses, as a procedure is declared to it
+implementation does, in the RFC 2119 sense. A unit no entry cites, which `spec/uncited.txt` lists,
+binds every implementation all the same: the entries say what a side does, and the text states what
+it must. Beside it, `spec/vectors.json` holds the bytes of envelopes and what they say, and what a
+reader refuses with which code; `spec/conversations.json` holds what a server of the interop
+service, `spec/interop-service.json`, does with what its clients send, over one connection or
+several: the envelopes it answers, what it reports, and the silence it keeps; `spec/transports.json`
+holds what a transport's server does at its edge, over HTTP and over a WebSocket: the exchanges and
+the messages it takes, and what it gives back; `spec/clocks.json` holds what every side's test clock
+does when a case advances it; `spec/durations.json` holds what every place that takes a duration an
+application gives a side makes of every input; `spec/identities.json` holds what a router takes, or
+refuses, as a procedure is declared to it
 ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)); `spec/codecs.json`
 holds the bytes every side's codecs write of what they read and of what they are given, in `raw`,
 `text`, `json` and `proto` ([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)).
 Beside the wire, its companion [`spec/debugging.md`](../../spec/debugging.md) has two files of its
-own ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json` holds
-what a debug filter reads as and keeps, and `spec/metrics.json` what a registry writes and what each
-exit of a call counts.
+own ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json`
+holds what a debug filter reads as and keeps, and `spec/metrics.json` what a registry writes and
+what each exit of a call counts.
 
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
 interop service over WebSocket and over HTTP, and each implementation's client calls every other's
@@ -245,8 +247,8 @@ Y, or comes back to it, and Z comes to all of them at once, by a decision that m
 ## Consequences
 
 **Each behaviour is written and tested once per language.** The conformance files take most of that
-cost off the wire: 223 vectors in 10 groups, 153 conversations, 56 transports' cases and 9 clock
-cases, which both sides play, written once. CI's `spec` job regenerates them and fails on any byte
+cost off the wire: the vectors, the conversations, the transports' cases and the clock cases,
+which both sides play, written once. CI's `spec` job regenerates them and fails on any byte
 that differs, or on any file a generator writes that is not committed.
 
 **What no entry plays stays with each side's twin tests**, and `docs/support.md` says so: a
@@ -310,7 +312,7 @@ sentence on a client's behaviour.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
-in three rounds. Its objections, each with its answer:
+in four rounds. Its objections, each with its answer:
 
 ### On the files' schemas, their version and their check
 
@@ -363,3 +365,29 @@ in three rounds. Its objections, each with its answer:
 | Changing `spec/check.py` in an editorial change reverses the round that kept `spec/` out of it; and the gap is wider, a line's label not tied to its file                                               | Accepted: `spec/check.py` does not change; the check that every file of entries is named by a line of its document, the line's label its file's, joins 0006's gates owed.                                                                                    |
 | "Cites, entry by entry" is false beyond the clock cases: the transports' responses, the durations' inputs, the debug filters' fixtures and the identities' ways cite nothing                            | Accepted: every entry that plays a case cites its units, and the fixtures, inputs and responses it plays them with cite none.                                                                                                                                |
 | `spec/codecs.proto` is written by hand, under no schema, read by every side's tests, and in neither the frame nor its exceptions; and a list of nine files is one registry more                         | Accepted: it stands beside the interop service as a file written by hand and read whole; the paragraph names the files of entries by the README's table, and lists none.                                                                                     |
+
+### On the text of 0.2.0
+
+The spec's preamble and its companion's, sections 8.3, 9.2, 11.6 and 14.3, and the text of a few
+clauses reworded to what both sides do. The user chose where it asked: the text binds, and the
+entries say what a side does; 11.6 takes 12.1's subject, played over a procedure that notifies
+nothing; and one parser of a loopback host for both sides comes with the transport's security.
+
+| Objection                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Each section names the conformance files that check it" is false for 15 of 17 sections, the form this record's round refused                                                                           | Accepted: the preamble takes this record's form, each file of entries named by a section whose clauses it plays, a group of vectors by its name, each entry citing its units, `spec/uncited.txt` listing those none cites, and the clock cases named as those no section names. The companion keeps the stronger form for its sections 6 to 12, where it holds.       |
+| The new MUST narrows the frame: the clock cases fall out, any row of the matrix excuses with no `differs`, and a MUST binds a demonstration rather than behaviour                                       | Accepted: the spec says that a side does what each entry says, the clock cases holding `advance` to one meaning, but an entry whose `differs` names a row and the side's language; that every side plays the files whole stays this record's to say.                                                                                                                  |
+| "Binds it all the same, held by its twin tests" claims tests that do not exist: 16.8 holds by nothing, 9.0 is a definition, a third side has none, and the companion's 1.2, 1.3 and 3.5 hold by no test | Accepted: the sentence ends at "binds it all the same"; the companion says that the support matrix names the twin tests that hold what of its sections 1 to 5 a test can.                                                                                                                                                                                             |
+| 9.2's new paragraph promises that a requester not admitted learns nothing of a relay's destinations, services or procedures, against 14.3, 0019 and the code                                            | Accepted: a request with no destination is answered `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN` before its credential is asked; the paragraph says that such a requester learns of the destinations only what 14.3 says, and names no services or procedures.                                                                                                            |
+| "In place of steps 3 to 8", placed before the resolution paragraph, frees a relay from the later turn while the C# side admits a forwarded credential in the same turn                                  | Accepted: the paragraph follows the resolution paragraph and says steps 3 to 7, the credential resolving as that paragraph says, and section 14.2 in place of step 8; 14.3's lead says the same, and both sides take the later turn ([0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges).                                                        |
+| The new `ELSEWHERE` conversation repeats what is played, and the path no entry plays, a relay that verifies presented an `ELSEWHERE`, stays unplayed                                                    | Accepted in part: the conversation of a relay that verifies an `ELSEWHERE` — a verifier that fails, one that does not hold, one that crosses — is added, played on both sides. Refused, the drop of the other: retitled, it is the one entry that reaches 14.3's second step after an `ELSEWHERE` admitted on its scheme.                                             |
+| 11.6 keeps "a subscription's result", yet the conversation sends SUBSCRIPTION to a procedure that notifies nothing, and cannot observe "subscribes nothing"                                             | Accepted: 11.6 takes 12.1's subject, the result of a request that opens a subscription, its procedure notifying or not, and the conversation cites it so; the twin tests that hold "subscribes nothing" for a procedure that notifies are named in the matrix's list of what no entry plays.                                                                          |
+| The open point, inside 8.2, rides on 8.2's citations, and "not tested" misreads the matrix's legend                                                                                                     | Accepted: the open point is a clause of its own, 8.3, which `spec/uncited.txt` lists; its cells read "not available: no bound".                                                                                                                                                                                                                                       |
+| The changelog's sweep misses a line under Changed for a section 0.1.0 never had, and the new lines repeat the defect                                                                                    | Accepted: a line under Changed words a rule 0.1.0 released, every other goes into its Added entry; section 1.4's line moves to the durations' entry, and "in that order" goes until the registry's order is stated.                                                                                                                                                   |
+| The change writes totals in five places that every later change must move again                                                                                                                         | Accepted: no total in the changelog, the README's prose or this record; one count stays in `docs/support.md`, moved by each change that adds entries and checked by the release against `spec/check.py`'s report; a check of that table is a gate owed ([0006](0006-a-rule-has-its-gate.md)).                                                                         |
+| 17.6's "half the smallest positive double, 5 × 10⁻³²⁴" makes half 2.5 × 10⁻³²⁴, and numbers between 2⁻¹⁰⁷⁵ and it read 0 by the text and the smallest double on both sides                              | Accepted: 17.6 says 2⁻¹⁰⁷⁵ or less, half of 2⁻¹⁰⁷⁴; two entries of `spec/codecs.json` pin both sides of it.                                                                                                                                                                                                                                                           |
+| "Each as its parser canonicalizes it" makes conforming a divergence the sides have: `127.0.0.1.` is on the loopback for the TypeScript side, not for the C# side                                        | Accepted: the clause does not land; 13.4 names `[::1]` in a URL alone, and one parser for both sides is a change of behaviour of its own, with its own round.                                                                                                                                                                                                         |
+| Judging `localhost` "on the condition that the name resolves to the loopback alone" contradicts "never by what a name resolves to", and no side evaluates it                                            | Accepted: 13.4 says that a side takes such a name on the loopback without resolving it, as Secure Contexts does where the platform resolves it there alone, and that its application gives another host where it does not.                                                                                                                                            |
+| 9.7's "a failure on the call id of a subscription the side holds ends it" binds a server, which reports such a failure `CALL_UNKNOWN` and keeps the subscription                                        | Accepted: 9.7 says a failure a client receives on a subscription it holds, as 11.7's second item has it.                                                                                                                                                                                                                                                              |
+| "No decision changes" is not so: the conformance contract, the companion's subject, the `ELSEWHERE` the default admission passes, and the page                                                          | Accepted: this record's Decision says that what no entry cites binds all the same, and keeps the round; [0010](0010-a-request-presents-a-credential-of-a-scheme.md) names the `ELSEWHERE` beside the `JWT` and points here; the companion keeps [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s subject, which stays as it is; the page is rebuilt. |
+| 13.4's new sentence splits a sentence before its colon; a transfer credits nothing; a listen's count is read once its query is decoded                                                                  | Accepted: the sentence follows the one it continues and names `OPAQUE`; the budget is what a side reserves for its transfers, each opening's and each credit it grants; the count is read once the query is decoded.                                                                                                                                                  |

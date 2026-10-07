@@ -531,6 +531,59 @@
       ]
     },
     {
+      "name": "the result of a request that opens a subscription, too large for one envelope, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE, where the same result without SUBSCRIPTION goes as a transfer",
+      "clauses": [
+        "11.6",
+        "12.1"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 10 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 33 35 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": 34
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 33 35 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
+            "total": 37
+          }
+        },
+        {
+          "send": "A1 15 00 04  00 00 00 03  00 00 00 00 00 00 00 25"
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 3,
+            "offset": 28,
+            "isLast": true,
+            "payload": "78 78 78 78 78 78 78 78 22"
+          }
+        }
+      ]
+    },
+    {
       "name": "the server asks its client a command, and answers with what the client answered",
       "clauses": [
         "9.1"
@@ -6915,6 +6968,50 @@
       ]
     },
     {
+      "name": "an ELSEWHERE its transport carried passes the default admission of a relay that does not verify on its scheme alone, and learns which destinations exist",
+      "clauses": [
+        "14.3.1",
+        "14.3.2"
+      ],
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 01  00 01 00 01  00 00 00 63  00 03 00 00 | 22 78 22",
+          "carried": "Interop fail=true",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 16,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
       "name": "an ELSEWHERE its transport carried crosses a relay to a destination registered with an audience, its credential moved to leg B's transport as it came",
       "clauses": [
         "14.2.3",
@@ -7755,6 +7852,107 @@
           "expect": {
             "kind": 17,
             "callId": 3,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relay that verifies asks its verifier for an ELSEWHERE its transport carried before its destination is looked up: a verifier that fails is answered PROCEDURE_FAILED and reported, one that does not hold SESSION_REQUIRED, and one that holds crosses as it came",
+      "clauses": [
+        "14.2.3",
+        "14.3.1"
+      ],
+      "relay": {
+        "verifies": true
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 01  00 01 00 01  00 00 00 63  00 03 00 00 | 22 78 22",
+          "carried": "Interop fail=true",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "report": "exception",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 03  00 01 00 01  00 00 00 63  00 03 00 00 | 22 78 22",
+          "carried": "Interop nobody",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0,
+              "detail": "the credential does not hold"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 05  00 00 00 05  00 01 00 01  00 00 00 0C  00 03 00 00 | 22 79 22",
+          "carried": "Interop sub=carol",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 8,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22",
+            "credential": {
+              "scheme": "ELSEWHERE"
+            }
+          },
+          "on": "device",
+          "carried": "Interop sub=carol"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
             "payload": "22 79 22"
           },
           "on": "client"

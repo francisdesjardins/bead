@@ -43,9 +43,8 @@ publish/subscribe broker (coming).
 - **Everything a conversation needs**: cancel, sessions, a credential on each call — a JWT, or
   what its transport carries — relays that forward it to the destination that verifies it, and
   commands, the server's own calls to the client.
-- **One behaviour in every language.** The spec, its 223 vectors and 153 conversations are the
-  contract. The TypeScript and C# implementations both play them, and call each other in CI over
-  both transports.
+- **One behaviour in every language.** The spec and its conformance files are the contract. The
+  TypeScript and C# implementations both play them, and call each other in CI over both transports.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
@@ -81,20 +80,20 @@ share, above all `spec/`, which both read in their tests.
 
 ## The specification and its conformance files
 
-[`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each of
-its sections names the vector groups that check it. Its companion,
-[`spec/debugging.md`](spec/debugging.md), states what a side traces, filters and counts beside the
-wire, under a version of its own. Beside them:
+[`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each
+file of entries is named by a section whose clauses it plays, and each entry cites the units it
+checks. Its companion, [`spec/debugging.md`](spec/debugging.md), states what a side traces, filters
+and counts beside the wire, under a version of its own. Beside them:
 
 | File                                                | What it holds                                                                                                                                                                                         |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                 | 223 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
-| [`conversations.json`](spec/conversations.json)     | 153 conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
+| [`conversations.json`](spec/conversations.json)     | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
 | [`transports.json`](spec/transports.json)           | 56 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                              |
 | [`clocks.json`](spec/clocks.json)                   | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
 | [`durations.json`](spec/durations.json)             | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)           | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
-| [`codecs.json`](spec/codecs.json)                   | 97 payloads read and 44 values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why      |
+| [`codecs.json`](spec/codecs.json)                   | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
 | [`codecs.proto`](spec/codecs.proto)                 | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
 | [`debug-filters.json`](spec/debug-filters.json)     | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 5 filters given as functions, event by event                                                   |
 | [`metrics.json`](spec/metrics.json)                 | 22 expositions, the text a registry writes for what it counts, byte for byte, and 49 exits of the interop service's server, the series each step moved                                                |

@@ -563,6 +563,9 @@ PAYLOADS = [
     ('2^53 + 1 rounded to 2^53', 'json', ['17.6'], b'9007199254740993'),
     ('a number under the smallest double reads as 0', 'json', ['17.6'], b'1e-400'),
     ('a negative number under the smallest double reads as 0', 'json', ['17.6', '17.7.4'], b'-1e-400'),
+    # 2⁻¹⁰⁷⁵, half the smallest positive double, lies between these two: at it, the tie goes to the even, 0
+    ('a number just under half the smallest double reads as 0', 'json', ['17.6'], b'2.4703282292062327e-324'),
+    ('a number just over half the smallest double reads as the smallest', 'json', ['17.6'], b'2.4703282292062328e-324'),
     ('more digits than a double holds, rounded', 'json', ['17.6'], b'3.141592653589793238462643383279'),
     ('a tie between two doubles, read to the even', 'json', ['17.6'], utf8(tie())),
     ('a digit past a tie, read to the neighbour above', 'json', ['17.6'], utf8(past_the_tie())),
@@ -853,7 +856,7 @@ assert declared_fields() == {number: (name, kind) for number, (name, kind, _) in
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 97 and len(values) == 44
+assert len(payloads) == 99 and len(values) == 44
 
 # the proto rows as 0018 states them, each taken with its text, its number and how many nest below the
 # top, or refused for its reason; and the deep rows' bytes as protobuf's writers write them

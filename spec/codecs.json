@@ -185,6 +185,24 @@
       "written": "30"
     },
     {
+      "name": "a number just under half the smallest double reads as 0",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "32 2E 34 37 30 33 32 38 32 32 39 32 30 36 32 33 32 37 65 2D 33 32 34",
+      "written": "30"
+    },
+    {
+      "name": "a number just over half the smallest double reads as the smallest",
+      "encoding": "json",
+      "clauses": [
+        "17.6"
+      ],
+      "bytes": "32 2E 34 37 30 33 32 38 32 32 39 32 30 36 32 33 32 38 65 2D 33 32 34",
+      "written": "35 65 2D 33 32 34"
+    },
+    {
       "name": "more digits than a double holds, rounded",
       "encoding": "json",
       "clauses": [
