@@ -797,6 +797,18 @@ public sealed class TransportsTests
             var on = step.TryGetProperty("on", out var named) ? named.GetString()! : "";
             var wait = step.TryGetProperty("within", out var within) ? TimeOf(within) : Patience;
 
+            // a step is one act, on the exchange and within the time it may name: one that holds a
+            // second act fails, never passes with it left unplayed
+            var acts = step.EnumerateObject().Count((property) =>
+            {
+                return property.Name is not "on" and not "within";
+            });
+
+            if (acts != 1)
+            {
+                throw new ArgumentException($"a step no test plays: {step.GetRawText()}", nameof(step));
+            }
+
             if (step.TryGetProperty("send", out var send))
             {
                 NothingMore();

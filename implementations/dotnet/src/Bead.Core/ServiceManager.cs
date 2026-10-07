@@ -506,9 +506,11 @@ public sealed class ServiceManager
 
     /// <summary>
     /// One step of a call — a request made or answered, a command, a notification sent or heard —
-    /// and the exception it failed with, or none. Nothing is built, and no clock read, while nobody
-    /// hears it. A listener that throws is reported through the router, with the call's connection
-    /// on a server's, and changes nothing of the call.
+    /// and the exception it failed with, or none; on a tx step, why its tx did not go out: a
+    /// notification that could not go, an answer its router refused, told again at its start, or
+    /// none, from a resolver that failed before it answered. Nothing is built, and no clock read,
+    /// while nobody hears it. A listener that throws is reported through the router, with the
+    /// call's connection on a server's, and changes nothing of the call.
     /// </summary>
     public event Action<Exception?, DebugEvent>? Debug;
 
@@ -1194,7 +1196,7 @@ public sealed class ServiceManager
                 });
             }
 
-            var response = new Response(this, (target, payload, started));
+            var response = new Response(this, (target, payload, started, props.Signal));
             var request = new RequestProps<TRequest>
             {
                 ConnectionHandle = props.ConnectionHandle,
@@ -1208,13 +1210,28 @@ public sealed class ServiceManager
             {
                 await made.Callback(request, response);
             }
-            catch
+            catch (Exception reason)
             {
                 // a resolver that failed before it answered still answers, so its requester does
-                // not wait out its timeout; why it failed goes on, for the router to report
+                // not wait out its timeout, told with why beside it; why it failed goes on, for the
+                // router to report; a call no longer answered takes neither
                 if (!response.IsAnswered)
                 {
                     response.IsAnswered = true;
+
+                    if (started.HasValue && !props.Signal.IsCancellationRequested)
+                    {
+                        manager.Trace(Procedure, new DebugStep(DebugDirection.Tx, made.Type)
+                        {
+                            CallId = props.Header.CallId,
+                            ConnectionHandle = props.ConnectionHandle,
+                            Error = reason,
+                            IsAnswered = true,
+                            Rx = payload,
+                            Started = started.Value,
+                        });
+                    }
+
                     await AnswerFailed(target);
                 }
 
@@ -1271,7 +1288,7 @@ public sealed class ServiceManager
                 nameof(failure));
         }
 
-        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started? Started) answering) : INotificationResponse<TResponse>
+        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started? Started, CancellationToken Signal) answering) : INotificationResponse<TResponse>
         {
             public bool IsAnswered { get; set; }
 
@@ -1328,30 +1345,42 @@ public sealed class ServiceManager
                 IsAnswered = true;
 
                 // traced once its request was, to whoever listens
-                if (answering.Started is { } started)
-                {
-                    resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type)
-                    {
-                        CallId = Target.Header.CallId,
-                        ConnectionHandle = Target.ConnectionHandle,
-                        IsAnswered = true,
-                        Rx = answering.Request,
-                        Started = started,
-                        Tx = answered,
-                    });
-                }
+                Told(answered, null);
 
                 try
                 {
                     await resolver._router.Respond(answer, Target);
                 }
-                catch
+                catch (Exception reason)
                 {
-                    // an answer the router could not send — too large, say — is answered as failed,
-                    // so its requester does not wait out its timeout
+                    // an answer the router could not send — too large, say — is told again at its
+                    // start with why, and answered as failed, so its requester does not wait out its
+                    // timeout
+                    Told(answered, reason);
+
                     await resolver.AnswerFailed(Target);
 
                     throw;
+                }
+            }
+
+            // ! tells its answer's step, or why it did not go, to whoever listens; built here, out of
+            // the async Send, so that a request holds no step of its own while nobody listens. A call
+            // no longer answered takes no failure
+            private void Told(object? answered, Exception? reason)
+            {
+                if (answering.Started is { } started && (reason is null || !answering.Signal.IsCancellationRequested))
+                {
+                    resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type)
+                    {
+                        CallId = Target.Header.CallId,
+                        ConnectionHandle = Target.ConnectionHandle,
+                        Error = reason,
+                        IsAnswered = true,
+                        Rx = answering.Request,
+                        Started = started,
+                        Tx = answered,
+                    });
                 }
             }
         }

@@ -33,6 +33,14 @@ internal static class ConversationPlayer
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    // every key a step may hold, each one read as it is played: a step that holds another fails,
+    // never passes with what it asks left unplayed
+    private static readonly HashSet<string> StepKeys =
+    [
+        "advance", "carried", "carries", "close", "counted", "expect", "on", "open", "report", "secure",
+        "send", "token", "twoWay", "until", "wall",
+    ];
+
     // helpers
 
     // the server's limits, the conversation's where it gives them
@@ -395,6 +403,11 @@ internal static class ConversationPlayer
         {
             foreach (var step in steps.EnumerateArray())
             {
+                Assert.Subset(StepKeys, step.EnumerateObject().Select((property) =>
+                {
+                    return property.Name;
+                }).ToHashSet(StringComparer.Ordinal));
+
                 var connection = step.TryGetProperty("on", out var on) ? on.GetString()! : OnlyConnection;
 
                 if (step.TryGetProperty("open", out var opened))

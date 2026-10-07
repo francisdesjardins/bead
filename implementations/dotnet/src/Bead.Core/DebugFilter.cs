@@ -417,7 +417,8 @@ public sealed record DebugFilter
 /// Debug listeners that hear only what a <see cref="DebugFilter"/> keeps. A filter is given as it
 /// is, as a spec, or as a function asked at each event — read again only when it gives other than
 /// it gave last, compiled again only when that reads as another filter, and left as it was when
-/// that no longer holds, or the function throws, since a trace never fails a call. The first must
+/// that no longer holds, or the function throws, reported to no one, since a trace never fails a
+/// call; a function that gives none keeps every event, as an empty filter does. The first must
 /// hold, or the listener is not made: an <see cref="ArgumentException"/>.
 /// </summary>
 public static class DebugFilters
@@ -589,7 +590,9 @@ public static class DebugFilters
                 }
                 catch (Exception)
                 {
-                    // the last filter that held stays: a filter that fails never fails the call it traces
+                    // the last filter that held stays, and the failure is reported to no one: a filter
+                    // has no router to report through, and is asked again at the next event
+                    // (spec/debugging.md 6.9); a filter that fails never fails the call it traces
                 }
 
                 current = predicate;

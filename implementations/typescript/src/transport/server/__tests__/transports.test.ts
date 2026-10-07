@@ -166,6 +166,21 @@ const HOST = '127.0.0.1';
 // the transports this harness plays a case over
 const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['http', 'websocket']);
 
+// ! every key of a step this harness reads: one it does not know fails the step, rather than pass it
+// unplayed
+const STEP_KEYS: ReadonlySet<string> = new Set([
+  'advance',
+  'close',
+  'expect',
+  'on',
+  'report',
+  'send',
+  'stop',
+  'until',
+  'wall',
+  'within',
+]);
+
 // how long a step waits on the real clock for its bytes, a gauge, a timer or a report, unless it says
 const PATIENCE = 3_000;
 const POLL = 10;
@@ -584,6 +599,21 @@ test.describe('the transports', () => {
         for (const [index, step] of steps.entries()) {
           const at = `step ${String(index + 1)}`;
           const milliseconds = step.within ?? PATIENCE;
+
+          expect(
+            Object.keys(step).filter((key) => {
+              return !STEP_KEYS.has(key);
+            }),
+            `${at}: the keys this harness does not read`
+          ).toEqual([]);
+          // a step is one act, on the exchange and within the time it may name: one that holds a
+          // second act fails, never passes with it left unplayed
+          expect(
+            Object.keys(step).filter((key) => {
+              return key !== 'on' && key !== 'within';
+            }),
+            `${at}: the acts it holds`
+          ).toHaveLength(1);
 
           if (step.send !== undefined || step.close === true) {
             expectNothingReported(`before ${at}`);

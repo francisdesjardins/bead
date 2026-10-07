@@ -81,6 +81,29 @@
       ]
     },
     {
+      "name": "a request to service 0 is read, and answered SERVICE_UNKNOWN by routing",
+      "clauses": [
+        "4.7",
+        "9.2.4"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 00 00 01 | 7B 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN",
       "clauses": [
         "9.2.4"

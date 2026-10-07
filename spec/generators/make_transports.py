@@ -313,6 +313,14 @@ cases = [
         *drawn(listening=True),
         send('none', 'GET', '/bead?after=x&wait=0', fields={'bead-connection-token': '{token}'}),
         refused('none', 400, 'malformed'), listen('past', 5, 0), refused('past', 400, 'malformed')]),
+    ('a listen whose after is empty, or of sixteen digits, is refused 400, marked, and one whose after is left out is 0',
+     ['15.6.4', '15.9'], None, [
+        *drawn(listening=True),
+        send('empty', 'GET', '/bead?after=&wait=0', fields={'bead-connection-token': '{token}'}),
+        refused('empty', 400, 'malformed'),
+        send('sixteen', 'GET', '/bead?after=0000000000000000&wait=0', fields={'bead-connection-token': '{token}'}),
+        refused('sixteen', 400, 'malformed'),
+        send('absent', 'GET', '/bead?wait=0', fields={'bead-connection-token': '{token}'}), expect('absent', 204, body='')]),
     ('an outbox past its bound closes its connection, and cuts the exchange whose request it was handed',
      ['15.7', '15.9', '15.12.6'], {'maximumOutboxBytes': 16}, [
         *drawn(listening=True), post('subscribe', SUBSCRIBE), answered('subscribe', result(1, 'null')),
@@ -608,7 +616,7 @@ document = {
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
         'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
-        'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits.',
+        'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),

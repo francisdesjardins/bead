@@ -261,12 +261,12 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Reads_the_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates()
+    public async Task Reads_the_monotonic_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates_and_the_wall_clock_never()
     {
         var registry = new MetricsRegistry();
 
         // a call made and a call answered, each on a core given a registry and on one given none
-        async Task<int> ReadingsOf(MetricsRegistry? given)
+        async Task<(int Wall, int Monotonic)> ReadingsOf(MetricsRegistry? given)
         {
             var client = new CountedPort((RouterSide.Client, given));
             var server = new CountedPort((RouterSide.Server, given));
@@ -280,11 +280,12 @@ public sealed partial class RouterCoreTests
             await server.Loop.WhenIdle();
             Assert.Single(server.Sent);
 
-            return client.Clock.Readings + server.Clock.Readings;
+            return (client.Clock.Readings.Wall + server.Clock.Readings.Wall, client.Clock.Readings.Monotonic + server.Clock.Readings.Monotonic);
         }
 
-        Assert.Equal(0, await ReadingsOf(null));
-        Assert.Equal(4, await ReadingsOf(registry));
+        // the monotonic clock alone, twice a call, and never the wall clock (spec/debugging.md 3.3)
+        Assert.Equal((0, 0), await ReadingsOf(null));
+        Assert.Equal((0, 4), await ReadingsOf(registry));
     }
 
     [Fact]

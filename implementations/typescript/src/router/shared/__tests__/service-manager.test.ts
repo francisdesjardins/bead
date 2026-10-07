@@ -872,15 +872,15 @@ test.describe('createServiceManager', () => {
         return response(request.payload);
       });
       const asking = hearing.getRequest(echo, { serializer });
-      // the readings `run` takes of the clock, wall and monotonic together
-      const readingsOf = async (run: () => Promise<unknown>): Promise<number> => {
-        const before = clock.readings.monotonic + clock.readings.wall;
+      // the readings `run` takes of the wall clock and of the monotonic one, each apart
+      const readingsOf = async (run: () => Promise<unknown>): Promise<[number, number]> => {
+        const { monotonic, wall } = clock.readings;
 
         await run();
 
-        return clock.readings.monotonic + clock.readings.wall - before;
+        return [clock.readings.wall - wall, clock.readings.monotonic - monotonic];
       };
-      const readEach = async (): Promise<number[]> => {
+      const readEach = async (): Promise<[number, number][]> => {
         return [
           await readingsOf(() => {
             return asking({ text: 'x' })();
@@ -902,7 +902,12 @@ test.describe('createServiceManager', () => {
         return undefined;
       })();
 
-      expect(await readEach()).toEqual([0, 0, 0, 0]);
+      expect(await readEach()).toEqual([
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ]);
 
       for (const manager of [hearing, notifying]) {
         manager.on('debug', () => {
@@ -911,8 +916,13 @@ test.describe('createServiceManager', () => {
       }
 
       // a call's start on both clocks, and its end on the monotonic one; a notification's on the
-      // wall clock alone
-      expect(await readEach()).toEqual([3, 3, 1, 1]);
+      // wall clock alone (spec/debugging.md 3.2)
+      expect(await readEach()).toEqual([
+        [1, 2],
+        [1, 2],
+        [1, 0],
+        [1, 0],
+      ]);
     });
 
     test("refuses a clock that differs from its router's", () => {
@@ -1499,6 +1509,153 @@ test.describe('createServiceManager', () => {
         ['rx', start, undefined],
         ['tx', start, 30],
       ]);
+    });
+
+    test('tells a callback that fails before it answers as an answer that did not go, with why beside it; nothing more for one that fails once it answered, nor for an admission that fails', async () => {
+      const start = Date.UTC(2026, 0, 1);
+      const clock = createTestClock(start);
+      const manager = createServiceManager(createFakeRouter('server', clock).router);
+      const seen = recordDebug(manager);
+      const thrown = new Error('thrown');
+      const rejected = new Error('rejected');
+      const after = new Error('after');
+
+      // each takes 10 ms before it fails
+      const throwing = manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
+        clock.tick(10);
+
+        throw thrown;
+      });
+      const rejecting = manager.getRequestResolver(
+        { ...echo, procedureId: 2 },
+        { serializer: serverSerializer }
+      )(() => {
+        clock.tick(10);
+
+        return Promise.reject(rejected);
+      });
+      const refusing = manager.getRequestResolver(
+        { ...echo, procedureId: 3 },
+        {
+          beforeRequest: () => {
+            throw thrown;
+          },
+          serializer: serverSerializer,
+        }
+      )(() => {
+        return Promise.resolve();
+      });
+      const failingOnceAnswered = manager.getRequestResolver(
+        { ...echo, procedureId: 4 },
+        { serializer: serverSerializer }
+      )(async (request, response) => {
+        await response(request.payload);
+
+        throw after;
+      });
+
+      const request = propsOf(encode({ text: 'hi' }));
+
+      await expect(throwing(request)).rejects.toBe(thrown);
+      await expect(rejecting(request)).rejects.toBe(rejected);
+      await expect(refusing(request)).rejects.toBe(thrown);
+      await expect(failingOnceAnswered(request)).rejects.toBe(after);
+
+      expect(
+        seen.map(({ error, info }) => {
+          return [
+            info.procedureId,
+            info.direction,
+            info.tx,
+            error,
+            info.startedAt,
+            info.duration,
+            info.callId,
+          ];
+        })
+      ).toEqual([
+        [1, 'rx', undefined, null, start, undefined, header.callId],
+        [1, 'tx', undefined, thrown, start, 10, header.callId],
+        [2, 'rx', undefined, null, start + 10, undefined, header.callId],
+        [2, 'tx', undefined, rejected, start + 10, 10, header.callId],
+        [4, 'rx', undefined, null, start + 20, undefined, header.callId],
+        [4, 'tx', { text: 'hi' }, null, start + 20, 0, header.callId],
+      ]);
+    });
+
+    test('tells an answer its router cannot send again at its start, with why beside it', async () => {
+      const start = Date.UTC(2026, 0, 1);
+      const clock = createTestClock(start);
+      const { calls, router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const tooLong = new FailureError(SERVER_FAILURES.payloadTooLarge);
+      const respond = router.respond;
+      let heard: unknown;
+
+      // the payload answer goes nowhere, 5 ms after it is handed over; a failure goes out
+      router.respond = async (response, request) => {
+        if (response.failure !== undefined) {
+          return respond(response, request);
+        }
+
+        await clock.tickAsync(5);
+
+        throw tooLong;
+      };
+
+      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })(async (
+        request,
+        response
+      ) => {
+        await clock.tickAsync(10);
+        heard = await response(request.payload).catch((reason: unknown) => {
+          return reason;
+        });
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(heard).toBe(tooLong);
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, info.tx, error, info.startedAt, info.duration];
+        })
+      ).toEqual([
+        ['rx', undefined, null, start, undefined],
+        ['tx', { text: 'hi' }, null, start, 10],
+        ['tx', { text: 'hi' }, tooLong, start, 15],
+      ]);
+      expect(
+        calls.respond.map(({ response }) => {
+          return response.failure;
+        })
+      ).toEqual([SERVER_FAILURES.procedureFailed]);
+    });
+
+    test('tells nothing more than its request for a callback that fails on its signal, its call cancelled or gone with its connection', async () => {
+      const manager = createServiceManager(createFakeRouter().router);
+      const seen = recordDebug(manager);
+      const controller = new AbortController();
+
+      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })((
+        request
+      ) => {
+        // its call cancelled, or its connection gone, as the callback runs
+        controller.abort();
+        request.signal.throwIfAborted();
+
+        return Promise.resolve();
+      });
+
+      await expect(resolver(propsOf(encode({ text: 'hi' }), controller.signal))).rejects.toBe(
+        controller.signal.reason
+      );
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, error];
+        })
+      ).toEqual([['rx', null]]);
     });
   });
 

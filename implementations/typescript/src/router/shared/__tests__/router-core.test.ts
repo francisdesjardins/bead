@@ -5130,14 +5130,20 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    test('read the clock twice more for a counted call than for one counted nothing, once at each of its gates', async () => {
-      const readingsOf = async (isCounted: boolean): Promise<number[]> => {
+    test('read the monotonic clock twice more for a counted call than for one counted nothing, once at each of its gates, and the wall clock never', async () => {
+      // the readings of each kind a call answered, then a call made, take
+      const readingsOf = async (isCounted: boolean): Promise<number[][]> => {
         const clock = createTestClock();
         const { port } = createPort();
         const metrics = isCounted ? createMetricsRegistry().attach('server') : undefined;
         using core = createRouterCore(port, { clock, metrics });
         const read = () => {
-          return clock.readings.monotonic + clock.readings.wall;
+          return [clock.readings.monotonic, clock.readings.wall];
+        };
+        const since = (from: number[], to: number[]) => {
+          return to.map((reading, index) => {
+            return reading - (from[index] ?? 0);
+          });
         };
 
         core.registerResolver(
@@ -5163,11 +5169,16 @@ test.describe('createRouterCore', () => {
         core.receive(resultOf(2), 'a');
         await asking;
 
-        return [between - before, read() - between];
+        return [since(before, between), since(between, read())];
       };
-      const [answeredUncounted = 0, madeUncounted = 0] = await readingsOf(false);
+      const uncounted = await readingsOf(false);
 
-      expect(await readingsOf(true)).toEqual([answeredUncounted + 2, madeUncounted + 2]);
+      // * two more of the monotonic clock, and not one more of the wall clock (spec/debugging.md 3.3)
+      expect(await readingsOf(true)).toEqual(
+        uncounted.map(([monotonic = 0, wall = 0]) => {
+          return [monotonic + 2, wall];
+        })
+      );
     });
 
     test('count a call it makes as its router settles it, timed to that instant', async () => {

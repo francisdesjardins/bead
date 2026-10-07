@@ -48,7 +48,8 @@ interface IFilterEntry {
 /** One step of a filter given as a function. */
 interface ISourceStep {
   event?: number;
-  gives?: string;
+  /** A filter, as written, or none: `null`. */
+  gives?: string | null;
   heard?: boolean;
   made?: boolean;
   throws?: true;
@@ -213,8 +214,8 @@ test.describe('the debug filters given as functions', () => {
 
   for (const { listener: whose, name, steps } of SOURCES) {
     test(name, () => {
-      // what the function does now: gives a filter, or throws
-      let current: { gives?: string; throws?: true } = {};
+      // what the function does now: gives a filter, gives none, or throws
+      let current: { gives?: string | undefined; throws?: true } = {};
       let heard = false;
       const source = (): string | undefined => {
         if (current.throws === true) {
@@ -229,7 +230,7 @@ test.describe('the debug filters given as functions', () => {
         const at = `step ${String(index + 1)}`;
 
         if (step.gives !== undefined) {
-          current = { gives: step.gives };
+          current = { gives: step.gives ?? undefined };
         }
 
         if (step.throws === true) {

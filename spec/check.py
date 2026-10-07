@@ -17,7 +17,7 @@ each exposition the metrics pin reads as 0.0.4, its families in the order of the
 companion's help and type, its buckets rising under the companion's bounds, each le OpenMetrics'
 canonical number for its bound, each _count the sum of its handled counts, none started below
 handled; each implementation's tests read every group, the conversations, the transports' cases,
-any of which may name the row of docs/support.md it crosses, the clock cases, the debug filters, the
+a case of which may name the row of docs/support.md it crosses, the clock cases, the debug filters, the
 metrics, the codecs' payloads and values and the identities' names, ids, folds and procedure kinds,
 an entry of either naming, where it crosses a row of docs/support.md, a row that names the file and
 the entry; the encodings section 17 states are the codecs' schema's, each played, and spec.md names

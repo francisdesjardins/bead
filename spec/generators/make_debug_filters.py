@@ -3,6 +3,8 @@ refused, and what a filter given as a function does from event to event (spec/de
 decision 0013). The filter is read here a third time, beside the two sides, by the grammar's words."""
 import json
 import os
+import re
+import tokenize
 
 from debugging_version import debugging_version
 
@@ -129,16 +131,17 @@ CALLS = [
     call('rx', 'request', 'GetTime'),            # 2
     call('tx', 'command', 'ping'),               # 3
     call('rx', 'notification', 'news'),          # 4
-    call('tx', 'request', 'a\rb'),               # 5: a carriage return within
-    call('tx', 'request', 'ab'),           # 6: a line separator within
+    call('tx', 'request', 'a\rb'),               # 5: a carriage return, U+000D, within
+    call('tx', 'request', 'a\u2028b'),          # 6: a line separator, U+2028, within
     call('rx', 'request', 'key'),                # 7
-    call('rx', 'request', 'Key'),           # 8: the Kelvin sign, which some platforms fold with k
-    call('rx', 'request', 'İd'),            # 9: a capital I with a dot, which some platforms lower to two
-    call('rx', 'request', 'a\u0085b'),           # 10: a next line within, white space to some platforms
+    call('rx', 'request', '\u212aey'),           # 8: the Kelvin sign, U+212A, which some platforms fold with k
+    call('rx', 'request', '\u0130d'),            # 9: a capital I with a dot, U+0130, which some platforms lower to two
+    call('rx', 'request', 'a\u0085b'),           # 10: a next line, U+0085, within, white space to some platforms
     call('rx', 'request', ''),                   # 11: the empty name
     call('rx', 'request', 'a.b'),                # 12
     call('rx', 'request', 'axb'),                # 13
-    call('rx', 'request', 'café'),          # 14: a letter outside ASCII
+    call('rx', 'request', 'caf\u00e9'),          # 14: a letter outside ASCII, U+00E9
+    call('tx', 'request', 'a\nb'),               # 15: a line feed, U+000A, within, which a regular expression's . matches on no platform
 ]
 
 ENVELOPES = [
@@ -162,12 +165,12 @@ FILTERS = [
     ('an empty filter keeps every call and every envelope', [PASSING], ''),
     ('separators alone are an empty filter', [GRAMMAR, SEPARATED, PASSING], ' ,\t\n\x0b\x0c\r'),
     ('a comma and each of the six ASCII white spaces part two words',
-     [GRAMMAR, SEPARATED, READ_AS], 'getStatus,ping news\tkey\nGetTime\x0baxb\x0ca.b\rcafé'),
+     [GRAMMAR, SEPARATED, READ_AS], 'getStatus,ping news\tkey\nGetTime\x0baxb\x0ca.b\rcaf\u00e9'),
     ('a run of separators parts two words once', [GRAMMAR, SEPARATED], ', ping ,\t, news ,'),
     ('a next line, U+0085, parts no two words', [SEPARATED, READ_AS], 'a\u0085b'),
-    ('a byte order mark, U+FEFF, parts no two words', [SEPARATED, READ_AS], 'getStatus﻿ping'),
-    ('a no-break space, U+00A0, parts no two words', [SEPARATED, READ_AS], 'getStatus ping'),
-    ('a line separator, U+2028, parts no two words', [SEPARATED, READ_AS], 'getStatusping'),
+    ('a byte order mark, U+FEFF, parts no two words', [SEPARATED, READ_AS], 'getStatus\ufeffping'),
+    ('a no-break space, U+00A0, parts no two words', [SEPARATED, READ_AS], 'getStatus\u00a0ping'),
+    ('a line separator, U+2028, parts no two words', [SEPARATED, READ_AS], 'getStatus\u2028ping'),
     ('d(rx) keeps the calls and the envelopes that come in', [SELECTORS, PASSING], 'd(rx)'),
     ('a selector\'s letter and its values are read in either case', [GRAMMAR, SELECTORS], 'D(TX)'),
     ('d(rx|tx) keeps both directions', [GRAMMAR, SELECTORS], 'd(rx|tx)'),
@@ -182,17 +185,17 @@ FILTERS = [
     ('a pattern matches a whole name, an ASCII letter in either case', [PATTERNS], 'GETTIME, KEY'),
     ('* stands for any run of characters, none included', [PATTERNS], 'get*'),
     ('* alone keeps every name, the empty one among them', [PATTERNS], '*'),
-    ('* crosses a carriage return and a line separator', [PATTERNS], 'a*'),
+    ('* crosses a carriage return, a line feed and a line separator', [PATTERNS], 'a*'),
     ('a point stands for itself', [PATTERNS], 'a.b'),
     ('an exclusion leaves out what it matches, and wins over a pattern', [PATTERNS, READ_AS], 'get* -getStatus'),
     ('an exclusion alone keeps every name but those it matches', [PATTERNS], '-g*'),
     ('- alone leaves out the empty name', [GRAMMAR, PATTERNS, READ_AS], '-'),
     ('a selector, a pattern and an exclusion together', [GRAMMAR, PASSING, READ_AS], ' d(rx),t(r|C)  get*, -getStatus\tping '),
-    ('the Kelvin sign in a pattern matches itself alone', [PATTERNS], 'KEY'),
+    ('the Kelvin sign in a pattern matches itself alone', [PATTERNS], '\u212aEY'),
     ('k in a pattern matches no Kelvin sign', [PATTERNS], 'Key'),
-    ('a capital I with a dot in a pattern matches itself alone', [PATTERNS], 'İD'),
+    ('a capital I with a dot in a pattern matches itself alone', [PATTERNS], '\u0130D'),
     ('i in a pattern matches no capital I with a dot', [PATTERNS], 'Id'),
-    ('a letter outside ASCII matches itself in its own case alone', [PATTERNS], 'CAFÉ, CAFé'),
+    ('a letter outside ASCII matches itself in its own case alone', [PATTERNS], 'CAF\u00c9, CAF\u00e9'),
     ('a pattern within a word of separators outside ASCII matches that whole word', [SEPARATED, PATTERNS], 'A\u0085B'),
     # what a side refuses, and what it names
     ('d() is refused, an empty selector', [REFUSED, SELECTOR_EMPTY], 'd()'),
@@ -201,8 +204,8 @@ FILTERS = [
     ('a value left empty first is refused', [REFUSED, VALUE_EMPTY], 't(|r)'),
     ('a direction that is none is refused, named as it was written', [REFUSED, NAMES_NOTHING], 'd(UP)'),
     ('d(rx)(tx) is one selector, whose one value names nothing', [REFUSED, NAMES_NOTHING], 'd(rx)(tx)'),
-    ('a kind spelled with the Kelvin sign names nothing', [GRAMMAR, REFUSED, NAMES_NOTHING], 'e(chunK)'),
-    ('a kind spelled with a capital I with a dot names nothing', [GRAMMAR, REFUSED, NAMES_NOTHING], 'e(notİfication)'),
+    ('a kind spelled with the Kelvin sign names nothing', [GRAMMAR, REFUSED, NAMES_NOTHING], 'e(chun\u212a)'),
+    ('a kind spelled with a capital I with a dot names nothing', [GRAMMAR, REFUSED, NAMES_NOTHING], 'e(not\u0130fication)'),
     ('a type the trace does not name is refused', [REFUSED, NAMES_NOTHING], 't(constructor)'),
     ('a value holding a quote is refused, named as it was written', [REFUSED, NAMES_NOTHING], 'd("rx")'),
     ('a value holding a backslash is refused, named as it was written', [REFUSED, NAMES_NOTHING], 't(r\\n)'),
@@ -254,7 +257,8 @@ class Source:
         if self.giving is THROWS:
             raise Refused('throws', None)
 
-        return parse(self.giving)
+        # none is no filter, which keeps every one, as an empty filter does
+        return parse('' if self.giving is None else self.giving)
 
     def step(self, step):
         if 'gives' in step or 'throws' in step:
@@ -296,6 +300,8 @@ SOURCES = [
     ('a function\'s filter of envelopes is asked at each event alike', [FUNCTION], 'envelope',
      [gives('e(failure)'), {'made': None}, event(2), event(1), gives('e(fail)'), event(2), event(1),
       gives('d(tx)'), event(0), event(2)]),
+    ('a function that gives none keeps every event, as an empty filter does, from its first on', [PASSING, FUNCTION], 'call',
+     [gives(None), {'made': None}, event(0), event(4), gives('d(rx)'), event(0), gives(None), event(0), event(11)]),
 ]
 
 
@@ -311,7 +317,7 @@ document = {
         'calls are the fixtures a call\'s filter is asked of: a trace\'s event, by its direction, its type and its procedure\'s name. envelopes are those an envelope\'s filter is asked of: a router\'s event, by its direction and its kind, named as section 3.1 of spec.md names it, in lower case. An entry names a fixture by its index.',
         'filter is a filter as written. parsed is what it reads as (6.6): its directions, its types and its kinds, by the grammar\'s names, and include, its patterns, and exclude, its exclusions without their -, as written, each in the order of its words. keeps lists the calls a call\'s listener given the filter hears, and the envelopes an envelope\'s listener hears, in their order.',
         'refused, in place of parsed and keeps, is why a side refuses the filter (6.7): reason, the first word that does not hold, and written, the word or the value it names, as it was written. The words of a refusal are each side\'s own, and stay with its tests.',
-        'sources are filters given as functions (6.9). listener says whose listener the function filters, a call\'s or an envelope\'s. A step gives a filter, which the function gives from then on; throws, from then on the function throws; made, the listener is made with the function, which is asked then, and true or false says whether it is made; event, an event of that fixture goes through the listener, which asks the function again, and heard says whether the listener heard it.',
+        'sources are filters given as functions (6.9). listener says whose listener the function filters, a call\'s or an envelope\'s. A step gives a filter, which the function gives from then on, or null, none, which keeps every event; throws, from then on the function throws; made, the listener is made with the function, which is asked then, and true or false says whether it is made; event, an event of that fixture goes through the listener, which asks the function again, and heard says whether the listener heard it.',
         'clauses are the units of spec/debugging.md an entry checks: a clause, 6.7; a row of its table, counted from 1, 6.7.3.',
         'Every character outside printable ASCII is written as its JSON escape.',
     ],
@@ -328,6 +334,25 @@ for each in document['sources']:
     made_at = [index for index, step in enumerate(steps) if 'made' in step]
     assert len(made_at) == 1 and not any('event' in step for step in steps[:made_at[0]]), each['name']
     assert steps[made_at[0]]['made'] or made_at[0] == len(steps) - 1, each['name']
+
+# ! an entry that names a code point holds it, and every string here is written in ASCII, a
+# character outside it as its escape: an editor that drops an invisible character leaves the name
+# saying what the data no longer holds
+for name, _clauses, text in FILTERS:
+    for code_point in re.findall(r'U\+([0-9A-F]{4,6})', name):
+        assert chr(int(code_point, 16)) in text, name
+
+# the fixtures whose comments name a character, by their index
+for index, code_point in ((5, 0x0D), (6, 0x2028), (8, 0x212A), (9, 0x0130), (10, 0x85), (14, 0xE9), (15, 0x0A)):
+    assert chr(code_point) in CALLS[index]['procedureName'], index
+
+# a string's text as written, not its value: '\u2028' is ASCII written, U+2028 once read; the literal
+# text of an f-string, and of a t-string, is a token of its own (Python 3.12, 3.14)
+WRITTEN = {tokenize.STRING} | {getattr(tokenize, kind) for kind in ('FSTRING_MIDDLE', 'TSTRING_MIDDLE')
+                               if hasattr(tokenize, kind)}
+with tokenize.open(__file__) as generator:
+    for token in tokenize.generate_tokens(generator.readline):
+        assert token.type not in WRITTEN or token.string.isascii(), token.start
 
 with open(ROOT + 'debug-filters.json', 'w', encoding='utf-8', newline='\n') as file:
     json.dump(document, file, ensure_ascii=True, indent=2)

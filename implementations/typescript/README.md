@@ -850,7 +850,12 @@ A service manager's `debug` tells each step of each call (section 4): its direct
 monotonic reading; its options, their defaults applied and its credential left out; what went out
 and came in, decoded and copied; and what it failed with, a failure by its code, its scope and its
 detail. A call made and its answer, a request received once admitted and decoded and the answer it
-sends, a notification sent or heard: each is a step. Each router's own `debug` tells each envelope
+sends, a notification sent or heard: each is a step. An error on a `tx` step says its `tx` did not
+go out, and why: a notification that could not go; an answer its router could not send, told again
+at its start with what its router refused it with; or none, from a resolver that failed before it
+answered, with what it failed with. The `PROCEDURE_FAILED` that goes in their place is the
+envelopes' to tell, and a call answered nothing — cancelled, gone with its connection, its router
+disposed — tells no failure. Each router's own `debug` tells each envelope
 (section 5), out once it is written within its bound, in once it reads: its direction, its
 connection — `server` on a client — and a copy of its header, which carries its credential's scheme
 in place of its credential.
@@ -859,8 +864,8 @@ Neither costs anything while nobody listens (section 3). `isDebugging` says whet
 until someone does, a call reads no clock and builds nothing for its trace — no step, no copy of its
 options or its payloads — and an envelope no redacted header: one check a call, and one an envelope.
 
-A listener's error never changes a call (section 2). What a listener throws — the trace's, or a
-filter's around it — goes to its router's `error` event, with the call's connection on a server,
+A listener's error never changes a call (section 2). What a listener throws — the trace's, or the
+one a filter wraps — goes to its router's `error` event, with the call's connection on a server,
 and the next listener is called all the same: the call keeps its outcome, its answer and what goes
 on the wire, as if nobody listened.
 
@@ -891,9 +896,10 @@ left empty, `d(rx|)`; a value that names none of its letter's, `d(UP)`; any othe
 parenthesis, `d(rx,tx)` being two such words. `parseDebugFilter` reads a filter's words into its
 parts, and a filter given whole, as those parts, is refused in the grammar's names. A filter given
 as a function is asked at each event — an environment variable read afresh, say — and compiled
-again only when it changed. The first must hold, or the listener's wrapper throws a
-`ProgrammerError` as it is set up; one that stops holding later, or a function that throws, leaves
-the last that held, since a trace never fails a call. The package reads no variable of its own,
+again only when it changed; one that gives none, a variable unset, keeps every event, as an empty
+filter does. The first must hold, or the listener's wrapper throws a `ProgrammerError` as it is set
+up; one that stops holding later, or a function that throws, leaves the last that held, reported to
+no one, since a trace never fails a call. The package reads no variable of its own,
 since it runs in a browser too; the examples name theirs `DEBUG_CALLS`, as it filters calls and
 their envelopes both:
 

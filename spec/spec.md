@@ -476,9 +476,9 @@ section 12.1 answers a result its side cannot send, a failure, which subscribes 
 
 1. by a cancel on its call id, from the client, which the server answers by nothing, and after
    which it sends nothing more on that call id;
-2. by a failure on its call id, from the server — its queue past its bounds, its session ended —
-   after which the server sends nothing more on it, and the client reserves the call id
-   (section 10.3);
+2. by a failure on its call id, from the server — its queue past its bounds, its session ended, or
+   a failure its application ends it with — after which the server sends nothing more on it, and
+   the client reserves the call id (section 10.3);
 3. with its connection, at both ends.
 
 A client receiving a notification under no subscription reports it as `SUBSCRIPTION_UNKNOWN`; on a

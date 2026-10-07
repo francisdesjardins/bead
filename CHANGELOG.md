@@ -152,29 +152,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/debugging.md`, the spec's companion (decision 0013), at version 0.1.0 of its own: what a
   side traces, filters and counts beside the wire, which a constrained profile may leave out and
   still conform to the wire. It states the trace of calls and of envelopes, each step of a call
-  naming its call; a listener's error, which never changes a call; the cost while nobody listens,
-  and two build switches; the debug filter's grammar in ABNF, in ASCII alone, and its refusals by
-  reason; and a registry of metrics, its declarations, its ceiling, nine families under
-  OpenTelemetry's RPC names, `bead` for `rpc`, every series made at 0, the router's gates and every
-  exit of a call, A66's buckets in whole microseconds with each `le` OpenMetrics' canonical number,
-  and its exposition's bytes in the Prometheus text format 0.0.4. It names spec sections 16 and 17
-  where it reads a name: no procedure is named `_OTHER`, and every procedure's name is a pattern a
-  debug filter reads. A side that carries the protocol whole is one built with neither of its two
-  switches, which a constrained profile uses to leave out what it does not build, and a listener is
-  synchronous. Sections 6 to 12 name the file that checks each, and the support matrix the twin
-  tests that hold what a test can of sections 1 to 5. `spec/spec.md` says where it stands beside it,
-  and decision 0008's spec axis carries its version, which moves as the spec's does, a release whose
-  companion moved tagging `debugging-v` and that version.
+  naming its call, and an answer that did not go told with why beside it, a step's payloads the
+  call's own, which no listener changes; a listener's error, which never changes a call; the cost
+  while nobody listens, and two build switches; the debug filter's grammar in ABNF, in ASCII alone,
+  and its refusals by reason, a filter given as a function that gives none keeping every event, and
+  none of its failures reported; and a registry of metrics, its declarations, each refused for the
+  first reason that applies, its ceiling, nine families under OpenTelemetry's RPC names, `bead` for
+  `rpc`, every series made at 0, a subscription dropped counted at either end under the code of the
+  failure that ended it, whatever its code, as spec 11.7 lets an application end one with the
+  failure it chooses, the router's gates and every exit of a call, A66's buckets in whole
+  microseconds with each `le` OpenMetrics' canonical number, and its exposition's bytes in the
+  Prometheus text format 0.0.4. It names spec sections 16 and 17 where it reads a name: no procedure
+  is named `_OTHER`, and every procedure's name is a pattern a debug filter reads. A side that
+  carries the protocol whole is one built with neither of its two switches, which a constrained
+  profile uses to leave out what it does not build, and a listener is synchronous. Sections 6 to 12
+  name the file that checks each, and the support matrix the twin tests that hold what a test can of
+  sections 1 to 5. `spec/spec.md` says where it stands beside it, and decision 0008's spec axis
+  carries its version, which moves as the spec's does, a release whose companion moved tagging
+  `debugging-v` and that version.
 - `spec/debug-filters.json` and `spec/metrics.json`, their schemas and their generators, each
   repeating the companion's version as its `debuggingVersion`: 52 filters, what each reads as and
-  keeps of fixed calls and envelopes, or its refusal's reason and what it names, and 5 filters given
-  as functions, event by event; 22 expositions, a registry's text byte for byte, and 49 exits, the
-  interop service's conversations played by a server given a registry, a `counted` step listing the
-  series each step moved. `spec/check.py` holds the companion's version, its units, which
-  `spec/debugging-uncited.txt` lists where none cites them, and the lines naming its files; reads
-  each exposition as 0.0.4, its families, its help and its buckets the companion's, each `_count` the
-  sum of its handled counts, none started below handled; and requires each side's tests to read
-  both files. The `spec` job regenerates them.
+  keeps of fixed calls and envelopes, or its refusal's reason and what it names, and 6 filters given
+  as functions, event by event, an entry naming a character holding it, which its generator checks,
+  writing every character outside ASCII as its escape; 24 expositions, a registry's text byte for
+  byte, and 50 exits, the interop service's conversations played by a server given a registry, a
+  `counted` step listing the series each step moved. `spec/check.py` holds the companion's version,
+  its units, which `spec/debugging-uncited.txt` lists where none cites them, and the lines naming
+  its files; reads each exposition as 0.0.4, its families, its help and its buckets the companion's,
+  each `_count` the sum of its handled counts, none started below handled; and requires each side's
+  tests to read both files. The `spec` job regenerates them.
 - A metrics registry on each side (decision 0013), `createMetricsRegistry` and `MetricsRegistry`,
   which a router given it as its `metricsRegistry`, `MetricsRegistry`, counts into at its gates, and
   which every client and server passes on to the router it builds; one given to two routers sums

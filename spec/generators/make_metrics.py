@@ -33,7 +33,6 @@ EVERY_CODE = [*CODES.values(), APPLICATION, OTHER]
 SERVER_CODES = ['SESSION_REQUIRED', 'ACCESS_DENIED', 'PAYLOAD_TOO_LARGE', 'CAPACITY_EXCEEDED', 'CREDENTIAL_UNSUPPORTED',
                 'SUBSCRIPTION_UNSUPPORTED', 'CHUNK_INVALID', 'CREDIT_EXCEEDED', 'PAYLOAD_UNDECODABLE', 'TRANSFER_STALLED',
                 'PROCEDURE_FAILED', APPLICATION]
-NOTIFYING_CODES = ['SESSION_REQUIRED', 'CAPACITY_EXCEEDED']
 assert len(EVERY_CODE) == 24 and len(SERVER_CODES) == 12
 
 # 11.3: A66's bounds, in microseconds, each with its le, OpenMetrics' canonical number for it
@@ -157,7 +156,7 @@ class Registry:
             self.call_series('client', address, TYPES[('client', router)], EVERY_CODE)
         if way == 'resolver' and notifies:
             self.sent.setdefault(address, {'sent': 0, 'failed': 0})
-            self.dropped_series(address, NOTIFYING_CODES)
+            self.dropped_series(address, EVERY_CODE)
         if way == 'notification':
             self.heard.setdefault(address, 0)
             self.dropped_series(address, EVERY_CODE)
@@ -269,9 +268,9 @@ def series_count(registry):
     return sum(len(series) for series in registry.families().values())
 
 
-# the record's counts (7.7): 61, 74, 5, 26, and _OTHER's 73 and 74
+# the record's counts (7.7): 61, 74, 27, 26, and _OTHER's 73 and 74
 for way, router, notifies, expected in (('resolver', 'server', False, 61), ('requester', 'client', False, 74),
-                                        ('resolver', 'server', True, 61 + 5), ('notification', 'client', False, 26)):
+                                        ('resolver', 'server', True, 61 + 27), ('notification', 'client', False, 26)):
     counted = Registry()
     counted.declare(router, way, (1, 1), 'p', notifies)
     assert series_count(counted) == expected, (way, series_count(counted))
@@ -288,6 +287,7 @@ assert series_count(counted) == 73 + 74
 REGISTRY, DECLARED, DECLARED_REFUSED, CEILING, MADE_AHEAD, CODES_OF, SERIES_COUNTS = (
     '7.1', '7.2', '7.3', '7.4', '7.5', '7.6', '7.7')
 ANOTHER_NAME, ANOTHER_ADDRESS, ANOTHER_REVISION, PAST_CEILING = '7.3.1', '7.3.2', '7.3.3', '7.3.4'
+NOTIFIER_DROPS = '10.3.5'
 FAMILY_TABLE, ROLES, LABELED, OUTCOME, UNDER_WAY = '8.1', '8.2', '8.3', '8.4', '8.5'
 DURATION, OBSERVED, BUCKETS = '11.1', '11.2', '11.3'
 EXPOSED, GROUPED, ORDERED, LABELS, NUMBERS, LINES = '12.1', '12.2', '12.3', '12.4', '12.5', '12.6'
@@ -383,7 +383,7 @@ EXPOSITIONS = [
      None, ['server'], [], []),
     ('a registry given to a client\'s router makes its _OTHER series at 0: request among its client families, command among its server families',
      [MADE_AHEAD, ROLES, LABELED, ORDERED], None, ['client'], [], []),
-    ('a resolver declared makes its 61 series at 0, and one whose procedure notifies 5 more, as the side that notifies',
+    ('a resolver declared makes its 61 series at 0, and one whose procedure notifies 27 more, as the side that notifies',
      [DECLARED, MADE_AHEAD, CODES_OF, SERIES_COUNTS, GROUPED, ORDERED], None, ['server'],
      [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 10, 'ticks', notifies=True)], []),
     ('a requester declared makes its 74 series at 0, and a notification registered 26, as the side that hears',
@@ -435,6 +435,11 @@ EXPOSITIONS = [
      [notified(1, 'sent', 1, 10), notified(1, 'sent', 1, 10), notified(1, 'failed', 1, 10), notified(0, 'heard', 1, 10),
       dropped(1, 'notifies', 1, 10, 'CAPACITY_EXCEEDED'), dropped(0, 'hears', 1, 10, 'CAPACITY_EXCEEDED'),
       dropped(0, 'hears', 1, 10)]),
+    ('a subscription the side that notifies drops counts under the code of the failure that ends it: a protocol code by its name, a procedure\'s own application, a code section 8 names none of _OTHER',
+     [MADE_AHEAD, CODES_OF, OUTCOME, NOTIFIER_DROPS], None, ['server'],
+     [resolver(SERVER, 1, 10, 'ticks', notifies=True)],
+     [dropped(SERVER, 'notifies', 1, 10, 'ACCESS_DENIED'), dropped(SERVER, 'notifies', 1, 10, APPLICATION),
+      dropped(SERVER, 'notifies', 1, 10, OTHER), dropped(SERVER, 'notifies', 1, 10)]),
     ('one registry given to two routers sums them, a declaration of an address it holds under its name taking the same series',
      [REGISTRY, DECLARED_REFUSED], None, ['server', 'server'],
      [resolver(0, 1, 1, 'echo'), resolver(1, 1, 1, 'echo')],
@@ -468,6 +473,12 @@ EXPOSITIONS = [
      [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 2, 'fail'), resolver(SERVER, 1, 3, 'slow', refused='past the ceiling'),
       resolver(SERVER, 1, 1, 'echo'), requester(SERVER, 1, 3, 'slow')],
      [answered(SERVER, 'failure', 'PROCEDURE_UNKNOWN')]),
+    ('a declaration that several reasons refuse is refused for the first that applies, in the order of their table',
+     [DECLARED_REFUSED, ANOTHER_NAME, ANOTHER_ADDRESS, ANOTHER_REVISION, PAST_CEILING], 2, ['server'],
+     [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 2, 'fail'),
+      resolver(SERVER, 1, 1, 'other', refused='another name at its address', revision=2),
+      resolver(SERVER, 1, 3, 'ECHO', refused='its name at another address', revision=2),
+      resolver(SERVER, 1, 3, 'slow', refused='another revision of its service', revision=2)], []),
     ('a resolver whose procedure notifies counts against the notification families\' ceiling too',
      [PAST_CEILING, CEILING], 1, ['client', 'server'],
      [notification(0, 1, 10, 'ticks'), resolver(1, 1, 11, 'tick', notifies=True, refused='past the ceiling'),
@@ -760,6 +771,10 @@ EXITS = [
     ('a notification handed to its transport counts sent, under the procedure its subscription went to', [GOES, NOTIFICATION_SENT, WIRE],
      'a request that opens a subscription to ticks is answered, and each tick notifies it on its call id',
      {2: answered_whole('ticks', 'result'), 5: [*answered_whole('tick', 'result'), sent('ticks')]}),
+    ('a notification a credit lets go from its queue counts sent as it goes, and one queued counts nothing', [GOES, NOTIFICATION_SENT],
+     'a paced subscription is sent a notification per credit, the first credited by its request',
+     {2: answered_whole('ticks', 'result'), 5: [*answered_whole('tick', 'result'), sent('ticks')],
+      7: answered_whole('tick', 'result'), 9: sent('ticks')}),
     ('a client\'s cancel drops no subscription', [CANCEL_DROPS_NOTHING],
      'a cancel ends a subscription, and nothing more goes on its call id',
      {2: answered_whole('ticks', 'result'), 5: answered_whole('tick', 'result')}),

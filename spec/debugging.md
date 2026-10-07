@@ -43,8 +43,8 @@ and moves the minor of both documents.
 2.1. Debugging is a side's own. Nothing a side traces, filters or counts goes on the wire, and a
 peer never knows whether it listens.
 
-2.2. A listener's error never changes a call. An error a listener throws, the trace's or a filter's
-around it, MUST be reported, as section 9.0 of `spec.md` reports an error: through its router's
+2.2. A listener's error never changes a call. An error a listener throws, the trace's or the one a
+filter wraps, MUST be reported, as section 9.0 of `spec.md` reports an error: through its router's
 error event, with the call's connection on a server, through which its service manager reports its
 own. A listener is synchronous: what it returns is not awaited, and an error it raises once it
 returned is its platform's, outside this guard. The call goes on as if nobody listened: its outcome,
@@ -100,21 +100,33 @@ side, each in its platform's case:
 | the error, beside the step     | what the step failed with; a failure by its code, its scope and its detail                                                      |
 | `callId`, `connectionHandle`   | its call, as its envelopes name it (5.1): its call id, and its connection, `server` on a client; none where 4.2 names none      |
 
+A step's `rx` and `tx` may be the call's own values, not copies of them: a listener MUST NOT change
+them, since its call may still read what it changed.
+
 4.2. The steps it tells, and the call each names:
 
-| Step                                                     | Direction | Its call                                                    |
-| -------------------------------------------------------- | --------- | ----------------------------------------------------------- |
-| a call made                                              | `tx`      | its own, once its router drew its id; none if refused first |
-| its answer, or its failure                               | `rx`      | the call made's                                             |
-| a request received, once admitted and decoded            | `rx`      | its request's                                               |
-| the answer it sends                                      | `tx`      | its request's                                               |
-| a notification sent, and its failure to go at that start | `tx`      | none: it goes to each subscription under that one's id      |
-| a notification heard, or its failure to decode           | `rx`      | none: its subscription's call names it                      |
+| Step                                                                                               | Direction | Its call                                                    |
+| -------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------- |
+| a call made                                                                                        | `tx`      | its own, once its router drew its id; none if refused first |
+| its answer, or its failure                                                                         | `rx`      | the call made's                                             |
+| a request received, once admitted and decoded                                                      | `rx`      | its request's                                               |
+| the answer it sends, its failure to go at that start, or its resolver's failure before it answered | `tx`      | its request's                                               |
+| a notification sent, and its failure to go at that start                                           | `tx`      | none: it goes to each subscription under that one's id      |
+| a notification heard, or its failure to decode                                                     | `rx`      | none: its subscription's call names it                      |
 
-4.3. A request refused by its admission, or whose payload does not decode, is not traced; nor is a
-call whose value does not write, which is not made (`spec.md` 17.2). A relayed call is no call of a
-service manager's at the relay: neither of its legs is traced as one, and their envelopes are, each
-leg under its own call id (5.1).
+A `tx` step with an error says that its `tx` did not go out, and why: a notification that could not
+go; an answer its router could not send, past its limit say, told again at its start with what its
+router refused it with; or none, from a resolver that failed before it answered, with what it failed
+with. A request whose answer did not go is answered `PROCEDURE_FAILED` in its place (`spec.md` 9.5,
+12.1), which the trace of envelopes tells (5.1). A call cancelled, gone with its connection, or
+whose router was disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a
+resolver that fails once it answered.
+
+4.3. A request refused by its admission, or whose admission fails, answered `PROCEDURE_FAILED`
+(`spec.md` 9.2, step 5), or whose payload does not decode, is not traced: no step of it was told,
+and none of its answer is; nor is a call whose value does not write, which is not made (`spec.md`
+17.2). A relayed call is no call of a service manager's at the relay: neither of its legs is traced
+as one, and their envelopes are, each leg under its own call id (5.1).
 
 4.4. A call made names its call once its router drew its id, and its `tx` step is told then; one its
 router refuses before drawing an id names none, and its `tx` step is told as it is refused. Its `tx`
@@ -201,7 +213,9 @@ types and its kinds.
 
 6.9. A filter given as a function is asked as its listener is made, and again at each event. The
 first it gives MUST hold, or the listener is not made; one that later fails to hold, or a function
-that throws, leaves the last that held.
+that throws, leaves the last that held, and is not reported: a filter has no router to report
+through, and is asked again at the next event. A function that gives none gives no filter, which
+keeps every event, as an empty filter does (6.5), as its listener is made and at any event.
 
 6.10. The filter compares the names it is given, whatever they hold; `spec.md` section 16 states
 what a procedure's name holds, and every such name is a pattern the filter reads.
@@ -226,7 +240,7 @@ and the clients that build a router pass on. One registry given to two routers s
 families declare it, and holds one name for it and one revision for its service: a declaration of
 an address it holds under the same name takes the same series. A router refuses first what
 `spec.md` section 16.10 refuses. A side MUST refuse a declaration as it is made, never on a call, as
-it refuses a resolver registered twice, for one of these reasons:
+it refuses a resolver registered twice, for the first of these reasons that applies, in their order:
 
 | Reason                            | A declaration that names                                                       |
 | --------------------------------- | ------------------------------------------------------------------------------ |
@@ -254,7 +268,7 @@ families. A count never makes a series.
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | a procedure's in the server families                                  | 12: `SESSION_REQUIRED`, `ACCESS_DENIED`, `PAYLOAD_TOO_LARGE`, `CAPACITY_EXCEEDED`, `CREDENTIAL_UNSUPPORTED`, `SUBSCRIPTION_UNSUPPORTED`, `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `PAYLOAD_UNDECODABLE`, `TRANSFER_STALLED`, `PROCEDURE_FAILED`, `application` |
 | a procedure's in the client families, and `_OTHER`'s in both          | 24: section 8's 22, `application` and `_OTHER`, since a peer's answer, or a relay's, can carry any                                                                                                                                                        |
-| a procedure's in the notification families, as the side that notifies | 2: `CAPACITY_EXCEEDED`, `SESSION_REQUIRED`                                                                                                                                                                                                                |
+| a procedure's in the notification families, as the side that notifies | 24, as a procedure's in the client families, since its application ends a subscription with the failure it chooses (`spec.md` 11.7, item 2)                                                                                                               |
 | a procedure's in the notification families, as the side that hears    | 24, as a procedure's in the client families                                                                                                                                                                                                               |
 
 A route refused, a header that does not read and a relayed call are `_OTHER`'s, which is why a
@@ -263,9 +277,9 @@ procedure's server series take none of their codes.
 7.7. So a procedure takes 61 series in the server families: 44 in the histogram, its 42 buckets, its
 `_sum` and its `_count`; 1 started; and 16 handled, `result`, `cancelled`, `closed` and `error`, and
 `failure` under each of its 12 codes. It takes 74 in the client families: 44, 1, and 29 handled,
-`timeout` besides and 24 codes. It takes 5 in the notification families of the side that notifies,
-2 sent and 3 dropped, its two codes and none; and 26 in those of the side that hears, 1 heard and 25
-dropped, its 24 codes and none. `_OTHER` takes 73 series in the server families of a router and 74 in
+`timeout` besides and 24 codes. It takes 27 in the notification families of the side that notifies,
+2 sent and 25 dropped, its 24 codes and none; and 26 in those of the side that hears, 1 heard and 25
+dropped, the same 25. `_OTHER` takes 73 series in the server families of a router and 74 in
 its client families.
 
 ## 8. The families
@@ -400,7 +414,10 @@ a close.
 9.8. The metrics count what the wire carried, and the trace tells what the side made of it. A result
 its requester cannot decode came as a result, and is counted so at both ends; the trace tells the
 failure. A request that opens a subscription counts as a call by its answer; what follows it is the
-notifications'.
+notifications'. A failure whose code a procedure's server series take none of, which a resolver
+registered on its router itself, not through a service manager, alone can answer, counts under
+`PROCEDURE_FAILED`, the code a service manager answers in its place (`spec.md` 9.5), since no count
+makes a series (7.5).
 
 ## 10. Notifications
 
@@ -425,6 +442,7 @@ manager's `dropped` event:
 | the side that notifies | its session ended (13.6)                                      | `SESSION_REQUIRED`                               |
 | the side that hears    | a failure on its call id once it was answered (11.7, item 2)  | the failure's: its name, `application`, `_OTHER` |
 | either                 | its connection closes, or the side is disposed (11.7, item 3) |                                                  |
+| the side that notifies | a failure its application ends it with (11.7, item 2)         | the failure's: its name, `application`, `_OTHER` |
 
 10.4. A client's cancel (`spec.md` 11.7, item 1) drops nothing, at either end. A notification a
 later one of the same key replaces in its queue (11.9), or one its subscription's end leaves queued,
@@ -436,7 +454,9 @@ _Metrics: `spec/metrics.json`._
 
 11.1. A router reads its monotonic clock at a call's start gate and at its end gate, and observes
 the difference in whole microseconds, its fraction dropped: the TypeScript side the difference of
-its two milliseconds times 1,000, the C# side a `TimeSpan`'s ticks over 10.
+its two milliseconds in nanoseconds, rounded to a whole one, then over 1,000, so that a reading's
+binary fraction drops no microsecond, 0.3 ms less 0.2 ms reading 100 µs; the C# side a `TimeSpan`'s
+ticks over 10.
 
 11.2. Every call that ends is observed, whatever its outcome, so a series' `_count` is the sum of
 its handled counts.

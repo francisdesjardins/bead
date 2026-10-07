@@ -17,6 +17,7 @@ import type {
   Envelope,
   ICredentials,
   IElsewhereSession,
+  IFailure,
   INotificationLike,
   IProcedure,
   OutgoingEnvelope,
@@ -4649,6 +4650,52 @@ test.describe('createRouterServer, its metrics', () => {
 
     expect(droppedOf()).toEqual([
       'bead_subscriptions_dropped_total{service="2",procedure="news"} 2',
+    ]);
+  });
+
+  test('counts a subscription its application drops under the code of the failure that ends it, whatever its code', async () => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    // a protocol code, a code of the procedure's own, and a code section 8 names none of
+    const ending: [Handle, IFailure][] = [
+      [first, SERVER_FAILURES.accessDenied],
+      [second, { code: 9, scope: FailureScope.APPLICATION }],
+      [third, { code: 99, scope: FailureScope.PROTOCOL }],
+    ];
+
+    createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
+      (_request, response) => {
+        return response('ok');
+      }
+    );
+
+    for (const [connectionHandle] of ending) {
+      open(connectionHandle);
+      deliver(connectionHandle, subscribingOf(1));
+    }
+
+    await sleep(0);
+    sent.length = 0;
+
+    for (const [connectionHandle, failure] of ending) {
+      await router.dropSubscriptions({ connectionHandle, failure });
+    }
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.ACCESS_DENIED],
+      [second, 'failure', 1, 9],
+      [third, 'failure', 1, 99],
+    ]);
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_subscriptions_dropped_total');
+      })
+    ).toEqual([
+      'bead_subscriptions_dropped_total{service="2",procedure="news",code="ACCESS_DENIED"} 1',
+      'bead_subscriptions_dropped_total{service="2",procedure="news",code="application"} 1',
+      'bead_subscriptions_dropped_total{service="2",procedure="news",code="_OTHER"} 1',
     ]);
   });
 

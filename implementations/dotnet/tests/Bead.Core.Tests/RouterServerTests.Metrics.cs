@@ -290,6 +290,51 @@ public sealed partial class RouterServerTests
         }));
     }
 
+    [Fact]
+    public async Task Counts_a_subscription_its_application_drops_under_the_code_of_the_failure_that_ends_it_whatever_its_code()
+    {
+        var registry = new MetricsRegistry();
+
+        Start(new RouterServerOptions { MetricsRegistry = registry });
+        _transport.Open(First);
+        _transport.Open(Second);
+        _transport.Open(Third);
+        NotifierOf((_, response) =>
+        {
+            return response.Answer("ok");
+        });
+
+        Deliver(First, SubscribingOf(1));
+        Deliver(Second, SubscribingOf(1));
+        Deliver(Third, SubscribingOf(1));
+        await Settle();
+        _transport.Sent.Clear();
+
+        // a protocol code section 8 names, a procedure's own, and a protocol code it names none of
+        await Router.DropSubscriptions(First, Failure.OfProtocol(ProtocolCode.AccessDenied)).WaitAsync(Patience, Cancelled);
+        await Router.DropSubscriptions(Second, Failure.OfApplication(9)).WaitAsync(Patience, Cancelled);
+        await Router.DropSubscriptions(Third, Failure.OfProtocol((ProtocolCode)99)).WaitAsync(Patience, Cancelled);
+        await Settle();
+
+        Assert.Equal(["first failure 1 AccessDenied", "second failure 1 9", "third failure 1 99"], SentSince());
+
+        // nothing under none, and every code a series, made at 0 as its procedure was declared
+        Assert.Equal(
+            [
+                "bead_subscriptions_dropped_total{code=\"ACCESS_DENIED\"} 1",
+                "bead_subscriptions_dropped_total{code=\"application\"} 1",
+                "bead_subscriptions_dropped_total{code=\"_OTHER\"} 1",
+            ],
+            CountedOf((registry, "news")).Where((line) =>
+            {
+                return line.StartsWith("bead_subscriptions_dropped_total", StringComparison.Ordinal);
+            }));
+        Assert.Equal(25, registry.Exposition().Text.Split('\n').Count((line) =>
+        {
+            return line.StartsWith("bead_subscriptions_dropped_total{service=\"2\",procedure=\"news\"", StringComparison.Ordinal);
+        }));
+    }
+
     // a resolver of its own whose handler fails before it answers, and answers nothing
     private sealed class Breaking(Procedure procedure) : IRequestResolver
     {
