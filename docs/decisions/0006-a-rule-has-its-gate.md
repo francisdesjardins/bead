@@ -26,6 +26,7 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 | The conformance files are what their generators write                                                                                                                                                                                                                                                                                                   | `spec`                                           |
 | The conformance files keep their frame ([0004](0004-one-behaviour-in-every-language.md)), and every side reads them                                                                                                                                                                                                                                     | `spec`                                           |
 | No configuration holds a published test key                                                                                                                                                                                                                                                                                                             | `spec`                                           |
+| The interop's blueprint keeps its schema and its form, its arrays in their order, and `interop-service.json` its procedures, by name ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                     | `spec`                                           |
 | Every implementation reads the wire alike, as the conformance files state it, but what a row of the matrix excuses                                                                                                                                                                                                                                      | `typescript`, `dotnet`                           |
 | Every implementation refuses a declaration off section 16                                                                                                                                                                                                                                                                                               | `typescript`, `dotnet`                           |
 | Every implementation traces, filters and counts alike                                                                                                                                                                                                                                                                                                   | `typescript`, `dotnet`                           |
@@ -96,6 +97,11 @@ vector cannot.
 - `beadc check`, which holds a blueprint to section 16 and to the builder's rules, and
   `beadc breaking`, which holds a blueprint to the last release's
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
+- the builder's types, lint, format, tests and rules, on Linux and Windows; `interop.proto`'s
+  blueprint, its projection the interop's byte for byte, in every line ending;
+  `beadc generate --check` over the repository; the image's and the wrappers' tests; and
+  `examples/hello`'s two builds, its C# messages generated and external
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
 - tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
   root's tools' tests, in Node's runner, would hold.
 

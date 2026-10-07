@@ -65,8 +65,13 @@ are `Bead.*` and their namespaces `Bead` and `Bead.*`. Over HTTP, the media type
 headers are `bead-*`. The builder's command is `beadc`, as `protoc` and `flatc` are named, since a
 bare `bead` is not Bead's to take; the C# it generates qualifies every type as `global::Bead.`, so a
 platform's name, as ASP.NET's `HealthStatus`, never makes one of Bead's ambiguous (CS0104). The
-builder's protobuf package and extension numbers are reserved in protobuf's global registry when its
-options freeze at v1.
+builder's options take one extension number of protobuf's global registry from their first
+publication, which lists the project beside it; their package, `bead`, is protected by no registry,
+as no protobuf package is, and goes by the project's name as `buf.validate` and `google.api` go by
+theirs
+([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
+A blueprint of the builder's names its format's major, `bead-blueprint/1`, whose schema moves on the
+spec's axis.
 
 **The repository is kept as if it were published.** The wire changes only by decision: a record
 here, and the Tenth Man before it ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
@@ -105,7 +110,7 @@ with its answer:
 | `bead` is taken on npm, PyPI and crates.io, and a memory tool for coding agents goes by Beads                                     | Accepted in part: the protocol keeps its name, and the builder's command is `beadc`.                                                                                                                  |
 | npm's scope is the owner's, and NuGet has no scopes                                                                               | Accepted as a rule: the C# packages are `FrancisDesjardins.Bead.*`, and their assemblies and namespaces stay `Bead.*`.                                                                                |
 | A prefix against a platform's names holds once, in `BeadHttpClient`, and `HealthStatus` collides with ASP.NET's (CS0104)          | Accepted for the builder: the C# it generates qualifies every type as `global::Bead.`. Nothing else is renamed.                                                                                       |
-| The builder's protobuf package and extension numbers belong in protobuf's global registry                                         | Accepted, when its options freeze at v1, not before.                                                                                                                                                  |
+| The builder's protobuf package and extension numbers belong in protobuf's global registry                                         | Accepted: from their first publication, the image's, not at v1 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s second round).                         |
 | "Nothing is published" does not hold: the demo carries the name, and names are due at the first publication, not the first commit | Accepted: the repository is kept as if it were published.                                                                                                                                             |
 | Another name for the protocol, one free on every registry                                                                         | Refused: the name weighed sounds like a binary WebSocket library in the same languages; the names Bead publishes under are qualified by their owner, and free; and a rename is a decision of its own. |
 | another npm scope                                                                                                                 | Refused: an account can become an organization.                                                                                                                                                       |
