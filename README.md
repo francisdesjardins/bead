@@ -65,6 +65,7 @@ spec/                         spec.md, debugging.md, the conformance files both 
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/
+builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
@@ -168,6 +169,28 @@ With `CI=true`, a restore that would change a `packages.lock.json` fails. The co
 generates `Probe` from `spec/codecs.proto` at each build, with Grpc.Tools, beside Google.Protobuf;
 nothing it generates is committed.
 
+## The builder
+
+In `builder/`, `beadc`: it compiles a `.proto` with buf, resolves it into a blueprint, refuses a
+`.proto` or a blueprint by rule name, and writes a blueprint in its form; each language's server and
+client, generated from a blueprint, are coming
+([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
+Node 24.9 or later, and a toolchain of its own, as the TypeScript side's: Yarn 4 vendored under
+`.yarn/releases/`, and buf from its lockfile. Node runs `src/cli.ts` as written.
+
+```sh
+cd builder
+yarn install --immutable
+yarn check        # types, lint, format, buf's lint and format, the options' generated code
+yarn test         # beadc's tests, the interop's .proto and its blueprint among them
+node src/cli.ts check ../spec/interop-blueprint.json
+node src/cli.ts blueprint --check ../spec/interop-blueprint.json
+```
+
+The last two hold the interop's blueprint to beadc's rules and to its form, as CI does. Its
+[README](builder/README.md) gives the commands, the rules and their reasons, and what each option of
+`bead/options.proto` means.
+
 ## Interop, both ways
 
 Each side starts the other's interop server and calls it with its own client, over WebSocket and
@@ -250,11 +273,12 @@ there only until it closes.
 - `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
   or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
-  package's, the C# side's and its lock files' project ranges, and each conformance file's with its
-  document's — and each released section of the CHANGELOG stays as its tag shipped it. On a release
-  branch, a pull request into `main` and `main`, the product and each changed document also move
-  one step past their last release, the CHANGELOG is dated and linked, and each document's tag
-  stands where it belongs. `--ref` and `--base` judge the tree as another ref, as CI does.
+  package's and the builder's, the C# side's and its lock files' project ranges, and each
+  conformance file's with its document's — and each released section of the CHANGELOG stays as its
+  tag shipped it. On a release branch, a pull request into `main` and `main`, the product and each
+  changed document also move one step past their last release, the CHANGELOG is dated and linked,
+  and each document's tag stands where it belongs. `--ref` and `--base` judge the tree as another
+  ref, as CI does.
 - `node tools/check-format.mjs`: the root's own files — the README to the CI, the spec's texts and
   schemas, the tools, the workflows — in the layout the TypeScript side's formatter gives them; with `--staged`,
   the staged ones alone. It needs the TypeScript side installed.
@@ -270,10 +294,11 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 
 A release moves every version in one commit, on a `release/*` branch or a `hotfix/*` one, and CI
 judges that commit, every job, before any tag exists. `tools/release.mjs prepare` moves the
-product's version in `package.json`, in `Directory.Build.props` and in the C# lock files' project
-ranges, and each changed document's a step past its last release; it runs the generators, dates the
-CHANGELOG's version and links it, then runs the gate as a release, `spec/check.py` and the root's
-format check, naming any whose tool is absent with the CI job that holds it.
+product's version in the TypeScript side's and the builder's `package.json`, in
+`Directory.Build.props` and in the C# lock files' project ranges, and each changed document's a step
+past its last release; it runs the generators, dates the CHANGELOG's version and links it, then runs
+the gate as a release, `spec/check.py` and the root's format check, naming any whose tool is absent
+with the CI job that holds it.
 `tools/release.mjs tag`, after the finish, tags each document whose version no tag names yet at the
 release's `v*`, runs the gate as `main`'s run will, and prints the one push:
 
@@ -301,13 +326,16 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 
 ## CI
 
-[`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on a pinned
-runner image, `ubuntu-26.04`: `spec` (regenerate, then diff, then `spec/check.py`), `typescript` on
-Node 26 and on the floor, 24.9 (install, check, test, the demo's static build, and the root's
-files under the same formatter), `dotnet` (format, test, and the interop both ways with
-`BEAD_INTEROP_REQUIRED=1`), and `commits` (the subjects, the links, the versions, then the root's
-tools' own tests). `ci-ok` needs them all, so one check stands for every job; branch protection,
-which would make it the one check a branch requires, waits on GitHub Pro or a public repository.
+[`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on pinned
+runner images, `ubuntu-26.04`, and `windows-2025` for the builder's: `spec` (regenerate, then diff,
+then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9 (install, check, test, the
+demo's static build, and the root's files under the same formatter), `dotnet` (format, test, and
+the interop both ways with `BEAD_INTEROP_REQUIRED=1`), `builder` (install, test, then beadc over
+the interop's blueprint, its rules and its form, on Node 26 on Linux and Windows and on 24.9 on
+Linux; its types, lint and format, buf's among them, on Linux), and `commits` (the subjects, the
+links, the versions, then the root's tools' own tests). `ci-ok` needs them all, so one check stands
+for every job; branch protection, which would make it the one check a branch requires, waits on
+GitHub Pro or a public repository.
 
 ## Contributing
 
