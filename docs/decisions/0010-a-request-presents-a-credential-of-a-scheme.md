@@ -415,10 +415,11 @@ one out on an answer changes this record.
 allows: the relay forwards a `JWT` to its audience alone, and the destination verifies it. Tokens
 bound to their sender (RFC 9449, RFC 8705) are a decision of their own.
 
-**A relay's default admission lets any `JWT` past its first step.** It reads the header's scheme,
-never the token, so a requester that writes any bytes in the block passes step 1 of section 14.3 and
-learns from `DESTINATION_UNKNOWN` which destinations exist: that step's promise, that a requester
-not admitted learns only whether the relay has any destination, holds for a call presenting none or
+**A relay's default admission lets any `JWT`, and any `ELSEWHERE` its transport carried, past its
+first step.** It reads the header's scheme, never the credential, so a requester that writes any
+bytes in the block, or has its transport carry any value, passes step 1 of section 14.3 and learns
+from `DESTINATION_UNKNOWN` which destinations exist: that step's promise, that a requester not
+admitted learns only whether the relay has any destination, holds for a call presenting none or
 `OPAQUE` alone, unless the relay `verifies`.
 
 **A page presents `ELSEWHERE` to its own origin only.** `Authorization` is not a header CORS lets
@@ -456,8 +457,9 @@ verifier refuses one ([0006](0006-a-rule-has-its-gate.md)).
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 six rounds, a later one answering an earlier one's answers; the round on a forwarded credential's
 turn and on a credential that leaves a transfer no room is kept in
-[0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges. The decision's objections,
-each with the answer that holds:
+[0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, and the round on the
+`ELSEWHERE` its default admission passes in [0004](0004-one-behaviour-in-every-language.md), On the
+text of 0.2.0. The decision's objections, each with the answer that holds:
 
 ### The block and the sessions
 

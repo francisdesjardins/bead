@@ -4,10 +4,11 @@ What every implementation of Bead does, stated once. The key words MUST, MUST NO
 are to be read as in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
 [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when in capitals.
 
-Each section names the groups of [`vectors.json`](vectors.json) that check it. An implementation
-conforms to the wire when it reads every vector as given, refuses each refusal with its code, and
-writes every `headers` and `envelopes` vector back to its bytes. The why of each rule is in the
-decisions:
+Each file of entries is named, on a line of its own, by a section whose clauses it plays, a group
+of [`vectors.json`](vectors.json) by its name, and each entry cites the units it checks:
+[`uncited.txt`](uncited.txt) lists the units no entry cites. The clock cases of
+[`clocks.json`](clocks.json) cite none, and no section names them: they hold every side's test clock
+to one meaning of `advance`. The why of each rule is in the decisions:
 
 - [0001](../docs/decisions/0001-the-envelope-sits-at-fixed-offsets.md): the envelope, its calls, its
   transfers, its cancel, and what a transport owes;
@@ -35,13 +36,16 @@ decisions:
 
 **Version: 0.1.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
-written.**
+written; one point is open, section 8.3.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
 side conforms to the wire by sections 1 to 15, to what it declares by section 16, and to what its
 codecs write and read by section 17, for each encoding it offers: a relay, which reads no payload,
-offers none.
+offers none. A side does what each entry of the files that play those sections says, the clock
+cases holding `advance` to one meaning, but an entry whose `differs` names a row of the support
+matrix, [`docs/support.md`](../docs/support.md), and the side's language. A unit no entry cites
+binds it all the same.
 
 ## 1. Conventions
 
@@ -62,7 +66,7 @@ limit, a session's or a transport's bound, a delay — is held as a whole number
 up. A side MUST refuse one that, as given, is under a millisecond or past 2³¹ − 1, a delay's 0
 aside, and a value that is no number: NaN, or a string or a boolean, as a limit read from JSON may
 be. A timeout or a bound is never 0, and may be without end but where its place says it may not;
-one not given is its default. A delay is a wait before an act — a pause, a reconnection's wait, the
+one not given is its default. A delay — a wait before an act: a pause, a reconnection's wait, the
 `wait` a client's listens ask (section 15.10) — is never without end, and takes 0 as at once.
 
 ## 2. The prefix
@@ -265,8 +269,19 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
 takes no more: a notification past its subscription's queue (section 11.10), a transfer past those
 its connection receives at once or past the budget left (section 12.3), a call past those that wait
-for an issuer's deadline (section 13.8). It says nothing against the call's credential, and
-withdraws none (section 13.4).
+for an issuer's deadline (section 13.8). A requester gives it, too, to a call of its own it has no
+call id free for (section 9.1). It says nothing against the call's credential, and withdraws none
+(section 13.4).
+
+8.3. Open in this version: nothing bounds the calls a peer holds open to its receiver over a
+transport that keeps its connection, a WebSocket or a Web Worker. The receiver holds each request it
+took until it is answered, cancelled, or its connection closes (section 9.10), each with its payload
+whole, a request whose credential still resolves among them (section 13.8), and refuses none of them
+for their number. Over HTTP, `maximumWaitingExchanges` bounds them, a refusal of the transport's own
+(section 15.12), not this code. A bound of the protocol's, refused with `CAPACITY_EXCEEDED` as a
+receiver takes the request (section 9.2), as HTTP/2 bounds the streams a peer opens
+([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2)), comes by a decision of
+its own.
 
 ## 9. Calls and answers
 
@@ -279,8 +294,9 @@ the call id. What it _drops in silence_ it does neither.
 9.1. A call is a request and its answer, under one call id on one connection. Either side opens
 calls: a client its requests, a server its commands to a client. A requester draws its call ids in
 its own parity (section 3.5), from the first again once past the last, and skips those it waits on,
-those it reserved (section 10) and those it holds otherwise, a subscription's. What this section
-says of a side receiving a request holds for a client receiving a command alike.
+those it reserved (section 10) and those it holds otherwise, a subscription's. A requester with no
+call id free in its parity fails its call before it goes, with `CAPACITY_EXCEEDED`. What this
+section says of a side receiving a request holds for a client receiving a command alike.
 
 9.2. A side receiving a request of this layout MUST take these steps in this order, and stop at the
 first that applies:
@@ -288,7 +304,8 @@ first that applies:
 1. A call id of the receiver's own parity: the request would answer another call. It MUST NOT be
    answered, and is reported as `ENVELOPE_MALFORMED`.
 2. A call id open already — a call still to be answered, or one held as a subscription: the same.
-3. A destination the receiver has no handler for: answered with `DESTINATION_UNKNOWN`.
+3. A destination, named to a receiver that relays nothing (section 14.1): answered with
+   `DESTINATION_UNKNOWN`.
 4. No resolver for its service: `SERVICE_UNKNOWN`; for its procedure in a service known:
    `PROCEDURE_UNKNOWN`.
 5. Its credential, then its admission, in this order, which read its header, never its payload:
@@ -336,6 +353,12 @@ its verifier; a transfer's opening gets no credit (section 12.3); and the call r
 it resolved to, whatever befell its connection's meanwhile. A resolution that settles once its call
 ended opens no session, moves no session's end, and is dropped.
 
+A receiver that relays takes, on a request that names a destination, section 14.3's steps in their
+order in place of steps 3 to 7, its credential resolving as the paragraph above says, and goes on as
+section 14.2 says in place of step 8. Steps 1 and 2 hold for it as for any request, and it asks
+nothing of steps 3 to 7 first: a requester it does not admit learns of its destinations only what
+section 14.3 says.
+
 9.3. An answer — a result or a failure — names its call by its call id alone: never its procedure,
 never a destination. A call is answered once.
 
@@ -363,9 +386,10 @@ application failure, with a code from 1 to 65,535 of the procedure's own numberi
 6. report anything else, and answer nothing.
 
 9.7. A result or a failure received is paired with the call waiting on its call id. With no call
-waiting, a failure MAY end a subscription (section 11); on a call id reserved, it is late, and
-dropped in silence; otherwise it is reported as `CALL_UNKNOWN`. A result that comes once a result
-in a transfer answered the call is reported as `ENVELOPE_MALFORMED`.
+waiting, a failure a client receives on the call id of a subscription it holds ends it
+(section 11.7, item 2); on a call id reserved, it is late, and dropped in silence; otherwise it is
+reported as `CALL_UNKNOWN`. A result that comes once a result in a transfer answered the call is
+reported as `ENVELOPE_MALFORMED`.
 
 9.8. A side that takes no notification reports one as `KIND_UNSUPPORTED`. A side that sends no
 notification reports a credit that counts notifications the same way; a side that sends them drops
@@ -442,8 +466,11 @@ its subscription to the call id as it draws it, before the request goes out.
 11.5. A call id a subscription holds is in use: a server MUST refuse a request on it (section 9.2,
 step 2), and a client MUST NOT draw it.
 
-11.6. A subscription's result goes in one envelope: one that would need a transfer is
-`PAYLOAD_TOO_LARGE`.
+11.6. The result of a request that opens a subscription, its procedure notifying or not, goes in
+one envelope, whether its side sends transfers or not: one that would need a transfer
+(section 12.1) is answered with `PROCEDURE_FAILED`, and reported as `PAYLOAD_TOO_LARGE`, as
+section 12.1 answers a result its side cannot send, a failure, which subscribes nothing
+(section 11.2).
 
 11.7. A subscription ends:
 
@@ -468,7 +495,7 @@ give it a key, which never travels: one of the same key replaces the one waiting
 the queue; one with none is added last. A credit lets the queue go, in its order, as far as it
 reaches.
 
-11.10. A server bounds each queue — 64 notifications and 1 MiB by default; an implementation MAY set
+11.10. A server bounds each queue — 64 notifications and 1 MiB by default; an application MAY set
 others. A notification that takes a queue past its bounds ends its subscription with
 `CAPACITY_EXCEEDED`: a failure on its call id once the subscription was answered; the answer of the
 request itself while it is still unanswered.
@@ -483,7 +510,7 @@ came.
 _Conversations: `spec/conversations.json`._
 
 12.1. A payload whose envelope would pass `chunkBytes` goes as a transfer: a request's, or a
-result's, whose header is counted with the 20 bytes of an announcement, whether it carries one or
+result's, a result's header counted with the 20 bytes of an announcement, whether it carries one or
 not. A notification, a failure, and the result of a request that opens a subscription (section 11.6)
 always go in one envelope. A side that sends no transfer fails a request whose payload would need
 one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a result with
@@ -493,17 +520,17 @@ one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a resul
 `chunkBytes` to a CHUNK (section 12.6); an opening, and a payload that came whole, it holds to
 `maximumEnvelopeBytes`.
 
-| Limit                       | By default  | Bounds                                                                       |
-| --------------------------- | ----------- | ---------------------------------------------------------------------------- |
-| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                               |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                  |
-| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send |
-| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it        |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a side receives holds together                      |
-| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none    |
-| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole         |
-| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit                       |
-| `maximumDetailBytes`        | 1,024       | a failure's detail                                                           |
+| Limit                       | By default  | Bounds                                                                                                                 |
+| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                         |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                            |
+| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send                                           |
+| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                  |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each opening's, and each credit it grants past them |
+| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                              |
+| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                   |
+| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit                                                                 |
+| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                     |
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
@@ -623,39 +650,43 @@ goes out after it changed, in its `CREDENTIAL` block: `OPAQUE`, its token, once 
 drawn anew; `NONE` once it ended. An answer announces no other scheme, and one that announces
 nothing carries no `CREDENTIAL` block. An answer that did not go out announced nothing.
 
-13.4. A client learns its connection's session from the answers, and presents it, `OPAQUE`, only
-on a call that asks for it, never by default: that call is bound to the session the client knows,
-so a call made in a session that ended, or that was opened anew under a new token, is refused
-rather than run in whatever session the connection holds. A client MAY be given a credential to
-present by default: a `JWT`, or an `ELSEWHERE` with what its transport carries beside each request
-(section 15.1). Every call presents it but one that gives its own, or none: a call may present
-none, whatever the default. A default is withdrawn once a call that presented it is refused
-`SESSION_REQUIRED`, whatever relays the refusal crossed: the client presents none by default from
-then on, and tells its application, by the credential's scheme alone, so the call that renews it
-goes out without it. A refusal withdraws the default only while it is still the credential its call
-presented, the same scheme and the same bytes: a default given other bytes since is kept, and one
-set again to the same bytes is withdrawn with it; and a failure that ends a subscription once answered (section 13.6) withdraws
-nothing, since a session the application ended leaves a credential that may still hold. A client
-receiving a command resolves its credential as a server does (section 9.2, step 5), the session it
-learned standing for its connection's.
+13.4. A client learns its connection's session from the answers, and presents it, `OPAQUE`, only on
+a call that asks for it, never by default: that call is bound to the session the client knows, so a
+call made in a session that ended, or that was opened anew under a new token, is refused rather than
+run in whatever session the connection holds. A call that asks for its session, `OPAQUE`, while the
+client knows none fails before it goes, with `SESSION_REQUIRED`, and withdraws nothing. A client MAY
+be given a credential to present by default: a `JWT`, or an `ELSEWHERE` with what its transport
+carries beside each request (section 15.1). Every call presents it but one that gives its own, or
+none: a call may present none, whatever the default. A default is withdrawn once a call that
+presented it is refused `SESSION_REQUIRED`, whatever relays the refusal crossed: the client presents
+none by default from then on, and tells its application, by the credential's scheme alone, so the
+call that renews it goes out without it. A refusal withdraws the default only while it is still the
+credential its call presented, the same scheme and the same bytes: a default given other bytes since
+is kept, and one set again to the same bytes is withdrawn with it; and a failure that ends a
+subscription once answered (section 13.6) withdraws nothing, since a session the application ended
+leaves a credential that may still hold. A client receiving a command resolves its credential as a
+server does (section 9.2, step 5), the session it learned standing for its connection's.
 
-A client fails a call before it goes, and a server a command alike, with
-`DESTINATION_UNREACHABLE`, as a relay refuses a call its leg B cannot carry (section 14.3): nothing
-was tried, and its credential stays. It does so for a call that presents `ELSEWHERE` over a
-transport that carries no credential beside an envelope — a WebSocket, a Web Worker, a server's
-over HTTP (sections 15.2, 15.9) — and for one that presents a `JWT` or an `ELSEWHERE` over a
-transport that leaves the machine in the clear, since a bearer credential crosses only TLS off the
-machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is
-judged by what it is given, never by what a name resolves to. It is secure under TLS, its scheme
-`wss` or `https`; on the loopback, its host — the one a client names in its URL, or the one a
-server listens on — `localhost` or a name that ends in `.localhost`, compared in ASCII lower case,
-an IPv4 address in 127.0.0.0/8, or `::1`, as the W3C's
+A client fails a call before it goes, and a server a command alike, with `DESTINATION_UNREACHABLE`,
+as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
+credential stays. It does so for a call that presents `ELSEWHERE` over a transport that carries no
+credential beside an envelope — a WebSocket (section 15.2), a Web Worker, whose messages carry an
+envelope alone, a server's over HTTP (section 15.9) — and for one that presents a `JWT` or an
+`ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential crosses
+only TLS off the machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A
+transport is judged by what it is given, never by what a name resolves to. It is secure under TLS,
+its scheme `wss` or `https`; on the loopback, its host — the one a client names in its URL, or the
+one a server listens on — `localhost` or a name that ends in `.localhost`, compared in ASCII lower
+case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback, `::1`, `[::1]` in a URL, as the W3C's
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
 potentially trustworthy; or when it never leaves the machine, a Web Worker or a router called in
-process. Any other leaves the machine in the clear. A server cannot tell what stands in front of it:
-its application MAY say so, and is then believed whatever the server listens on — TLS terminated
-before it, which makes it secure, or a proxy that serves the network in the clear, which leaves it
-in the clear.
+process. A side takes a `localhost` name on the loopback without resolving it, as Secure Contexts
+does where the platform resolves such names there alone
+([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a platform whose resolver
+sends one elsewhere, its application gives another host. Any other leaves the machine in the clear.
+A server cannot tell what stands in front of it: its application MAY say so, and is then believed
+whatever the server listens on — TLS terminated before it, which makes it secure, or a proxy that
+serves the network in the clear, which leaves it in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 5): a call never runs outside the session it presented. A procedure
@@ -681,13 +712,14 @@ session. A credential's session has none: no message, listen or silence moves it
 at its end, once the application ends it, or with its connection. A connection without a
 connection's session — none yet, or its session ended, whatever credentials its calls present — is
 closed once silent past the server's own connection timeout, when it has one, counted from its
-session's end for one that had one. Each of these timeouts may be without end, and is when not
-given. A message of its connection starts every one anew, whatever session its call runs in; a
-session timeout counts messages alone. Over HTTP, a listen held is not silence: while one is held,
-no connection timeout runs, and silence counts anew from its end (section 15.9). Over WebSocket, a
-peer that only hears is silent: it speaks now and then, or is given a connection timeout without
-end. A connection that closes takes its sessions; a session opened for a connection already closed
-ends at once.
+session's end for one that had one. Each of these timeouts may be without end, and is when neither
+the application nor its transport gives one: an HTTP server gives its own connection timeout, 30 s
+(section 15.12). A message of its connection starts every one anew, whatever session its call runs
+in; a session timeout counts messages alone. Over HTTP, a listen held is not silence: while one is
+held, no connection timeout runs, and silence counts anew from its end (section 15.9). Over
+WebSocket, a peer that only hears is silent: it speaks now and then, or is given a connection
+timeout without end. A connection that closes takes its sessions; a session opened for a connection
+already closed ends at once.
 
 13.8. A side verifies a `JWT` one way, as an access token of RFC 9068's profile in JWS Compact
 Serialization (RFC 7515), as RFC 8725 recommends. The application gives its keys, each a JWK
@@ -738,8 +770,8 @@ bytes each, an `HS256` one that is not `oct`, its `k` 32 bytes at least (RFC 751
 application's fault, never the token's: the verifier fails, and refuses nothing.
 
 A side may be given a key set besides its keys, with the issuers it answers for, one at least, and
-the most calls that wait for one issuer's deadline at once, `maximumWaitingCalls`, _N_: a whole
-number from 1 to 2³¹ − 1, 64 when not given. A key set given with no issuer, or with an _N_ outside
+the most calls that wait for one issuer's deadline at once, `maximumWaitingCalls`, _M_: a whole
+number from 1 to 2³¹ − 1, 64 when not given. A key set given with no issuer, or with an _M_ outside
 those bounds, is the application's fault, refused as the side is built. Asked for one of its
 issuers, with a signal, it answers that issuer's keys (RFC 7517 §5), each a JWK with its one
 algorithm, and may wait. The side asks it for no other issuer, compared octet for octet: a token
@@ -780,15 +812,15 @@ the keys that serve, so a `kid` that answer did not name is refused then, at ste
 other waits on, for the deadline and the ask then, since an ask that went before its token came may
 not know its key.
 
-At most _N_ calls wait for one issuer's deadline at once, each issuer's apart. A call that waits on
+At most _M_ calls wait for one issuer's deadline at once, each issuer's apart. A call that waits on
 an ask is not counted: the key set's own latency bounds its wait, and the ask's deadline. A call is
 counted as it starts to wait for the deadline, and as an answer moves it there from an ask that went
 before its token came, the calls that answer moves taken in the order they came to that ask: one
-that would wait past _N_ is refused `CAPACITY_EXCEEDED` then, in the turn it would have waited, and
+that would wait past _M_ is refused `CAPACITY_EXCEEDED` then, in the turn it would have waited, and
 not reported (section 9.2, step 5). A call holds its place while it waits for the deadline: at the
 deadline, the calls that waited for it wait on the ask that goes then, and hold none there, and a
 call that leaves frees its own. A peer that sends tokens whose `kid` no key names holds no more than
-_N_ calls, and what they carry, for an issuer's deadline, and any more no longer than an ask takes
+_M_ calls, and what they carry, for an issuer's deadline, and any more no longer than an ask takes
 to settle, a minute at most. A call's own signal — its cancel, which its requester's timeout sends
 as well (section 9.9), or its connection closing (section 9.10) — ends its own wait, never the ask.
 The side fetches nothing itself: the key set is the application's to fetch.
@@ -881,7 +913,8 @@ A call that presents a credential never runs in leg B's session in place of its 
 transport carried beside a call that presents anything but `ELSEWHERE` stays at the relay.
 
 14.3. A relay takes these steps on a request that names a destination, in this order, on its
-opening, before any of its payload crosses — as section 9.2's credential, admission and limit:
+opening, before any of its payload crosses, in place of section 9.2's steps 3 to 7, its credential
+resolving as section 9.2 says:
 
 1. its credential, then its admission, `beforeRoute`, asked on its header, its destination
    included, before the destination is looked up, in this order:
@@ -911,9 +944,10 @@ opening, before any of its payload crosses — as section 9.2's credential, admi
       verifying, with `ACCESS_DENIED`, as section 9.2 answers an admission's refusal of a call that
       presented a credential: the credential may hold, and this relay does not take it unverified.
 
-   A requester not admitted learns only whether the relay has any destination, when it presents
-   none or `OPAQUE`, or presents anything to a relay that verifies: a `JWT` passes the default
-   admission of a relay that does not verify on its scheme alone, whatever its bytes;
+   A requester not admitted learns only whether the relay has any destination (section 9.2, step 3),
+   when it presents none or `OPAQUE`, or presents anything to a relay that verifies: a `JWT`, and an
+   `ELSEWHERE` its transport carried, pass the default admission of a relay that does not verify on
+   their scheme alone, and learn which destinations exist;
 
 2. a destination not registered: `DESTINATION_UNKNOWN`;
 3. a request that opens a subscription: `SUBSCRIPTION_UNSUPPORTED`, since a relay carries none;
@@ -1025,8 +1059,8 @@ layout, kind and call id, in the prefix every layout keeps (section 2), and noth
 3. a REQUEST on the server's own parity is refused, 400; one on a call id already waiting, 409.
 
 Exchanges keep no order between them, so a CANCEL may come before its REQUEST: the server buries
-that call id for 5 seconds — the least a requester reserves one (section 10.3) — and ends the request
-that comes under it 204, never handed on.
+that call id for 5 seconds — what a requester reserves one for when its call was given no time
+(section 10.3) — and ends the request that comes under it 204, never handed on.
 
 A client writes the credential a request carries in the `Authorization` field of its `POST`
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2)), as it is given, and
@@ -1082,16 +1116,17 @@ brings back all that is left in a batch of type `application/prs.bead-batch`: ea
 its length on 4 bytes, big-endian, the number of the first in `bead-sequence`, the others following
 one by one. With nothing left, the server holds the listen up to `wait` milliseconds — 30 seconds at
 most by default — and ends it 204; a second listen takes the first's place. A `wait` the server
-reads is its peer's, not an application's (section 1.4): fifteen digits at most, a `wait` left out
-being 0, which answers at once, and one past the server's bound held to it. A client reads a batch
-as it comes, and hears each envelope as it comes whole; what a listen lost carried past what was
-heard comes again to the next, so nothing is lost and nothing heard twice. A failure that ends a
-subscription, in a batch, may come before the result that answered its call, in a `POST`'s body: the
-client pairs the failure with the call still waiting, which fails with it (section 9.7), and reports
-the result that follows as `CALL_UNKNOWN`. An outbox past its bound — two envelopes' worth by
-default — closes its connection, its client having fallen behind. A batch carries no credential
-beside its envelopes, nor does an answer: a command of the server's that presents `ELSEWHERE` over
-HTTP fails before it goes, `DESTINATION_UNREACHABLE`.
+reads is its peer's, not an application's (section 1.4): its `after` and its `wait` are each a
+count, 0 when left out, and otherwise, once the query is decoded, one to fifteen ASCII digits and
+nothing else; a `wait` of 0 answers at once, and one past the server's bound is held to it. A client
+reads a batch as it comes, and hears each envelope as it comes whole; what a listen lost carried
+past what was heard comes again to the next, so nothing is lost and nothing heard twice. A failure
+that ends a subscription, in a batch, may come before the result that answered its call, in a
+`POST`'s body: the client pairs the failure with the call still waiting, which fails with it
+(section 9.7), and reports the result that follows as `CALL_UNKNOWN`. An outbox past its bound — two
+envelopes' worth by default — closes its connection, its client having fallen behind. A batch
+carries no credential beside its envelopes, nor does an answer: a command of the server's that
+presents `ELSEWHERE` over HTTP fails before it goes, `DESTINATION_UNREACHABLE`.
 
 15.10. A client SHOULD listen from its connect on, asking a `wait` under the server's bound, and
 listen again at once once a listen ends. A listen lost is listened again from where it was: at once,
@@ -1182,15 +1217,16 @@ long as it runs. A side that counts its calls MUST refuse a declaration that doe
 (`debugging.md` section 6.5).
 
 16.8. Within a service, an id or a name a release declared SHOULD stay its declaration's in every
-later release, or be reserved, and never be declared for another: so a peer built against an
-earlier release never calls an id that now means another procedure, and within a service a name
-never comes to count another procedure. Between a manifest's releases, `beadc breaking` holds it;
-nothing holds it across manifests, nor on a side written by hand.
+later release, or be reserved, and never be declared for another: so a peer built against an earlier
+release never calls an id that now means another procedure, and within a service a name never comes
+to count another procedure. Between two releases of the definitions a builder generates a side from,
+the builder's `beadc breaking` is to hold it, a gate decision 0006 owes; nothing holds it across
+definitions, nor on a side written by hand.
 
 16.9. A service's revision counts the releases of its contract, from 1, and does not travel. It
 SHOULD move once in a release whose contract differs from the release before, however much moved,
-and never back, as `beadc breaking` holds it. A side holds 0 for a procedure it knows no revision
-of, a relay's leg B (section 14.2), and declares none at 0.
+and never back, as `beadc breaking` is to hold it (section 16.8). A side holds 0 for a procedure it
+knows no revision of, a relay's leg B (section 14.2), and declares none at 0.
 
 16.10. A side MUST refuse a declaration as it is made, never on a call, for the first of these
 reasons that applies, before any reason of its own; a declaration refused declares nothing:
@@ -1203,7 +1239,7 @@ reasons that applies, before any reason of its own; a declaration refused declar
 
 A side's sentences are its own; a C side reports a code. A side built without the trace and the
 metrics (`debugging.md` section 1.2), which keeps no names, never refuses `off its form`, its names
-those of the manifest its tables were generated from.
+those of the definitions its tables were generated from.
 
 16.11. A procedure's definition may name its kind, how it is called: `request`, a request a client
 makes of its server; `notifies`, such a request to a procedure that notifies, which may open a
@@ -1270,11 +1306,11 @@ literal. A reader MUST refuse:
 
 17.6. A reader reads a number as the IEEE 754 double nearest it, a tie to the even, as ECMAScript's
 `JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 may not stay exact,
-and a number under the smallest double reads as 0. A value that needs more travels as a string, as
-RFC 7493 §2.2 recommends. A reader takes a noncharacter, which RFC 7493 §2.1 refuses and Unicode's
-Corrigendum #9 lets be interchanged. What it hands its application is the value of the payload's
-canonical form (section 17.7): `1.0` and `1` are one value, and `12345678901234567890` is
-`12345678901234567000`.
+and a number whose magnitude is 2⁻¹⁰⁷⁵ or less, half the smallest positive double, 2⁻¹⁰⁷⁴,
+reads as 0. A value that needs more travels as a string, as RFC 7493 §2.2 recommends. A reader
+takes a noncharacter, which RFC 7493 §2.1 refuses and Unicode's Corrigendum #9 lets be
+interchanged. What it hands its application is the value of the payload's canonical form
+(section 17.7): `1.0` and `1` are one value, and `12345678901234567890` is `12345678901234567000`.
 
 17.7. A writer writes a value's canonical form (RFC 8785 §3.2), and nothing else:
 

@@ -70,8 +70,9 @@ it goes a call whose credential it cannot: `carriesCredential`, and `isSecure`, 
 end was given, never by what a name resolves to — a client by the URL of its connect, under TLS
 (`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`); a
 server, per connection, by what it listens on — a loopback host, or, over HTTP, a server under TLS —
-and nothing tells it that TLS stands in front of it; a worker always, since it never leaves the
-machine.
+unless its application tells it what stands in front of it, `secure`: `true` for TLS terminated
+before it, which makes each connection secure, `false` for a proxy that serves the network in the
+clear, which leaves each in the clear; a worker always, since it never leaves the machine.
 
 Each end takes its time from a `clock`: the part of the globals Bead calls — `setTimeout`,
 `clearTimeout`, `setInterval`, `clearInterval`, `Date.now` and `performance.now` — in their own

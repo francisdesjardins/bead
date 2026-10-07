@@ -61,23 +61,29 @@ const NOTHING_TO_WITHDRAW = (): void => {};
 
 // helpers
 
-/** The page's hook, when one is defined and has a `register`. */
+/** The page's hook, when one is defined and has a `register`; none when reading it throws. */
 const hookOf = (): IDevtoolsHook | undefined => {
-  const hook: unknown = (globalThis as Record<symbol, unknown>)[DEVTOOLS_HOOK_KEY];
+  // ! a page's global, or its `register`, may be a getter that throws: the client is built all the
+  // same
+  try {
+    const hook: unknown = (globalThis as Record<symbol, unknown>)[DEVTOOLS_HOOK_KEY];
 
-  return typeof hook === 'object' &&
-    hook !== null &&
-    typeof (hook as Partial<IDevtoolsHook>).register === 'function'
-    ? (hook as IDevtoolsHook)
-    : undefined;
+    return typeof hook === 'object' &&
+      hook !== null &&
+      typeof (hook as Partial<IDevtoolsHook>).register === 'function'
+      ? (hook as IDevtoolsHook)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 // definition
 
 /**
  * Announces a client's layers to the page's DevTools hook, when one is defined, and gives what
- * withdraws them. A hook that is no hook, or whose `register` throws, is ignored: the client is built
- * all the same, and what this gives withdraws nothing.
+ * withdraws them. A hook that is no hook, one whose read throws, or one whose `register` throws, is
+ * ignored: the client is built all the same, and what this gives withdraws nothing.
  */
 export const announceToDevtools = ({
   metricsRegistry,

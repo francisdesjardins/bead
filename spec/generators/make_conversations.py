@@ -218,6 +218,9 @@ def chunk_out(call_id, offset, data, last):
 
 ECHOED = json_string(100).encode('utf-8')
 LONG = json_string(300).encode('utf-8')
+# the result bytes answers to a length of 35: 37 bytes, past what an envelope of 64 holds behind a
+# result's header and an announcement's 20 bytes
+RESULT_37 = ('"' + 'x' * 35 + '"').encode('utf-8')
 
 # ── 13.8 and 13.9: a JWT's session, its end, and the key set ────────────────────────────────────
 
@@ -732,6 +735,13 @@ conversations = [
      ['12.1'], {**SMALL, 'maximumTransfers': 0}, [
          json_request(1, 'bytes', '{"length":34}'), result(1, '"' + 'x' * 34 + '"'),
          json_request(3, 'bytes', '{"length":35}'), failure(3, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE)]),
+    # 11.6: the result of a request that opens a subscription goes whole, whatever its procedure
+    # notifies, from a side that sends transfers too; 8 + 20 + 37 bytes pass chunkBytes, 64
+    ('the result of a request that opens a subscription, too large for one envelope, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE, where the same result without SUBSCRIPTION goes as a transfer',
+     ['11.6', '12.1'], CHUNKED, [
+         json_request(1, 'bytes', '{"length":35}', flags=0x10), failure(1, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE),
+         json_request(3, 'bytes', '{"length":35}'), result_opening(3, RESULT_37[:28], 37),
+         credit_in(3, 37), chunk_out(3, 28, RESULT_37[28:], True)]),
     # 9.1: a server opens calls of its own, a command to its client, on its even call ids
     ('the server asks its client a command, and answers with what the client answered', ['9.1'], None, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), answer(2, '"noon"'), result(1, '"noon"')]),
@@ -1192,6 +1202,11 @@ def credentials_through_a_relay():
              opened('client'), opened('device'), *registered_as(DEVICE, audience),
              to(1, '"x"', unreadable, destination=99), refused_with(1, DESTINATION_UNKNOWN),
              to(3, '"x"', unreadable), refused_with(3, DESTINATION_UNREACHABLE)]),
+        ('an ELSEWHERE its transport carried passes the default admission of a relay that does not verify on its scheme alone, and learns which destinations exist',
+         ['14.3.1', '14.3.2'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', elsewhere, destination=99, carried='Interop fail=true'),
+             refused_with(1, DESTINATION_UNKNOWN)]),
         ('an ELSEWHERE its transport carried crosses a relay to a destination registered with an audience, its credential moved to leg B\'s transport as it came',
          ['14.2.3', '14.3.1', '14.3.5'], None, [
              opened('client'), opened('device'), *registered_as(DEVICE, audience),
@@ -1254,6 +1269,15 @@ def credentials_through_a_relay():
              *registered_as(DEVICE, audience), *registered_as(13, other, connection='other'),
              to(1, '"x"', jwt(token), destination=13), refused_with(1, DESTINATION_UNREACHABLE),
              to(3, '"y"', jwt(token)), *crosses(3, 2, '"y"', leg_b_presenting(2, '"y"', as_jwt(token)))])),
+        with_relay({'verifies': True}, ('a relay that verifies asks its verifier for an ELSEWHERE its transport carried before its destination is looked up: a verifier that fails is answered PROCEDURE_FAILED and reported, one that does not hold SESSION_REQUIRED, and one that holds crosses as it came',
+         ['14.2.3', '14.3.1'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', elsewhere, destination=99, carried='Interop fail=true'),
+             refused_with(1, PROCEDURE_FAILED), on(report('exception'), 'client'),
+             to(3, '"x"', elsewhere, destination=99, carried='Interop nobody'),
+             refused_with(3, SESSION_REQUIRED, does_not_hold),
+             to(5, '"y"', elsewhere, carried='Interop sub=carol'),
+             *crosses(5, 2, '"y"', leg_b_presenting(2, '"y"', as_elsewhere, carried='Interop sub=carol'))])),
         # 14.3, step 1: the admission reads the call's session, which a relay that verifies resolves
         with_relay({'verifies': True, 'beforeRoute': 'requireSession'}, ('a relay that verifies hands its admission the credential\'s session: requireSession admits a JWT that holds, and refuses a call in none',
          ['14.3.1'], None, [

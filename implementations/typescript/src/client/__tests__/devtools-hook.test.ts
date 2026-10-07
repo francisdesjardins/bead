@@ -254,7 +254,7 @@ test.describe('announceToDevtools', () => {
     expect(sources).toHaveLength(3);
   });
 
-  test('ignores a hook that is none, one whose register throws, and one whose withdraw throws, the client built all the same', async () => {
+  test('ignores a hook that is none, one whose read throws, one whose register throws, and one whose withdraw throws, the client built all the same', async () => {
     const layers = () => {
       const client = createClient({ transport: createEchoTransport() }, { devtools: false });
 
@@ -292,5 +292,36 @@ test.describe('announceToDevtools', () => {
     const kept = createClient({ transport: createEchoTransport() });
 
     await expect(kept[Symbol.asyncDispose]()).resolves.toBeUndefined();
+
+    // a hook whose register is a getter that throws, then a global that is one
+    Object.defineProperty(globalThis, DEVTOOLS_HOOK_KEY, {
+      configurable: true,
+      value: Object.defineProperty({}, 'register', {
+        get: () => {
+          throw new Error('a register that fails as it is read');
+        },
+      }),
+    });
+
+    const unread = createClient({ transport: createEchoTransport() });
+
+    await expect(unread.services.getRequest(ECHO, { serializer })('still here')()).resolves.toBe(
+      'still here'
+    );
+    await expect(unread[Symbol.asyncDispose]()).resolves.toBeUndefined();
+
+    Object.defineProperty(globalThis, DEVTOOLS_HOOK_KEY, {
+      configurable: true,
+      get: () => {
+        throw new Error('a hook that fails as it is read');
+      },
+    });
+
+    const unreadable = createClient({ transport: createEchoTransport() });
+
+    await expect(
+      unreadable.services.getRequest(ECHO, { serializer })('still here')()
+    ).resolves.toBe('still here');
+    await expect(unreadable[Symbol.asyncDispose]()).resolves.toBeUndefined();
   });
 });

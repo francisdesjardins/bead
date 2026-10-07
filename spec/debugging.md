@@ -5,8 +5,9 @@ MUST NOT, SHOULD and MAY are to be read as in [RFC 2119](https://www.rfc-editor.
 [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when in capitals.
 
 This document is the companion of [`spec.md`](spec.md), which states the wire: what it states never
-goes on the wire. Each section names the conformance file that checks it. The why of each rule is in
-the decisions:
+goes on the wire. Sections 6 to 12 each name the conformance file that checks them; sections 1 to 5
+name none: the support matrix, [`docs/support.md`](../docs/support.md), names the twin tests that
+hold what of them a test can. The why of each rule is in the decisions:
 
 - [0013](../docs/decisions/0013-every-language-debugs-alike-at-no-cost-when-off.md): the whole of it;
 - [0016](../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md): the
@@ -22,14 +23,16 @@ unchanged. **Status: every section is written.**
 
 ## 1. Conformance
 
-1.1. A side that carries the protocol whole MUST trace its calls and its envelopes, filter both, and
-count its calls and its notifications, as this document states.
+1.1. A side that carries the protocol whole, built with neither of section 3.5's switches, MUST
+trace its calls and its envelopes, filter both, and count its calls and its notifications, as this
+document states.
 
 1.2. A constrained profile MAY leave out, at build time, the trace and the filter, or the metrics,
-or both. It conforms to `spec.md` either way, its wire by sections 1 to 15, what it declares by
-section 16 and its codecs by section 17, and to this document for what it builds: what it leaves out
-is a row of the support matrix, not a difference of the protocol. A side built without the metrics
-plays `spec/debug-filters.json` alone, one built without the trace `spec/metrics.json` alone.
+or both, as section 3.5's switches do. It conforms to `spec.md` either way, its wire by sections 1
+to 15, what it declares by section 16 and its codecs by section 17, and to this document for what it
+builds: what it leaves out is a row of the support matrix, not a difference of the protocol. A side
+built without the metrics plays `spec/debug-filters.json` alone, one built without the trace
+`spec/metrics.json` alone.
 
 1.3. This document names the wire's kinds and codes as `spec.md` states them, its kinds by section
 3.1 and its codes by section 8. A code that section 8 gains adds a value to `code` (section 8.4),
@@ -43,8 +46,9 @@ peer never knows whether it listens.
 2.2. A listener's error never changes a call. An error a listener throws, the trace's or a filter's
 around it, MUST be reported, as section 9.0 of `spec.md` reports an error: through its router's
 error event, with the call's connection on a server, through which its service manager reports its
-own. The call goes on as if nobody listened: its outcome, its answer and what goes on the wire are
-the same.
+own. A listener is synchronous: what it returns is not awaited, and an error it raises once it
+returned is its platform's, outside this guard. The call goes on as if nobody listened: its outcome,
+its answer and what goes on the wire are the same.
 
 2.3. A side calls each listener within a guard, and counts on a path no listener runs on.
 

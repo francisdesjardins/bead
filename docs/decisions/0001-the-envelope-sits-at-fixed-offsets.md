@@ -124,12 +124,12 @@ open (unanswered, a subscription, a transfer it refuses), never on one it holds 
 is never answered, and one that names no call is dropped in silence, having crossed its answer. The
 other end forgets the call, takes away what it subscribed, then stops what still works on it, so
 nothing more goes out on that call id. The requester reserves the call id as long as the call was
-given, 5 seconds when it was given no time, or, once a result came to it as a transfer, as long as
-the other end keeps that call abandoned, should that be longer; it drops in silence what comes late
-on it. This is HTTP/2's `RST_STREAM` narrowed to the requester, as a gRPC client cancels: the side
-that answers ends a call with a failure, which carries a code, so a cancel needs none; and since
-call ids come back, a cancel on an id that names no call is no error, where `RST_STREAM` on an idle
-stream is one.
+given, 5 seconds when it was given no time or waited without end, or, once a result came to it as a
+transfer, as long as the other end keeps that call abandoned, should that be longer; it drops in
+silence what comes late on it. This is HTTP/2's `RST_STREAM` narrowed to the requester, as a gRPC
+client cancels: the side that answers ends a call with a failure, which carries a code, so a cancel
+needs none; and since call ids come back, a cancel on an id that names no call is no error, where
+`RST_STREAM` on an idle stream is one.
 
 ## Consequences
 

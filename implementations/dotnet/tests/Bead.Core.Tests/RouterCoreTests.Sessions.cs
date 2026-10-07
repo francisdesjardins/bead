@@ -339,6 +339,36 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task Hands_its_resolver_what_its_transport_carried_for_an_ELSEWHERE_alone_what_came_beside_any_other_staying_here()
+    {
+        var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere] };
+        var resolver = server.Resolve();
+
+        server.Resolution = (_, _) =>
+        {
+            return ValueTask.FromResult<CallSession?>(new CallSession());
+        };
+        server.Loop.Post(() =>
+        {
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(1, null)), false) { Credential = "Bearer a" }, Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(3, Credential.Jwt("a.b.c"))), false) { Credential = "Bearer b" }, Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Elsewhere())), false) { Credential = "Bearer c" }, Handle);
+        });
+        await server.Settle();
+
+        Assert.Equal(
+            [(1u, null), (3u, null), (5u, "Bearer c")],
+            resolver.Requests.Select((props) =>
+            {
+                return (props.Header.CallId, props.TransportCredential);
+            }).OrderBy((handed) =>
+            {
+                return handed.CallId;
+            }));
+        Assert.Empty(server.Reports);
+    }
+
+    [Fact]
     public async Task A_credential_resolving_its_call_s_cancel_or_its_connection_s_close_tells_sessionOf_by_the_call_s_signal_and_what_it_settles_to_then_is_dropped()
     {
         var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
