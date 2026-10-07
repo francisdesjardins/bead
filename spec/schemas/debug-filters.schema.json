@@ -145,8 +145,8 @@
       "additionalProperties": false,
       "properties": {
         "gives": {
-          "description": "A filter, as written, which the function gives from now on.",
-          "type": "string"
+          "description": "A filter, as written, which the function gives from now on; null, none, which keeps every event.",
+          "type": ["string", "null"]
         },
         "throws": { "description": "From now on the function throws.", "const": true },
         "made": {

@@ -5,7 +5,7 @@
     "calls are the fixtures a call's filter is asked of: a trace's event, by its direction, its type and its procedure's name. envelopes are those an envelope's filter is asked of: a router's event, by its direction and its kind, named as section 3.1 of spec.md names it, in lower case. An entry names a fixture by its index.",
     "filter is a filter as written. parsed is what it reads as (6.6): its directions, its types and its kinds, by the grammar's names, and include, its patterns, and exclude, its exclusions without their -, as written, each in the order of its words. keeps lists the calls a call's listener given the filter hears, and the envelopes an envelope's listener hears, in their order.",
     "refused, in place of parsed and keeps, is why a side refuses the filter (6.7): reason, the first word that does not hold, and written, the word or the value it names, as it was written. The words of a refusal are each side's own, and stay with its tests.",
-    "sources are filters given as functions (6.9). listener says whose listener the function filters, a call's or an envelope's. A step gives a filter, which the function gives from then on; throws, from then on the function throws; made, the listener is made with the function, which is asked then, and true or false says whether it is made; event, an event of that fixture goes through the listener, which asks the function again, and heard says whether the listener heard it.",
+    "sources are filters given as functions (6.9). listener says whose listener the function filters, a call's or an envelope's. A step gives a filter, which the function gives from then on, or null, none, which keeps every event; throws, from then on the function throws; made, the listener is made with the function, which is asked then, and true or false says whether it is made; event, an event of that fixture goes through the listener, which asks the function again, and heard says whether the listener heard it.",
     "clauses are the units of spec/debugging.md an entry checks: a clause, 6.7; a row of its table, counted from 1, 6.7.3.",
     "Every character outside printable ASCII is written as its JSON escape."
   ],
@@ -44,7 +44,7 @@
     {
       "direction": "tx",
       "type": "request",
-      "procedureName": "ab"
+      "procedureName": "a\u2028b"
     },
     {
       "direction": "rx",
@@ -85,6 +85,11 @@
       "direction": "rx",
       "type": "request",
       "procedureName": "caf\u00e9"
+    },
+    {
+      "direction": "tx",
+      "type": "request",
+      "procedureName": "a\nb"
     }
   ],
   "envelopes": [
@@ -147,7 +152,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -191,7 +197,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -379,13 +386,13 @@
         "6.2",
         "6.6"
       ],
-      "filter": "getStatusping",
+      "filter": "getStatus\u2028ping",
       "parsed": {
         "directions": [],
         "types": [],
         "kinds": [],
         "include": [
-          "getStatusping"
+          "getStatus\u2028ping"
         ],
         "exclude": []
       },
@@ -461,7 +468,8 @@
           0,
           3,
           5,
-          6
+          6,
+          15
         ],
         "envelopes": [
           0,
@@ -503,7 +511,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -549,7 +558,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -592,7 +602,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -637,7 +648,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -747,7 +759,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           1,
@@ -793,7 +806,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -932,7 +946,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -946,7 +961,7 @@
       }
     },
     {
-      "name": "* crosses a carriage return and a line separator",
+      "name": "* crosses a carriage return, a line feed and a line separator",
       "clauses": [
         "6.4"
       ],
@@ -966,7 +981,8 @@
           6,
           10,
           12,
-          13
+          13,
+          15
         ],
         "envelopes": [
           0,
@@ -1070,7 +1086,8 @@
           11,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -1115,7 +1132,8 @@
           10,
           12,
           13,
-          14
+          14,
+          15
         ],
         "envelopes": [
           0,
@@ -1728,6 +1746,48 @@
         {
           "event": 2,
           "heard": false
+        }
+      ]
+    },
+    {
+      "name": "a function that gives none keeps every event, as an empty filter does, from its first on",
+      "clauses": [
+        "6.5",
+        "6.9"
+      ],
+      "listener": "call",
+      "steps": [
+        {
+          "gives": null
+        },
+        {
+          "made": true
+        },
+        {
+          "event": 0,
+          "heard": true
+        },
+        {
+          "event": 4,
+          "heard": true
+        },
+        {
+          "gives": "d(rx)"
+        },
+        {
+          "event": 0,
+          "heard": false
+        },
+        {
+          "gives": null
+        },
+        {
+          "event": 0,
+          "heard": true
+        },
+        {
+          "event": 11,
+          "heard": true
         }
       ]
     }
