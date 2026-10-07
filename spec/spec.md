@@ -34,7 +34,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0021](../docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md): a broker,
   section 15.
 
-**Version: 0.1.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.2.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
 written; one point is open, section 8.3.**
 
