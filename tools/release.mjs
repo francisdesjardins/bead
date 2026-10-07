@@ -1,0 +1,575 @@
+#!/usr/bin/env node
+// A release's versions, moved in its release commit, and its documents' tags, set after its finish
+// (decision 0008). It stages, commits and pushes nothing, and tags nothing but the documents.
+//
+//   node tools/release.mjs prepare [<version>] [--spec <move>] [--debugging <move>]
+//                                  [--date YYYY-MM-DD] [--python <path>] [--dry-run]
+//   node tools/release.mjs tag [<version>]
+//
+// `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
+// moves the TypeScript package's version, the C# side's <Version> and its lock files' project
+// ranges, each document's line and interop-service.json's specVersion; runs the generators; dates
+// [Unreleased] as the version, under a new empty one, and links it; then runs the gate as a
+// release, spec/check.py and the root's format check, naming one whose tool is absent. A <move> is
+// x.y.z, patch, minor, major or same, from the document's last release. Run again, it re-dates,
+// regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*: tags
+// spec-v… and debugging-v… at the commit v<version> tags, for each document whose version no tag
+// names yet; runs the gate as main's run will, then over the branch checked out; and prints the one
+// push. Exit 1 on a refusal; exit 2 on a usage error.
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parseArgs } from 'node:util';
+
+import {
+  CHANGELOG,
+  DOCUMENTS,
+  LOCKS,
+  MODES,
+  PACKAGE,
+  PROPS,
+  STATED,
+  checkVersions,
+  gatherReleases,
+  git,
+  isDay,
+  newest,
+  parseVersion,
+  readChangelog,
+  readText,
+  successorsOf,
+} from './check-versions.mjs';
+
+// the root's formatter, from the TypeScript side's install, and the files `prepare` writes by hand
+const OXFMT = 'implementations/typescript/node_modules/oxfmt/bin/oxfmt';
+const FORMATTED = [CHANGELOG, 'spec/spec.md', 'spec/debugging.md', 'spec/interop-service.json'];
+
+// ── Texts ─────────────────────────────────────────────────────────────────────
+
+// ! each write replaces one version in its text and nothing else, so a file keeps its format and
+// its diff stays one line; a pattern that does not match exactly once is refused, never guessed at
+const replaceOnce = (text, { pattern, replacement }) => {
+  const found = text.match(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`)) ?? [];
+  if (found.length !== 1) {
+    throw new Error(`${found.length} matches of ${pattern}, where one is due`);
+  }
+  return text.replace(pattern, replacement);
+};
+
+// the package's own version: the top-level key, found by its indentation
+export const withPackageVersion = (text, version) => {
+  return replaceOnce(text, {
+    pattern: /^ {2}"version": "[^"]*"/m,
+    replacement: `  "version": "${version}"`,
+  });
+};
+
+export const withPropsVersion = (text, version) => {
+  return replaceOnce(text, {
+    pattern: /<Version>[^<]*<\/Version>/,
+    replacement: `<Version>${version}</Version>`,
+  });
+};
+
+// the line a document states its version on, which its generators read
+export const withStatedVersion = (text, version) => {
+  return replaceOnce(text, {
+    pattern: /^\*\*Version: \d+\.\d+\.\d+\*\*/m,
+    replacement: `**Version: ${version}**`,
+  });
+};
+
+// a conformance file written by hand, interop-service.json: its version's key, and nothing else
+export const withRepeatedVersion = (text, { key, version }) => {
+  return replaceOnce(text, {
+    pattern: new RegExp(`"${key}": "\\d+\\.\\d+\\.\\d+"`),
+    replacement: `"${key}": "${version}"`,
+  });
+};
+
+// every project range of a lock file, as NuGet writes it from <Version>, at the version: the text,
+// and how many ranges it holds
+export const withLockRanges = (text, version) => {
+  let count = 0;
+  const moved = text.replace(/("Bead\.[\w.]+": "\[)\d+\.\d+\.\d+(, \)")/g, (_, open, close) => {
+    count += 1;
+    return `${open}${version}${close}`;
+  });
+  return { text: moved, count };
+};
+
+// Keep a Changelog 1.1.0: [Unreleased] becomes the version and its date, under a new empty
+// [Unreleased]; its link compares from the version's tag, and the version's compares the last
+// release's tag with its own. Run again, the version right below [Unreleased] is its own: it is
+// re-dated, and its links stay. The text, and whether the version's heading is new
+export const withChangelogRelease = (text, { version, last, date, branch }) => {
+  const { sections } = readChangelog(text);
+  const at = sections.findIndex((section) => section.label === 'Unreleased');
+  if (at === -1) {
+    throw new Error('no ## [Unreleased]');
+  }
+  const own = sections[at + 1]?.label === version;
+  if (!own && sections.some((section) => section.label === version)) {
+    throw new Error(`[${version}] stands elsewhere than right below [Unreleased]`);
+  }
+  const link = /^\[Unreleased\]: (\S+)\/compare\/v\d+\.\d+\.\d+\.\.\.develop$/m.exec(text);
+  if (link === null) {
+    throw new Error(
+      'no [Unreleased]: <repository>/compare/v<last>...develop to read the repository from'
+    );
+  }
+  const heading = new RegExp(`^## \\[${version.replaceAll('.', '\\.')}\\].*$`, 'm');
+  if (own) {
+    const { entries } = sections[at];
+    if (entries > 0) {
+      throw new Error(
+        `[Unreleased] holds ${entries} ${entries === 1 ? 'entry' : 'entries'}: on ${branch}, a line goes under [${version}]`
+      );
+    }
+    return { text: text.replace(heading, `## [${version}] - ${date}`), first: false };
+  }
+  const repository = link[1];
+  const compared =
+    last === null
+      ? `${repository}/releases/tag/v${version}`
+      : `${repository}/compare/v${last}...v${version}`;
+  return {
+    text: text
+      .replace(/^## \[Unreleased\]\n/m, `## [Unreleased]\n\n## [${version}] - ${date}\n`)
+      .replace(
+        link[0],
+        `[Unreleased]: ${repository}/compare/v${version}...develop\n[${version}]: ${compared}`
+      ),
+    first: true,
+  };
+};
+
+// ── Moves ─────────────────────────────────────────────────────────────────────
+
+// the version a move gives from the last release's: a level, `same`, or a version given whole
+export const resolveMove = (move, { last, label }) => {
+  if (parseVersion(move) !== null) {
+    return move;
+  }
+  const levels = ['patch', 'minor', 'major', 'same'];
+  if (!levels.includes(move)) {
+    throw new Error(`${label}: ${move} is no move; give x.y.z, ${levels.join(', ')}`);
+  }
+  if (last === null) {
+    throw new Error(`${label} was never released, so ${move} has nothing to move from: give x.y.z`);
+  }
+  const [patch, minor, major] = successorsOf(last);
+  return { patch, minor, major, same: last }[move];
+};
+
+// a document's version in the release, from its facts as the gate reads them, held to the same
+// rules: a successor of its last release when its files changed, at least the minor when a
+// conformance file, a key or a property was added; its last release's when they did not
+export const versionOf = (document, { stated, move, facts }) => {
+  const { last, changed, added } = facts;
+  const flag = `--${document.id}`;
+  if (last === null) {
+    if (move === undefined) {
+      if (parseVersion(stated) === null) {
+        throw new Error(`${document.path} states no version: give its first, ${flag} x.y.z`);
+      }
+      return stated;
+    }
+    return resolveMove(move, { last: null, label: document.path });
+  }
+  if (changed.length === 0) {
+    if (move === undefined || move === 'same' || move === last.version) {
+      return last.version;
+    }
+    throw new Error(
+      `${document.path}: none of its files changed since ${last.name}, so it keeps ${last.version}, and ${flag} ${move} is refused`
+    );
+  }
+  const [patch, minor, major] = successorsOf(last.version);
+  // * run again, a move already made is kept
+  if (move === undefined && ![patch, minor, major].includes(stated)) {
+    const files = changed.slice(0, 3).join(', ') + (changed.length > 3 ? ', …' : '');
+    throw new Error(
+      `${document.path} changed since ${last.name} (${files}): give ${flag} minor when an implementation must change to keep passing, ${flag} patch when a conforming one passes unchanged (decision 0008)`
+    );
+  }
+  const version =
+    move === undefined ? stated : resolveMove(move, { last: last.version, label: document.path });
+  if (![patch, minor, major].includes(version)) {
+    throw new Error(
+      `${document.path}: ${version}, where its changes since ${last.name} owe one of ${patch}, ${minor}, ${major}`
+    );
+  }
+  if (version === patch && added.length > 0) {
+    const { path, what } = added[0];
+    throw new Error(
+      `${document.path}: ${version}, a patch, where ${what === 'file' ? `the file ${path}` : `${path}'s ${what}`} was added since ${last.name}: ${flag} minor at least (decision 0008)`
+    );
+  }
+  return version;
+};
+
+// ── Prepare ───────────────────────────────────────────────────────────────────
+
+// the local calendar day: the day the tag the finish writes carries, in its offset; not UTC's
+export const localDay = (date) => {
+  const pad = (value) => {
+    return String(value).padStart(2, '0');
+  };
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+// runs a command from the root, its output shown, or none when quiet; throws when it fails
+const runFrom = (root) => {
+  return (command, args, { quiet = false } = {}) => {
+    const result = spawnSync(command, args, { cwd: root, stdio: quiet ? 'ignore' : 'inherit' });
+    if (result.error !== undefined || result.status !== 0) {
+      throw new Error(
+        `${[command, ...args].join(' ')}: ${result.error?.message ?? `exit ${result.status}`}`
+      );
+    }
+  };
+};
+
+// prepares the release on the branch checked out
+//   version  the product's, the branch's by default
+//   moves    each document's move, by its id
+//   date     the CHANGELOG's, the local day by default
+//   python   the generators' interpreter, and spec/check.py's when it imports jsonschema
+//   dryRun   prints the plan and writes nothing
+//   run      runs a command; a stand-in in the tests
+//   log      prints a line
+export const prepare = (root, options = {}) => {
+  const {
+    moves = {},
+    date = localDay(new Date()),
+    python = process.platform === 'win32' ? 'python' : 'python3',
+    dryRun = false,
+    run = runFrom(root),
+    log = console.log,
+  } = options;
+  const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  const named = /^(release|hotfix)\/(.+)$/.exec(branch);
+  if (named === null) {
+    throw new Error(`${branch}: a release is prepared on a release/* or hotfix/* branch`);
+  }
+  const [, kind, branchVersion] = named;
+  const product = options.version ?? branchVersion;
+  if (parseVersion(product) === null) {
+    throw new Error(`${product}: x.y.z is due`);
+  }
+  if (product !== branchVersion) {
+    throw new Error(`${product}: the branch ${branch} names ${branchVersion}`);
+  }
+  if (!isDay(date)) {
+    throw new Error(`--date ${date}: a day, YYYY-MM-DD, is due`);
+  }
+
+  // * every fact from the last release and the tree, so a second run converges on the first
+  const releases = gatherReleases(root, { mode: MODES.release });
+  const last = newest(releases.tags.filter((tag) => tag.reached));
+  if (last !== null && !successorsOf(last.version).includes(product)) {
+    throw new Error(
+      `${product}: the product's last release, ${last.name}, owes one of ${successorsOf(last.version).join(', ')}`
+    );
+  }
+  const plan = { product, documents: {}, written: [] };
+  for (const document of DOCUMENTS) {
+    const text = readText(join(root, document.path));
+    if (text === null) {
+      continue;
+    }
+    plan.documents[document.id] = versionOf(document, {
+      stated: STATED.exec(text)?.[1] ?? null,
+      move: moves[document.id],
+      facts: releases.documents[document.id],
+    });
+  }
+  const summary = `release ${product}: ${Object.entries(plan.documents)
+    .map(([id, version]) => `${id} ${version}`)
+    .join(', ')}`;
+  if (dryRun) {
+    log(summary);
+    return plan;
+  }
+  try {
+    run(python, ['--version'], { quiet: true });
+  } catch {
+    throw new Error(`${python}: no Python to run the generators; give --python <path>`);
+  }
+
+  // the versions, each one replacement in its text, every text changed before any is written
+  const staged = new Map();
+  const stage = (path, change) => {
+    const text = readText(join(root, path));
+    if (text === null) {
+      throw new Error(`${path}: no such file`);
+    }
+    try {
+      staged.set(path, change(text));
+    } catch (error) {
+      throw new Error(`${path}: ${error.message}`);
+    }
+    if (staged.get(path) === text) {
+      staged.delete(path);
+    }
+  };
+  stage(PACKAGE, (text) => withPackageVersion(text, product));
+  stage(PROPS, (text) => withPropsVersion(text, product));
+  for (const document of DOCUMENTS.filter((document) => document.id in plan.documents)) {
+    stage(document.path, (text) => withStatedVersion(text, plan.documents[document.id]));
+  }
+  if ('spec' in plan.documents) {
+    stage('spec/interop-service.json', (text) => {
+      return withRepeatedVersion(text, { key: 'specVersion', version: plan.documents.spec });
+    });
+  }
+  // ! a text replacement, not `dotnet restore --force-evaluate`: the root's tools run no third
+  // toolchain (decision 0005), and the lock files keep LF
+  const locks = git(root, ['ls-files', '--', 'implementations/dotnet'])
+    .split('\n')
+    .filter((path) => LOCKS.test(path));
+  let ranges = 0;
+  let holding = 0;
+  for (const path of locks) {
+    stage(path, (text) => {
+      const moved = withLockRanges(text, product);
+      ranges += moved.count;
+      holding += moved.count > 0 ? 1 : 0;
+      return moved.text;
+    });
+  }
+  if (ranges === 0) {
+    throw new Error(
+      `no project range, "Bead.<Name>": "[x.y.z, )", in the ${locks.length} lock files of implementations/dotnet`
+    );
+  }
+  let first = false;
+  stage(CHANGELOG, (text) => {
+    const released = withChangelogRelease(text, {
+      version: product,
+      last: last?.version ?? null,
+      date,
+      branch,
+    });
+    first = released.first;
+    return released.text;
+  });
+  for (const [path, text] of staged) {
+    writeFileSync(join(root, path), text);
+    plan.written.push(path);
+  }
+
+  // ! the order is free: no generator reads another's output; one that comes to makes the order
+  // matter, and then this glob gives way to CI's list
+  const generators = readdirSync(join(root, 'spec/generators'))
+    .filter((name) => /^make_\w+\.py$/.test(name))
+    .sort();
+  for (const name of generators) {
+    run(python, [`spec/generators/${name}`]);
+  }
+
+  // the checks: the gate is required; one whose tool is absent is named, with the CI job holding it
+  const { problems } = checkVersions(root, { ref: branch });
+  if (problems.length > 0) {
+    throw new Error(
+      `the gate, as a release:\n${problems.map((problem) => `  ${problem}`).join('\n')}`
+    );
+  }
+  let jsonschema = true;
+  try {
+    run(python, ['-c', 'import jsonschema'], { quiet: true });
+  } catch {
+    jsonschema = false;
+  }
+  if (jsonschema) {
+    run(python, ['spec/check.py']);
+  } else {
+    log(`skipped: spec/check.py (no jsonschema for ${python}); CI's spec job holds it`);
+  }
+  if (existsSync(join(root, OXFMT))) {
+    run(process.execPath, [
+      OXFMT,
+      '-c',
+      'implementations/typescript/.oxfmtrc.json',
+      '--check',
+      ...FORMATTED,
+    ]);
+  } else {
+    log(`skipped: the root's format check (no ${OXFMT}); CI's typescript job holds it`);
+  }
+
+  // what follows, which it does none of
+  log(`${summary} (${ranges} project ranges in ${holding} lock files)`);
+  const owed = DOCUMENTS.filter((document) => {
+    const facts = releases.documents[document.id];
+    return document.id in plan.documents && plan.documents[document.id] !== facts.last?.version;
+  }).map((document) => {
+    const version = plan.documents[document.id];
+    return `${document.name}'s ${version} (${document.prefix}${version})`;
+  });
+  if (owed.length > 0) {
+    log(`owed by hand: the [${product}] line on ${owed.join(' and ')}`);
+  }
+  if (first) {
+    log(`next: git add -A && git commit -m "chore(release): ${product}"`);
+    log(`      git flow ${kind} publish ${product}, and wait for ci-ok`);
+    log('      node tools/release.mjs prepare, again right before the finish');
+  } else {
+    log(`next: git commit -am "chore(release): ${product}, dated", if git status shows a change`);
+    log(`      wait for ci-ok on ${branch}`);
+    log(`      git flow ${kind} finish ${product}, without -p; then node tools/release.mjs tag`);
+  }
+  return plan;
+};
+
+// ── Tag ───────────────────────────────────────────────────────────────────────
+
+// sets each document's tag at the commit v<version> tags, the newest v* by default
+//   version  the product's
+//   log      prints a line
+export const tag = (root, options = {}) => {
+  const { log = console.log } = options;
+  const released = git(root, ['for-each-ref', '--format=%(refname)', 'refs/tags/v*'])
+    .split('\n')
+    .map((ref) => /^refs\/tags\/v(\d+\.\d+\.\d+)$/.exec(ref)?.[1])
+    .filter((version) => version !== undefined)
+    .map((version) => ({ version }));
+  // ! the finish ends on develop, at its back-merge: the tagged commit is no HEAD to read
+  const version = options.version ?? newest(released)?.version;
+  if (version === undefined) {
+    throw new Error('no v* tag: finish the release first');
+  }
+  const name = `v${version}`;
+  if (!released.some((release) => release.version === version)) {
+    throw new Error(`${name}: no such tag`);
+  }
+  const commit = git(root, ['rev-parse', `refs/tags/${name}^{commit}`]).trim();
+  try {
+    git(root, ['merge-base', '--is-ancestor', commit, 'main']);
+  } catch {
+    throw new Error(`${name} is not on main: finish the release first`);
+  }
+  const show = (path) => {
+    try {
+      return git(root, ['show', `${commit}:${path}`]);
+    } catch {
+      return null;
+    }
+  };
+  const product = JSON.parse(show(PACKAGE) ?? '{}').version;
+  if (product !== version) {
+    throw new Error(`${name}: its tree states the product ${product}, where ${version} is due`);
+  }
+
+  const exists = (tagName) => {
+    return git(root, ['tag', '--list', tagName]).trim() !== '';
+  };
+  const made = [];
+  for (const document of DOCUMENTS) {
+    const stated = STATED.exec(show(document.path) ?? '')?.[1];
+    if (stated === undefined || exists(`${document.prefix}${stated}`)) {
+      continue;
+    }
+    // ! at the commit, peeled: a tag of the tag would nest it
+    git(root, [
+      'tag',
+      '-a',
+      `${document.prefix}${stated}`,
+      '-m',
+      `${document.path} ${stated}`,
+      commit,
+    ]);
+    made.push(`${document.prefix}${stated}`);
+  }
+  log(
+    made.length > 0 ? `tagged ${made.join(', ')} at ${name}` : `no document's tag to set at ${name}`
+  );
+
+  // the gate as main's run will judge it, then over the branch checked out, where a released
+  // section of the CHANGELOG shows a line the back-merge filed under it
+  const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  const problems = [
+    ...checkVersions(root, { ref: 'main', commit: 'main' }).problems.map((problem) => {
+      return `main: ${problem}`;
+    }),
+    ...checkVersions(root).problems.map((problem) => `${branch}: ${problem}`),
+  ];
+  // each document's tag at the commit, in the documents' order
+  const documentTags = DOCUMENTS.flatMap((document) => {
+    return git(root, [
+      'for-each-ref',
+      '--format=%(refname:strip=2) %(*objectname) %(objectname)',
+      `refs/tags/${document.prefix}*`,
+    ])
+      .split('\n')
+      .filter((line) => line.split(' ').slice(1).includes(commit))
+      .map((line) => line.split(' ')[0]);
+  });
+  const push = `git push --atomic origin main develop ${[name, ...documentTags].join(' ')}`;
+  if (problems.length > 0) {
+    throw new Error(
+      [
+        ...problems,
+        `fix them, then run node tools/release.mjs tag again, which sets no tag twice, and push: ${push}`,
+      ].join('\n')
+    );
+  }
+  log(`push: ${push}`);
+  return { version, made, push };
+};
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+if (import.meta.main) {
+  const usage = () => {
+    console.error(
+      'usage: node tools/release.mjs prepare [<version>] [--spec <move>] [--debugging <move>] [--date YYYY-MM-DD] [--python <path>] [--dry-run]'
+    );
+    console.error('       node tools/release.mjs tag [<version>]');
+    process.exit(2);
+  };
+  let parsed;
+  try {
+    parsed = parseArgs({
+      allowPositionals: true,
+      options: {
+        spec: { type: 'string' },
+        debugging: { type: 'string' },
+        date: { type: 'string' },
+        python: { type: 'string' },
+        'dry-run': { type: 'boolean' },
+      },
+    });
+  } catch (error) {
+    console.error(`release: ${error.message}`);
+    usage();
+  }
+  const { values, positionals } = parsed;
+  const [command, version, ...rest] = positionals;
+  if (
+    rest.length > 0 ||
+    !['prepare', 'tag'].includes(command) ||
+    (command === 'tag' && Object.keys(values).length > 0)
+  ) {
+    usage();
+  }
+  try {
+    const root = git(process.cwd(), ['rev-parse', '--show-toplevel']).trim();
+    if (command === 'prepare') {
+      prepare(root, {
+        version,
+        moves: { spec: values.spec, debugging: values.debugging },
+        date: values.date,
+        python: values.python,
+        dryRun: values['dry-run'],
+      });
+    } else {
+      tag(root, { version });
+    }
+  } catch (error) {
+    console.error(`release: ${error.message}`);
+    process.exit(1);
+  }
+}

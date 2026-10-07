@@ -315,6 +315,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each step of the trace of calls names its call, `callId` and `connectionHandle`, on both sides
   (decision 0013): a call made once its router drew its id; a call refused before, and a
   notification, name none. A router's `request` takes an `onCallId`.
+- `tools/release.mjs`, which moves every version in a release commit, the C# lock files' project
+  ranges included, dates the CHANGELOG, and tags the spec and its companion beside the product
+  after the finish; and `tools/check-versions.mjs`, in CI's `commits` job, which holds that every
+  version agrees with itself, that a released section of the CHANGELOG stays as shipped, and that a
+  release moves each version its changes owe, dates its section, and tags its documents where they
+  belong (decision 0008). With them come the root's tools' own tests, in Node's runner.
 
 ### Changed
 
