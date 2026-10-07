@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // The root's own files keep the layout the TypeScript side's formatter gives them, under its
 // configuration: the README to the CI, the spec's texts and schemas, the tools, the workflows. The conformance
-// files are left to their generators, and each implementation holds its own files in its gate.
+// files are left to their generators, the interop's blueprint to spec/check.py, which holds its form
+// (decision 0022), and each implementation holds its own files in its gate.
 //
 //   node tools/check-format.mjs            every root file this check holds
 //   node tools/check-format.mjs --staged   the staged ones alone, as the pre-commit hook asks

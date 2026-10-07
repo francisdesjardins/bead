@@ -3,7 +3,7 @@
 - **Status**: accepted
 - **Scope**: `spec/spec.md` section 16 and the conformance sentence; `spec/debugging.md` 1.2, 6.10,
   7.3 and 8.3; `spec/identities.json` and its gate; `spec/metrics.json`; every implementation's
-  routers, service manager and registry; the support matrix; and the manifests the builder checks
+  routers, service manager and registry; the support matrix; and the blueprints the builder checks
 
 ## Context
 
@@ -93,7 +93,7 @@ routing; 4.10 never writes one, and neither side's writer does (`header.ts`, wit
 - A block at the low end, 0 to 255, as CoAP keeps 0 to 255 for the IETF's own options and as IANA
   keeps ports 0 to 1023 as System Ports ([RFC 6335
   §6](https://www.rfc-editor.org/rfc/rfc6335#section-6)). It moves service 1: the interop's
-  (`spec/interop-service.json`), with the bytes of 29 conversations and every `service="1"` label of
+  (`spec/interop-blueprint.json`), with the bytes of 29 conversations and every `service="1"` label of
   `spec/metrics.json`, and the demo's (`implementations/typescript/demo/procedures.ts`); and every
   test that declares a service below 256, which `serviceId: 2` and `ServiceId = 2` alone reach in 26
   TypeScript test files and 12 C# ones.
@@ -139,7 +139,7 @@ first letter lowered, and only that.
   router checks the ids' ranges, the revision's and the name's form, a pure function over the
   procedure: no lock, no table, nothing held. The registry keeps its refusals, compares names as
   section 16 compares them, and gains one: a service at another revision. One name an address and
-  one revision a service then hold on a side that counts, and in a manifest through `beadc check`;
+  one revision a service then hold on a side that counts, and in a blueprint through `beadc check`;
   on a side that counts nothing, two names at one address show only in its trace, the one reader
   left, which is debugging's.
 
@@ -151,7 +151,7 @@ first letter lowered, and only that.
 - **For life, within a service, a retired id reserved, as protobuf reserves a field's number.**
   Chosen. Names alike, so a label and a filter never come to count or keep another procedure of that
   service. Only a sequence of releases shows it, so one tool holds it: `beadc breaking`, against the
-  last release, its findings waived by rule name. Nothing holds it across manifests, nor for a side
+  last release, its findings waived by rule name. Nothing holds it across blueprints, nor for a side
   written by hand: section 16 writes it as a SHOULD, naming its holder
   ([0006](0006-a-rule-has-its-gate.md)).
 
@@ -168,7 +168,7 @@ first letter lowered, and only that.
 **What section 16 holds.** The identity rules bind every side; the checks and the breaking rules
 bind the builder.
 
-- Everything a manifest holds besides: services' and failures' names, a package's scope,
+- Everything a blueprint holds besides: services' and failures' names, a package's scope,
   reservations, hooks, the release rules and the derivation from a `.proto`. The spec defines none
   of these and no conformance file cites them; a builder-only change would move the spec's minor,
   which moves "when an implementation must change to keep passing"
@@ -176,7 +176,7 @@ bind the builder.
 - **What binds a side.** Chosen: the ids' ranges and service 0; a procedure's name, its form, its
   reading and its fold; one name an address and one revision a service, held where a side counts;
   ids for life and the revision's meaning, as SHOULDs naming `beadc breaking`; the refusal and its
-  order. The rest binds the builder's manifest, held by the builder's tests.
+  order. The rest binds the builder's blueprint, held by the builder's tests.
 
 **A service's name's scope** is the builder's, and its consumers choose it: the generated classes,
 whose namespace is a file's `csharp_namespace`, which two packages may share, where two
@@ -188,7 +188,7 @@ whose namespace is a file's `csharp_namespace`, which two packages may share, wh
 - Full names in the transcoding's routes, as gRPC and Connect route
   `/acme.catalog.v1.Catalog/Method`, and class names unique within each generated namespace, held by
   `NAME_TARGET`.
-- **Unique within a manifest, folded.** Chosen: one manifest is one id space, so two versions served
+- **Unique within a blueprint, folded.** Chosen: one blueprint is one id space, so two versions served
   side by side take two names, `CatalogV1` and `CatalogV2`.
 
 **Where the rules are pinned.**
@@ -215,7 +215,7 @@ passes on: `_OTHER`, `say "hi"`, `café`.
 
 **A service and its procedures are known by ids, which travel, and by names, which never cross
 Bead's wire.** Spec section 16 states what binds a side, hand-written or generated; it changes no
-envelope, and a reader reads every id section 4 lets it read. What binds a manifest besides is the
+envelope, and a reader reads every id section 4 lets it read. What binds a blueprint besides is the
 builder's own, decided with it.
 
 **Ids, and their ranges** (16.2, 16.3): a service's id and a procedure's from 1 to 65,535, each on 2
@@ -234,13 +234,13 @@ as debugging 6.4 reads a pattern.
 written the same each time, each name of a service at one address, and each service at one revision:
 an address keeps its spelling, where the fold joins two addresses. A side that counts refuses a
 declaration that does not, in its registry (debugging 7.3, which gains
-`another revision of its service`); `beadc check` holds a manifest to it.
+`another revision of its service`); `beadc check` holds a blueprint to it.
 
 **For life, and a revision's meaning.** Within a service, an id or a name a release declared stays
 its declaration's in every later one, or is reserved; a revision counts the releases of a service's
 contract, from 1, moved once in a release that changes it, never back. Section 16 writes both as
 SHOULDs and names their holder, `beadc breaking` against the last release; nothing holds them across
-manifests, nor on a side written by hand.
+blueprints, nor on a side written by hand.
 
 **A side refuses as it declares.** Each router refuses a declaration — a resolver registered, a
 requester made, a notification registered — as it is made, never on a call, for the first of these
@@ -266,7 +266,7 @@ requester or a resolver the manager makes goes to the router with no reason of t
 it, and is checked there, once.
 
 **A side that keeps no names.** A constrained profile built without the trace and the metrics
-(debugging 1.2) refuses `out of its range` alone; its names are a manifest's, which `beadc check`
+(debugging 1.2) refuses `out of its range` alone; its names are a blueprint's, which `beadc check`
 holds to their form ([0006](0006-a-rule-has-its-gate.md)'s gates owed).
 
 **What a peer sees.** Ids in each request, a code in each application failure, and whether a server
@@ -275,7 +275,7 @@ name, a revision or a reservation.
 
 | Identity             | On the wire | A side holds it                                                   | `beadc` holds it                                         |
 | -------------------- | ----------- | ----------------------------------------------------------------- | -------------------------------------------------------- |
-| A service's id       | yes         | its range, at every declaration                                   | its range; unique in a manifest; reservations; for life  |
+| A service's id       | yes         | its range, at every declaration                                   | its range; unique in a blueprint; reservations; for life |
 | A procedure's id     | yes         | its range, at every declaration                                   | its range; unique in its service; reservations; for life |
 | A procedure's name   | no          | its form, at every declaration; folded uniqueness where it counts | the same, reservations, for life                         |
 | A service's revision | no          | its range; one a service where it counts                          | its range; `breaking` its moves                          |
@@ -288,11 +288,11 @@ an input no C# type holds crossing a row of the matrix; and `folds`, pairs of na
 beside them,
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s
 procedure kinds. It lists the ways a side declares by a stable id, and each side's harness keys its
-table by them. A builder plays `names` and `ids` as one-procedure manifests.
+table by them. A builder plays `names` and `ids` as one-procedure blueprints.
 
 **`spec/metrics.json` pins what a registry refuses**, folded, its revision among it.
 
-**`beadc check` and `beadc breaking` hold a manifest to section 16** and to the builder's own rules
+**`beadc check` and `beadc breaking` hold a blueprint to section 16** and to the builder's own rules
 ([0006](0006-a-rule-has-its-gate.md)'s gates owed).
 
 ## Consequences
@@ -306,7 +306,7 @@ one at each login (`demo/page.ts`): there, each call scans its name's 1 to 63 ch
 allocation and no lock. A registry's fold compares character by character, never building a folded
 string, and takes a name held at its address exactly as it is, unfolded (`MetricsRegistry.cs`).
 
-**Uniqueness and the revision hold only where a side counts, and in a manifest.** A side given no
+**Uniqueness and the revision hold only where a side counts, and in a blueprint.** A side given no
 registry takes `1/1 echo` and `1/2 echo` both; its trace then shows the two, which is all that reads
 them.
 
@@ -330,21 +330,21 @@ the release that carries section 16 with section 17
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)),
 and the user chose where it asked: service 0 the protocol's, the router's checks without memory and
 the registry's with it, section 16 holding what binds a side, a service's name unique within a
-manifest, folded, 63 characters, a side that keeps no names refusing out of its range alone, and one
+blueprint, folded, 63 characters, a side that keeps no names refusing out of its range alone, and one
 conformance sentence for sections 16 and 17. Its objections, each with the answer that holds:
 
-| Objection                                                                                                                                                                              | Answer                                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The protocol's range sits where the cited registries keep private use and experiments: CoAP's top is experimental and never operational, TLS's and DNS's first byte 255 is Private Use | Accepted: CoAP's top range is read as the reverse of a protocol's own; the top block is weighed on its own terms, TLS's and DNS's reading named; service 0 is chosen among the four placements                                                                                                                                                                               |
-| "Service 0 alone" was dismissed on a false premise, and 16.3 reversed the plan and the builder's design without saying so                                                              | Accepted: no writer writes 0, so no application holds it; service 0 is the protocol's, its cost stated (4.10 and both writers on the day, one id and one revision shared by procedure id), HTTP/2's stream 0 named                                                                                                                                                           |
-| Ids for life and a revision's moves are MUSTs with no gate, and a refusal is promised that no command makes                                                                            | Accepted: the refusal no command makes goes with the builder's rules; ids for life and the revision's moves are SHOULDs in section 16 naming `beadc breaking` against the last release, its findings waived by rule name; "never for another" across manifests is said to be held by nothing                                                                                 |
-| Section 16 binds builder concepts the spec does not define, and the Decision and the section disagree on hooks and the `.proto` derivation                                             | Accepted: section 16 keeps the ranges and service 0, the procedure's name, its reading and its fold, one name an address and one revision a service, the refusal and its order; services' and failures' names, packages, reservations, hooks, release rules and the derivation bind the builder's manifest, held by the builder's tests; the user keeps them out of the spec |
-| The merge point with 0016 does not merge, and conformance to section 16 is undefined                                                                                                   | Accepted: one sentence for both records, "a side conforms to the wire by sections 1 to 15, to what it declares by section 16, and to what its codecs write and read by section 17", in the spec's header and in debugging 1.2                                                                                                                                                |
-| Two of the fold's three reasons are false, and the filter reason refutes 16.8                                                                                                          | Accepted: the reasons that hold are the `procedure` label read beside its `service`, a filter's letters matching in either case, and a consumer that marks its assembly CLS-compliant; ids and names are for life within a service, and section 16 says a filter word reaches a name in every service                                                                        |
-| "Unique within its package" serves neither consumer of a service's name                                                                                                                | Accepted: the scope is chosen by its consumers, unique within a manifest, folded; full names in the transcoding's routes with `NAME_TARGET` per namespace was weighed beside it, and the user keeps the manifest                                                                                                                                                             |
-| The 63-character bound rests on two misread standards and a false claim about C                                                                                                        | Accepted: the bound stays a plain choice, for short labels, keys and routes, citing no standard; "by construction" goes; a side that keeps no names refuses out of its range alone, its names the manifest's that `beadc check` holds                                                                                                                                        |
-| A cheaper option was never weighed: stateless checks at the router, stateful ones in the registry                                                                                      | Accepted: the router checks ranges and form, a pure function; the registry keeps names, folded, and holds the revision; the per-router table was weighed beside it, its cost in the Context, and the user takes the split                                                                                                                                                    |
-| "A call pays nothing" is false where a requester is made for each call                                                                                                                 | Accepted: no table and no lock at the router; the registry takes an exact name at its address without folding and folds character by character, never building a string; the claim reads "a call that makes no requester pays nothing"                                                                                                                                       |
-| The service manager refuses first, with another type, so 16.10's order does not hold at that layer                                                                                     | Accepted in part: the service manager's one reason of its own, a notification asked for again otherwise, follows the router's check, which `getNotification` runs first, so 16.10's order holds there too; its "asked for otherwise" keeps its type, about the manager's state, and the record names it before the registry's reasons                                        |
-| The file plays three of the five declaration paths, and no input that is not a number                                                                                                  | Accepted: the file lists five ways, a resolver on each router, a requester on each, a notification on a client's, each harness keyed by them; `"1"`, `true` and `null` join the ids and revisions, crossing the C# row, as `durations.json` pins `"1000"` and `true`                                                                                                         |
-| The record carries a false .NET probe                                                                                                                                                  | Accepted: `GetString()` over `"a\uD800"` throws `InvalidOperationException`, as the Context's probe shows; that is a second reason, beside I-JSON (RFC 7493 §2.1), to keep a lone surrogate in the twins and out of the file                                                                                                                                                 |
+| Objection                                                                                                                                                                              | Answer                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The protocol's range sits where the cited registries keep private use and experiments: CoAP's top is experimental and never operational, TLS's and DNS's first byte 255 is Private Use | Accepted: CoAP's top range is read as the reverse of a protocol's own; the top block is weighed on its own terms, TLS's and DNS's reading named; service 0 is chosen among the four placements                                                                                                                                                                                |
+| "Service 0 alone" was dismissed on a false premise, and 16.3 reversed the plan and the builder's design without saying so                                                              | Accepted: no writer writes 0, so no application holds it; service 0 is the protocol's, its cost stated (4.10 and both writers on the day, one id and one revision shared by procedure id), HTTP/2's stream 0 named                                                                                                                                                            |
+| Ids for life and a revision's moves are MUSTs with no gate, and a refusal is promised that no command makes                                                                            | Accepted: the refusal no command makes goes with the builder's rules; ids for life and the revision's moves are SHOULDs in section 16 naming `beadc breaking` against the last release, its findings waived by rule name; "never for another" across blueprints is said to be held by nothing                                                                                 |
+| Section 16 binds builder concepts the spec does not define, and the Decision and the section disagree on hooks and the `.proto` derivation                                             | Accepted: section 16 keeps the ranges and service 0, the procedure's name, its reading and its fold, one name an address and one revision a service, the refusal and its order; services' and failures' names, packages, reservations, hooks, release rules and the derivation bind the builder's blueprint, held by the builder's tests; the user keeps them out of the spec |
+| The merge point with 0016 does not merge, and conformance to section 16 is undefined                                                                                                   | Accepted: one sentence for both records, "a side conforms to the wire by sections 1 to 15, to what it declares by section 16, and to what its codecs write and read by section 17", in the spec's header and in debugging 1.2                                                                                                                                                 |
+| Two of the fold's three reasons are false, and the filter reason refutes 16.8                                                                                                          | Accepted: the reasons that hold are the `procedure` label read beside its `service`, a filter's letters matching in either case, and a consumer that marks its assembly CLS-compliant; ids and names are for life within a service, and section 16 says a filter word reaches a name in every service                                                                         |
+| "Unique within its package" serves neither consumer of a service's name                                                                                                                | Accepted: the scope is chosen by its consumers, unique within a blueprint, folded; full names in the transcoding's routes with `NAME_TARGET` per namespace was weighed beside it, and the user keeps the blueprint                                                                                                                                                            |
+| The 63-character bound rests on two misread standards and a false claim about C                                                                                                        | Accepted: the bound stays a plain choice, for short labels, keys and routes, citing no standard; "by construction" goes; a side that keeps no names refuses out of its range alone, its names the blueprint's that `beadc check` holds                                                                                                                                        |
+| A cheaper option was never weighed: stateless checks at the router, stateful ones in the registry                                                                                      | Accepted: the router checks ranges and form, a pure function; the registry keeps names, folded, and holds the revision; the per-router table was weighed beside it, its cost in the Context, and the user takes the split                                                                                                                                                     |
+| "A call pays nothing" is false where a requester is made for each call                                                                                                                 | Accepted: no table and no lock at the router; the registry takes an exact name at its address without folding and folds character by character, never building a string; the claim reads "a call that makes no requester pays nothing"                                                                                                                                        |
+| The service manager refuses first, with another type, so 16.10's order does not hold at that layer                                                                                     | Accepted in part: the service manager's one reason of its own, a notification asked for again otherwise, follows the router's check, which `getNotification` runs first, so 16.10's order holds there too; its "asked for otherwise" keeps its type, about the manager's state, and the record names it before the registry's reasons                                         |
+| The file plays three of the five declaration paths, and no input that is not a number                                                                                                  | Accepted: the file lists five ways, a resolver on each router, a requester on each, a notification on a client's, each harness keyed by them; `"1"`, `true` and `null` join the ids and revisions, crossing the C# row, as `durations.json` pins `"1000"` and `true`                                                                                                          |
+| The record carries a false .NET probe                                                                                                                                                  | Accepted: `GetString()` over `"a\uD800"` throws `InvalidOperationException`, as the Context's probe shows; that is a second reason, beside I-JSON (RFC 7493 §2.1), to keep a lone surrogate in the twins and out of the file                                                                                                                                                  |

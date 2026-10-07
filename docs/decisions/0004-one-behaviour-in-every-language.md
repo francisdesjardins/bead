@@ -23,8 +23,9 @@ implementation does, in the RFC 2119 sense. A unit no entry cites, which `spec/u
 binds every implementation all the same: the entries say what a side does, and the text states what
 it must. Beside it, `spec/vectors.json` holds the bytes of envelopes and what they say, and what a
 reader refuses with which code; `spec/conversations.json` holds what a server of the interop
-service, `spec/interop-service.json`, does with what its clients send, over one connection or
-several: the envelopes it answers, what it reports, and the silence it keeps; `spec/transports.json`
+service — its API, `spec/interop-blueprint.json`, and its behaviour, relay and credentials,
+`spec/interop-service.json` — does with what its clients send, over one connection or several:
+the envelopes it answers, what it reports, and the silence it keeps; `spec/transports.json`
 holds what a transport's server does at its edge, over HTTP and over a WebSocket: the exchanges and
 the messages it takes, and what it gives back; `spec/clocks.json` holds what every side's test clock
 does when a case advances it; `spec/durations.json` holds what every place that takes a duration an
@@ -216,8 +217,12 @@ uncited or one listed that an entry now cites. The companion's files cite its ow
 
 The clock cases cite no unit, and no section names them: they hold every side's test clock to one
 meaning of `advance`, which [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)
-decides and the spec does not state. Two files of `spec/` hold no entries, are written by hand, and
-are read whole: the interop service, `spec/interop-service.json`, under its schema, which the
+decides and the spec does not state. Three files of `spec/` hold no entries, are written by hand,
+and are read whole: the interop service's API, `spec/interop-blueprint.json`, a blueprint of the
+builder's in its one form
+([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)),
+which the generators read; its behaviour, relay and credentials, `spec/interop-service.json`,
+under its schema, which states each of the blueprint's procedures by its name, and which the
 conversations and the transports' cases play against; and `spec/codecs.proto`, the message the
 codecs' `proto` entries read and write, which section 17 names, every side's tests compile, and the
 codecs' generator reads. What else a file holds — its keys, the reasons its outcomes give, the ways

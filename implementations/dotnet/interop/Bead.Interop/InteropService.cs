@@ -6,15 +6,20 @@ using System.Text.RegularExpressions;
 namespace Bead.Interop;
 
 /// <summary>
-/// The procedures of Bead's interop service, <c>spec/interop-service.json</c>, as the C# side
-/// offers them: what a client of any implementation calls, and what
-/// <c>spec/conversations.json</c> plays against.
+/// The procedures of Bead's interop service, its API <c>spec/interop-blueprint.json</c> and its
+/// behaviour <c>spec/interop-service.json</c>, as the C# side offers them: what a client of any
+/// implementation calls, and what <c>spec/conversations.json</c> plays against.
 /// </summary>
 public static class InteropService
 {
     // constants
 
-    private static readonly JsonElement Manifest = Load();
+    // the interop service's relay and credentials, as its file states them
+    private static readonly JsonElement Service = Load("interop-service.json");
+
+    // the interop service's API: its blueprint's one service, of no feature, as the blueprint's
+    // schema pins them (decision 0022)
+    private static readonly JsonElement Api = Load("interop-blueprint.json").GetProperty("services")[0];
 
     // the question ask puts to its client's clock, and how long it waits for the answer
     private const string Question = "What time is it where you are?";
@@ -70,9 +75,9 @@ public static class InteropService
 
     // helpers
 
-    private static JsonElement Load()
+    private static JsonElement Load(string name)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "interop-service.json");
+        var path = Path.Combine(AppContext.BaseDirectory, name);
 
         using var document = JsonDocument.Parse(File.ReadAllText(path));
 
@@ -80,15 +85,15 @@ public static class InteropService
     }
 
     /// <summary>
-    /// The names of the manifest's procedures, and whether each is a command a client offers: what
+    /// The names of the API's procedures, and whether each is a command, which a client offers: what
     /// <see cref="Offer(IBeadServer{string})"/> and <see cref="OfferClient"/> register between them.
     /// </summary>
-    public static IReadOnlyList<(string ProcedureName, bool IsOfferedByClient)> Procedures { get; } =
-        [.. Manifest.GetProperty("procedures").EnumerateArray().Select((procedure) =>
+    public static IReadOnlyList<(string ProcedureName, bool IsCommand)> Procedures { get; } =
+        [.. Api.GetProperty("procedures").EnumerateArray().Select((procedure) =>
         {
             return (
                 procedure.GetProperty("procedureName").GetString()!,
-                procedure.TryGetProperty("offeredBy", out var side) && side.GetString() == "client");
+                KindOf(procedure) == ProcedureKind.Command);
         })];
 
     /// <summary>
@@ -104,7 +109,7 @@ public static class InteropService
     {
         ArgumentNullException.ThrowIfNull(clock);
 
-        var jwt = Manifest.GetProperty("credentials").GetProperty("jwt");
+        var jwt = Service.GetProperty("credentials").GetProperty("jwt");
         var keySet = jwt.GetProperty("keySet");
         var answered = keySet.GetProperty("issuers").EnumerateArray().ToDictionary(
             (named) =>
@@ -166,7 +171,7 @@ public static class InteropService
         return answering.Keys;
     }
 
-    // a key's one algorithm, as the manifest names it
+    // a key's one algorithm, as the service's file names it
     private static JwtAlgorithm AlgorithmOf(JsonElement key)
     {
         return key.GetProperty("algorithm").GetString() switch
@@ -280,19 +285,37 @@ public static class InteropService
         return issuer.GetString()!;
     }
 
-    /// <summary>The procedure of the interop service named <paramref name="procedureName"/>.</summary>
+    // a procedure's kind, as the blueprint names it
+    private static ProcedureKind KindOf(JsonElement procedure)
+    {
+        return procedure.GetProperty("procedureKind").GetString() switch
+        {
+            "request" => ProcedureKind.Request,
+            "notifies" => ProcedureKind.Notifies,
+            "command" => ProcedureKind.Command,
+
+            // the format's enum holds the kind: a checked file never reaches this arm
+            var other => throw new InvalidOperationException($"the interop's blueprint names no kind {other}"),
+        };
+    }
+
+    /// <summary>
+    /// The procedure of the interop service named <paramref name="procedureName"/>, of the kind its
+    /// blueprint gives it.
+    /// </summary>
     public static Procedure ProcedureOf(string procedureName)
     {
-        foreach (var procedure in Manifest.GetProperty("procedures").EnumerateArray())
+        foreach (var procedure in Api.GetProperty("procedures").EnumerateArray())
         {
             if (procedure.GetProperty("procedureName").GetString() == procedureName)
             {
                 return new Procedure
                 {
-                    ServiceId = Manifest.GetProperty("serviceId").GetUInt16(),
+                    ServiceId = Api.GetProperty("serviceId").GetUInt16(),
                     ProcedureId = procedure.GetProperty("procedureId").GetUInt16(),
                     ProcedureName = procedureName,
-                    ServiceRevision = Manifest.GetProperty("serviceRevision").GetInt32(),
+                    ProcedureKind = KindOf(procedure),
+                    ServiceRevision = Api.GetProperty("serviceRevision").GetInt32(),
                 };
             }
         }
@@ -466,7 +489,7 @@ public static class InteropService
         {
             if (request.Session?.Identifier is not null)
             {
-                return response.Fail(Failure.OfProtocol(ProtocolCode.AccessDenied, "logout ends its connection's session, which this call does not run in"));
+                return response.Fail(Failure.OfProtocol(ProtocolCode.AccessDenied, "a call in a credential's session ends no connection's session"));
             }
 
             sessionManager.Delete(request.ConnectionHandle);

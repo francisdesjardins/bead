@@ -4,14 +4,14 @@ using System.Text.Json;
 namespace Bead.Tests;
 
 /// <summary>
-/// <see cref="PayloadCodecs"/>: spec 17's codecs by the manifest's encoding, each the codec of the
+/// <see cref="PayloadCodecs"/>: spec 17's codecs by their encoding's name, each the codec of the
 /// internal payloads <c>spec/codecs.json</c> plays, and a codec made of two functions; the twins of
 /// the TypeScript side's <c>payloads.test.ts</c> on <c>payloadCodecOf</c>.
 /// </summary>
 public sealed class PayloadCodecsTests
 {
     [Fact]
-    public void Gives_spec_17_s_codecs_by_the_manifest_s_encoding()
+    public void Gives_spec_17_s_codecs_by_their_encoding_s_name()
     {
         Assert.Equal([1, 2], PayloadCodecs.Raw.Encode(PayloadCodecs.Raw.Decode(new byte[] { 1, 2 })).ToArray());
         Assert.Equal("Josée", PayloadCodecs.Text.Decode("Josée"u8.ToArray()));

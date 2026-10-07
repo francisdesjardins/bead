@@ -177,7 +177,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public void Offers_every_procedure_of_the_interop_manifest_on_the_side_it_names()
+    public void Offers_every_procedure_of_the_interop_service_s_API_on_the_side_its_kind_names()
     {
         var server = new Registrations(RouterSide.Server);
         var client = new Registrations(RouterSide.Client);
@@ -194,7 +194,7 @@ public sealed partial class RouterClientTests
         Assert.Equal(
             InteropService.Procedures.Where((procedure) =>
             {
-                return !procedure.IsOfferedByClient;
+                return !procedure.IsCommand;
             }).Select((procedure) =>
             {
                 return procedure.ProcedureName;
@@ -203,7 +203,7 @@ public sealed partial class RouterClientTests
         Assert.Equal(
             InteropService.Procedures.Where((procedure) =>
             {
-                return procedure.IsOfferedByClient;
+                return procedure.IsCommand;
             }).Select((procedure) =>
             {
                 return procedure.ProcedureName;

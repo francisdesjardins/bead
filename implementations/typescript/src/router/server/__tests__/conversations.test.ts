@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import {
+  INTEROP_API,
   INTEROP_SERVICE,
   interopCredentialsOf,
   interopVerifierOf,
@@ -24,6 +25,7 @@ import { createTestClock, duesOn } from '../../../transport/shared/__tests__/fix
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createRouterClient } from '../../client/router-client';
 import { createServiceManager } from '../../shared/service-manager';
+import { ProcedureKind } from '../../shared/constants';
 import { createPipedTransports } from '../../shared/__tests__/fixtures';
 import type {
   IJwtSetKey,
@@ -71,13 +73,13 @@ const createRegistrations = <Handle extends string>() => {
 
 // definition
 
-test('every procedure of the interop manifest is offered, on the side it names', () => {
+test("every procedure of the interop service's API is offered, on the side its kind names", () => {
   const server = createRegistrations<TransportServerConnectionHandle>();
   const client = createRegistrations<ServerConnectionHandle>();
-  const namesOf = (isOfferedByClient: boolean): string[] => {
-    return INTEROP_SERVICE.procedures
-      .filter(({ offeredBy }) => {
-        return (offeredBy === 'client') === isOfferedByClient;
+  const namesOf = (isCommand: boolean): string[] => {
+    return INTEROP_API.procedures
+      .filter(({ procedureKind }) => {
+        return (procedureKind === ProcedureKind.COMMAND) === isCommand;
       })
       .map(({ procedureName }) => {
         return procedureName;

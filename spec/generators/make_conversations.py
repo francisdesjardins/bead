@@ -12,8 +12,10 @@ from spec_version import spec_version
 # the conformance files sit one folder up from their generators
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
-SERVICE_ID = SERVICE['serviceId']
-PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in SERVICE['procedures']}
+# the interop service's API, its one service in its blueprint (decision 0022)
+API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
+SERVICE_ID = API['serviceId']
+PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
 
 MALFORMED, LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED, TOO_LARGE = 1, 2, 3, 4
 DESTINATION_UNKNOWN, SERVICE_UNKNOWN, PROCEDURE_UNKNOWN, CALL_UNKNOWN = 16, 18, 19, 20

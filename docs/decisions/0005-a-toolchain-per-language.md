@@ -46,7 +46,8 @@ check, `spec/check.py`, needs `jsonschema`, which `spec/requirements.in` names a
 
 **A language that joins comes the same way**: a folder under `implementations/`, its own native
 toolchain, and a CI job of its own. A part every language uses that is neither an implementation nor
-the spec, as the builder is, is placed by a decision of its own.
+the spec is placed by a decision of its own, as the builder is by
+[0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md).
 
 ## Consequences
 
@@ -61,7 +62,9 @@ the spec, as the builder is, is placed by a decision of its own.
 - The root's prose and scripts have no formatter of their own: CI holds the root's prose, scripts
   and schemas, and the spec's text, to the TypeScript side's oxfmt, through
   `-c implementations/typescript/.oxfmtrc.json` (`tools/check-format.mjs` lists them, for CI and the
-  pre-commit hook), so formatting them needs that side installed. The conformance files are left to their generators.
+  pre-commit hook), so formatting them needs that side installed. The conformance files are left
+  to their generators, and the interop's blueprint to `spec/check.py`, which holds its form
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 - Coverage is measured by each side's own tool, c8's istanbul report and `dotnet test --coverage`'s
   cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either; it is a
   local command, not a CI job.

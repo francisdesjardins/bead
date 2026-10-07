@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bead's interop service, spec/interop-service.json",
   "type": "object",
-  "required": ["$comment", "specVersion", "serviceId", "serviceRevision", "procedures"],
+  "required": ["$comment", "specVersion", "relay", "procedures", "credentials"],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -13,12 +13,6 @@
     },
     "specVersion": {
       "$ref": "common.schema.json#/$defs/specVersion"
-    },
-    "serviceId": {
-      "$ref": "common.schema.json#/$defs/serviceId"
-    },
-    "serviceRevision": {
-      "$ref": "common.schema.json#/$defs/serviceRevision"
     },
     "relay": {
       "description": "What the interop server's relay admits, what it forwards, and whether it verifies what it forwards.",
@@ -44,14 +38,11 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "description": "A procedure, what it takes, what it answers, and what admits or notifies, when it does.",
+        "description": "A procedure of interop-blueprint.json, by its name: what it takes, what it answers, and what it admits or notifies, where the blueprint's admission is not none or its kind notifies, which check.py holds.",
         "type": "object",
-        "required": ["procedureId", "procedureName", "request", "answers"],
+        "required": ["procedureName", "request", "answers"],
         "additionalProperties": false,
         "properties": {
-          "procedureId": {
-            "$ref": "common.schema.json#/$defs/procedureId"
-          },
           "procedureName": {
             "$ref": "common.schema.json#/$defs/procedureName"
           },
@@ -70,10 +61,6 @@
           "notifies": {
             "type": "string",
             "minLength": 1
-          },
-          "offeredBy": {
-            "description": "client, for a command, which a client offers and its server calls.",
-            "const": "client"
           }
         }
       }

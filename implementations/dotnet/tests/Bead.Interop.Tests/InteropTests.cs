@@ -424,7 +424,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         await using var client = await ConnectedOver(transport);
 
         // an access token of the HS256 issuer for grace, an hour on the platform's clock, signed with
-        // the manifest's published key
+        // the service file's published key
         var key = InteropService.CredentialsOf(TimeProvider.System).Keys.Single((held) =>
         {
             return held.Algorithm == JwtAlgorithm.Hs256;
@@ -454,6 +454,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         });
 
         Assert.Equal(((ushort)ProtocolCode.AccessDenied, FailureOrigin.Peer), (refused.Code, refused.Origin));
+        Assert.Equal("a call in a credential's session ends no connection's session", refused.Detail);
         Assert.NotNull(client.Router.Credential);
     }
 

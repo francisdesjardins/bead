@@ -8,7 +8,7 @@
 //
 // `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
 // moves the TypeScript package's version, the C# side's <Version> and its lock files' project
-// ranges, each document's line and interop-service.json's specVersion; runs the generators; dates
+// ranges, each document's line and every conformance file's repeat of it; runs the generators; dates
 // [Unreleased] as the version, under a new empty one, and links it; then runs the gate as a
 // release, spec/check.py and the root's format check, naming one whose tool is absent. A <move> is
 // x.y.z, patch, minor, major or same, from the document's last release. Run again, it re-dates,
@@ -38,6 +38,7 @@ import {
   parseVersion,
   readChangelog,
   readText,
+  readVersions,
   successorsOf,
 } from './check-versions.mjs';
 
@@ -80,7 +81,7 @@ export const withStatedVersion = (text, version) => {
   });
 };
 
-// a conformance file written by hand, interop-service.json: its version's key, and nothing else
+// a conformance file written by hand: its version's key, and nothing else, so its layout stays
 export const withRepeatedVersion = (text, { key, version }) => {
   return replaceOnce(text, {
     pattern: new RegExp(`"${key}": "\\d+\\.\\d+\\.\\d+"`),
@@ -320,10 +321,23 @@ export const prepare = (root, options = {}) => {
   for (const document of DOCUMENTS.filter((document) => document.id in plan.documents)) {
     stage(document.path, (text) => withStatedVersion(text, plan.documents[document.id]));
   }
-  if ('spec' in plan.documents) {
-    stage('spec/interop-service.json', (text) => {
-      return withRepeatedVersion(text, { key: 'specVersion', version: plan.documents.spec });
-    });
+  // every conformance file that repeats a moved document's version, as check-versions.mjs reads
+  // them: a generator writes its own again after, and a file written by hand keeps its layout
+  const repeated = readVersions(
+    (path) => {
+      return readText(join(root, path));
+    },
+    git(root, ['ls-files', '--', 'spec']).split('\n')
+  );
+  for (const document of DOCUMENTS.filter((document) => document.id in plan.documents)) {
+    for (const path of Object.keys(repeated.documents[document.id].files)) {
+      stage(path, (text) => {
+        return withRepeatedVersion(text, {
+          key: document.key,
+          version: plan.documents[document.id],
+        });
+      });
+    }
   }
   // ! a text replacement, not `dotnet restore --force-evaluate`: the root's tools run no third
   // toolchain (decision 0005), and the lock files keep LF
