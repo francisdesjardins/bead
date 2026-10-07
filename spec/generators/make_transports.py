@@ -17,7 +17,8 @@ PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure
 
 REQUEST, RESULT, FAILURE, NOTIFICATION = 16, 17, 18, 19
 PROTOCOL = 0
-SUBSCRIPTION_UNSUPPORTED, SESSION_REQUIRED, PAYLOAD_TOO_LARGE, PROCEDURE_FAILED = 22, 32, 34, 64
+DESTINATION_UNREACHABLE, SUBSCRIPTION_UNSUPPORTED, SESSION_REQUIRED, PAYLOAD_TOO_LARGE = 17, 22, 32, 34
+PROCEDURE_FAILED, DESTINATION_LOST = 64, 65
 
 BEAD = 'application/prs.bead'
 BATCH = 'application/prs.bead-batch'
@@ -390,15 +391,15 @@ cases = [
 
 
 def relayed_over_http():
-    """14 and 15.9: a relay over HTTP, whose destination is a connection that listens: what it sends
-    that connection goes in a batch, which carries a credential in its block alone."""
+    """14 and 15.9: a relay over HTTP, whose destination is a connection of the peer's: what it sends
+    one that listens goes in a batch, which carries a credential in its block alone; one that does
+    not listen takes none of its requests; and a request past its outbox is lost with it."""
     # the interop service's HS256 issuer, its key RFC 7515's A.1, a published test key, and its audience
     issuer, audience = 'https://hs256.interop.bead.example', 'bead-interop'
     secret = 'AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow'
     # the wall clock's start, 2026-01-01T00:00:00Z, in seconds since the epoch
     wall = 1_767_225_600
     destination = 12
-    destination_unreachable = 17
 
     def base64url(data):
         return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
@@ -427,6 +428,11 @@ def relayed_over_http():
         return send(on, method, target, fields=[('bead-connection-token', '{device}'), ('content-type', BEAD)]
                     if method == 'POST' else {'bead-connection-token': '{device}'}, body=body)
 
+    # leg A's call in its connection's session, which names the destination and presents none
+    login = request(1, 'login', '{"name":"ada"}')
+    in_session = request(3, 'echo', '"x"', flags=0x02, words=4, tail=word(destination, 4))
+    registered = as_device('register', 'POST', body=request(1, 'register', '{"destination":%d}' % destination))
+
     leg_b = {'kind': REQUEST, 'callId': 2, 'flags': 0x08, 'serviceId': SERVICE_ID, 'procedureId': PROCEDURES['echo'],
              'payload': text('"x"'), 'credential': {'scheme': 'JWT', 'token': token}}
 
@@ -441,13 +447,35 @@ def relayed_over_http():
              answered('register', result(1, str(destination))),
              *drawn(),
              post('elsewhere', relayed(1, elsewhere_block), fields={'authorization': BEARER}),
-             answered('elsewhere', failure(1, destination_unreachable)),
+             answered('elsewhere', failure(1, DESTINATION_UNREACHABLE)),
              post('jwt', relayed(3, jwt_block)),
              as_device('listen', 'GET', '/bead?after=0&wait=60000'),
              expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'}, batch=[leg_b]),
              as_device('answer', 'POST', body='A1 11 00 02  00 00 00 02 | ' + text('"x"')),
              expect('answer', 204, body=''),
              answered('jwt', result(3, '"x"'))]),
+        # 14.3.4 and 15.8: a destination over HTTP that does not listen carries no request of the
+        # relay's, which answers before trying, and reports nothing
+        ('a relay answers DESTINATION_UNREACHABLE for a destination over HTTP that does not listen, nothing tried',
+         ['14.3.4', '14.5.4', '15.8'], None, [
+             connect('device'), expect('device', 201, fields={
+                 'bead-connection-token': {'capture': 'device', 'shape': 'token'}, 'bead-listen': None}),
+             registered, answered('register', result(1, str(destination))),
+             *drawn(), post('login', login), answered('login', result(1, '"ada"', OPENED)),
+             post('relayed', in_session),
+             answered('relayed', failure(3, DESTINATION_UNREACHABLE,
+                                         detail=f'destination {destination} is unreachable: its connection carries no request'))]),
+        # 14.5.5 and 15.9: leg B's request past the outbox of a destination that listens is one its
+        # transport had: the connection closes, and the request is lost with it
+        ('a relay\'s request past its destination\'s outbox closes that connection, and leg A is answered DESTINATION_LOST, reported',
+         ['14.5.5', '15.9'], {'maximumOutboxBytes': 12}, [
+             connect('device', listen=True), expect('device', 201, fields={
+                 'bead-connection-token': {'capture': 'device', 'shape': 'token'}, 'bead-listen': '?1'}),
+             registered, answered('register', result(1, str(destination))),
+             *drawn(), post('login', login), answered('login', result(1, '"ada"', OPENED)),
+             post('relayed', in_session), answered('relayed', failure(3, DESTINATION_LOST)), {'report': 'exception'},
+             until('connections', 1),
+             as_device('after', 'POST', body=request(3, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
     ]
 
 
@@ -589,6 +617,17 @@ websocket = [
          armed(10_000), advance(6000),
          message('socket', binary=request(5, 'echo', '"y"')), heard('socket', envelope=result(5, '"y"')),
          armed(10_000), advance(10_000), heard('socket', close=NORMAL), until('connections', 0)]),
+    # 14.5.5 and 14.6: a destination over WebSocket that closes once it had leg B's request
+    ('a relay\'s destination over WebSocket that closes as leg B goes is lost: leg A is answered DESTINATION_LOST, reported',
+     ['14.5.5', '14.6', '15.3'], {}, [
+         *upgrade('client'), *upgrade('device'),
+         message('client', binary=request(1, 'login', '{"name":"ada"}')), heard('client', envelope=result(1, '"ada"', OPENED)),
+         message('device', binary=request(1, 'register', '{"destination":12}')), heard('device', envelope=result(1, '12')),
+         message('client', binary=request(3, 'echo', '"x"', flags=0x02, words=4, tail=word(12, 4))),
+         heard('device', envelope={'kind': REQUEST, 'callId': 2, 'flags': 0, 'serviceId': SERVICE_ID,
+                                   'procedureId': PROCEDURES['echo'], 'payload': text('"x"')}),
+         message('device', close=NORMAL), heard('device', close=NORMAL),
+         heard('client', envelope=failure(3, DESTINATION_LOST)), {'report': 'exception', 'on': 'client'}]),
 ]
 
 # responses as a server may cut them, which every side's reader reads alike

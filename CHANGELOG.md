@@ -31,7 +31,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/transports.json`, its schema and its generator: what a server of the interop service does at
   its HTTP transport's edge, which each side's tests play against their own server with a peer that
   writes HTTP/1.1 in exact octets, the bounds' defaults each side checks, and responses cut across
-  reads that each side's reader reads alike.
+  reads that each side's reader reads alike; and a relay's leg B on a real transport: a destination
+  over HTTP that does not listen, answered `DESTINATION_UNREACHABLE`, a request past its
+  destination's outbox and a WebSocket that closes as leg B goes, each answered `DESTINATION_LOST`,
+  since section 15.9 says that an envelope past an outbox is one its transport had.
 - The WebSocket's cases in `spec/transports.json`, played with frames the peer writes itself: a
   message whole or in fragments, a text message reported, a message past its limit closed 1009, a
   clean close and a stop, and, on the real clock, the ping and the peer that leaves it unanswered.
