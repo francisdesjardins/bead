@@ -1,0 +1,10 @@
+# buf's own workspace over the builder's .proto files that compile: `yarn check` runs `buf lint` and
+# `buf format --diff --exit-code` over it. beadc never reads this file: it passes buf a configuration
+# of its own.
+version: v2
+modules:
+  - path: proto
+    lint:
+      use: [STANDARD]
+      # bead/options.proto's package is `bead`, as protobuf's own options name none
+      except: [PACKAGE_VERSION_SUFFIX]

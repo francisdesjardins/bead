@@ -151,6 +151,48 @@ jobs:
       - run: $YARN test:interop
         working-directory: implementations/typescript
 
+  # ── Builder ──────────────────────────────────────────────────────────────────
+  # beadc's own gate, from builder/, its toolchain its own. On Linux: types, lint, format, buf's lint
+  # and format over its options, and the options' generated code held to its generator, none of
+  # which a platform moves. On every leg: its tests. On Windows, where buf is another binary, on the
+  # current line; on Linux, on the floor `engines.node` declares too.
+  builder:
+    name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-2025]
+        node: ['26']
+        include:
+          - os: ubuntu-26.04
+            node: '24.9'
+    defaults:
+      run:
+        working-directory: builder
+        # Git Bash on Windows, so `$YARN` and every step read alike on both
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      # The download cache, not `node_modules`: cache what was downloaded, always install.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: builder-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('builder/yarn.lock') }}
+          restore-keys: builder-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
+      # `--immutable` fails if `yarn.lock` would change.
+      - run: $YARN install --immutable
+      - if: runner.os == 'Linux'
+        run: $YARN check
+      - run: $YARN test
+
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
@@ -211,7 +253,7 @@ jobs:
   ci-ok:
     name: CI ok
     if: always()
-    needs: [spec, typescript, dotnet, commits]
+    needs: [spec, typescript, dotnet, builder, commits]
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:

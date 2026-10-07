@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+
+  // The lint surface is the TypeScript side's, by reference: `bead/options-last` and its plugin load
+  // from the base's folder. The builder adds the shape its functions take, as that side does.
+  "extends": ["../implementations/typescript/.oxlintrc.base.json"],
+  "rules": {
+    "func-style": ["error", "expression"],
+    "prefer-arrow-callback": "error"
+  },
+  "overrides": [
+    {
+      // beadc runs on Node, never in a page
+      "files": ["src/**/*.ts"],
+      "env": { "browser": false, "node": true }
+    },
+    {
+      // the gate, a plain Node module whose functions are declarations and whose stdout is its
+      // output contract
+      "files": ["tools/**"],
+      "rules": {
+        "func-style": "off",
+        "prefer-arrow-callback": "off",
+        "no-console": "off",
+        "curly": "off",
+        "arrow-body-style": "off"
+      }
+    }
+  ],
+  // **Not inherited through `extends`**, so written out here in full
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/playwright-report/**",
+    "**/test-results/**",
+    "**/coverage/**",
+    "**/*.d.ts",
+    // protoc-gen-es's, committed as it writes it: `tools/check-options.mjs` holds it to its
+    // generator
+    "**/*_pb.ts",
+    ".yarn/**"
+  ]
+}
