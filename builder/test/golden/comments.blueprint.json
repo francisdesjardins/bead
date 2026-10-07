@@ -1,0 +1,131 @@
+{
+  "format": "bead-blueprint/1",
+  "proto": {
+    "files": [
+      {
+        "package": "bead.comments.v1",
+        "path": "bead/comments/v1/comments.proto"
+      }
+    ],
+    "messages": []
+  },
+  "requires": [],
+  "reservedServices": {
+    "ids": [],
+    "names": []
+  },
+  "services": [
+    {
+      "description": "The comments fixture: how a leading comment becomes a description, whatever it holds.\n\nA second paragraph, its lines joined by one space.",
+      "failures": [
+        {
+          "code": 1,
+          "description": "Too late, on its first line; and on its second.",
+          "failureName": "LATE"
+        },
+        {
+          "code": 2,
+          "failureName": "EARLY"
+        }
+      ],
+      "procedures": [
+        {
+          "admission": "session",
+          "description": "Holds a block's end, */, and markup: <tag>, & and \"quotes\", a backslash \\ and an astral 😀.",
+          "failures": [],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "escapes",
+          "request": {
+            "encoding": "text"
+          },
+          "result": {
+            "encoding": "text"
+          }
+        },
+        {
+          "admission": "session",
+          "failures": [],
+          "procedureId": 2,
+          "procedureKind": "request",
+          "procedureName": "trailing",
+          "request": {
+            "encoding": "raw"
+          },
+          "result": {
+            "encoding": "raw"
+          }
+        },
+        {
+          "admission": "session",
+          "failures": [],
+          "procedureId": 3,
+          "procedureKind": "request",
+          "procedureName": "detached",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "session",
+          "description": "A block comment, its second line.",
+          "failures": [
+            "LATE"
+          ],
+          "procedureId": 4,
+          "procedureKind": "request",
+          "procedureName": "block",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "session",
+          "description": "  Indented past its marker:    its end trimmed.",
+          "failures": [],
+          "procedureId": 5,
+          "procedureKind": "request",
+          "procedureName": "indented",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "session",
+          "failures": [],
+          "procedureId": 6,
+          "procedureKind": "request",
+          "procedureName": "empty",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        }
+      ],
+      "proto": {
+        "file": "bead/comments/v1/comments.proto",
+        "fullName": "bead.comments.v1.CommentsService"
+      },
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 2,
+      "serviceName": "Comments",
+      "serviceRevision": 3
+    }
+  ],
+  "specVersion": "0.2.0"
+}

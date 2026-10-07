@@ -1,0 +1,122 @@
+// Bead's options: what a .proto file declares of Bead's services and procedures beyond protobuf's
+// own, and the payload types whose bytes are the payload itself (decision 0022). A service with
+// (bead.service) is Bead's, and every rpc in it carries (bead.procedure). What each option means
+// and what `beadc check` refuses of it are builder/README.md's.
+syntax = "proto3";
+
+package bead;
+
+import "google/protobuf/descriptor.proto";
+
+option csharp_namespace = "Bead.Protobuf";
+
+// ! One number on every extendee: 58500, of the range descriptor.proto leaves to one organization or
+// to experimental options, until the first publication takes a number of protobuf's global
+// registry (decisions 0008 and 0022)
+extend google.protobuf.FileOptions {
+  File file = 58500;
+}
+
+extend google.protobuf.ServiceOptions {
+  Service service = 58500;
+}
+
+extend google.protobuf.MethodOptions {
+  Procedure procedure = 58500;
+}
+
+// What a file's services admit when they say nothing, and the service ids and names its package
+// retired.
+message File {
+  Admission admission = 1;
+  repeated IdRange reserved_services = 2;
+  repeated string reserved_service_names = 3;
+}
+
+// A Bead service: its id on the wire, its revision, and what its procedures admit when they say
+// nothing.
+message Service {
+  // From 1 to 65,535 (spec 16.2); 0 is the protocol's (16.3).
+  uint32 id = 1;
+  // From 1 to 2,147,483,647 (spec 16.2), the releases of its contract (16.9); never 0.
+  uint32 revision = 2;
+  Admission admission = 3;
+  // The enum that numbers its procedures' failures (spec 9.5), by its name.
+  string failures = 4;
+  // What to use instead; `option deprecated = true` says that it is deprecated.
+  string deprecation_message = 5;
+  // The procedure ids and names none of its rpcs takes again.
+  repeated IdRange reserved_ids = 6;
+  repeated string reserved_names = 7;
+}
+
+// A Bead procedure: its id on the wire, and what its rpc's types do not say. Its name is its rpc's,
+// the first letter lowered.
+message Procedure {
+  // From 1 to 65,535 (spec 16.2), and its declaration's for life (16.8).
+  uint32 id = 1;
+  // How its calls go besides a request answered, which neither member changes.
+  oneof procedure_kind {
+    Notifies notifies = 2;
+    Command command = 3;
+  }
+  Admission admission = 4;
+  // The bytes a payload of it holds at most, its request's and its result's, up to 2,147,483,647;
+  // the router's alone when 0.
+  uint32 maximum_payload_bytes = 5;
+  // What to use instead; `option deprecated = true` says that it is deprecated.
+  string deprecation_message = 6;
+  // The values of its service's failures enum it may answer, each by its name as the enum writes it.
+  repeated string failures = 7;
+}
+
+// A procedure that notifies (spec 11.2): a request to it that opens a subscription subscribes its
+// requester to notifications of this message; one that opens none is answered as any request is.
+message Notifies {
+  // By its full name, or by a name in the rpc's package.
+  string message = 1;
+}
+
+// A procedure the client offers and the server calls, on one connection (spec 9.1).
+message Command {}
+
+// Who may call a procedure, decided on the call's session before its payload is read (spec 9.2,
+// step 5.3).
+message Admission {
+  // Every call: overrides one inherited.
+  message None {}
+
+  // A call with a session, its call's: the side's requireSession.
+  message Session {}
+
+  // ! One of the three: an admission that states none is refused (ADMISSION_EMPTY)
+  oneof rule {
+    None none = 1;
+    Session session = 2;
+    // A named admission the side that answers is given, synchronous, on the call's session, present
+    // or not.
+    string hook = 3;
+  }
+}
+
+// Ids from first to last, both included; last is first when 0.
+message IdRange {
+  uint32 first = 1;
+  uint32 last = 2;
+}
+
+// A payload that is its bytes, as they are: raw (spec 17.3). Its protobuf form is never written.
+message Raw {
+  bytes data = 1;
+}
+
+// A payload that is its text, in UTF-8: text (spec 17.4). Its protobuf form is never written.
+message Text {
+  string text = 1;
+}
+
+// A payload that is one JSON value, in UTF-8, in its canonical form: json (spec 17.5 to 17.8). Its
+// protobuf form is never written.
+message Json {
+  string json = 1;
+}

@@ -1,6 +1,7 @@
 # buf's own workspace over the builder's .proto files that compile: `yarn check` runs `buf lint` and
 # `buf format --diff --exit-code` over it. beadc never reads this file: it passes buf a configuration
-# of its own.
+# of its own. A rule's fixture under test/proto/ is its own root, outside the workspace, since some
+# compile on purpose to nothing and one holds a copy of bead/options.proto.
 version: v2
 modules:
   - path: proto
@@ -8,3 +9,8 @@ modules:
       use: [STANDARD]
       # bead/options.proto's package is `bead`, as protobuf's own options name none
       except: [PACKAGE_VERSION_SUFFIX]
+  - path: test/fixtures
+    lint:
+      use: [STANDARD]
+      # bead.Raw, bead.Text and bead.Json serve many rpcs, as request and as response
+      except: [RPC_REQUEST_STANDARD_NAME, RPC_RESPONSE_STANDARD_NAME, RPC_REQUEST_RESPONSE_UNIQUE]
