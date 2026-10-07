@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 0
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_REVISION_RANGE",
+      "pointer": "/services/0/serviceRevision"
+    }
+  ]
+}

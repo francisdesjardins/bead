@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/maximumPayloadBytes",
+      "value": 2147483648
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_LIMIT_RANGE",
+      "pointer": "/services/0/procedures/0/maximumPayloadBytes"
+    }
+  ]
+}

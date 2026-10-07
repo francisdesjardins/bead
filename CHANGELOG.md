@@ -18,6 +18,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   revision, and each procedure's id, kind, bindings, admission and failures. `spec/check.py` holds
   it to its schema and its form, its members and its arrays in their order, and
   `interop-service.json` to its procedures; `--write-blueprints` lays it out (decision 0022).
+- `builder/`, the builder `beadc`, on Node with a toolchain of its own: `bead/options.proto`,
+  whose extensions take 58500 until their first publication takes a number of protobuf's global
+  registry; a front end that compiles a `.proto` with buf and resolves it into a blueprint;
+  `beadc check`, which refuses a `.proto` or a blueprint by rule name, section 16's identities
+  among its rules; `beadc blueprint`, which writes a blueprint in its form and, with `--check`,
+  holds one to it; `beadc version`. The interop's `.proto` is its fixture, whose blueprint is
+  `spec/interop-blueprint.json` byte for byte; CI's `builder` job runs its tests on Linux and on
+  Windows (decision 0022).
 
 ### Changed
 
@@ -28,6 +36,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# interop's `logout` refuses a call in a credential's session with the TypeScript side's
   detail, "a call in a credential's session ends no connection's session", which the interop
   holds both ways.
+- `tools/check-versions.mjs` holds the builder's `package.json`, where the tree has one, at the
+  product's version, and `tools/release.mjs prepare` moves it with the product's (decision 0008).
 
 ### Removed
 

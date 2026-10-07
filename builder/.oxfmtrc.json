@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxfmt/configuration_schema.json",
+
+  // The TypeScript side's options, copied: oxfmt's configuration has no `extends`, and it walks up
+  // from where it runs, so the builder holds its own file. Keeping the two alike is review's.
+  "semi": true,
+  "trailingComma": "es5",
+  "singleQuote": true,
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "endOfLine": "lf",
+  "arrowParens": "always",
+  "bracketSpacing": true,
+  "jsxSingleQuote": false,
+  "proseWrap": "preserve",
+  "sortPackageJson": true,
+  // `_pb.ts` is protoc-gen-es's, which `tools/check-options.mjs` holds to its generator; a golden
+  // blueprint and a raw case of the form are bytes a test reads, which oxfmt would lay out otherwise
+  "ignorePatterns": [".yarn/**", "**/*_pb.ts", "test/golden/**", "test/form/**"]
+}

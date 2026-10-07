@@ -1,0 +1,10 @@
+# The code protoc-gen-es writes for bead/options.proto, which the front end reads a .proto's options
+# through: run by buf, both from npm. `yarn options:generate` writes it; `yarn check` writes it again
+# apart and fails on a difference. The plugin runs under the Node that runs buf, so no PATH is read.
+version: v2
+inputs:
+  - directory: proto
+plugins:
+  - local: [node, node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es]
+    out: src/generated
+    opt: [target=ts, import_extension=ts]

@@ -1,0 +1,5 @@
+# Everything Yarn writes is derived, except the release, which is the point of vendoring it.
+# node_modules/, coverage/, playwright-report/ and test-results/ are the root's.
+.yarn/*
+!.yarn/releases
+.pnp.*

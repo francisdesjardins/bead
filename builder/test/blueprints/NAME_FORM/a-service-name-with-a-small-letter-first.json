@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/serviceName",
+      "value": "interop"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_FORM",
+      "pointer": "/services/0/serviceName"
+    }
+  ]
+}

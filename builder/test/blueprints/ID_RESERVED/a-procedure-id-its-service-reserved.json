@@ -1,0 +1,18 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureIds/-",
+      "value": {
+        "first": 1,
+        "last": 1
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "ID_RESERVED",
+      "pointer": "/services/0/procedures/0/procedureId"
+    }
+  ]
+}

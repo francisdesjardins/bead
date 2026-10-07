@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A deprecation_message without option deprecated = true.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Echo(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 1
+      deprecation_message: "Use something else."
+    };
+  }
+}

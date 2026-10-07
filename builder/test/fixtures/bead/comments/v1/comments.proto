@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package bead.comments.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    session: {}
+  }
+};
+
+// A comment detached from the service, a blank line before it: no description.
+
+// The comments fixture: how a leading comment becomes a description, whatever it holds.
+//
+// A second paragraph,
+// its lines joined by one space.
+service CommentsService {
+  option (bead.service) = {
+    id: 2
+    revision: 3
+    failures: "CommentsFailure"
+  };
+
+  // Holds a block's end, */, and markup: <tag>, & and "quotes", a backslash \ and an astral 😀.
+  rpc Escapes(bead.Text) returns (bead.Text) {
+    option (bead.procedure) = {id: 1};
+  }
+
+  rpc Trailing(bead.Raw) returns (bead.Raw) {
+    option (bead.procedure) = {id: 2};
+  } // A trailing comment: no description.
+
+  // A detached comment: no description.
+
+  rpc Detached(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 3};
+  }
+
+  /* A block comment,
+   * its second line. */
+  rpc Block(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 4
+      failures: ["COMMENTS_FAILURE_LATE"]
+    };
+  }
+
+  //   Indented past its marker:    its end trimmed.
+  rpc Indented(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 5};
+  }
+
+  //
+  rpc Empty(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 6};
+  }
+}
+
+// The comments fixture's failures.
+enum CommentsFailure {
+  COMMENTS_FAILURE_UNSPECIFIED = 0;
+  // Too late, on its first line;
+  // and on its second.
+  COMMENTS_FAILURE_LATE = 1;
+  COMMENTS_FAILURE_EARLY = 2; // A trailing comment: no description.
+}

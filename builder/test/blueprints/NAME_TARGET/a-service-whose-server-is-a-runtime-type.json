@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/serviceName",
+      "value": "Http"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_TARGET",
+      "pointer": "/services/0/serviceName"
+    }
+  ]
+}

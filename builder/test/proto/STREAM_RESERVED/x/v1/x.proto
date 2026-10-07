@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A stream, which Bead keeps for its own streams.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Echo(stream bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 1};
+  }
+}

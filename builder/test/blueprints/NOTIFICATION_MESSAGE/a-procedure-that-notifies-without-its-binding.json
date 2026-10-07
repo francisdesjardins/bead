@@ -1,0 +1,14 @@
+{
+  "patch": [
+    {
+      "op": "remove",
+      "path": "/services/0/procedures/9/notification"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NOTIFICATION_MESSAGE",
+      "pointer": "/services/0/procedures/9/notification"
+    }
+  ]
+}

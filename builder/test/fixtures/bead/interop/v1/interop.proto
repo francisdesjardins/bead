@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package bead.interop.v1;
+
+import "bead/options.proto";
+
+option csharp_namespace = "Bead.Interop";
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Bead's interop service: the procedures every implementation's interop server offers alike, what
+// each takes, answers and admits stated in interop-service.json.
+service InteropService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+    failures: "InteropFailure"
+  };
+
+  // Answers its request's payload.
+  rpc Echo(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 1};
+  }
+
+  // Answers an application failure, on purpose.
+  rpc Fail(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 2
+      failures: ["INTEROP_FAILURE_ON_PURPOSE"]
+    };
+  }
+
+  // Answers once a delay passed, and counts the calls cancelled first.
+  rpc Slow(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 3};
+  }
+
+  // Answers how many calls to slow its connection cancelled.
+  rpc Cancellations(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 4};
+  }
+
+  // Admits nobody.
+  rpc Denied(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 5
+      admission: {hook: "nobody"}
+    };
+  }
+
+  // Throws before it answers.
+  rpc Broken(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 6};
+  }
+
+  // Answers a string of the length asked for.
+  rpc Bytes(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 7};
+  }
+
+  // Answers what its client's clock answers.
+  rpc Ask(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 8};
+  }
+
+  // Answers the time where its client is.
+  rpc Clock(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 9
+      command: {}
+    };
+  }
+
+  // Notifies what tick notifies, to its call's session's subscription.
+  rpc Ticks(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 10
+      notifies: {message: "bead.Json"}
+      failures: ["INTEROP_FAILURE_ON_PURPOSE"]
+    };
+  }
+
+  // Notifies a value to the subscription to ticks.
+  rpc Tick(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 11};
+  }
+
+  // Opens a new session for its connection.
+  rpc Login(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 12};
+  }
+
+  // Ends its connection's session.
+  rpc Logout(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 13
+      admission: {
+        session: {}
+      }
+    };
+  }
+
+  // Answers the name its call's session holds.
+  rpc Whoami(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 14
+      admission: {
+        session: {}
+      }
+    };
+  }
+
+  // Registers its caller's connection as a destination of the relay.
+  rpc Register(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 15
+      failures: ["INTEROP_FAILURE_REGISTERED_ALREADY"]
+    };
+  }
+
+  // Takes out the destination its caller's connection registered last.
+  rpc Unregister(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 16};
+  }
+
+  // Ends a credential's session on every connection that keeps it.
+  rpc EndSession(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 17};
+  }
+
+  // Ends every credential's session of an issuer.
+  rpc EndSessionsOf(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 18};
+  }
+}
+
+// The interop service's own failures, by the codes its procedures answer.
+enum InteropFailure {
+  INTEROP_FAILURE_UNSPECIFIED = 0;
+  // This procedure fails, on purpose.
+  INTEROP_FAILURE_ON_PURPOSE = 7;
+  // That destination is registered already.
+  INTEROP_FAILURE_REGISTERED_ALREADY = 8;
+}

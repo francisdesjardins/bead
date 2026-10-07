@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// An rpc of a Bead service without (bead.procedure): its id cannot be guessed.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Echo(bead.Json) returns (bead.Json);
+}

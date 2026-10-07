@@ -7,15 +7,15 @@
 //   node tools/release.mjs tag [<version>]
 //
 // `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
-// moves the TypeScript package's version, the C# side's <Version> and its lock files' project
-// ranges, each document's line and every conformance file's repeat of it; runs the generators; dates
-// [Unreleased] as the version, under a new empty one, and links it; then runs the gate as a
-// release, spec/check.py and the root's format check, naming one whose tool is absent. A <move> is
-// x.y.z, patch, minor, major or same, from the document's last release. Run again, it re-dates,
-// regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*: tags
-// spec-v… and debugging-v… at the commit v<version> tags, for each document whose version no tag
-// names yet; runs the gate as main's run will, then over the branch checked out; and prints the one
-// push. Exit 1 on a refusal; exit 2 on a usage error.
+// moves the TypeScript package's version and the builder's where the tree has one, the C# side's
+// <Version> and its lock files' project ranges, each document's line and every conformance file's
+// repeat of it; runs the generators; dates [Unreleased] as the version, under a new empty one, and
+// links it; then runs the gate as a release, spec/check.py and the root's format check, naming one
+// whose tool is absent. A <move> is x.y.z, patch, minor, major or same, from the document's last
+// release. Run again, it re-dates, regenerates and checks. `tag`, after the finish, <version>
+// defaulting to the newest v*: tags spec-v… and debugging-v… at the commit v<version> tags, for
+// each document whose version no tag names yet; runs the gate as main's run will, then over the
+// branch checked out; and prints the one push. Exit 1 on a refusal; exit 2 on a usage error.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import {
+  BUILDER,
   CHANGELOG,
   DOCUMENTS,
   LOCKS,
@@ -317,6 +318,9 @@ export const prepare = (root, options = {}) => {
     }
   };
   stage(PACKAGE, (text) => withPackageVersion(text, product));
+  if (readText(join(root, BUILDER)) !== null) {
+    stage(BUILDER, (text) => withPackageVersion(text, product));
+  }
   stage(PROPS, (text) => withPropsVersion(text, product));
   for (const document of DOCUMENTS.filter((document) => document.id in plan.documents)) {
     stage(document.path, (text) => withStatedVersion(text, plan.documents[document.id]));

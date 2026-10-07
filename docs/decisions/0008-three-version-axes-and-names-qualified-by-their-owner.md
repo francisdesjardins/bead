@@ -54,8 +54,9 @@ promise to be decided at once, on the day of the first release.
    least when a conformance file, a top-level key of one or a property of its schemas was added,
    and one whose files did not keeps it.
 
-3. **The product**: each implementation's releases, under Semantic Versioning, at `0.x`, tagged
-   `v*`, one version in `package.json` and `Directory.Build.props`, cut from a `release/*` branch
+3. **The product**: each implementation's releases and the builder's, under Semantic Versioning, at
+   `0.x`, tagged `v*`, one version in the TypeScript side's and the builder's `package.json` and in
+   `Directory.Build.props`, cut from a `release/*` branch
    ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
 
 **A name is qualified by its owner.** The TypeScript package is `@francisdesjardins/bead` on npm.

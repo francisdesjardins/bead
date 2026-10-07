@@ -1,0 +1,7 @@
+{
+  "a-fraction.json": [{ "pointer": "/serviceId", "line": 2, "column": 16 }],
+  "a-member-twice.json": [{ "pointer": "/format", "line": 3, "column": 3 }],
+  "a-surrogate-alone-in-a-name.json": [{ "pointer": "/\uDC00", "line": 2, "column": 13 }],
+  "a-surrogate-alone-in-a-value.json": [{ "pointer": "/description", "line": 2, "column": 18 }],
+  "an-exponent.json": [{ "pointer": "/serviceId", "line": 2, "column": 16 }]
+}

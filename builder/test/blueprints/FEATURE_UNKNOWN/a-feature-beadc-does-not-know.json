@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["typed-json"]
+    }
+  ],
+  "findings": [
+    {
+      "rule": "FEATURE_UNKNOWN",
+      "pointer": "/requires/0"
+    }
+  ]
+}

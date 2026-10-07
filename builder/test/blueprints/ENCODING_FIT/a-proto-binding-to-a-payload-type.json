@@ -1,0 +1,18 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "bead.Json"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "ENCODING_FIT",
+      "pointer": "/services/0/procedures/0/request"
+    }
+  ]
+}
