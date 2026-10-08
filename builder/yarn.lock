@@ -137,6 +137,7 @@ __metadata:
     "@bufbuild/buf": "npm:1.73.0"
     "@bufbuild/protobuf": "npm:2.16.0"
     "@bufbuild/protoc-gen-es": "npm:2.16.0"
+    "@bufbuild/protoplugin": "npm:2.16.0"
     "@playwright/test": "npm:1.63.0"
     "@types/node": "npm:^24.19.0"
     ajv: "npm:8.20.0"

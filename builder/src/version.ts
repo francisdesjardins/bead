@@ -1,8 +1,8 @@
 // ── Version ───────────────────────────────────────────────────────────────────
 
-// What beadc is and what it writes for: its own version, the product's, from its package; the
-// blueprint's format; the spec's version, read from spec/spec.md in place, which a blueprint it writes
-// repeats; and the number Bead's options take.
+// What beadc is and what it writes for: its own version, the product's, from its package; its
+// tools', each from its own package; the blueprint's format; the spec's version, read from
+// spec/spec.md in place, which a blueprint it writes repeats; and the number Bead's options take.
 
 // dependencies
 
@@ -17,8 +17,13 @@ export const FORMAT = 'bead-blueprint/1';
 
 // ! the number bead/options.proto's three extensions take, which version.test.ts holds them to:
 // 58500 until the first publication takes a number of protobuf's global registry, here, in
-// options.proto and in options_pb.ts, regenerated (decisions 0008 and 0022)
+// options.proto and in options_pb.ts, regenerated, and in the goldens that embed it,
+// test/golden/typescript/bead/options_pb.ts and messages_pb.ts, written again (decisions 0008 and
+// 0022)
 export const OPTIONS_NUMBER = 58500;
+
+/** The oldest `@bufbuild/protobuf` protoc-gen-es's output runs on, with `erasable_syntax`. */
+export const PROTOBUF_FLOOR = '2.13.0';
 
 // the spec's line that states its version, as spec/generators/spec_version.py reads it
 const SPEC_VERSION_LINE = /^\*\*Version: (\d+\.\d+\.\d+)\*\*/mu;
@@ -32,9 +37,10 @@ const SPEC = new URL('../../spec/', import.meta.url);
 const require = createRequire(import.meta.url);
 
 // a package's own `version`, its package.json found by walking up from the file it resolves to, since
-// a package that declares `exports` may not export its package.json
-const packageVersionOf = (name: string): string => {
-  let folder = dirname(require.resolve(name));
+// a package that declares `exports` may not export its package.json; `entry`, a module of it, for a
+// package that resolves to none by its name alone
+const packageVersionOf = (name: string, entry: string = name): string => {
+  let folder = dirname(require.resolve(entry));
 
   for (;;) {
     try {
@@ -76,6 +82,11 @@ export const beadcVersion = (): string => {
   return declared.version;
 };
 
+/** protoc-gen-es's version, which writes a project's messages and names itself in their header. */
+export const protocGenEsVersion = (): string => {
+  return packageVersionOf('@bufbuild/protoc-gen-es', '@bufbuild/protoc-gen-es/bin/protoc-gen-es');
+};
+
 /** The version of spec/spec.md, from its `**Version: x.y.z**` line. */
 export const specVersion = (): string => {
   const stated = SPEC_VERSION_LINE.exec(readFileSync(specUrlOf('spec.md'), 'utf8'))?.[1];
@@ -93,6 +104,8 @@ export const versionLines = (): readonly string[] => {
     `beadc ${beadcVersion()}`,
     `buf ${packageVersionOf('@bufbuild/buf')}`,
     `protobuf-es ${packageVersionOf('@bufbuild/protobuf')}`,
+    `protoplugin ${packageVersionOf('@bufbuild/protoplugin')}`,
+    `protoc-gen-es ${protocGenEsVersion()}`,
     `format ${FORMAT}`,
     `spec ${specVersion()}`,
     `options ${String(OPTIONS_NUMBER)}`,

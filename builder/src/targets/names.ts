@@ -7,24 +7,34 @@
 
 // constants
 
-/** A service's generated classes, after its name: TypeScript's and C#'s alike. */
+/**
+ * The types a service gives, after its name, in every official target: its descriptors, its
+ * catalogue, its server and its options, its client and its options, and TypeScript's resolvers.
+ */
 export const CLASS_SUFFIXES: readonly string[] = Object.freeze([
   'Procedures',
   'Failures',
   'Server',
   'ServerOptions',
   'Client',
+  'ClientOptions',
+  'Resolvers',
 ]);
 
 /**
  * The procedure names TypeScript's generated client refuses: its own members, `on` and
- * `notifications`; `then`, which would make it a thenable; and `Object.prototype`'s.
+ * `notifications`; `then`, which would make it a thenable; and the seven of `Object.prototype` a
+ * procedure's name can take, which a member would shadow, or, for `constructor`, not compile.
  */
 export const TYPESCRIPT_PROCEDURE_NAMES: ReadonlySet<string> = new Set([
   'on',
   'notifications',
   'then',
   'constructor',
+  'hasOwnProperty',
+  'isPrototypeOf',
+  'propertyIsEnumerable',
+  'toLocaleString',
   'toString',
   'valueOf',
 ]);

@@ -4,13 +4,18 @@ import { expect, test } from '@playwright/test';
 
 import { checkRoots } from '../../check.ts';
 import { formOf } from '../../model/form.ts';
+import { specVersion } from '../../version.ts';
 import { descriptionOf } from '../comments.ts';
 import { COMMENTS_PROTO, deriveRoot, toCrlf } from './derive.ts';
 
 const GOLDEN = new URL('../../../test/golden/comments.blueprint.json', import.meta.url);
 
 test('the comments fixture gives its golden blueprint, in LF, in CRLF and after a byte order mark', () => {
-  const golden = readFileSync(GOLDEN, 'utf8');
+  // a golden holds what the code writes, and a release moves the spec's version: today's, then
+  const golden = readFileSync(GOLDEN, 'utf8').replace(
+    /"specVersion": "[^"]*"/u,
+    `"specVersion": "${specVersion()}"`
+  );
   const variants = [
     [
       'lf',

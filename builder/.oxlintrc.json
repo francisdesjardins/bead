@@ -37,6 +37,9 @@
     // protoc-gen-es's, committed as it writes it: `tools/check-options.mjs` holds it to its
     // generator
     "**/*_pb.ts",
+    // the target's goldens, bytes a test compares and the type-check compiles as a consumer would:
+    // their lint is the TypeScript side's own, over the code it generates
+    "test/golden/**",
     ".yarn/**"
   ]
 }

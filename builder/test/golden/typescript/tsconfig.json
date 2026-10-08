@@ -1,0 +1,18 @@
+{
+  // The goldens as a consumer compiles them: the TypeScript side's strictness and its Bundler
+  // resolution, the runtime by its package's name mapped to its source, @bufbuild/protobuf and
+  // Node's types from the builder's install. Their relative imports name their `.ts`, as
+  // `importExtension` writes them by default. `yarn type-check` runs it after the builder's own.
+  "extends": "../../../../implementations/typescript/tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
+    "types": ["node"],
+    "paths": {
+      "@francisdesjardins/bead/service": [
+        "../../../../implementations/typescript/src/service/service.ts"
+      ]
+    }
+  },
+  "include": ["**/*.ts"]
+}

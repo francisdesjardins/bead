@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package bead.messages.v1;
+
+import "bead/options.proto";
+import "google/protobuf/timestamp.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Greets, in messages of its own.
+service GreeterService {
+  option (bead.service) = {
+    id: 3
+    revision: 1
+    failures: "GreeterFailure"
+  };
+
+  // Says hello.
+  rpc SayHello(Greeting) returns (Greeting.Reply) {
+    option (bead.procedure) = {
+      id: 1
+      failures: ["GREETER_FAILURE_NOBODY"]
+    };
+  }
+
+  // Notifies the time, as a well-known type.
+  rpc Watch(Greeting) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 2
+      notifies: {message: "google.protobuf.Timestamp"}
+    };
+  }
+
+  // Asks the client its name.
+  rpc Name(bead.Text) returns (Greeting) {
+    option (bead.procedure) = {
+      id: 3
+      command: {}
+    };
+  }
+}
+
+// A greeting.
+message Greeting {
+  // Its answer, nested.
+  message Reply {
+    string text = 1;
+  }
+
+  string name = 1;
+  google.protobuf.Timestamp at = 2;
+}
+
+// The greeter's failures.
+enum GreeterFailure {
+  GREETER_FAILURE_UNSPECIFIED = 0;
+  // Nobody to greet.
+  GREETER_FAILURE_NOBODY = 1;
+}
