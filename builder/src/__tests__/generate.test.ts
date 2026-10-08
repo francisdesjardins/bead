@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,7 +16,7 @@ import { expect, test } from '@playwright/test';
 import { checkBlueprintFile, checkRoots, type IChecked } from '../check.ts';
 import { type IConfig, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
-import { differencesOf, EDITOR_COPY, planOf, writePlan } from '../generate.ts';
+import { differencesOf, EDITOR_COPY, planOf, writeEditorCopy, writePlan } from '../generate.ts';
 import { PROTOC_CSHARP_HEADER } from '../protoc.ts';
 import { needsProtoc } from './pinned.ts';
 
@@ -174,6 +182,23 @@ test("writes the editor's copy for a .proto source and never compares it", () =>
   expect(findingsOf(folder)).toEqual([
     'gen/ts/old_pb.ts: beadc generate writes no such file from this source; it takes it out',
   ]);
+});
+
+test("writes the editor's copy by its content, its mode the folder's own", () => {
+  const folder = test.info().outputPath('project');
+  const copy = join(folder, ...EDITOR_COPY.split('/'), 'bead', 'options.proto');
+
+  writeEditorCopy(folder);
+
+  expect(readFileSync(copy, 'utf8')).toBe(readFileSync(OPTIONS, 'utf8'));
+
+  // ! a copy of the file would carry its mode, 0755 in an image built from a Windows checkout:
+  // written, it takes the one any file written there takes
+  const written = join(folder, 'written');
+
+  writeFileSync(written, '');
+
+  expect(statSync(copy).mode & 0o777).toBe(statSync(written).mode & 0o777);
 });
 
 // protoc's first lines for `source`, and the namespace it writes its types in, as its C# file holds

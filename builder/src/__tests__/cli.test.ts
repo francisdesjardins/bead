@@ -102,6 +102,19 @@ test(".proto's blueprint written in its form, and its set beside it", () => {
   expect(existsSync(set)).toBe(true);
 });
 
+test('the usage names every command, init and wrapper among them', () => {
+  const run = beadc([]);
+
+  expect(run.status).toBe(2);
+
+  for (const command of ['check', 'blueprint', 'generate', 'init <name>', 'wrapper', 'version']) {
+    expect(run.stderr).toContain(`
+  ${command} `);
+  }
+
+  expect(run.stderr).toContain('--language typescript|csharp');
+});
+
 test('a call beadc cannot take exits 2', () => {
   expect(beadc([]).status).toBe(2);
   expect(beadc(['generate', INTEROP]).status).toBe(2);
