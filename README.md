@@ -308,12 +308,12 @@ against each server.
 - `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
   or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
-  package's and the builder's, the C# side's and its lock files' project ranges, and each
-  conformance file's with its document's — and each released section of the CHANGELOG stays as its
-  tag shipped it. On a release branch, a pull request into `main` and `main`, the product and each
-  changed document also move one step past their last release, the CHANGELOG is dated and linked,
-  and each document's tag stands where it belongs. `--ref` and `--base` judge the tree as another
-  ref, as CI does.
+  package's and the builder's, the C# side's and the project ranges of the C# lock files, an
+  example's among them, and each conformance file's with its document's — and each released section
+  of the CHANGELOG stays as its tag shipped it. On a release branch, a pull request into `main` and
+  `main`, the product and each changed document also move one step past their last release, the
+  CHANGELOG is dated and linked, and each document's tag stands where it belongs. `--ref` and
+  `--base` judge the tree as another ref, as CI does.
 - `node tools/check-format.mjs`: the root's own files — the README to the CI, the spec's texts and
   schemas, the tools, the workflows, an example's files outside its halves — in the layout the
   TypeScript side's formatter gives them; with `--staged`, the staged ones alone. It needs the
@@ -336,11 +336,12 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 A release moves every version in one commit, on a `release/*` branch or a `hotfix/*` one, and CI
 judges that commit, every job, before any tag exists. `tools/release.mjs prepare` moves the
 product's version in the TypeScript side's and the builder's `package.json`, in
-`Directory.Build.props`, in the C# lock files' project ranges and in the header of the code beadc
-generates, and each changed document's a step past its last release, the spec's in that header too;
-it runs the generators, dates the CHANGELOG's version and links it, then runs the gate as a release,
-`spec/check.py` and the root's format check, naming any whose tool is absent with the CI job that
-holds it.
+`Directory.Build.props`, in the C# lock files' project ranges, an example's among them, in the
+header of the code beadc generates and in the image an example's wrappers name, and each changed
+document's a step past its last release, the spec's in that header too and in the `specVersion` of
+a blueprint an example generated; it runs the generators, dates the CHANGELOG's version and links
+it, then runs the gate as a release, `spec/check.py` and the root's format check, naming any whose
+tool is absent with the CI job that holds it.
 `tools/release.mjs tag`, after the finish, tags each document whose version no tag names yet at the
 release's `v*`, runs the gate as `main`'s run will, and prints the one push:
 

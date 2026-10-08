@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { MODES, documentOf, gatherReleases } from '../check-versions.mjs';
 import {
   localDay,
   prepare,
@@ -73,17 +74,18 @@ describe('texts', () => {
     assert.throws(() => withStatedVersion('no line\n', '0.2.0'), /0 matches/);
   });
 
-  test("the lock files' project ranges move, all of them: 12 in 5 files", () => {
+  test("the lock files' project ranges move, all of them: 13 in 6 files", () => {
     const lock = (count) => {
       const ranges = Array.from({ length: count }, (_, index) => {
         return `    "Bead.P${index}": "[0.1.0, )"`;
       });
       return `{\n${ranges.join(',\n')},\n    "Other": "[0.1.0, )"\n}\n`;
     };
-    const moved = [3, 1, 3, 3, 2].map((count) => withLockRanges(lock(count), '0.2.0'));
+    // the side's five that take its projects, then the example's
+    const moved = [3, 1, 3, 3, 2, 1].map((count) => withLockRanges(lock(count), '0.2.0'));
     assert.equal(
       moved.reduce((sum, { count }) => sum + count, 0),
-      12
+      13
     );
     assert.equal(
       moved[0].text,
@@ -233,12 +235,25 @@ const LOCK = json({
   },
 });
 
+// an example's lock file, as NuGet writes it beside its project: one project of the side's that
+// takes another
+const EXAMPLE_LOCK = json({
+  version: 1,
+  dependencies: {
+    'net10.0': {
+      'bead.core': { type: 'Project' },
+      'bead.transport.websockets': { type: 'Project', dependencies: { 'Bead.Core': '[0.1.0, )' } },
+    },
+  },
+});
+
 const TREE = {
   'implementations/typescript/package.json': json({ name: 'x', version: '0.1.0', private: true }),
   'builder/package.json': json({ name: 'beadc', version: '0.1.0', private: true }),
   'implementations/dotnet/Directory.Build.props': PROPS,
   'implementations/dotnet/src/Http/packages.lock.json': LOCK,
   'implementations/dotnet/src/Core/packages.lock.json': json({ version: 2, dependencies: {} }),
+  'examples/hello/dotnet/packages.lock.json': EXAMPLE_LOCK,
   'spec/spec.md': '# Spec\n\n**Version: 0.1.0**, of layout 0xA1.\n',
   'spec/vectors.json': json({ specVersion: '0.1.0', headers: [] }),
   'spec/interop-service.json': json({ specVersion: '0.1.0', id: 'interop' }),
@@ -396,6 +411,7 @@ describe('prepare', () => {
       'spec/interop-blueprint.json',
       'spec/interop-service.json',
       'spec/vectors.json',
+      'examples/hello/dotnet/packages.lock.json',
       'implementations/dotnet/src/Http/packages.lock.json',
       'CHANGELOG.md',
     ]);
@@ -411,6 +427,10 @@ describe('prepare', () => {
       read(root, 'implementations/dotnet/src/Http/packages.lock.json'),
       LOCK.replaceAll('[0.1.0, )', '[0.2.0, )')
     );
+    assert.equal(
+      read(root, 'examples/hello/dotnet/packages.lock.json'),
+      EXAMPLE_LOCK.replace('[0.1.0, )', '[0.2.0, )')
+    );
     assert.match(
       read(root, 'CHANGELOG.md'),
       /^## \[Unreleased\]\n\n## \[0\.2\.0\] - 2026-10-07\n\n### Added\n\n- A rule\.\n/m
@@ -423,7 +443,7 @@ describe('prepare', () => {
       TREE['spec/interop-blueprint.json'].replace('"0.1.0"', '"0.2.0"')
     );
     assert.deepEqual(logged, [
-      'release 0.2.0: spec 0.2.0, debugging 0.1.0 (2 project ranges in 1 lock files)',
+      'release 0.2.0: spec 0.2.0, debugging 0.1.0 (3 project ranges in 2 lock files)',
       "owed by hand: the [0.2.0] line on the spec's 0.2.0 (spec-v0.2.0)",
       'next: git add -A && git commit -m "chore(release): 0.2.0"',
       '      git flow release publish 0.2.0, and wait for ci-ok',
@@ -470,10 +490,13 @@ describe('prepare', () => {
 
   test('no project range in any lock file is refused, before anything is written', () => {
     const root = releasing();
-    write(root, { 'implementations/dotnet/src/Http/packages.lock.json': json({ version: 2 }) });
+    write(root, {
+      'implementations/dotnet/src/Http/packages.lock.json': json({ version: 2 }),
+      'examples/hello/dotnet/packages.lock.json': json({ version: 1 }),
+    });
     assert.throws(
       () => prepared(root, { moves: { spec: 'minor' } }),
-      /no project range, "Bead\.<Name>": "\[x\.y\.z, \)", in the 2 lock files/
+      /no project range, "Bead\.<Name>": "\[x\.y\.z, \)", in the 3 lock files of implementations\/dotnet and examples/
     );
     assert.match(read(root, 'implementations/typescript/package.json'), /"version": "0\.1\.0"/);
   });
@@ -516,6 +539,80 @@ describe('prepare', () => {
       assert.ok(!plan.written.includes(path), path);
       assert.equal(read(root, path), tree[path]);
     }
+  });
+
+  test("a committed wrapper's image moves to the product's version, once", () => {
+    const root = releasing();
+    // the lines that name the image, as `beadc wrapper` writes them, and the builder's templates
+    const sh = (tag) => {
+      return `#!/usr/bin/env bash\nimage="\${BEADC_IMAGE:-ghcr.io/francisdesjardins/beadc:${tag}}"\n`;
+    };
+    const ps1 = (tag) => {
+      return `#Requires -Version 7.6\n$image = 'ghcr.io/francisdesjardins/beadc:${tag}'\n`;
+    };
+    const tree = {
+      'examples/hello/beadc.sh': sh('0.1.0'),
+      'examples/hello/beadc.ps1': ps1('0.1.0'),
+      'builder/wrappers/beadc.sh': sh('@BEADC_VERSION@'),
+      'builder/wrappers/beadc.ps1': ps1('@BEADC_VERSION@'),
+    };
+    write(root, tree);
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'feat: wrappers');
+    const { plan } = prepared(root, { moves: { spec: 'minor' } });
+    assert.equal(read(root, 'examples/hello/beadc.sh'), sh('0.2.0'));
+    assert.equal(read(root, 'examples/hello/beadc.ps1'), ps1('0.2.0'));
+    for (const path of ['builder/wrappers/beadc.sh', 'builder/wrappers/beadc.ps1']) {
+      assert.ok(!plan.written.includes(path), path);
+      assert.equal(read(root, path), tree[path]);
+    }
+    // a wrapper that names the image twice is refused, before anything is written
+    const twice = releasing();
+    write(twice, {
+      'examples/hello/beadc.sh': `${sh('0.1.0')}# ghcr.io/francisdesjardins/beadc:0.1.0\n`,
+    });
+    git(twice, 'add', '-A');
+    git(twice, 'commit', '-qm', 'feat: wrapper');
+    assert.throws(
+      () => prepared(twice, { moves: { spec: 'minor' } }),
+      /examples\/hello\/beadc\.sh: 2 matches/
+    );
+    assert.match(read(twice, 'implementations/typescript/package.json'), /"version": "0\.1\.0"/);
+  });
+
+  test("a generated blueprint's specVersion moves with the spec, and counts as none of its files", () => {
+    const root = releasing();
+    const BLUEPRINT = 'examples/hello/gen/hello.blueprint.json';
+    const OTHER = 'examples/hello/gen/other.blueprint.json';
+    const GOLDEN = 'builder/test/golden/x.blueprint.json';
+    // its specVersion last, as beadc writes it, after the services
+    const blueprint = (format, version) => {
+      return `{\n  "format": "${format}",\n  "proto": { "files": [] },\n  "services": [],\n  "specVersion": "${version}"\n}\n`;
+    };
+    const tree = {
+      [BLUEPRINT]: blueprint('bead-blueprint/1', '0.1.0'),
+      [OTHER]: blueprint('bead-manifest/1', '0.1.0'),
+      [GOLDEN]: blueprint('bead-blueprint/1', '0.1.0'),
+    };
+    write(root, tree);
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'feat: blueprints');
+    const { plan } = prepared(root, { moves: { spec: 'minor' } });
+    assert.ok(plan.written.includes(BLUEPRINT));
+    assert.equal(read(root, BLUEPRINT), blueprint('bead-blueprint/1', '0.2.0'));
+    for (const path of [OTHER, GOLDEN]) {
+      assert.ok(!plan.written.includes(path), path);
+      assert.equal(read(root, path), tree[path]);
+    }
+    // the spec's changes since v0.1.0 are its own line and rule alone, though the blueprint was
+    // added and moved since
+    assert.deepEqual(
+      documentOf(BLUEPRINT, () => tree[BLUEPRINT]),
+      []
+    );
+    assert.deepEqual(gatherReleases(root, { mode: MODES.release }).documents.spec.changed, [
+      'spec/spec.md',
+    ]);
   });
 
   test("a tree without the builder's package owes none, and prepare writes none", () => {
