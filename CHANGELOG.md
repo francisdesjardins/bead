@@ -26,6 +26,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds one to it; `beadc version`. The interop's `.proto` is its fixture, whose blueprint is
   `spec/interop-blueprint.json` byte for byte; CI's `builder` job runs its tests on Linux and on
   Windows (decision 0022).
+- `beadc generate`, the TypeScript target: from a blueprint, a `<name>_bead.ts` for each service,
+  its descriptors, its catalogue, a server class where only resolvers are written and a client class
+  holding a requester of each procedure by its name, over the service layer of
+  `@francisdesjardins/bead/service`, with protoc-gen-es's messages where a binding is `proto`;
+  `--check` writes nothing and fails on a difference (decision 0022).
+- The root's `beadc.yaml`, which generates the TypeScript side's interop; CI's `builder` job holds
+  the interop to it.
 
 ### Changed
 
@@ -38,6 +45,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds both ways.
 - `tools/check-versions.mjs` holds the builder's `package.json`, where the tree has one, at the
   product's version, and `tools/release.mjs prepare` moves it with the product's (decision 0008).
+- The TypeScript side's interop is generated from `spec/interop-blueprint.json`:
+  `interop/generated/interop_bead.ts`; its resolvers are written in `interop/handlers.ts` and its
+  credentials in `interop/credentials.ts`, and `interop/offer.ts` is gone. Its lint refuses a service
+  manager's accessor there.
+- `tools/check-format.mjs` holds `beadc.yaml`.
+- `tools/release.mjs prepare` moves the generated code's header to the release's versions.
 
 ### Removed
 

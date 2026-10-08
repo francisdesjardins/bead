@@ -1,0 +1,10 @@
+# beadc.yaml: the interop's code, generated from its blueprint (decision 0022). From the root:
+# `node builder/src/cli.ts generate` writes it, and `generate --check` holds it there.
+version: 1
+source:
+  blueprint: spec/interop-blueprint.json
+outputs:
+  - language: typescript
+    out: implementations/typescript/interop/generated
+    importExtension: none
+    runtime: ../../src/service/service

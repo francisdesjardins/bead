@@ -66,6 +66,7 @@ implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/
 builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
+beadc.yaml                    the interop's code, generated from its blueprint by beadc
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
@@ -172,8 +173,8 @@ nothing it generates is committed.
 ## The builder
 
 In `builder/`, `beadc`: it compiles a `.proto` with buf, resolves it into a blueprint, refuses a
-`.proto` or a blueprint by rule name, and writes a blueprint in its form; each language's server and
-client, generated from a blueprint, are coming
+`.proto` or a blueprint by rule name, writes a blueprint in its form, and generates a typed server
+and client: the TypeScript side's interop is its output, the C# side's to come
 ([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 Node 24.9 or later, and a toolchain of its own, as the TypeScript side's: Yarn 4 vendored under
 `.yarn/releases/`, and buf from its lockfile. Node runs `src/cli.ts` as written.
@@ -181,15 +182,22 @@ Node 24.9 or later, and a toolchain of its own, as the TypeScript side's: Yarn 4
 ```sh
 cd builder
 yarn install --immutable
-yarn check        # types, lint, format, buf's lint and format, the options' generated code
+yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code
 yarn test         # beadc's tests, the interop's .proto and its blueprint among them
 node src/cli.ts check ../spec/interop-blueprint.json
 node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 ```
 
-The last two hold the interop's blueprint to beadc's rules and to its form, as CI does. Its
-[README](builder/README.md) gives the commands, the rules and their reasons, and what each option of
-`bead/options.proto` means.
+The last two hold the interop's blueprint to beadc's rules and to its form, as CI does. The root's
+[`beadc.yaml`](beadc.yaml) names what beadc generates from that blueprint, the TypeScript side's
+interop: from the root, `generate` writes it, and `generate --check`, CI's step, holds it there:
+
+```sh
+node builder/src/cli.ts generate --check
+```
+
+Its [README](builder/README.md) gives the commands, the rules and their reasons, the TypeScript
+target, and what each option of `bead/options.proto` means.
 
 ## Interop, both ways
 
@@ -295,10 +303,11 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 A release moves every version in one commit, on a `release/*` branch or a `hotfix/*` one, and CI
 judges that commit, every job, before any tag exists. `tools/release.mjs prepare` moves the
 product's version in the TypeScript side's and the builder's `package.json`, in
-`Directory.Build.props` and in the C# lock files' project ranges, and each changed document's a step
-past its last release; it runs the generators, dates the CHANGELOG's version and links it, then runs
-the gate as a release, `spec/check.py` and the root's format check, naming any whose tool is absent
-with the CI job that holds it.
+`Directory.Build.props`, in the C# lock files' project ranges and in the header of the code beadc
+generates, and each changed document's a step past its last release, the spec's in that header too;
+it runs the generators, dates the CHANGELOG's version and links it, then runs the gate as a release,
+`spec/check.py` and the root's format check, naming any whose tool is absent with the CI job that
+holds it.
 `tools/release.mjs tag`, after the finish, tags each document whose version no tag names yet at the
 release's `v*`, runs the gate as `main`'s run will, and prints the one push:
 
@@ -331,11 +340,12 @@ runner images, `ubuntu-26.04`, and `windows-2025` for the builder's: `spec` (reg
 then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9 (install, check, test, the
 demo's static build, and the root's files under the same formatter), `dotnet` (format, test, and
 the interop both ways with `BEAD_INTEROP_REQUIRED=1`), `builder` (install, test, then beadc over
-the interop's blueprint, its rules and its form, on Node 26 on Linux and Windows and on 24.9 on
-Linux; its types, lint and format, buf's among them, on Linux), and `commits` (the subjects, the
-links, the versions, then the root's tools' own tests). `ci-ok` needs them all, so one check stands
-for every job; branch protection, which would make it the one check a branch requires, waits on
-GitHub Pro or a public repository.
+the interop's blueprint, its rules and its form, and `beadc generate --check` over the root's
+`beadc.yaml`, the TypeScript side's interop, on Node 26 on Linux and Windows and on 24.9 on Linux;
+its types, the goldens' among them, lint and format, buf's among them, on Linux), and `commits`
+(the subjects, the links, the versions, then the root's tools' own tests). `ci-ok` needs them all,
+so one check stands for every job; branch protection, which would make it the one check a branch
+requires, waits on GitHub Pro or a public repository.
 
 ## Contributing
 

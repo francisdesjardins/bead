@@ -1,0 +1,23 @@
+import { readFileSync } from 'node:fs';
+
+import { expect, test } from '@playwright/test';
+
+import { DEFAULT_RUNTIME, IMPORT_EXTENSIONS, Messages } from '../options.ts';
+
+const PACKAGE = new URL('../../../../../implementations/typescript/package.json', import.meta.url);
+
+test("the default runtime is the service layer the TypeScript side's package exports", () => {
+  const declared = JSON.parse(readFileSync(PACKAGE, 'utf8')) as {
+    name: string;
+    exports: Record<string, string>;
+  };
+  const subpath = DEFAULT_RUNTIME.slice(declared.name.length);
+
+  expect(DEFAULT_RUNTIME.startsWith(`${declared.name}/`)).toBe(true);
+  expect(declared.exports[`.${subpath}`]).toBe('./src/service/service.ts');
+});
+
+test("an output's extensions and messages, in beadc.yaml's words", () => {
+  expect(IMPORT_EXTENSIONS).toEqual(['none', 'js', 'ts']);
+  expect(Object.values(Messages)).toEqual(['generate', 'external']);
+});

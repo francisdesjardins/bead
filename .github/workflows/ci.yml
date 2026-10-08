@@ -65,9 +65,10 @@ jobs:
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
-  # examples, the generated `Probe` held to its generator, then its tests. The interop against the C#
-  # server runs in the .NET job, the only one with both runtimes. On the current line and on the
-  # floor `engines.node` declares, so the floor holds by a run.
+  # examples, the generated `Probe` held to its generator, the generated interop's types and lint,
+  # then its tests. The interop against the C# server runs in the .NET job, the only one with both
+  # runtimes. On the current line and on the floor `engines.node` declares, so the floor holds by a
+  # run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
@@ -152,12 +153,14 @@ jobs:
         working-directory: implementations/typescript
 
   # ── Builder ──────────────────────────────────────────────────────────────────
-  # beadc's own gate, from builder/, its toolchain its own. On Linux: types, lint, format, buf's lint
-  # and format over its options and its fixtures, and the options' generated code held to its
-  # generator, none of which a platform moves. On every leg: its tests, the interop's .proto among
-  # them, whose blueprint is the spec's byte for byte in either line ending, then beadc itself over
-  # the interop's blueprint, its rules and its form. On Windows, where buf is another binary, on the
-  # current line; on Linux, on the floor `engines.node` declares too.
+  # beadc's own gate, from builder/, its toolchain its own. On Linux: types, the goldens' types,
+  # lint, format, buf's lint and format over its options and its fixtures, and the options'
+  # generated code held to its generator, none of which a platform moves. On every leg: its tests,
+  # the interop's .proto among them, whose blueprint is the spec's byte for byte in either line
+  # ending, then beadc itself over the interop's blueprint, its rules and its form, then the
+  # TypeScript side's interop to what beadc generates from the root's `beadc.yaml`. On Windows,
+  # where buf is another binary, on the current line; on Linux, on the floor `engines.node` declares
+  # too.
   builder:
     name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
@@ -198,6 +201,9 @@ jobs:
         run: node src/cli.ts check ../spec/interop-blueprint.json
       - name: The interop's blueprint, in its form
         run: node src/cli.ts blueprint --check ../spec/interop-blueprint.json
+      - name: The TypeScript side's interop, what beadc generates from its blueprint
+        working-directory: .
+        run: node builder/src/cli.ts generate --check
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are

@@ -1,8 +1,9 @@
 // ── Config ────────────────────────────────────────────────────────────────────
 
 // `beadc.yaml`, at a project's root: its `version`, its `source` — `.proto` roots, or a blueprint —
-// and where `beadc blueprint` writes. Every path stays under the folder that holds it, since the
-// image sees nothing else; a key beadc does not read is refused, never left unchecked.
+// where `beadc blueprint` writes, and the `outputs` `beadc generate` writes, a language and a folder
+// each. Every path stays under the folder that holds it, since the image sees nothing else; a key
+// beadc does not read is refused, never left unchecked.
 
 // dependencies
 
@@ -12,18 +13,41 @@ import nodePath, { type PlatformPath } from 'node:path';
 import { parse } from 'yaml';
 
 import { InputError } from './diagnostics.ts';
+import {
+  DEFAULT_RUNTIME,
+  IMPORT_EXTENSIONS,
+  type ImportExtension,
+  Messages,
+} from './targets/typescript/options.ts';
 
 // types
 
 /** Where a project's blueprint is read from: its `.proto` roots, or a blueprint's file. */
 export type Source = { readonly proto: readonly string[] } | { readonly blueprint: string };
 
+/** A TypeScript output: its folder, and how its files import. */
+export interface ITypeScriptOutput {
+  readonly language: 'typescript';
+  readonly out: string;
+  readonly importExtension: ImportExtension;
+  /** A package's name, or a path relative to `out` without its extension. */
+  readonly runtime: string;
+  readonly messages: Messages;
+  /** Where another generator writes the messages, for `external`. */
+  readonly messagesOut?: string;
+}
+
+/** An output `beadc generate` writes. */
+export type Output = ITypeScriptOutput;
+
 /** `beadc.yaml`, read, each path resolved against its folder. */
 export interface IConfig {
   readonly folder: string;
   readonly source: Source;
-  /** Where `beadc blueprint` writes, for a `.proto` source. */
+  /** Where `beadc blueprint` writes, for a `.proto` source; `beadc generate` writes it too. */
   readonly blueprint?: string;
+  /** What `beadc generate` writes, when `beadc.yaml` names any. */
+  readonly outputs?: readonly Output[];
 }
 
 // constants
@@ -31,8 +55,21 @@ export interface IConfig {
 /** The file beadc reads its project from. */
 export const CONFIG_FILE = 'beadc.yaml';
 
-const KEYS = new Set(['version', 'source', 'blueprint']);
+const KEYS = new Set(['version', 'source', 'blueprint', 'outputs']);
 const SOURCE_KEYS = new Set(['proto', 'blueprint']);
+const TYPESCRIPT_KEYS = new Set([
+  'language',
+  'out',
+  'importExtension',
+  'runtime',
+  'messages',
+  'messagesOut',
+]);
+const MESSAGES: readonly unknown[] = Object.values(Messages);
+
+// a path an import names, relative to the importer, and the extension it would name itself
+const RELATIVE = /^\.{1,2}\//u;
+const EXTENSION = /\.[cm]?[jt]s$/u;
 
 // helpers
 
@@ -82,7 +119,7 @@ export const parseConfig = (
   }
 
   if (!isRecord(value)) {
-    return refuse('a mapping of version, source and blueprint is due');
+    return refuse('a mapping of version, source, blueprint and outputs is due');
   }
 
   for (const key of Object.keys(value)) {
@@ -108,6 +145,87 @@ export const parseConfig = (
 
     return path.resolve(folder, given);
   };
+  // each output, its keys read or refused, its folders under this one
+  const outputOf = (given: unknown, at: number): Output => {
+    const key = `outputs[${String(at)}]`;
+
+    if (!isRecord(given)) {
+      return refuse(`${key} is a mapping of language, out and the language's keys`);
+    }
+
+    if (given['language'] === 'csharp') {
+      return refuse(`${key}: no target csharp in this beadc, which writes typescript alone`);
+    }
+
+    if (given['language'] !== 'typescript') {
+      return refuse(`${key}.language: typescript, the one target of this beadc`);
+    }
+
+    for (const name of Object.keys(given)) {
+      if (!TYPESCRIPT_KEYS.has(name)) {
+        refuse(`${key}.${name}, a key beadc does not read`);
+      }
+    }
+
+    const importExtension = given['importExtension'] ?? 'ts';
+    const runtime = given['runtime'] ?? DEFAULT_RUNTIME;
+    const messages = given['messages'] ?? Messages.GENERATE;
+
+    if (!(IMPORT_EXTENSIONS as readonly unknown[]).includes(importExtension)) {
+      refuse(`${key}.importExtension is none, js or ts`);
+    }
+
+    if (!isText(runtime) || path.isAbsolute(runtime)) {
+      return refuse(`${key}.runtime is a package's name, or a path relative to out`);
+    }
+
+    if (RELATIVE.test(runtime) && EXTENSION.test(runtime)) {
+      refuse(`${key}.runtime: ${runtime} names no extension; importExtension gives it`);
+    }
+
+    if (!MESSAGES.includes(messages)) {
+      refuse(`${key}.messages is generate or external`);
+    }
+
+    if ((messages === Messages.EXTERNAL) !== 'messagesOut' in given) {
+      refuse(`${key}.messagesOut names where messages: external finds them, and only then`);
+    }
+
+    return {
+      language: 'typescript',
+      out: resolved(given['out'], `${key}.out`),
+      importExtension: importExtension as ImportExtension,
+      runtime,
+      messages: messages as Messages,
+      ...('messagesOut' in given
+        ? { messagesOut: resolved(given['messagesOut'], `${key}.messagesOut`) }
+        : {}),
+    };
+  };
+  const outputsOf = (): { outputs?: readonly Output[] } => {
+    if (!('outputs' in value)) {
+      return {};
+    }
+
+    const given = value['outputs'];
+
+    if (!Array.isArray(given) || given.length === 0) {
+      return refuse('outputs lists one output at least, or is left out');
+    }
+
+    const outputs = given.map(outputOf);
+    const folders = new Set(
+      outputs.map((output) => {
+        return path.resolve(output.out);
+      })
+    );
+
+    if (folders.size < outputs.length) {
+      refuse('two outputs write one folder');
+    }
+
+    return { outputs };
+  };
   const source = value['source'];
 
   if (!isRecord(source)) {
@@ -129,7 +247,11 @@ export const parseConfig = (
       refuse('blueprint, an output, beside a blueprint as the source, which is that file');
     }
 
-    return { folder, source: { blueprint: resolved(source['blueprint'], 'source.blueprint') } };
+    return {
+      folder,
+      source: { blueprint: resolved(source['blueprint'], 'source.blueprint') },
+      ...outputsOf(),
+    };
   }
 
   const given = source['proto'];
@@ -141,6 +263,7 @@ export const parseConfig = (
     folder,
     source: { proto: roots },
     ...('blueprint' in value ? { blueprint: resolved(value['blueprint'], 'blueprint') } : {}),
+    ...outputsOf(),
   };
 };
 

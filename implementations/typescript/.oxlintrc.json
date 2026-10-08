@@ -81,6 +81,78 @@
       }
     },
     {
+      // The interop's code is what beadc generates from its blueprint (decision 0022): the files
+      // written by hand beside it register their resolvers and call through its server and client,
+      // never through a service manager's accessor. The generated folder is outside the pattern.
+      // ! An override's options replace an earlier one's for the same rule: the clock's entries
+      // above are repeated here, and move with them
+      "files": ["interop/*.ts"],
+      "rules": {
+        "no-restricted-properties": [
+          "error",
+          {
+            "object": "Date",
+            "property": "now",
+            "message": "the wall clock is the clock given's: `clock.Date.now()`"
+          },
+          {
+            "object": "performance",
+            "property": "now",
+            "message": "the monotonic reading is the clock given's: `clock.performance.now()`"
+          },
+          {
+            "object": "globalThis",
+            "property": "setTimeout",
+            "message": "a timer runs on the clock given: `clock.setTimeout`"
+          },
+          {
+            "object": "globalThis",
+            "property": "clearTimeout",
+            "message": "a timer runs on the clock given: `clock.clearTimeout`"
+          },
+          {
+            "object": "globalThis",
+            "property": "setInterval",
+            "message": "a timer runs on the clock given: `clock.setInterval`"
+          },
+          {
+            "object": "globalThis",
+            "property": "clearInterval",
+            "message": "a timer runs on the clock given: `clock.clearInterval`"
+          },
+          {
+            "object": "AbortSignal",
+            "property": "timeout",
+            "message": "a signal's timeout is a timer, which runs on the clock given: `clock.setTimeout` and an `AbortController`"
+          },
+          {
+            "property": "getRequest",
+            "message": "the interop calls through its generated client: `InteropClient`"
+          },
+          {
+            "property": "getRequestResolver",
+            "message": "the interop registers through its generated server: `InteropServer.on`"
+          },
+          {
+            "property": "getNotification",
+            "message": "the interop subscribes through its generated client: `InteropClient.notifications`"
+          },
+          {
+            "property": "getNotificationResolver",
+            "message": "the interop notifies through its generated server: `InteropServer.notify`"
+          },
+          {
+            "property": "getCommand",
+            "message": "the interop commands through its generated server: `InteropServer.command`"
+          },
+          {
+            "property": "getCommandResolver",
+            "message": "the interop answers a command through its generated client: `InteropClient.on`"
+          }
+        ]
+      }
+    },
+    {
       // a test may wait on the platform's own timers, or test one: the clock it gives Bead is its
       // own
       "files": ["**/__tests__/**"],

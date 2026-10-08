@@ -19,6 +19,7 @@ const ROOT = [
   'README.md',
   'CHANGELOG.md',
   'CLAUDE.md',
+  'beadc.yaml',
   '.claude/workflows',
   'docs',
   'spec/spec.md',

@@ -14,12 +14,10 @@ import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
-import {
-  INTEROP_SERVICE,
-  JSON_SERIALIZER,
-  offerInteropClient,
-  procedureOf,
-} from '../../../interop/offer';
+import { INTEROP_SERVICE } from '../../../interop/credentials';
+import { InteropClient, InteropProcedures } from '../../../interop/generated/interop_bead';
+import { offerInteropClient } from '../../../interop/handlers';
+import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import type { FetchLike } from '../../transport/client/types';
 import { noop } from '../../transport/shared/noop';
 import { createHTTPClient, type HTTPClient } from '../http-client';
@@ -221,18 +219,20 @@ test.describe('the C# server of the interop service', () => {
   for (const { carriesTransfers, create, label, portOf } of TRANSPORTS) {
     test.describe(`over ${label}`, () => {
       let client: HTTPClient | WSClient;
+      // the interop service's client side, made once a test, unpaced unless the test made it first
+      let made: InteropClient | undefined;
 
-      /** The requester of `procedureName`, on the client's connection, its payloads JSON. */
-      const requesterOf = (procedureName: string) => {
-        return client.services.getRequest(procedureOf(procedureName), {
-          serializer: JSON_SERIALIZER,
-        });
+      /** The interop service's client side over the client's connection. */
+      const interop = (): InteropClient => {
+        made ??= new InteropClient(client);
+
+        return made;
       };
 
       /** The calls to slow the connection cancelled, once the server counted `count` of them. */
       const cancellationsReaching = async (count: number): Promise<unknown> => {
         for (let tries = 0; tries < 40; tries += 1) {
-          const counted = await requesterOf('cancellations')(null)();
+          const counted = await interop().cancellations(null)();
 
           if (counted === count) {
             return counted;
@@ -241,11 +241,12 @@ test.describe('the C# server of the interop service', () => {
           await sleep(50);
         }
 
-        return requesterOf('cancellations')(null)();
+        return interop().cancellations(null)();
       };
 
       test.beforeEach(async () => {
         client = create();
+        made = undefined;
         await client.connect({ host: HOST, port: portOf(ports) });
       });
 
@@ -254,7 +255,7 @@ test.describe('the C# server of the interop service', () => {
       });
 
       test("echo answers with its request's payload", async () => {
-        await expect(requesterOf('echo')({ a: [1, 'two', null] })()).resolves.toEqual({
+        await expect(interop().echo({ a: [1, 'two', null] })()).resolves.toEqual({
           a: [1, 'two', null],
         });
       });
@@ -263,15 +264,15 @@ test.describe('the C# server of the interop service', () => {
       test('a value outside ASCII, its members in another order, echoed equal', async () => {
         const value = { z: `José ${String.fromCodePoint(0x1f600)}`, a: [1e21, 0.000001] };
 
-        await expect(requesterOf('echo')(value)()).resolves.toStrictEqual(value);
+        await expect(interop().echo(value)()).resolves.toStrictEqual(value);
       });
 
       test('bytes answers a string of the length asked', async () => {
-        await expect(requesterOf('bytes')({ length: 1_000 })()).resolves.toBe('x'.repeat(1_000));
+        await expect(interop().bytes({ length: 1_000 })()).resolves.toBe('x'.repeat(1_000));
       });
 
       test('fail answers with its own failure, raised by the server', async () => {
-        await expect(requesterOf('fail')(null)()).rejects.toMatchObject({
+        await expect(interop().fail(null)()).rejects.toMatchObject({
           code: 7,
           detail: 'this procedure fails, on purpose',
           origin: 'peer',
@@ -281,17 +282,17 @@ test.describe('the C# server of the interop service', () => {
       });
 
       test('a procedure unknown, and a service unknown, are refused as the protocol says', async () => {
-        const unknown = { ...procedureOf('echo'), procedureId: 99 };
-        const elsewhere = { ...procedureOf('echo'), serviceId: 9 };
+        const unknown = { ...InteropProcedures.echo.procedure, procedureId: 99 };
+        const elsewhere = { ...InteropProcedures.echo.procedure, serviceId: 9 };
 
         await expect(
-          client.services.getRequest(unknown, { serializer: JSON_SERIALIZER })(null)()
+          client.services.getRequest(unknown, { serializer: PAYLOAD_CODECS.json })(null)()
         ).rejects.toMatchObject({
           code: ProtocolCode.PROCEDURE_UNKNOWN,
           scope: FailureScope.PROTOCOL,
         });
         await expect(
-          client.services.getRequest(elsewhere, { serializer: JSON_SERIALIZER })(null)()
+          client.services.getRequest(elsewhere, { serializer: PAYLOAD_CODECS.json })(null)()
         ).rejects.toMatchObject({
           code: ProtocolCode.SERVICE_UNKNOWN,
           scope: FailureScope.PROTOCOL,
@@ -300,59 +301,58 @@ test.describe('the C# server of the interop service', () => {
 
       test('an admission that refuses, a resolver that throws, and a payload that is not JSON', async () => {
         const notJson = {
-          ...JSON_SERIALIZER,
+          ...PAYLOAD_CODECS.json,
           encode: () => {
             return new Uint8Array([0xff]);
           },
         };
 
-        await expect(requesterOf('denied')(null)()).rejects.toMatchObject({
+        await expect(interop().denied(null)()).rejects.toMatchObject({
           code: ProtocolCode.ACCESS_DENIED,
           detail: 'this procedure admits nobody',
         });
-        await expect(requesterOf('broken')(null)()).rejects.toMatchObject({
+        await expect(interop().broken(null)()).rejects.toMatchObject({
           code: ProtocolCode.PROCEDURE_FAILED,
         });
         await expect(
-          client.services.getRequest(procedureOf('echo'), { serializer: notJson })(null)()
+          client.services.getRequest(InteropProcedures.echo.procedure, { serializer: notJson })(
+            null
+          )()
         ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_UNDECODABLE });
       });
 
       test('a call cancelled by its signal is cancelled at the server too', async () => {
         const controller = new AbortController();
-        const slow = requesterOf('slow')(SLOW)({ signal: controller.signal });
+        const slow = interop().slow(SLOW)({ signal: controller.signal });
 
         // a call after it answered: the server has it, where its cancel must find it — by the
         // socket's order, or by the fetch's
-        await requesterOf('echo')(null)();
+        await interop().echo(null)();
         controller.abort();
         await expect(slow).rejects.toBeInstanceOf(CancelError);
         await expect(cancellationsReaching(1)).resolves.toBe(1);
       });
 
       test('a call past its timeout is cancelled at the server too', async () => {
-        await expect(requesterOf('slow')(SLOW)({ timeout: 200 })).rejects.toBeInstanceOf(
-          TimeoutError
-        );
+        await expect(interop().slow(SLOW)({ timeout: 200 })).rejects.toBeInstanceOf(TimeoutError);
         await expect(cancellationsReaching(1)).resolves.toBe(1);
       });
 
       test('the server asks the command its client offers, and answers with what it answered', async () => {
-        offerInteropClient(client.services);
+        offerInteropClient(interop());
 
-        await expect(requesterOf('ask')(null)()).resolves.toBe('noon');
+        await expect(interop().ask(null)()).resolves.toBe('noon');
       });
 
       test('a subscription hears each tick, then a paced one each tick its callbacks settled', async () => {
-        const serializer = { ...JSON_SERIALIZER, decodeNotification: JSON_SERIALIZER.decode };
         const heard: unknown[] = [];
-        const ticks = client.services.getNotification(procedureOf('ticks'), { serializer });
+        const ticks = interop().notifications.ticks;
         const registration = await ticks(null, (value) => {
           heard.push(value);
         })();
 
-        await requesterOf('tick')({ value: 1 })();
-        await requesterOf('tick')({ value: 2 })();
+        await interop().tick({ value: 1 })();
+        await interop().tick({ value: 2 })();
         await expect
           .poll(() => {
             return heard;
@@ -362,21 +362,20 @@ test.describe('the C# server of the interop service', () => {
       });
 
       test('a paced subscription waits for its callback to settle before the next comes', async () => {
-        const serializer = { ...JSON_SERIALIZER, decodeNotification: JSON_SERIALIZER.decode };
         const heard: unknown[] = [];
         const holding = Promise.withResolvers<void>();
-        const ticks = client.services.getNotification(procedureOf('ticks'), {
-          serializer,
-          window: 1,
-        });
+
+        made = new InteropClient(client, { windows: { ticks: 1 } });
+
+        const ticks = interop().notifications.ticks;
         const registration = await ticks(null, (value) => {
           heard.push(value);
 
           return heard.length === 1 ? holding.promise : undefined;
         })();
 
-        await requesterOf('tick')({ value: 1 })();
-        await requesterOf('tick')({ value: 2 })();
+        await interop().tick({ value: 1 })();
+        await interop().tick({ value: 2 })();
         await expect
           .poll(() => {
             return heard;
@@ -394,29 +393,29 @@ test.describe('the C# server of the interop service', () => {
       });
 
       test('a session opened is learned from its answer, and its end too', async () => {
-        await expect(requesterOf('whoami')(null)()).rejects.toMatchObject({
+        await expect(interop().whoami(null)()).rejects.toMatchObject({
           code: ProtocolCode.SESSION_REQUIRED,
         });
-        await expect(requesterOf('login')({ name: 'ada' })()).resolves.toBe('ada');
+        await expect(interop().login({ name: 'ada' })()).resolves.toBe('ada');
         expect(client.router.sessionToken).toMatch(/^[\w-]{22}$/);
-        await expect(requesterOf('whoami')(null)()).resolves.toBe('ada');
-        await expect(requesterOf('logout')(null)()).resolves.toBeNull();
+        await expect(interop().whoami(null)()).resolves.toBe('ada');
+        await expect(interop().logout(null)()).resolves.toBeNull();
         expect(client.router.sessionToken).toBeUndefined();
       });
 
       test('a call presenting the session it learned runs in it, the session opened anew presented anew, and none presented once it ended', async () => {
         const presenting = { credential: { scheme: CredentialScheme.OPAQUE } } as const;
 
-        await expect(requesterOf('login')({ name: 'ada' })(presenting)).rejects.toMatchObject({
+        await expect(interop().login({ name: 'ada' })(presenting)).rejects.toMatchObject({
           code: ProtocolCode.SESSION_REQUIRED,
           origin: 'local',
         });
-        await expect(requesterOf('login')({ name: 'ada' })()).resolves.toBe('ada');
-        await expect(requesterOf('whoami')(null)(presenting)).resolves.toBe('ada');
-        await expect(requesterOf('login')({ name: 'bob' })(presenting)).resolves.toBe('bob');
-        await expect(requesterOf('whoami')(null)(presenting)).resolves.toBe('bob');
-        await expect(requesterOf('logout')(null)(presenting)).resolves.toBeNull();
-        await expect(requesterOf('whoami')(null)(presenting)).rejects.toMatchObject({
+        await expect(interop().login({ name: 'ada' })()).resolves.toBe('ada');
+        await expect(interop().whoami(null)(presenting)).resolves.toBe('ada');
+        await expect(interop().login({ name: 'bob' })(presenting)).resolves.toBe('bob');
+        await expect(interop().whoami(null)(presenting)).resolves.toBe('bob');
+        await expect(interop().logout(null)(presenting)).resolves.toBeNull();
+        await expect(interop().whoami(null)(presenting)).rejects.toMatchObject({
           code: ProtocolCode.SESSION_REQUIRED,
           origin: 'local',
         });
@@ -425,20 +424,20 @@ test.describe('the C# server of the interop service', () => {
       test('a JWT presented by default runs in its credential’s session: whoami answers its sub, and logout is refused ACCESS_DENIED', async () => {
         client.router.credential = { scheme: CredentialScheme.JWT, token: interopTokenOf('grace') };
 
-        await expect(requesterOf('login')({ name: 'ada' })()).resolves.toBe('ada');
-        await expect(requesterOf('whoami')(null)()).resolves.toBe('grace');
-        await expect(requesterOf('logout')(null)()).rejects.toMatchObject({
+        await expect(interop().login({ name: 'ada' })()).resolves.toBe('ada');
+        await expect(interop().whoami(null)()).resolves.toBe('grace');
+        await expect(interop().logout(null)()).rejects.toMatchObject({
           code: ProtocolCode.ACCESS_DENIED,
           detail: "a call in a credential's session ends no connection's session",
         });
         // the connection's session stays, a call presenting none running in it
         await expect(
-          requesterOf('whoami')(null)({ credential: { scheme: CredentialScheme.NONE } })
+          interop().whoami(null)({ credential: { scheme: CredentialScheme.NONE } })
         ).resolves.toBe('ada');
       });
 
       test('an ELSEWHERE goes over HTTP alone, its Authorization what the verifier reads: whoami answers the sub it names; over a WebSocket it fails before it goes', async () => {
-        const whoami = requesterOf('whoami')(null)({
+        const whoami = interop().whoami(null)({
           credential: { carried: 'Interop sub=ada', scheme: CredentialScheme.ELSEWHERE },
         });
 
@@ -458,30 +457,28 @@ test.describe('the C# server of the interop service', () => {
           { connectionTimeout: 2 ** 31, name: 'ada' },
           { name: 'ada', sessionTimeout: -1 },
         ]) {
-          await expect(requesterOf('login')(refused)()).rejects.toMatchObject(failed);
+          await expect(interop().login(refused)()).rejects.toMatchObject(failed);
         }
 
-        await expect(requesterOf('whoami')(null)()).rejects.toMatchObject({
+        await expect(interop().whoami(null)()).rejects.toMatchObject({
           code: ProtocolCode.SESSION_REQUIRED,
         });
-        await expect(
-          requesterOf('register')({ destination: 41, timeout: 0 })()
-        ).rejects.toMatchObject(failed);
-        await expect(requesterOf('register')({ destination: 41, timeout: 1.5 })()).resolves.toBe(
-          41
+        await expect(interop().register({ destination: 41, timeout: 0 })()).rejects.toMatchObject(
+          failed
         );
-        await expect(requesterOf('unregister')(null)()).resolves.toBe(true);
+        await expect(interop().register({ destination: 41, timeout: 1.5 })()).resolves.toBe(41);
+        await expect(interop().unregister(null)()).resolves.toBe(true);
 
         // a session timeout given ends its session once past, rounded; silence counts it alone
         await expect(
-          requesterOf('login')({
+          interop().login({
             connectionTimeout: 2 ** 31 - 1,
             name: 'ada',
             sessionTimeout: 99.6,
           })()
         ).resolves.toBe('ada');
         await sleep(400);
-        await expect(requesterOf('whoami')(null)()).rejects.toMatchObject({
+        await expect(interop().whoami(null)()).rejects.toMatchObject({
           code: ProtocolCode.SESSION_REQUIRED,
         });
       });
@@ -490,8 +487,8 @@ test.describe('the C# server of the interop service', () => {
       if (carriesTransfers) {
         test('a payload that goes as a transfer comes back as one, and so does a result too large for one envelope', async () => {
           const long = 'x'.repeat(3 * 1_048_576);
-          const echoed = await requesterOf('echo')(long)();
-          const sent = await requesterOf('bytes')({ length: 3 * 1_048_576 })();
+          const echoed = await interop().echo(long)();
+          const sent = await interop().bytes({ length: 3 * 1_048_576 })();
 
           // compared, not diffed: three mebibytes would bury a failure
           expect(echoed === long).toBe(true);

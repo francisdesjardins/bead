@@ -9,7 +9,8 @@
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect } from '@playwright/test';
-import { interopCredentialsOf, offerInterop } from '../../../../interop/offer';
+import { interopCredentialsOf } from '../../../../interop/credentials';
+import { offerInterop } from '../../../../interop/handlers';
 import { createServer } from '../../../server/server';
 import type { IServerTransportLike } from '../../../server/types';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
