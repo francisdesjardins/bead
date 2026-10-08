@@ -10,8 +10,8 @@ import type { IBlueprint } from '../../../model/blueprint.ts';
 import { applyPatch, blueprintCases } from '../../../model/__tests__/patch.ts';
 import { RULES, Severity } from '../../../rules.ts';
 import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../../version.ts';
-import type { IGeneratedFile, ITargetInput } from '../../target.ts';
-import { DEFAULT_RUNTIME, type ITypeScriptOptions, Messages } from '../options.ts';
+import { type IGeneratedFile, type ITargetInput, Messages } from '../../target.ts';
+import { DEFAULT_RUNTIME, type ITypeScriptOptions } from '../options.ts';
 import { typescriptTarget } from '../typescript.ts';
 
 const BUILDER = fileURLToPath(new URL('../../../../', import.meta.url));

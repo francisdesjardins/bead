@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 import type { IBlueprint } from '../../../model/blueprint.ts';
-import { Messages } from '../options.ts';
+import { Messages } from '../../target.ts';
 import { typescriptTarget } from '../typescript.ts';
 
 const INTEROP = new URL('../../../../../spec/interop-blueprint.json', import.meta.url);

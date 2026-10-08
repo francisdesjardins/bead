@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { expect, test } from '@playwright/test';
 
-import { DEFAULT_RUNTIME, IMPORT_EXTENSIONS, Messages } from '../options.ts';
+import { Messages } from '../../target.ts';
+import { DEFAULT_RUNTIME, IMPORT_EXTENSIONS } from '../options.ts';
 
 const PACKAGE = new URL('../../../../../implementations/typescript/package.json', import.meta.url);
 

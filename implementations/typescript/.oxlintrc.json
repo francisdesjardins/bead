@@ -83,7 +83,8 @@
     {
       // The interop's code is what beadc generates from its blueprint (decision 0022): the files
       // written by hand beside it register their resolvers and call through its server and client,
-      // never through a service manager's accessor. The generated folder is outside the pattern.
+      // never through a service manager or its accessors, as the C# side's banned-API analyzer
+      // refuses its type in interop/. The generated folder is outside the pattern.
       // ! An override's options replace an earlier one's for the same rule: the clock's entries
       // above are repeated here, and move with them
       "files": ["interop/*.ts"],
@@ -124,6 +125,10 @@
             "object": "AbortSignal",
             "property": "timeout",
             "message": "a signal's timeout is a timer, which runs on the clock given: `clock.setTimeout` and an `AbortController`"
+          },
+          {
+            "property": "services",
+            "message": "the interop reaches no service manager: its generated server and client, `InteropServer` and `InteropClient`"
           },
           {
             "property": "getRequest",

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Bead.Tests;
 using Bead.Transport.Http;
 using Bead.Transport.WebSockets;
 
@@ -90,16 +91,13 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         return document.RootElement.Clone();
     }
 
+    // a requester no generated client holds: a procedure or a service its server lacks, or a payload
+    // that is not JSON, through the service manager's own accessor
     private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(Connected client, (Procedure Procedure, IRequestSerializerClient<JsonElement, JsonElement>? Serializer) asked)
     {
         return client.Services.GetRequest(
             asked.Procedure,
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = asked.Serializer ?? InteropService.JsonAsked });
-    }
-
-    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(Connected client, string procedureName)
-    {
-        return RequesterOf(client, (InteropService.ProcedureOf(procedureName), null));
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = asked.Serializer ?? new JsonPayloads() });
     }
 
     // the calls to slow the connection cancelled, once the server counted as many as expected
@@ -109,7 +107,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         for (var tries = 0; tries < 40 && counted != count; tries += 1)
         {
-            counted = (await RequesterOf(client, "cancellations")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetInt32();
+            counted = (await client.Interop.Cancellations(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetInt32();
 
             if (counted != count)
             {
@@ -150,7 +148,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
             await client.Connect(new WebSocketConnectOptions { Host = Host, Port = port }, Cancelled);
 
-            return new Connected((client.Services, client.Router), client.DisposeAsync);
+            return new Connected(client, client.DisposeAsync);
         }
 
         var inOrder = new InOrder();
@@ -158,7 +156,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         await httpClient.Connect(new HttpConnectOptions { Host = Host, Port = httpPort }, Cancelled);
 
-        return new Connected((httpClient.Services, httpClient.Router), async () =>
+        return new Connected(httpClient, async () =>
         {
             await httpClient.DisposeAsync();
             inOrder.Dispose();
@@ -174,8 +172,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         await using var client = await ConnectedOver(transport);
 
-        Assert.Equal("{\"a\":[1,\"two\",null]}", (await RequesterOf(client, "echo")(JsonOf("{\"a\":[1,\"two\",null]}"))().WaitAsync(Patience, Cancelled)).GetRawText());
-        Assert.Equal(new string('x', 1_000), (await RequesterOf(client, "bytes")(JsonOf("{\"length\":1000}"))().WaitAsync(Patience, Cancelled)).GetString());
+        Assert.Equal("{\"a\":[1,\"two\",null]}", (await client.Interop.Echo(JsonOf("{\"a\":[1,\"two\",null]}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal(new string('x', 1_000), (await client.Interop.Bytes(JsonOf("{\"length\":1000}"))().WaitAsync(Patience, Cancelled)).GetString());
     }
 
     // the two codecs read each other's bytes: each side writes its members sorted, in UTF-8
@@ -187,7 +185,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         await using var client = await ConnectedOver(transport);
 
         var value = JsonOf("{\"z\":\"Jos\u00E9 \U0001F600\",\"a\":[1e21,0.000001]}");
-        var echoed = await RequesterOf(client, "echo")(value)().WaitAsync(Patience, Cancelled);
+        var echoed = await client.Interop.Echo(value)().WaitAsync(Patience, Cancelled);
 
         Assert.True(JsonElement.DeepEquals(value, echoed), echoed.GetRawText());
     }
@@ -199,8 +197,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         await using var client = await ConnectedOver(WebSocket);
 
         var text = new string('x', 3 * 1_048_576);
-        var echoed = await RequesterOf(client, "echo")(JsonOf($"\"{text}\""))().WaitAsync(Patience, Cancelled);
-        var sent = await RequesterOf(client, "bytes")(JsonOf("{\"length\":3145728}"))().WaitAsync(Patience, Cancelled);
+        var echoed = await client.Interop.Echo(JsonOf($"\"{text}\""))().WaitAsync(Patience, Cancelled);
+        var sent = await client.Interop.Bytes(JsonOf("{\"length\":3145728}"))().WaitAsync(Patience, Cancelled);
 
         // compared, not diffed: three mebibytes would bury a failure
         Assert.True(echoed.GetString() == text);
@@ -216,7 +214,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         var failure = await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return RequesterOf(client, "fail")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+            return client.Interop.Fail(JsonOf("null"))().WaitAsync(Patience, Cancelled);
         });
 
         Assert.Equal(7, failure.Code);
@@ -241,12 +239,12 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
             });
         }
 
-        var echo = InteropService.ProcedureOf("echo");
+        var echo = InteropProcedures.Echo.Procedure;
 
         Assert.Equal((ushort)ProtocolCode.ProcedureUnknown, (await FailureOf(RequesterOf(client, (echo with { ProcedureId = 99 }, null))(JsonOf("null")))).Code);
         Assert.Equal((ushort)ProtocolCode.ServiceUnknown, (await FailureOf(RequesterOf(client, (echo with { ServiceId = 9 }, null))(JsonOf("null")))).Code);
-        Assert.Equal("this procedure admits nobody", (await FailureOf(RequesterOf(client, "denied")(JsonOf("null")))).Detail);
-        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, (await FailureOf(RequesterOf(client, "broken")(JsonOf("null")))).Code);
+        Assert.Equal("this procedure admits nobody", (await FailureOf(client.Interop.Denied(JsonOf("null")))).Detail);
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, (await FailureOf(client.Interop.Broken(JsonOf("null")))).Code);
         Assert.Equal((ushort)ProtocolCode.PayloadUndecodable, (await FailureOf(RequesterOf(client, (echo, new NotJson()))(JsonOf("null")))).Code);
     }
 
@@ -257,11 +255,11 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         await using var client = await ConnectedOver(transport);
         using var source = new CancellationTokenSource();
-        var slow = RequesterOf(client, "slow")(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { CancellationToken = source.Token });
+        var slow = client.Interop.Slow(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { CancellationToken = source.Token });
 
         // a call after it answered: the server has it, where its cancel must find it — by the
         // socket's order, or by the handler's
-        await RequesterOf(client, "echo")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+        await client.Interop.Echo(JsonOf("null"))().WaitAsync(Patience, Cancelled);
         await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
@@ -279,7 +277,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         await Assert.ThrowsAsync<TimeoutException>(() =>
         {
-            return RequesterOf(client, "slow")(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { Timeout = TimeSpan.FromMilliseconds(200) })
+            return client.Interop.Slow(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { Timeout = TimeSpan.FromMilliseconds(200) })
                 .WaitAsync(Patience, Cancelled);
         });
         Assert.Equal(1, await CancellationsReaching(client, 1));
@@ -292,23 +290,46 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         await using var client = await ConnectedOver(transport);
 
-        InteropService.OfferClient(client.Services);
+        InteropHandlers.OfferClient(client.Interop);
 
-        Assert.Equal("\"noon\"", (await RequesterOf(client, "ask")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("\"noon\"", (await client.Interop.Ask(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
     }
 
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
-    public async Task A_subscription_hears_each_tick_and_a_paced_one_waits_for_its_callback(string transport)
+    public async Task An_unpaced_subscription_hears_each_tick(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var heard = new List<int>();
+
+        await using var registration = await client.Interop.Notifications.Ticks.Register(JsonOf("null"), (value) =>
+        {
+            lock (heard)
+            {
+                heard.Add(value.GetInt32());
+            }
+
+            return Task.CompletedTask;
+        })().WaitAsync(Patience, Cancelled);
+
+        await client.Interop.Tick(JsonOf("{\"value\":1}"))().WaitAsync(Patience, Cancelled);
+        await client.Interop.Tick(JsonOf("{\"value\":2}"))().WaitAsync(Patience, Cancelled);
+        await Heard(heard, [1, 2]);
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task A_paced_subscription_waits_for_its_callback_to_settle_before_the_next_comes(string transport)
     {
         await using var client = await ConnectedOver(transport);
 
         var heard = new List<int>();
         var holding = new TaskCompletionSource();
-        var ticks = client.Services.GetNotification(
-            InteropService.ProcedureOf("ticks"),
-            new NotificationDependencies<JsonElement, JsonElement, JsonElement> { Serializer = new JsonNotifications(), Window = 1 });
+        // its client side made first, at its window: a Bead client asks a notification at one alone
+        var ticks = client.InteropWith(new InteropWindows { Ticks = 1 }).Notifications.Ticks;
 
         await using var registration = await ticks.Register(JsonOf("null"), (value) =>
         {
@@ -320,8 +341,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
             }
         })().WaitAsync(Patience, Cancelled);
 
-        await RequesterOf(client, "tick")(JsonOf("{\"value\":1}"))().WaitAsync(Patience, Cancelled);
-        await RequesterOf(client, "tick")(JsonOf("{\"value\":2}"))().WaitAsync(Patience, Cancelled);
+        await client.Interop.Tick(JsonOf("{\"value\":1}"))().WaitAsync(Patience, Cancelled);
+        await client.Interop.Tick(JsonOf("{\"value\":2}"))().WaitAsync(Patience, Cancelled);
         await Heard(heard, [1]);
         await Task.Delay(100, Cancelled);
         Assert.Equal([1], Snapshot(heard));
@@ -338,14 +359,14 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return RequesterOf(client, "whoami")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+            return client.Interop.Whoami(JsonOf("null"))().WaitAsync(Patience, Cancelled);
         });
 
         Assert.Equal((ushort)ProtocolCode.SessionRequired, refused.Code);
-        Assert.Equal("\"ada\"", (await RequesterOf(client, "login")(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("\"ada\"", (await client.Interop.Login(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
         Assert.NotNull(client.Router.SessionToken);
-        Assert.Equal("\"ada\"", (await RequesterOf(client, "whoami")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
-        await RequesterOf(client, "logout")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+        Assert.Equal("\"ada\"", (await client.Interop.Whoami(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        await client.Interop.Logout(JsonOf("null"))().WaitAsync(Patience, Cancelled);
         Assert.Null(client.Router.SessionToken);
     }
 
@@ -358,29 +379,29 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         var presenting = new RequestOptions { Credential = Credential.Opaque() };
 
-        async Task<string> Answered((string ProcedureName, string Payload) call)
+        async Task<string> Answered((Func<JsonElement, BoundCall<JsonElement>> Requester, string Payload) call)
         {
-            return (await RequesterOf(client, call.ProcedureName)(JsonOf(call.Payload))(presenting).WaitAsync(Patience, Cancelled)).GetRawText();
+            return (await call.Requester(JsonOf(call.Payload))(presenting).WaitAsync(Patience, Cancelled)).GetRawText();
         }
 
-        async Task<FailureException> Refused(string procedureName)
+        async Task<FailureException> Refused(Func<JsonElement, BoundCall<JsonElement>> requester)
         {
             return await Assert.ThrowsAsync<FailureException>(() =>
             {
-                return RequesterOf(client, procedureName)(JsonOf("null"))(presenting).WaitAsync(Patience, Cancelled);
+                return requester(JsonOf("null"))(presenting).WaitAsync(Patience, Cancelled);
             });
         }
 
-        var before = await Refused("login");
+        var before = await Refused(client.Interop.Login);
 
         Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (before.Code, before.Origin));
-        Assert.Equal("\"ada\"", (await RequesterOf(client, "login")(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
-        Assert.Equal("\"ada\"", await Answered(("whoami", "null")));
-        Assert.Equal("\"bob\"", await Answered(("login", "{\"name\":\"bob\"}")));
-        Assert.Equal("\"bob\"", await Answered(("whoami", "null")));
-        Assert.Equal("null", await Answered(("logout", "null")));
+        Assert.Equal("\"ada\"", (await client.Interop.Login(JsonOf("{\"name\":\"ada\"}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("\"ada\"", await Answered((client.Interop.Whoami, "null")));
+        Assert.Equal("\"bob\"", await Answered((client.Interop.Login, "{\"name\":\"bob\"}")));
+        Assert.Equal("\"bob\"", await Answered((client.Interop.Whoami, "null")));
+        Assert.Equal("null", await Answered((client.Interop.Logout, "null")));
 
-        var ended = await Refused("whoami");
+        var ended = await Refused(client.Interop.Whoami);
 
         Assert.Equal(((ushort)ProtocolCode.SessionRequired, FailureOrigin.Local), (ended.Code, ended.Origin));
     }
@@ -402,18 +423,18 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         foreach (var refused in new[] { "{\"name\":\"ada\",\"sessionTimeout\":0.4}", "{\"connectionTimeout\":2147483648,\"name\":\"ada\"}", "{\"name\":\"ada\",\"sessionTimeout\":-1}" })
         {
-            Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(RequesterOf(client, "login")(JsonOf(refused))));
+            Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.Interop.Login(JsonOf(refused))));
         }
 
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(RequesterOf(client, "whoami")(JsonOf("null"))));
-        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(RequesterOf(client, "register")(JsonOf("{\"destination\":41,\"timeout\":0}"))));
-        Assert.Equal("41", (await RequesterOf(client, "register")(JsonOf("{\"destination\":41,\"timeout\":1.5}"))().WaitAsync(Patience, Cancelled)).GetRawText());
-        Assert.Equal("true", (await RequesterOf(client, "unregister")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(client.Interop.Whoami(JsonOf("null"))));
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.Interop.Register(JsonOf("{\"destination\":41,\"timeout\":0}"))));
+        Assert.Equal("41", (await client.Interop.Register(JsonOf("{\"destination\":41,\"timeout\":1.5}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("true", (await client.Interop.Unregister(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
 
         // a session timeout given ends its session once past, rounded; silence counts it alone
-        Assert.Equal("\"ada\"", (await RequesterOf(client, "login")(JsonOf("{\"connectionTimeout\":2147483647,\"name\":\"ada\",\"sessionTimeout\":99.6}"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("\"ada\"", (await client.Interop.Login(JsonOf("{\"connectionTimeout\":2147483647,\"name\":\"ada\",\"sessionTimeout\":99.6}"))().WaitAsync(Patience, Cancelled)).GetRawText());
         await Task.Delay(400, Cancelled);
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(RequesterOf(client, "whoami")(JsonOf("null"))));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(client.Interop.Whoami(JsonOf("null"))));
     }
 
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
@@ -425,7 +446,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         // an access token of the HS256 issuer for grace, an hour on the platform's clock, signed with
         // the service file's published key
-        var key = InteropService.CredentialsOf(TimeProvider.System).Keys.Single((held) =>
+        var key = InteropCredentials.Of(TimeProvider.System).Keys.Single((held) =>
         {
             return held.Algorithm == JwtAlgorithm.Hs256;
         });
@@ -446,11 +467,11 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         client.Router.Credential = Credential.Jwt($"{signingInput}.{System.Buffers.Text.Base64Url.EncodeToString(signature)}");
 
-        Assert.Equal("\"grace\"", (await RequesterOf(client, "whoami")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
+        Assert.Equal("\"grace\"", (await client.Interop.Whoami(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
 
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return RequesterOf(client, "logout")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+            return client.Interop.Logout(JsonOf("null"))().WaitAsync(Patience, Cancelled);
         });
 
         Assert.Equal(((ushort)ProtocolCode.AccessDenied, FailureOrigin.Peer), (refused.Code, refused.Origin));
@@ -465,7 +486,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         await using var client = await ConnectedOver(transport);
 
-        var whoami = RequesterOf(client, "whoami")(JsonOf("null"));
+        var whoami = client.Interop.Whoami(JsonOf("null"));
 
         if (transport == Http)
         {
@@ -526,35 +547,47 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         }
     }
 
-    // a client connected over one transport or the other: its services, its router, and what lets it go
-    private sealed class Connected((ServiceManager Services, RouterClient Router) layers, Func<ValueTask> dispose) : IAsyncDisposable
+    // a client connected over one transport or the other: its services, its router, the interop's
+    // generated client over it, made once, at its first use, and what lets it go
+    private sealed class Connected(IClient client, Func<ValueTask> dispose) : IAsyncDisposable
     {
-        public ServiceManager Services { get; } = layers.Services;
+        private InteropClient? _interop;
 
-        public RouterClient Router { get; } = layers.Router;
+        public ServiceManager Services
+        {
+            get
+            {
+                return client.Services;
+            }
+        }
+
+        public RouterClient Router
+        {
+            get
+            {
+                return client.Router;
+            }
+        }
+
+        public InteropClient Interop
+        {
+            get
+            {
+                return _interop ??= new InteropClient(client);
+            }
+        }
+
+        // the generated client made with its windows, before any other use
+        public InteropClient InteropWith(InteropWindows windows)
+        {
+            _interop = new InteropClient(client, new() { Windows = windows });
+
+            return _interop;
+        }
 
         public ValueTask DisposeAsync()
         {
             return dispose();
-        }
-    }
-
-    // JSON, in UTF-8, for a subscribing request, its answer and its notifications
-    private sealed class JsonNotifications : INotificationSerializerClient<JsonElement, JsonElement, JsonElement>
-    {
-        public ReadOnlyMemory<byte> Encode(JsonElement request)
-        {
-            return InteropService.JsonAsked.Encode(request);
-        }
-
-        public JsonElement Decode(ReadOnlyMemory<byte> response)
-        {
-            return InteropService.JsonAsked.Decode(response);
-        }
-
-        public JsonElement DecodeNotification(ReadOnlyMemory<byte> notification)
-        {
-            return InteropService.JsonAsked.Decode(notification);
         }
     }
 
@@ -568,7 +601,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         public JsonElement Decode(ReadOnlyMemory<byte> response)
         {
-            return InteropService.JsonAsked.Decode(response);
+            return new JsonPayloads().Decode(response);
         }
     }
 

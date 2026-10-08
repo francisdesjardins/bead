@@ -37,7 +37,7 @@ public sealed partial class RouterClientTests
 
         using var link = new Link(registry);
 
-        InteropService.OfferClient(link.ClientServices);
+        InteropHandlers.OfferClient(new InteropClient(link.AsClient));
         await RequesterOf(link.ClientServices, "echo")(JsonOf("1"))().WaitAsync(Patience, Cancelled);
 
         // the server asks its client back, by a command, before it answers

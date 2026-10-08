@@ -12,7 +12,7 @@ using Bead.Transport.WebSockets;
 // one. The HTTP server takes any free one.
 
 var port = args.Length > 0 ? int.Parse(args[0], CultureInfo.InvariantCulture) : 0;
-var credentials = InteropService.CredentialsOf(TimeProvider.System);
+var credentials = InteropCredentials.Of(TimeProvider.System);
 
 await using var server = new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Credentials = credentials } });
 await using var httpServer = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Credentials = credentials } });
@@ -24,8 +24,8 @@ void Report(Exception reason, string? connectionHandle)
 
 server.Router.Error += Report;
 httpServer.Router.Error += Report;
-InteropService.Offer(server);
-InteropService.Offer(httpServer);
+InteropHandlers.Offer(server);
+InteropHandlers.Offer(httpServer);
 
 var address = await server.Transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });
 var httpAddress = await httpServer.Transport.Start(new HttpTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true });

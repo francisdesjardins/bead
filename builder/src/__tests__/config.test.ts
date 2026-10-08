@@ -68,7 +68,7 @@ test('refuses a key it does not read, and a source of neither or both kinds', ()
   }
 });
 
-test("reads an output's keys and refuses another, a csharp output among them, and messagesOut without external", () => {
+test("reads an output's keys and refuses another, a C# output's namespace for a .proto or none for a blueprint, and messagesOut without external", () => {
   const folder = '/work';
   const posix = path.posix;
   const read = (outputs: string): IConfig => {
@@ -110,9 +110,41 @@ test("reads an output's keys and refuses another, a csharp output among them, an
     },
   ]);
 
+  expect(
+    read('  - language: csharp\n    out: gen/cs\n    namespace: Acme.Greeter\n').outputs
+  ).toEqual([
+    { language: 'csharp', out: '/work/gen/cs', namespace: 'Acme.Greeter', messages: 'generate' },
+  ]);
+  expect(
+    parseConfig(
+      'version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: csharp\n    out: gen\n    messages: external\n',
+      { folder, path: posix }
+    ).outputs
+  ).toEqual([{ language: 'csharp', out: '/work/gen', messages: 'external' }]);
+  expect(() => {
+    return parseConfig(
+      'version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: csharp\n    out: gen\n    namespace: Acme\n',
+      { folder, path: posix }
+    );
+  }).toThrow(/outputs\[0\]\.namespace: a \.proto's services take their file's/u);
+
   const refused: readonly (readonly [string, RegExp])[] = [
-    ['  - language: csharp\n    out: gen\n', /no target csharp in this beadc/u],
-    ['  - language: go\n    out: gen\n', /outputs\[0\]\.language: typescript/u],
+    ['  - language: csharp\n    out: gen\n', /outputs\[0\]\.namespace names the C# namespace/u],
+    ['  - language: csharp\n    out: gen\n    namespace: Acme..X\n', /is a C# namespace/u],
+    ['  - language: csharp\n    out: gen\n    namespace: 1Acme\n', /is a C# namespace/u],
+    [
+      '  - language: csharp\n    out: gen\n    namespace: Acme\n    importExtension: ts\n',
+      /outputs\[0\]\.importExtension, a key/u,
+    ],
+    [
+      '  - language: csharp\n    out: gen\n    namespace: Acme\n    messagesOut: msgs\n',
+      /outputs\[0\]\.messagesOut, a key/u,
+    ],
+    [
+      '  - language: csharp\n    out: gen\n    namespace: Acme\n    messages: none\n',
+      /generate or external/u,
+    ],
+    ['  - language: go\n    out: gen\n', /outputs\[0\]\.language: typescript or csharp/u],
     [
       '  - language: typescript\n    out: gen\n    namespace: X\n',
       /outputs\[0\]\.namespace, a key/u,

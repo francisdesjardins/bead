@@ -1,20 +1,15 @@
 // ── Options ───────────────────────────────────────────────────────────────────
 
 // What a TypeScript output asks of the target, in `beadc.yaml`'s words: the extension its relative
-// imports name, the runtime it imports, and where its messages come from. It imports nothing, so
-// `config.ts` reads it without loading the target, which loads a compiler.
+// imports name, the runtime it imports, and where its messages come from, protoc-gen-es writing them
+// in beadc's process for `generate`. It imports no module of the target's, so `config.ts` reads it
+// without loading the target, which loads a compiler.
+
+// dependencies
+
+import type { Messages } from '../target.ts';
 
 // types
-
-/** Where a TypeScript output's messages come from. */
-export const Messages = Object.freeze({
-  /** protoc-gen-es writes them into the output, in beadc's process. */
-  GENERATE: 'generate',
-  /** Another generator writes them, into a folder of their own. */
-  EXTERNAL: 'external',
-} as const);
-
-export type Messages = (typeof Messages)[keyof typeof Messages];
 
 /** The extension a generated file's relative imports name: none, `.js` or `.ts`. */
 export type ImportExtension = 'none' | 'js' | 'ts';

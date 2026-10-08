@@ -3,7 +3,7 @@
 // The rules at a blueprint's level that span entries, over a blueprint the format's schema took: one
 // id and one name a scope, folded as spec 16.6 folds; the reservations; a binding's encoding its
 // message's; a notification's result; a failure its service lacks; a `proto` binding's source; and
-// the names every official target generates or reserves.
+// the names every official target generates or reserves, and the descriptions every one writes.
 
 // dependencies
 
@@ -16,6 +16,7 @@ import {
   csharpNameOfFailure,
   RUNTIME_TYPES,
   TYPESCRIPT_PROCEDURE_NAMES,
+  xmlExcludedOf,
 } from '../targets/names.ts';
 import type { IBinding, IBlueprint, IRange, IServiceEntry } from './blueprint.ts';
 import { foldOf } from './identity.ts';
@@ -35,6 +36,11 @@ const inRanges = (id: number, ranges: readonly IRange[]): boolean => {
 
 const upperFirst = (name: string): string => {
   return `${name.slice(0, 1).toUpperCase()}${name.slice(1)}`;
+};
+
+// a character as its code point, U+0001
+const codePointOf = (character: string): string => {
+  return `U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`;
 };
 
 // definition
@@ -61,6 +67,18 @@ export const checkBlueprint = (
       return message.fullName;
     })
   );
+  // a description every official target writes: C#'s documentation comments are XML, which holds
+  // no C0 control but tab, LF and CR, nor U+FFFE and U+FFFF, raw or by reference
+  const checkDescription = (description: string | undefined, at: string): void => {
+    const excluded = description === undefined ? undefined : xmlExcludedOf(description);
+
+    if (excluded !== undefined) {
+      report('DESCRIPTION_TARGET', {
+        at,
+        message: `the description holds ${codePointOf(excluded)}, which no XML documentation comment holds, raw or by reference`,
+      });
+    }
+  };
   const serviceIds = new Map<number, number>();
   const serviceNames = new Map<string, string>();
   const reservedServiceNames = new Set(blueprint.reservedServices.names.map(foldOf));
@@ -165,6 +183,8 @@ export const checkBlueprint = (
       });
     }
 
+    checkDescription(service.description, `${place}/description`);
+
     for (const key of ['procedureIds', 'failureCodes'] as const) {
       service.reserved[key].forEach((range, at) => {
         if (range.first > range.last) {
@@ -214,6 +234,8 @@ export const checkBlueprint = (
           message: `${failure.failureName} is ${csharp} in C#, a member its failure's class holds already`,
         });
       }
+
+      checkDescription(failure.description, `${failurePlace}/description`);
     });
 
     service.procedures.forEach((procedure, at) => {
@@ -290,10 +312,22 @@ export const checkBlueprint = (
             at: `${procedurePlace}/admission/hook`,
             message: `${upperFirst(hook)}, its C# name, is a member every C# object holds already`,
           });
+        } else if (classNames.has(upperFirst(hook))) {
+          report('NAME_TARGET', {
+            at: `${procedurePlace}/admission/hook`,
+            message: `${upperFirst(hook)}, its C# name, is a class of its service, which its hooks' class would hold as its member`,
+          });
         }
       }
 
       procedure.failures.forEach((name, listed) => {
+        if (csharpNameOfFailure(name) === rpcName) {
+          report('NAME_TARGET', {
+            at: `${procedurePlace}/failures/${String(listed)}`,
+            message: `${rpcName} is ${name}'s C# name and its procedure's, whose class of failures would hold it as its member`,
+          });
+        }
+
         if (!catalogue.has(name)) {
           report('FAILURE_UNKNOWN', {
             at: `${procedurePlace}/failures/${String(listed)}`,
@@ -302,6 +336,7 @@ export const checkBlueprint = (
         }
       });
 
+      checkDescription(procedure.description, `${procedurePlace}/description`);
       checkBinding(procedure.request, `${procedurePlace}/request`);
       checkBinding(procedure.result, `${procedurePlace}/result`);
 

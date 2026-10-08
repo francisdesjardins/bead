@@ -68,7 +68,8 @@ export const RULES = Object.freeze({
   NOTIFICATION_RESULT: { level: Level.BLUEPRINT, severity: Severity.WARNING },
   FAILURE_UNKNOWN: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   BINDING_SOURCE: { level: Level.BLUEPRINT, severity: Severity.ERROR },
-  NAME_TARGET: { level: Level.BLUEPRINT, severity: Severity.ERROR },
+  NAME_TARGET: { level: Level.BOTH, severity: Severity.ERROR },
+  DESCRIPTION_TARGET: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   SPEC_VERSION_NEWER: { level: Level.BLUEPRINT, severity: Severity.WARNING },
 } as const satisfies Readonly<Record<string, IRule>>);
 

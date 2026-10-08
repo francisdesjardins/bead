@@ -39,7 +39,7 @@ public sealed class NotificationTests : IDisposable
             _serverEnd,
             new ServerOptions { Pacing = new PacingLimits { MaximumQueuedNotifications = 2 }, ResolverScheduler = _scheduler, Scheduler = _scheduler });
         _services = new ServiceManager(_client);
-        InteropService.Offer(_server);
+        InteropHandlers.Offer(_server);
         _serverEnd.Open();
         _client.Debug += (direction, envelope) =>
         {
@@ -71,7 +71,7 @@ public sealed class NotificationTests : IDisposable
     private INotification<JsonElement, JsonElement> TicksOf(int? window = null, Func<uint, JsonElement, Task>? unsubscribe = null)
     {
         return _services.GetNotification(
-            InteropService.ProcedureOf("ticks"),
+            InteropProcedures.Ticks.Procedure,
             new NotificationDependencies<JsonElement, JsonElement, JsonElement>
             {
                 Serializer = new JsonNotifications(),
@@ -85,7 +85,7 @@ public sealed class NotificationTests : IDisposable
     private INotification<JsonElement, JsonElement> TicksOfOwnManager(int? window)
     {
         return new ServiceManager(_client).GetNotification(
-            InteropService.ProcedureOf("ticks"),
+            InteropProcedures.Ticks.Procedure,
             new NotificationDependencies<JsonElement, JsonElement, JsonElement> { Serializer = new JsonNotifications(), Window = window });
     }
 
@@ -114,8 +114,8 @@ public sealed class NotificationTests : IDisposable
     private async Task Tick(int value)
     {
         await _services.GetRequest(
-            InteropService.ProcedureOf("tick"),
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked })(JsonOf($"{{\"value\":{value}}}"))()
+            InteropProcedures.Tick.Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() })(JsonOf($"{{\"value\":{value}}}"))()
             .WaitAsync(Patience, Cancelled);
         await Settle();
     }
@@ -497,7 +497,7 @@ public sealed class NotificationTests : IDisposable
         Assert.Equal((ushort)ProtocolCode.PayloadUndecodable, failure.Code);
         Assert.Equal(FailureOrigin.Local, failure.Origin);
         Assert.Equal(RouterSide.Client, failure.Side);
-        Assert.Equal(InteropService.ProcedureOf("ticks").Address, failure.ProcedureAddress);
+        Assert.Equal(InteropProcedures.Ticks.Procedure.Address, failure.ProcedureAddress);
         Assert.Null(failure.Header);
         Assert.NotNull(failure.InnerException);
         Assert.Empty(heard);
@@ -508,17 +508,17 @@ public sealed class NotificationTests : IDisposable
     {
         public ReadOnlyMemory<byte> Encode(JsonElement request)
         {
-            return InteropService.JsonAsked.Encode(request);
+            return new JsonPayloads().Encode(request);
         }
 
         public JsonElement Decode(ReadOnlyMemory<byte> response)
         {
-            return InteropService.JsonAsked.Decode(response);
+            return new JsonPayloads().Decode(response);
         }
 
         public JsonElement DecodeNotification(ReadOnlyMemory<byte> notification)
         {
-            return InteropService.JsonAsked.Decode(notification);
+            return new JsonPayloads().Decode(notification);
         }
     }
 

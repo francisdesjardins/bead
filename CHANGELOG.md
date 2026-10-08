@@ -12,7 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `.claude/workflows/`: three workflows launched by name, a round of the Tenth Man, an implementation
   on both sides with its integration and a commit plan, and an adversarial review by lens.
 - `tools/check-format.mjs`, the root's files in the layout the TypeScript side's formatter gives
-  them: CI runs it, and the pre-commit hook over the staged files.
+  them, `beadc.yaml` among them: CI runs it, and the pre-commit hook over the staged files.
 - `spec/interop-blueprint.json`, the interop service's API in the builder's format,
   `bead-blueprint/1`, under `spec/schemas/bead-blueprint.schema.json`: its service's id and
   revision, and each procedure's id, kind, bindings, admission and failures. `spec/check.py` holds
@@ -32,8 +32,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `<Name>Admissions` and `<Name>Windows`, over the service layer of
   `@francisdesjardins/bead/service`, with protoc-gen-es's messages where a binding is `proto`;
   `--check` writes nothing and fails on a difference (decision 0022).
-- The root's `beadc.yaml`, which generates the TypeScript side's interop; CI's `builder` job holds
-  the interop to it.
+- `beadc generate`'s C# target: from a blueprint, a `<Name>Bead.cs` for each service, its
+  descriptors, its catalogue and a class of failures for each procedure that lists any, the records
+  of its hooks and its windows, `<Name>Admissions` and `<Name>Windows`, a server class where only
+  resolvers are written and a client class holding a requester of each procedure by its name, over
+  the service layer of Bead.Core, every type qualified; protoc's C# messages from buf's set where a
+  binding is `proto`, each file in its namespace's folder, protoc held to one pin,
+  `builder/protoc.json`, which `builder/tools/fetch-protoc.mjs` fetches by its sha256 (decision
+  0022).
+- `generate` refuses two files it would write at one path, and leaves alone the files of a build's
+  and a package manager's folders.
+- `DESCRIPTION_TARGET`: `beadc check` refuses a description holding a character no XML
+  documentation comment holds.
+- `NAME_TARGET` refuses a procedure named `code`, a hook and a failure named as the C# class they
+  sit in, and, on a `.proto`, a class a message or an enum of its C# namespace holds.
+- The root's `beadc.yaml` generates each side's interop; CI's `builder` job holds both to it.
 
 ### Changed
 
@@ -50,7 +63,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `interop/generated/interop_bead.ts`; its resolvers are written in `interop/handlers.ts` and its
   credentials in `interop/credentials.ts`, and `interop/offer.ts` is gone. Its lint refuses a service
   manager's accessor there.
-- `tools/check-format.mjs` holds `beadc.yaml`.
 - `tools/release.mjs prepare` moves the generated code's header to the release's versions.
 - The service layer's options are typed by the service on both sides. The C# side's
   `ServiceServerOptions<TService>` takes the service's hooks as a record of one required member a
@@ -65,6 +77,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The contract with generated code is at 2, `GENERATED_CODE_SUPPORTS_VERSION_2` and
   `GeneratedCode.SupportsVersion2`: generated code takes the layer's options typed by the service
   (decision 0018).
+- The C# side's interop is generated from `spec/interop-blueprint.json`:
+  `interop/Bead.Interop/Generated/InteropBead.cs`; its resolvers are written in
+  `InteropHandlers.cs` and its credentials in `InteropCredentials.cs`, and `InteropService.cs` is
+  gone. The banned-API analyzer refuses the service manager there, and `dotnet format` leaves the
+  generated folders out.
 
 ### Removed
 

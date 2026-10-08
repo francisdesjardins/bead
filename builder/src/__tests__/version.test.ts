@@ -3,7 +3,16 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 import { file, procedure, service } from '../generated/bead/options_pb.ts';
-import { beadcVersion, OPTIONS_NUMBER, specUrlOf, specVersion, versionLines } from '../version.ts';
+import { protocPin } from '../protoc.ts';
+import {
+  beadcVersion,
+  OPTIONS_NUMBER,
+  protocLine,
+  specUrlOf,
+  specVersion,
+  versionLines,
+} from '../version.ts';
+import { stubProtoc, withProtoc } from './pinned.ts';
 
 const SEMANTIC_VERSION = /^\d+\.\d+\.\d+$/u;
 
@@ -22,6 +31,28 @@ test("the spec's version is an x.y.z, and the interop's blueprint repeats it", (
 
   expect(specVersion()).toMatch(SEMANTIC_VERSION);
   expect(blueprint.specVersion).toBe(specVersion());
+});
+
+test('names protoc at its pin, one of another version beside the pin, or none', () => {
+  const pinned = protocPin().version;
+  const folder = test.info().outputPath('stubs');
+
+  expect(pinned).toMatch(/^\d+\.\d+$/u);
+  expect(
+    withProtoc(stubProtoc(`${folder}/pinned`, { version: pinned }), () => {
+      return protocLine();
+    })
+  ).toBe(`protoc ${pinned}`);
+  expect(
+    withProtoc(stubProtoc(`${folder}/older`, { version: '35.1' }), () => {
+      return protocLine();
+    })
+  ).toBe(`protoc 35.1, pinned ${pinned}`);
+  expect(
+    withProtoc(`${folder}/nowhere/protoc`, () => {
+      return protocLine();
+    })
+  ).toBe(`protoc none, pinned ${pinned}`);
 });
 
 test("beadc's version is an x.y.z", () => {

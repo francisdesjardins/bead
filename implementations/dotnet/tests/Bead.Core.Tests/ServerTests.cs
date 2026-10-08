@@ -58,7 +58,7 @@ public sealed class ServerTests : IAsyncLifetime
                 ResolverScheduler = _scheduler,
                 Scheduler = _scheduler,
             });
-        InteropService.Offer(Server);
+        InteropHandlers.Offer(Server);
     }
 
     // disposes the server within its test, so the test's end does not again
@@ -91,7 +91,10 @@ public sealed class ServerTests : IAsyncLifetime
 
     private static Envelope RequestOf(uint callId, (string ProcedureName, bool OpensSubscription) call, string payload)
     {
-        var procedure = InteropService.ProcedureOf(call.ProcedureName);
+        var procedure = InteropProcedures.All.Single((described) =>
+        {
+            return described.Procedure.ProcedureName == call.ProcedureName;
+        }).Procedure;
 
         return new Envelope
         {
@@ -119,8 +122,8 @@ public sealed class ServerTests : IAsyncLifetime
     private Task<Exception?> Asked(bool? closeOnTimeout)
     {
         var clock = Server.Services.GetCommand(
-            InteropService.ProcedureOf("clock"),
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked });
+            InteropProcedures.Clock.Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
 
         return Record.ExceptionAsync(() =>
         {
@@ -460,7 +463,7 @@ public sealed class ServerTests : IAsyncLifetime
         var released = new TaskCompletionSource();
         var held = new Procedure { ServiceId = 2, ProcedureId = 1, ProcedureName = "held", ServiceRevision = 1 };
 
-        Server.Services.GetRequestResolver(held, new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = InteropService.Json })(async (request, response) =>
+        Server.Services.GetRequestResolver(held, new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() })(async (request, response) =>
         {
             await released.Task;
             await response.Answer(JsonSerializer.SerializeToElement(request.Session?.Data));
@@ -794,7 +797,7 @@ public sealed class ServerTests : IAsyncLifetime
         Start(Timeout.InfiniteTimeSpan);
 
         var sessions = Server.Sessions;
-        var dependencies = new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = InteropService.Json };
+        var dependencies = new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() };
 
         Server.Services.GetRequestResolver(gated, dependencies)(async (request, _) =>
         {
@@ -934,8 +937,8 @@ public sealed class ServerTests : IAsyncLifetime
         await Deliver(RequestOf(1, ("login", false), "{\"name\":\"ada\"}"));
 
         var clock = Server.Services.GetCommand(
-            InteropService.ProcedureOf("clock"),
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked });
+            InteropProcedures.Clock.Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
         var waiting = clock(JsonSerializer.SerializeToElement("ping"))(new RequestOptions { ConnectionHandle = Handle });
 
         await _scheduler.WhenIdle();

@@ -48,5 +48,7 @@
     <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
     <!-- what reads the durations, for the twins of the assertions that hold them -->
     <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
+    <!-- JSON as a service manager's accessor takes it, for the calls no generated client makes -->
+    <Compile Include="../Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
   </ItemGroup>
 </Project>

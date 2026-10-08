@@ -2,7 +2,10 @@
 
 // The rules at a `.proto`'s level, over the project's files of buf's set, each at buf's
 // `file:line:column` of the option that causes it, or of the rpc or the service when none does. A
-// blueprint is read from the files only once they pass.
+// blueprint is read from the files only once they pass. NAME_TARGET's half that needs the set: a
+// class a service gives that a message or an enum of its C# namespace holds, since C# compiles every
+// file of a namespace into one, which the blueprint, knowing no enum and no unbound message, cannot
+// see.
 
 // dependencies
 
@@ -11,6 +14,7 @@ import type { DescriptorProto } from '@bufbuild/protobuf/wkt';
 
 import { diagnosticOf, type IDiagnostic } from '../diagnostics.ts';
 import type { RuleName } from '../rules.ts';
+import { classNamesOf, csharpNamespaceOf } from '../targets/names.ts';
 import { enumNamed, messageNamed, PAYLOAD_TYPES } from './blueprint-of.ts';
 import { pathOf, positionOf } from './comments.ts';
 import type { IProtoFile, IProtoInput } from './input.ts';
@@ -50,6 +54,25 @@ const fieldsOf = (
   });
 };
 
+// the names of the top-level messages and enums of every file of the set, by the C# namespace
+// protoc's C# generator writes the file in
+const typesByNamespaceOf = (input: IProtoInput): Map<string, Set<string>> => {
+  const types = new Map<string, Set<string>>();
+
+  for (const file of input.registry.files) {
+    const namespace = csharpNamespaceOf(file.proto.package, file.proto.options?.csharpNamespace);
+    const held = types.get(namespace) ?? new Set<string>();
+
+    for (const declared of [...file.messages, ...file.enums]) {
+      held.add(declared.name);
+    }
+
+    types.set(namespace, held);
+  }
+
+  return types;
+};
+
 // definition
 
 /** The findings of the `.proto`-level rules over `input`'s files. */
@@ -72,9 +95,12 @@ export const checkProto = (input: IProtoInput): IDiagnostic[] => {
     );
   };
 
+  const typesByNamespace = typesByNamespaceOf(input);
+
   for (const file of input.files) {
     const desc: DescFile = file.desc;
     const fileOptions = fileOptionsOf(desc);
+    const namespace = csharpNamespaceOf(desc.proto.package, desc.proto.options?.csharpNamespace);
 
     for (const field of fieldsOf(desc.proto.messageType, [FILE_MESSAGE_TYPE])) {
       const typeName = field.typeName.replace(/^\./u, '');
@@ -110,6 +136,18 @@ export const checkProto = (input: IProtoInput): IDiagnostic[] => {
           message: `${service.typeName} has no (bead.service): beadc reads nothing of it`,
         });
         continue;
+      }
+
+      const taken = classNamesOf(service.name.replace(/Service$/u, '')).filter((className) => {
+        return typesByNamespace.get(namespace)?.has(className) === true;
+      });
+
+      if (taken.length > 0) {
+        report('NAME_TARGET', {
+          file,
+          path: [...declaration, 1],
+          message: `${service.typeName} gives the classes ${taken.join(', ')}, which a message or an enum of its C# namespace, ${namespace}, holds already`,
+        });
       }
 
       if (options.admission !== undefined && admissionOf(options.admission) === 'empty') {

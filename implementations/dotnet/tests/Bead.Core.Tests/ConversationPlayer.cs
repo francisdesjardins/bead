@@ -79,7 +79,7 @@ internal static class ConversationPlayer
     // limits whose chunk or envelope is under 1,024 bytes, which section 12.2 forbids beside them
     private static Credentials CredentialsOf((RouterLimits Limits, TimeProvider Clock) server)
     {
-        var credentials = InteropService.CredentialsOf(server.Clock);
+        var credentials = InteropCredentials.Of(server.Clock);
 
         return server.Limits.ChunkBytes < 1_024 || server.Limits.MaximumEnvelopeBytes < 1_024
             ? credentials with { Keys = [], KeySet = null }
@@ -355,7 +355,7 @@ internal static class ConversationPlayer
                 reason is FailureException failure ? failure.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) : "exception",
                 connectionHandle));
         };
-        InteropService.Offer(server);
+        InteropHandlers.Offer(server);
 
         // the series written once the server settled, read on its scheduler
         async Task<Dictionary<string, string>> Exposed()

@@ -11,4 +11,10 @@
     <ProjectReference Include="../../src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- no service manager's accessor called by hand: the generated server and client stand for them (0022) -->
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="../BannedSymbols.txt" />
+  </ItemGroup>
 </Project>

@@ -24,7 +24,7 @@ public sealed partial class RouterCoreTests
     };
 
     // echo's address, of no kind, so that a peer of either side resolves it (spec 16.11)
-    private static readonly Procedure Echo = InteropService.ProcedureOf("echo") with { ProcedureKind = null };
+    private static readonly Procedure Echo = InteropProcedures.Echo.Procedure with { ProcedureKind = null };
 
     // helpers
 
