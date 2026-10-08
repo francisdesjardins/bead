@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +16,10 @@ import { typescriptTarget } from '../typescript.ts';
 
 const BUILDER = fileURLToPath(new URL('../../../../', import.meta.url));
 const INTEROP = new URL('../../../../../spec/interop-blueprint.json', import.meta.url);
+const COMMITTED = new URL(
+  '../../../../../implementations/typescript/interop/generated/interop_bead.ts',
+  import.meta.url
+);
 const GOLDEN = fileURLToPath(new URL('../../../../test/golden/typescript/', import.meta.url));
 const FIXTURES = fileURLToPath(new URL('../../../../test/fixtures/', import.meta.url));
 const MESSAGES = fileURLToPath(new URL('../../../../test/messages/', import.meta.url));
@@ -326,4 +330,11 @@ test("imports an external output's messages from messagesOut, at each file's dep
     'import { Greeting_ReplySchema, GreetingSchema } from "../../../../messages/bead/messages/v1/messages_pb.ts";\n'
   );
   expect(content).not.toContain('// Messages:');
+});
+
+test("writes the interop's file as implementations/typescript commits it", () => {
+  expect(existsSync(COMMITTED)).toBe(true);
+  expect(
+    contentOf(typescriptTarget.generate(interopInput(), INTEROP_OPTIONS), 'interop_bead.ts')
+  ).toBe(readFileSync(COMMITTED, 'utf8').replaceAll('\r\n', '\n'));
 });

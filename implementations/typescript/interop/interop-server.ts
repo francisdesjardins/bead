@@ -14,7 +14,8 @@ import { WebSocketServer } from 'ws';
 import { createHTTPServer } from '../src/server/http-server';
 import { createWSServer } from '../src/server/ws-server';
 import { PLATFORM_CLOCK } from '../src/transport/shared/clock';
-import { interopCredentialsOf, offerInterop } from './offer';
+import { interopCredentialsOf } from './credentials';
+import { offerInterop } from './handlers';
 
 // definition
 

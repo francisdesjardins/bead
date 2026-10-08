@@ -299,6 +299,8 @@ form is no rule of `check`, as `buf lint` leaves layout to `buf format`.
 ## Its gates
 
 CI's `builder` job installs, then runs `yarn test`, `beadc check` and `beadc blueprint --check` over
-the interop's blueprint, on Linux and on Windows, on Node 26, and on Linux on Node 24.9 besides; and
-`yarn check` on Linux, whose types, the goldens' types, lint, format and generated code no platform
-moves.
+the interop's blueprint, and from the repository's root `node builder/src/cli.ts generate --check`
+over the root's [`beadc.yaml`](../beadc.yaml), which holds the TypeScript side's interop to what
+beadc generates from its blueprint, on Linux and on Windows, on Node 26, and on Linux on Node 24.9
+besides; and `yarn check` on Linux, whose types, the goldens' types, lint, format and generated code
+no platform moves.

@@ -12,7 +12,8 @@ import { createServer as createNodeServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
-import { interopCredentialsOf, type InteropServer, offerInterop } from '../../../../interop/offer';
+import { interopCredentialsOf } from '../../../../interop/credentials';
+import { offerInterop } from '../../../../interop/handlers';
 import {
   expectedOf,
   failureDetailOf,
@@ -25,6 +26,7 @@ import type { RouterLimitsOptions } from '../../../router/shared/types';
 import { wholeEnvelopeLimitsOf } from '../../../router/shared/whole-envelope-limits';
 import { CONNECTION_INACTIVITY_TIMEOUT } from '../../../server/http-server';
 import { createServer } from '../../../server/server';
+import type { IServer, IServerTransportLike } from '../../../server/types';
 import { createWSServer } from '../../../server/ws-server';
 import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
 import { TRANSPORT_WS } from '../../shared/constants';
@@ -148,7 +150,7 @@ interface IReport {
 
 /** A server of the interop service, whichever its transport, as a case plays it. */
 type ServerUnderTest = AsyncDisposable &
-  InteropServer & { transport: Pick<ITransportServer, 'gauges' | 'start'> };
+  IServer<IServerTransportLike, string> & { transport: Pick<ITransportServer, 'gauges' | 'start'> };
 
 // constants
 
