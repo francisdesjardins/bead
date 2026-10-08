@@ -2,8 +2,8 @@
 // The root's own files keep the layout the TypeScript side's formatter gives them, under its
 // configuration: the README to the CI, the spec's texts and schemas, the tools, the workflows. The
 // conformance files are left to their generators, the interop's blueprint to spec/check.py, which
-// holds its form (decision 0022), and each implementation, and the builder, holds its own files in
-// its gate.
+// holds its form (decision 0022), what beadc generates to beadc; each implementation, the builder
+// and each half of an example hold their own files in their gate.
 //
 //   node tools/check-format.mjs            every root file this check holds
 //   node tools/check-format.mjs --staged   the staged ones alone, as the pre-commit hook asks
@@ -20,6 +20,10 @@ const ROOT = [
   'CHANGELOG.md',
   'CLAUDE.md',
   'beadc.yaml',
+  'examples/hello/README.md',
+  'examples/hello/beadc.yaml',
+  'examples/hello/buf.yaml',
+  'examples/hello/pairs.mjs',
   '.claude/workflows',
   'docs',
   'spec/spec.md',

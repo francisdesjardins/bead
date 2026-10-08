@@ -1,0 +1,4 @@
+<Project>
+  <!-- the C# side's pins, held once -->
+  <Import Project="../../../implementations/dotnet/Directory.Packages.props" />
+</Project>

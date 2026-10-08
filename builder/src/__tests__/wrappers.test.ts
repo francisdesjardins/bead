@@ -1089,7 +1089,7 @@ test("each wrapper runs beadc version through the image: protoc 36.2 and the spe
   }
 });
 
-test("each wrapper runs generate --check over the repository's beadc.yaml through the image, 0, and 1 on a file off what beadc writes", () => {
+test("each wrapper runs generate --check over the repository's beadc.yaml and examples/hello's through the image, 0, and 1 on a file off what beadc writes", () => {
   // four container starts and more, at about 1.5 s each, longer on a cold runner
   test.setTimeout(240_000);
 
@@ -1097,7 +1097,11 @@ test("each wrapper runs generate --check over the repository's beadc.yaml throug
 
   needsImage();
 
-  for (const cwd of [REPOSITORY, join(REPOSITORY, 'implementations', 'typescript')]) {
+  for (const cwd of [
+    REPOSITORY,
+    join(REPOSITORY, 'implementations', 'typescript'),
+    join(REPOSITORY, 'examples', 'hello'),
+  ]) {
     for (const way of WAYS) {
       expect(
         imageRunOf(way, { cwd, args: ['generate', '--check'], bash }),

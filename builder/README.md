@@ -490,7 +490,8 @@ Windows, the right to make a symbolic link into one that fails. On the image's l
 Node 26, amd64 on `ubuntu-26.04` and arm64 on `ubuntu-26.04-arm`, each natively: the image's test
 stage, beadc's tests on the image's own Node, protoc and environment; then the image, which
 `yarn test` runs through each wrapper under `BEADC_IMAGE_REQUIRED=1`: `beadc version`,
-`generate --check` over the root's `beadc.yaml`, the messages fixture in both languages, a
+`generate --check` over the root's `beadc.yaml` and over
+[`examples/hello`](../examples/hello/README.md)'s, the messages fixture in both languages, a
 project's files written as the caller and an interrupt's 130; and shellcheck 0.11.0, from its image
 by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The C# side's `dotnet` job builds the
 C# goldens in its solution, under that side's gates, and `dotnet format` leaves them to their

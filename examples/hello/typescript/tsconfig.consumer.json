@@ -1,0 +1,26 @@
+{
+  // What a consumer of the runtime's sources must set, and nothing of the house's else: a project
+  // outside this repository compiles the runtime's `.ts` under its own options, and this is all of
+  // them. `yarn check` compiles the example under it in both message modes, so the day the runtime
+  // asks a consumer one more thing, the check fails here.
+  "compilerOptions": {
+    // a consumer's usual strictness
+    "strict": true,
+    // the runtime's imports name no extension, which `NodeNext` refuses (TS2835): a bundler's
+    // resolution, and a bundler to run them
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // TODO the runtime's call after `'on' in socket` fails without it (TS2722); its fix removes it
+    "exactOptionalPropertyTypes": true,
+    // beadc's imports name their `.ts`, as the example's own do
+    "allowImportingTsExtensions": true,
+    // iterator helpers on `Map` and `Set`, `await using`, and `JsonWebKey`, `BodyInit` and the
+    // platform's timers
+    "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
+    // the example's own: it runs on Node, and the compiler writes nothing, esbuild bundling
+    "types": ["node"],
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}
