@@ -334,6 +334,10 @@ node tools/release.mjs tag                     # spec-v… and debugging-v… at
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
 ```
 
+Before `prepare`, the release moves by hand the three digests beadc's image and its lint pin: the
+Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
+image in `ci.yml`, each to its tag's current digest; CI then builds and tests the image on them.
+
 A document whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
 change to keep passing, `patch` when a conforming one passes unchanged, and `minor` at least when a
 file, a key or a property was added
