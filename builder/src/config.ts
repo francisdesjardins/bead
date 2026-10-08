@@ -2,7 +2,7 @@
 
 // `beadc.yaml`, at a project's root: its `version`, its `source` — `.proto` roots, or a blueprint —
 // where `beadc blueprint` writes, and the `outputs` `beadc generate` writes, a language and a folder
-// each. Every path stays under the folder that holds it, since the image sees nothing else; a key
+// each, TypeScript or C#. Every path stays under the folder that holds it, since the image sees nothing else; a key
 // beadc does not read is refused, never left unchecked.
 
 // dependencies
@@ -13,6 +13,7 @@ import nodePath, { type PlatformPath } from 'node:path';
 import { parse } from 'yaml';
 
 import { InputError } from './diagnostics.ts';
+import { NAMESPACE } from './targets/csharp/options.ts';
 import { Messages } from './targets/target.ts';
 import {
   DEFAULT_RUNTIME,
@@ -37,8 +38,17 @@ export interface ITypeScriptOutput {
   readonly messagesOut?: string;
 }
 
+/** A C# output: its folder, the namespace of a blueprint's services, and its messages. */
+export interface ICSharpOutput {
+  readonly language: 'csharp';
+  readonly out: string;
+  /** For a blueprint source alone: a `.proto`'s services take their file's. */
+  readonly namespace?: string;
+  readonly messages: Messages;
+}
+
 /** An output `beadc generate` writes. */
-export type Output = ITypeScriptOutput;
+export type Output = ITypeScriptOutput | ICSharpOutput;
 
 /** `beadc.yaml`, read, each path resolved against its folder. */
 export interface IConfig {
@@ -65,6 +75,7 @@ const TYPESCRIPT_KEYS = new Set([
   'messages',
   'messagesOut',
 ]);
+const CSHARP_KEYS = new Set(['language', 'out', 'namespace', 'messages']);
 const MESSAGES: readonly unknown[] = Object.values(Messages);
 
 // a path an import names, relative to the importer, and the extension it would name itself
@@ -145,6 +156,46 @@ export const parseConfig = (
 
     return path.resolve(folder, given);
   };
+  // a C# output, its keys read or refused: a namespace for a blueprint's services, and only then
+  const csharpOutputOf = (given: Record<string, unknown>, key: string): ICSharpOutput => {
+    const source = value['source'];
+    const fromBlueprint = isRecord(source) && 'blueprint' in source;
+    const namespace = given['namespace'];
+    const messages = given['messages'] ?? Messages.GENERATE;
+
+    for (const name of Object.keys(given)) {
+      if (!CSHARP_KEYS.has(name)) {
+        refuse(`${key}.${name}, a key beadc does not read`);
+      }
+    }
+
+    if (fromBlueprint && namespace === undefined) {
+      refuse(
+        `${key}.namespace names the C# namespace of the services a blueprint declares, which no .proto gives`
+      );
+    }
+
+    if (!fromBlueprint && namespace !== undefined) {
+      refuse(
+        `${key}.namespace: a .proto's services take their file's, its csharp_namespace or its package`
+      );
+    }
+
+    if (namespace !== undefined && (typeof namespace !== 'string' || !NAMESPACE.test(namespace))) {
+      refuse(`${key}.namespace is a C# namespace, identifiers of letters, digits and _ by dots`);
+    }
+
+    if (!MESSAGES.includes(messages)) {
+      refuse(`${key}.messages is generate or external`);
+    }
+
+    return {
+      language: 'csharp',
+      out: resolved(given['out'], `${key}.out`),
+      ...(typeof namespace === 'string' ? { namespace } : {}),
+      messages: messages as Messages,
+    };
+  };
   // each output, its keys read or refused, its folders under this one
   const outputOf = (given: unknown, at: number): Output => {
     const key = `outputs[${String(at)}]`;
@@ -154,11 +205,11 @@ export const parseConfig = (
     }
 
     if (given['language'] === 'csharp') {
-      return refuse(`${key}: no target csharp in this beadc, which writes typescript alone`);
+      return csharpOutputOf(given, key);
     }
 
     if (given['language'] !== 'typescript') {
-      return refuse(`${key}.language: typescript, the one target of this beadc`);
+      return refuse(`${key}.language: typescript or csharp, the targets of this beadc`);
     }
 
     for (const name of Object.keys(given)) {

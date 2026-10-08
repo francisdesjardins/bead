@@ -7,7 +7,7 @@ words, with no default and no inheritance left to interpret
 `beadc check` refuses a `.proto` or a blueprint by rule name; `beadc blueprint` writes a blueprint
 in its one form, and with `--check` holds one to it; `beadc generate` writes, from a blueprint, a
 typed server where only resolvers are written and a client holding a requester of each procedure by
-its name, in TypeScript today, and with `--check` holds them to it. The format's schema is the spec's,
+its name, in TypeScript and in C#, and with `--check` holds them to it. The format's schema is the spec's,
 [`spec/schemas/bead-blueprint.schema.json`](../spec/schemas/bead-blueprint.schema.json), and the
 interop's blueprint, [`spec/interop-blueprint.json`](../spec/interop-blueprint.json), is what
 [`test/fixtures/bead/interop/v1/interop.proto`](test/fixtures/bead/interop/v1/interop.proto) gives,
@@ -68,23 +68,23 @@ version, its floor and its sums, and writes the C# goldens again.
 
 ## The commands
 
-| Command                                                     | What it does                                                                                                                                                                                                                                                                  |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `beadc check [<root or blueprint>]`                         | Runs [the rules](#the-rules) over the input named, a folder of `.proto` files or a blueprint's file, or over `beadc.yaml`'s source                                                                                                                                            |
-| `beadc blueprint [<root or blueprint>] -o <file>`           | Runs `check`, and writes nothing on an error; otherwise writes the blueprint in [its form](#the-form), encoded whole, then moved over the file. `--descriptor-set-out` writes buf's set                                                                                       |
-| `beadc blueprint --check [<root or blueprint>] [-o <file>]` | Writes nothing: holds the file `-o` names, or the blueprint given, to the blueprint in its form, naming the first line off, an array out of its order, a missing final line feed or a byte order mark                                                                         |
-| `beadc generate`                                            | Runs `check` over `beadc.yaml`'s source, and writes nothing on an error; otherwise writes each output `beadc.yaml` names, and for a `.proto` source the blueprint it names and the editor's copy of the options, each file encoded whole, then moved over the one it replaces |
-| `beadc generate --check`                                    | Writes nothing: holds each file `generate` writes to what it would write, CRLF read as LF, naming a file that differs at its first line off, a file missing, and a file of a kind `generate` writes in an output's folder that it would not write; never the editor's copy    |
-| `beadc version`                                             | beadc's version, buf's, protobuf-es's, protoplugin's, protoc-gen-es's, protoc's, `protoc 36.2`, or another's beside the pin, `protoc 35.1, pinned 36.2`, or `protoc none, pinned 36.2`, the format, the spec's version and the options' number                                |
+| Command                                                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beadc check [<root or blueprint>]`                         | Runs [the rules](#the-rules) over the input named, a folder of `.proto` files or a blueprint's file, or over `beadc.yaml`'s source                                                                                                                                                                                                                                                                                |
+| `beadc blueprint [<root or blueprint>] -o <file>`           | Runs `check`, and writes nothing on an error; otherwise writes the blueprint in [its form](#the-form), encoded whole, then moved over the file. `--descriptor-set-out` writes buf's set                                                                                                                                                                                                                           |
+| `beadc blueprint --check [<root or blueprint>] [-o <file>]` | Writes nothing: holds the file `-o` names, or the blueprint given, to the blueprint in its form, naming the first line off, an array out of its order, a missing final line feed or a byte order mark                                                                                                                                                                                                             |
+| `beadc generate`                                            | Runs `check` over `beadc.yaml`'s source, and writes nothing on an error; otherwise writes each output `beadc.yaml` names, and for a `.proto` source the blueprint it names and the editor's copy of the options, each file encoded whole, then moved over the one it replaces; refuses, before it writes anything, two files at one path, compared as a system that folds case compares them, naming both sources |
+| `beadc generate --check`                                    | Writes nothing: holds each file `generate` writes to what it would write, CRLF read as LF, naming a file that differs at its first line off, a file missing, and a file of a kind `generate` writes in an output's folder that it would not write; never the editor's copy, and never a file under an output's `bin/`, `obj/` or `node_modules/`                                                                  |
+| `beadc version`                                             | beadc's version, buf's, protobuf-es's, protoplugin's, protoc-gen-es's, protoc's, `protoc 36.2`, or another's beside the pin, `protoc 35.1, pinned 36.2`, or `protoc none, pinned 36.2`, the format, the spec's version and the options' number                                                                                                                                                                    |
 
 Flags: `--error-format text|json|github`, `--fail-on-warning`, `--except <RULE>`, which leaves out a
 warning by its name and never an error.
 
-| Exit | Meaning                                                                                                                                                                                                                                                                                                                                                               |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | done, warnings included unless `--fail-on-warning`                                                                                                                                                                                                                                                                                                                    |
-| 1    | an error, a warning under `--fail-on-warning`, or a difference under `blueprint --check` or `generate --check`                                                                                                                                                                                                                                                        |
-| 2    | the input or the call: a `.proto` buf does not compile, its messages as they came; a text that is no JSON; a bad flag; an input named to `generate`, which reads `beadc.yaml` alone; a bad `beadc.yaml`, an output of a language this beadc has no target for among them; a path outside its folder; a blueprint whose bindings name messages, as `generate`'s source |
+| Exit | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0    | done, warnings included unless `--fail-on-warning`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 1    | an error, a warning under `--fail-on-warning`, or a difference under `blueprint --check` or `generate --check`                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2    | the input or the call: a `.proto` buf does not compile, its messages as they came; a text that is no JSON; a bad flag; an input named to `generate`, which reads `beadc.yaml` alone; a bad `beadc.yaml`, an output of a language this beadc has no target for among them; a path outside its folder; a blueprint whose bindings name messages, as `generate`'s source; two files `generate` would write at one path; where a C# output generates messages, no protoc, one off its pin, or protoc's refusal, in its words |
 
 A finding prints one a line, `file:line:column: severity RULE: message` at a `.proto`'s place, as
 buf's source info gives it, and `file#/services/0/serviceId: severity RULE: message` at a
@@ -100,17 +100,23 @@ source:
   proto: [proto] # its .proto roots; or `blueprint: <file>`, a blueprint
 blueprint: gen/bead.blueprint.json # where `beadc blueprint` and `beadc generate` write
 outputs:
-  - language: typescript # the one target of this beadc
+  - language: typescript # or csharp
     out: gen/ts # the output's folder
     importExtension: ts # what a relative import ends with: none, js or ts (the default)
     runtime: '@francisdesjardins/bead/service' # the default; or a path relative to out, no extension
     messages: generate # the default; or external, another generator's, with messagesOut
     # messagesOut: gen/messages # where messages: external finds them
+  - language: csharp
+    out: gen/cs
+    # namespace: Acme.Greeter # for a blueprint source alone: a .proto's services take their file's
+    messages: generate # the default, protoc's; or external, a project's own build's
 ```
 
 Every path stays under the folder that holds `beadc.yaml`; one outside it is refused, with the fix:
 move `beadc.yaml` up. A key beadc does not read is refused, an output's among them, and so is
-`messagesOut` without `messages: external`; two outputs write two folders. For a `.proto` source,
+`messagesOut` without `messages: external`; two outputs write two folders. A C# output names its
+`namespace` for a blueprint source, whose services have no file to take one from, and never for a
+`.proto` source, whose services take their file's. For a `.proto` source,
 `generate` writes a copy of Bead's options to `.beadc/include/bead/options.proto` beside
 `beadc.yaml`, for an editor to resolve `import "bead/options.proto";`: it is git's to ignore, and
 `--check` never compares it.
@@ -252,6 +258,82 @@ never a golden; `BEADC_WRITE_GOLDEN=1 yarn test` writes them. `yarn type-check` 
 consumer does, under their own [`tsconfig.json`](test/golden/typescript/tsconfig.json): the
 TypeScript side's strictness and its `Bundler` resolution, the runtime's name mapped to its source.
 Their lint is the TypeScript side's, over the code it generates.
+
+## The C# target
+
+`beadc generate` writes, for each `.proto` file that declares a service, `<File>Bead.cs` beside the
+`<File>.cs` protoc writes for it, in the folder of its C# namespace, `Bead/Messages/V1/MessagesBead.cs`
+for `bead/messages/v1/messages.proto`, its file's base name in Pascal case as protoc names it; for a
+service a blueprint alone declares, `<Name>Bead.cs` at the folder's root, in the output's
+`namespace`: the interop's is `InteropBead.cs`, in `Bead.Interop`. A file's namespace is its
+`csharp_namespace`, or its package in Pascal case, as protoc's C# generator gives it. The target is a
+printer of its own: every type it names is qualified from `global::`, so it manages no `using`, and
+no type of the namespace takes a runtime type's place. A file holds, for each of its services:
+
+- **`<Name>Procedures`**: a descriptor each, `RequestProcedure` or `CommandProcedure`, its
+  procedure as the runtime takes it, its deprecation and its payload limit among them, its
+  admission, and its codecs, `PayloadCodecs.Raw`, `.Text` or `.Json`, or `PayloadCodecs.Of` over
+  Google.Protobuf, at a nesting limit of 101, for a `proto` binding; then `All`, every one in their
+  ids' order;
+- **`<Name>Failures`**, a class of failures for each procedure that lists any, its values its own,
+  and `Is`, which tells a failure received by the service's catalogue;
+- **`<Name>Admissions`** and **`<Name>Windows`**, the records of its hooks, each required, and of
+  the windows of its procedures that notify, which the service layer's options take typed by the
+  service; and **`<Name>Commands`**, **`<Name>Notifiers`** and **`<Name>Notifications`**, a member
+  a command, a procedure that notifies, and its notification;
+- **`<Name>Server<TData>`**, where only resolvers are written: the layer's `Command`, `Notify`,
+  `On`, `Offer` and `ProceduresWithoutResolver`, over the layer's options, `ServiceServerOptions`,
+  given in its one constructor where a procedure names a hook, or by a second, beside one that takes
+  none, where none does;
+- **`<Name>Client`**, over its Bead client, the layer's options after it: a requester of each
+  procedure its server answers, by its rpc's name, its `Notifications` and `On`;
+
+and, once, the contract with the runtime, `GeneratedCode.SupportsVersion2`. Every doc comment is the
+description, then what the procedure admits, through one writer: one `///` a line, the text
+XML-escaped, a `<para>` a paragraph where there are two, and each character C# reads as a line's
+end besides LF, CR, NEL, LS and PS, written as its reference, `&#xD;`; a string literal writes them
+as escapes.
+
+**Its header** is beadc's, as the TypeScript target writes it, and ends with `// <auto-generated/>`,
+Roslyn's mark of generated code, so a consumer's analyzers and `dotnet format` leave the file alone;
+then `#nullable enable`, which a file so marked needs:
+
+```csharp
+// @generated by beadc 0.2.0 from spec/interop-blueprint.json: bead-blueprint/1, spec 0.2.0.
+// Do not edit: regenerate with beadc.
+// <auto-generated/>
+
+#nullable enable
+
+namespace Bead.Interop;
+```
+
+Where the output generates messages, a third line names protoc's version and the oldest
+Google.Protobuf its code runs on, both the pin's. Where a project's own rules should judge the file
+anyway, as Bead's do, its `.editorconfig` says so: `[*Bead.cs]` `generated_code = false`.
+
+**Its messages.** Where a binding is `proto`, protoc's C# generator, the stock one, writes the
+messages from buf's set alone (`--descriptor_set_in`): the files that declare them and every file of
+the project they import, then `bead/options.proto`, where they import it, in a run of its own with
+`internal_access`, so each project keeps its copy to itself. Both runs take `base_namespace=`,
+protoc's own option, so each file lands in its namespace's folder and two files of one name in two
+packages never meet. From buf's set, protoc writes the code it writes from the `.proto` itself; its
+embedded descriptor differs by each field's `json_name` alone, the default, which buf's set writes
+and protoc's own leaves out. protoc is the [pinned](#building-and-testing) one. With
+`messages: external`, beadc writes none and names each message by its namespace, as a project's own
+build compiles them, Grpc.Tools among them.
+
+**Its goldens**, under [`test/golden/csharp/`](test/golden/csharp/): the comments fixture's
+`Bead/Comments/V1/CommentsBead.cs` and the messages fixture's `Bead/Messages/V1/MessagesBead.cs`,
+with protoc's `Bead/Messages/V1/Messages.cs` and `Bead/Protobuf/Options.cs`; the messages fixture
+holds a nested message, a `oneof`, a `map` and an `optional` field. A test writes them again and
+compares them byte for byte, their header's versions written as today's first; beadc's own files
+need no protoc, their messages' line being the pin's, and protoc's are compared where the pinned
+protoc runs. The C# side's solution builds them as a consumer does, in
+[`implementations/dotnet/tests/Bead.Goldens`](../implementations/dotnet/tests/Bead.Goldens/Bead.Goldens.csproj),
+under that side's analyzers and every warning an error; their code style is that side's
+`.editorconfig`, of which the goldens' own is a copy, since an `.editorconfig` reaches only the files
+under its folder, and a test holds the two equal, byte for byte.
 
 ## The rules
 

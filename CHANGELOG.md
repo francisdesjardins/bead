@@ -34,6 +34,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--check` writes nothing and fails on a difference (decision 0022).
 - The root's `beadc.yaml`, which generates the TypeScript side's interop; CI's `builder` job holds
   the interop to it.
+- `beadc generate`'s C# target: from a blueprint, a `<Name>Bead.cs` for each service, its
+  descriptors, its catalogue and a class of failures for each procedure that lists any, the records
+  of its hooks and its windows, `<Name>Admissions` and `<Name>Windows`, a server class where only
+  resolvers are written and a client class holding a requester of each procedure by its name, over
+  the service layer of Bead.Core, every type qualified; protoc's C# messages from buf's set where a
+  binding is `proto`, each file in its namespace's folder, protoc held to one pin,
+  `builder/protoc.json`, which `builder/tools/fetch-protoc.mjs` fetches by its sha256 (decision
+  0022).
+- `generate` refuses two files it would write at one path, and leaves alone the files of a build's
+  and a package manager's folders.
+- `DESCRIPTION_TARGET`: `beadc check` refuses a description holding a character no XML
+  documentation comment holds.
 
 ### Changed
 
