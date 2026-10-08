@@ -1,0 +1,15 @@
+# buf's workspace, for an editor, for buf lint, and for buf generate where a project's own build
+# writes its messages: beadc passes buf a configuration of its own and never reads this file.
+# .beadc/include holds the editor's copy of Bead's options, which beadc generate writes.
+version: v2
+modules:
+  - path: proto
+    lint:
+      use: [STANDARD]
+      # bead.Raw, bead.Text and bead.Json serve many rpcs, as request and as response
+      except: [RPC_REQUEST_STANDARD_NAME, RPC_RESPONSE_STANDARD_NAME, RPC_REQUEST_RESPONSE_UNIQUE]
+  - path: .beadc/include
+    lint:
+      use: [STANDARD]
+      # bead/options.proto's package is `bead`, as protobuf's own options name none
+      except: [PACKAGE_VERSION_SUFFIX]

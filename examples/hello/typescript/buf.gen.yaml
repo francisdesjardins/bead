@@ -1,0 +1,7 @@
+# The messages of the external build: protoc-gen-es, as buf generate runs it, over hello's buf
+# workspace, the parent folder, Bead's options from beadc's copy in .beadc/include among it.
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: gen/messages
+    opt: [target=ts, erasable_syntax=true, import_extension=ts]

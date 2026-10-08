@@ -1,0 +1,3 @@
+.beadc/
+# buf generate's messages for the external build, as Grpc.Tools' are obj/'s
+typescript/gen/messages/

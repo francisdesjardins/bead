@@ -8,13 +8,13 @@
 //   node tools/check-versions.mjs --base <branch>   a pull request's base: one into main is a release
 //
 // On every ref: the TypeScript package's `version`, the builder's where the tree has one, the C#
-// side's `<Version>` and every project range of its lock files agree; each conformance file repeats
-// its document's version; and each `## [x.y.z]` section of the CHANGELOG is the one its `vx.y.z`
-// shipped. On a release branch, a pull request into main and main, besides: the product and each
-// document whose files changed move one step past their last release, at least the minor where a
-// file, a key or a property was added, and a document whose files did not keeps its version; each
-// document's tag stands at the first `v*` that gives its version; and the CHANGELOG dates and links
-// the release. Exit 1 on a problem, one a line, then a summary; exit 2 on a usage error.
+// side's `<Version>` and every project range of its lock files and of an example's agree; each
+// conformance file repeats its document's version; and each `## [x.y.z]` section of the CHANGELOG
+// is the one its `vx.y.z` shipped. On a release branch, a pull request into main and main,
+// besides: the product and each document whose files changed move one step past their last
+// release, at least the minor where a file, a key or a property was added, and a document whose
+// files did not keeps its version; each document's tag stands at the first `v*` that gives its
+// version; and the CHANGELOG dates and links the release. Exit 1 on a problem, one a line, then a summary; exit 2 on a usage error.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -138,8 +138,10 @@ export const PROPS = 'implementations/dotnet/Directory.Build.props';
 export const BUILDER = 'builder/package.json';
 export const CHANGELOG = 'CHANGELOG.md';
 
-// the C# side's lock files: every packages.lock.json git lists under implementations/dotnet
-export const LOCKS = /^implementations\/dotnet\/(?:.+\/)?packages\.lock\.json$/;
+// the C# lock files that take the side's projects: every packages.lock.json git lists under
+// implementations/dotnet, and under an example's dotnet folder
+export const LOCKS =
+  /^(?:implementations\/dotnet|examples\/[^/]+\/dotnet)\/(?:.+\/)?packages\.lock\.json$/;
 
 // each document: its id, its name in prose, its tag's prefix, the file that states its version,
 // and the key its conformance files repeat that version under

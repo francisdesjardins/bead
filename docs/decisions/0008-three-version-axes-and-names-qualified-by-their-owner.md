@@ -44,8 +44,13 @@ promise to be decided at once, on the day of the first release.
    version.
 
    `tools/release.mjs` moves every version in the release commit, the C# lock files' project ranges
-   with them, and sets each document's tag at the `v*` that `git flow release finish` makes;
-   `tools/check-versions.mjs` holds them ([0006](0006-a-rule-has-its-gate.md)). A document's files
+   with them, an example's among them, and sets each document's tag at the `v*` that
+   `git flow release finish` makes; `tools/check-versions.mjs` holds them
+   ([0006](0006-a-rule-has-its-gate.md)). It moves as well the image an example's wrappers name and
+   the `specVersion` of a blueprint an example generated, which the `examples` job holds to what
+   beadc prints and writes, as `generate --check` holds the header of the code beadc generates
+   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
+   neither is a document's file. A document's files
    are its text, the conformance files that repeat its version and their schemas; the generators
    and checks that write and read them are none of them. A document's last release is the newest
    `v*` before the commit whose tree holds it, at the version that tree states, or at that `v*`'s

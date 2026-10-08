@@ -36,18 +36,21 @@ judges every file, and a version is held once.
   whatever the machine's own configuration adds.
 
 **The root has no manifest and no task runner.** It holds what every implementation shares: `spec/`
-and its generators, the builder, `builder/`
-([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)),
-`docs/`, `tools/`, `.githooks/`, the CI, the README, the CHANGELOG, the licence, and the standing
-instructions for Claude sessions, `CLAUDE.md` and `.claude/workflows/`; the rest of `.claude/` is
-each clone's own, which git ignores. The root's tools are Node scripts without dependencies. The
-spec's are Python 3.14's: its generators use the standard library alone, and its check,
-`spec/check.py`, needs `jsonschema`, which `spec/requirements.in` names and `spec/requirements.txt`
-locks with every hash, installed with `--require-hashes --only-binary=:all:`.
+and its generators, the builder, `builder/`, the examples, `examples/`, `docs/`, `tools/`,
+`.githooks/`, the CI, the README, the CHANGELOG, the licence, and the standing instructions for
+Claude sessions, `CLAUDE.md` and `.claude/workflows/`; the rest of `.claude/` is each clone's own,
+which git ignores. The builder and the examples are placed by
+[0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
+`examples/` holds projects written as a consumer writes one, each language's half under its own
+toolchain, the house's rules by reference where its platform can and a copy held to them where it
+cannot. The root's tools are Node scripts without dependencies. The spec's are Python 3.14's: its
+generators use the standard library alone, and its check, `spec/check.py`, needs `jsonschema`,
+which `spec/requirements.in` names and `spec/requirements.txt` locks with every hash, installed
+with `--require-hashes --only-binary=:all:`.
 
 **A language that joins comes the same way**: a folder under `implementations/`, its own native
 toolchain, and a CI job of its own. A part every language uses that is neither an implementation nor
-the spec is placed by a decision of its own, as the builder is by
+the spec is placed by a decision of its own, as the builder and the examples are by
 [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md).
 
 ## Consequences
@@ -69,6 +72,7 @@ the spec is placed by a decision of its own, as the builder is by
 - Coverage is measured by each side's own tool, c8's istanbul report and `dotnet test --coverage`'s
   cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either; it is a
   local command, not a CI job.
-- Three lockfile formats: a `yarn.lock` for the TypeScript side and one for the builder, at the
-  TypeScript side's pins and locked versions where they share a package, a `packages.lock.json` per
-  C# project, and `spec/requirements.txt`, so an upgrade is made side by side, never by one command.
+- Three lockfile formats: a `yarn.lock` for the TypeScript side, one for the builder and one for
+  each example's TypeScript half, at the TypeScript side's pins and locked versions where they share
+  a package, a `packages.lock.json` per C# project, an example's among them, and
+  `spec/requirements.txt`, so an upgrade is made side by side, never by one command.

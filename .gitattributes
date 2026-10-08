@@ -5,6 +5,7 @@
 # The vendored Yarn releases run as they were released: no normalisation may touch them.
 /implementations/typescript/.yarn/releases/** binary
 /builder/.yarn/releases/** binary
+/examples/hello/typescript/.yarn/releases/** binary
 
 # Binary by nature, should one ever be committed.
 *.png binary

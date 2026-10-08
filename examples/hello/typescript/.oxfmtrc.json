@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxfmt/configuration_schema.json",
+
+  // The TypeScript side's options, copied, as the builder's are: oxfmt's configuration has no
+  // `extends`, and an editor formats with the nearest file. tools/check-examples.mjs holds each
+  // option to the side's. What beadc and buf generate is left to them.
+  "semi": true,
+  "trailingComma": "es5",
+  "singleQuote": true,
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "endOfLine": "lf",
+  "arrowParens": "always",
+  "bracketSpacing": true,
+  "jsxSingleQuote": false,
+  "proseWrap": "preserve",
+  "sortPackageJson": true,
+  "ignorePatterns": [".yarn/**", "dist/**", "gen/**"]
+}

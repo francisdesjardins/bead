@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package hello.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Greets its callers, asks a nameless one its name, and counts down for one it greeted.
+service HelloService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+    failures: "HelloFailure"
+  };
+
+  // Greets a name; given none, asks its caller's first, by AskName.
+  rpc SayHello(SayHelloRequest) returns (SayHelloResponse) {
+    option (bead.procedure) = {
+      id: 1
+      failures: ["HELLO_FAILURE_NAMELESS"]
+    };
+  }
+
+  // Counts down from a number to 0, a Tick a step, for a caller its connection greeted.
+  rpc CountDown(CountDownRequest) returns (CountDownResponse) {
+    option (bead.procedure) = {
+      id: 2
+      notifies: {message: "hello.v1.Tick"}
+      admission: {hook: "greeted"}
+      failures: ["HELLO_FAILURE_TOO_FAR"]
+    };
+  }
+
+  // Asks the client its name: a command the client answers.
+  rpc AskName(AskNameRequest) returns (AskNameResponse) {
+    option (bead.procedure) = {
+      id: 3
+      command: {}
+    };
+  }
+}
+
+// Whom to greet; empty, the caller.
+message SayHelloRequest {
+  string name = 1;
+}
+
+// The greeting.
+message SayHelloResponse {
+  string greeting = 1;
+}
+
+// Where the count starts, 10 at most.
+message CountDownRequest {
+  int32 from = 1;
+}
+
+// The ticks the count will notify.
+message CountDownResponse {
+  int32 ticks = 1;
+}
+
+// One step of a count.
+message Tick {
+  int32 remaining = 1;
+}
+
+// What the server asks.
+message AskNameRequest {
+  string question = 1;
+}
+
+// What the client answers.
+message AskNameResponse {
+  string name = 1;
+}
+
+// What a hello answers instead.
+enum HelloFailure {
+  HELLO_FAILURE_UNSPECIFIED = 0;
+  // Nobody to greet: no name given, and none the caller gave when asked.
+  HELLO_FAILURE_NAMELESS = 1;
+  // A count past 10.
+  HELLO_FAILURE_TOO_FAR = 2;
+}

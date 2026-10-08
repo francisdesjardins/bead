@@ -170,7 +170,8 @@ jobs:
   # a stand-in engine. On the image's legs, Linux on Node 26, amd64 and arm64, each natively: beadc's
   # image built from `builder/Dockerfile`, its test stage built on the image itself, so beadc's
   # tests run once on the image's Node, protoc and environment, then once more from `builder/`, where
-  # each wrapper runs the image it built; and the wrappers' lint, each linter at its pin.
+  # each wrapper runs the image it built, over the repository's projects and `examples/hello`; and
+  # the wrappers' lint, each linter at its pin.
   #
   # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails: here a
   # skip could only be a fetch gone wrong.
@@ -266,6 +267,88 @@ jobs:
         working-directory: .
         run: node builder/src/cli.ts generate --check
 
+  # ── Examples ─────────────────────────────────────────────────────────────────
+  # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
+  # Yarn portal and a ProjectReference. First what the examples copy or take from beadc, held to
+  # their source; then examples/hello: beadc on Node from builder/ holds its generated files and
+  # writes the copy of Bead's options its external builds read; buf's lint and layout over its
+  # .proto; each half's gates and both its builds; then each client against each server, both
+  # modes of each half, sixteen pairs, every one writing transcript.txt, every server ending clean.
+  # On the current line and on the floor the TypeScript half's engines.node declares. The wrappers
+  # run over it on the builder job's image legs, where the image is.
+  examples:
+    name: Examples (Node ${{ matrix.node }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['26', '24.9']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: examples/hello/dotnet/global.json
+          cache: true
+          cache-dependency-path: |
+            examples/*/dotnet/packages.lock.json
+            implementations/dotnet/src/**/packages.lock.json
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: builder
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      # The download cache, not `node_modules`: cache what was downloaded, always install.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: examples-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('builder/yarn.lock', 'examples/*/typescript/yarn.lock') }}
+          restore-keys: examples-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
+      - uses: actions/cache@v6
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      # `--immutable` fails if `yarn.lock` would change.
+      - run: $YARN install --immutable
+        working-directory: builder
+      # assigned first: a failed fetch fails the step
+      - name: protoc, by its pin's sha256
+        working-directory: builder
+        run: |
+          protoc="$(node tools/fetch-protoc.mjs)"
+          echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      - name: What each example copies, or takes from beadc's wrapper and init
+        run: node tools/check-examples.mjs
+      # held first, then written: generate writes the same files again, and the copy of Bead's
+      # options, git's to ignore, which buf and Grpc.Tools read
+      - name: hello's generated files, what beadc writes
+        working-directory: examples/hello
+        run: |
+          node ../../builder/src/cli.ts generate --check
+          node ../../builder/src/cli.ts generate
+          git diff --exit-code
+      - run: $YARN install --immutable
+        working-directory: examples/hello/typescript
+      - name: hello's .proto, buf's lint and layout
+        working-directory: examples/hello
+        run: |
+          typescript/node_modules/.bin/buf lint
+          typescript/node_modules/.bin/buf format --diff --exit-code
+      - run: $YARN check
+        working-directory: examples/hello/typescript
+      - run: $YARN build && $YARN build:external
+        working-directory: examples/hello/typescript
+      - run: dotnet format Hello.csproj --verify-no-changes --exclude gen
+        working-directory: examples/hello/dotnet
+      - run: dotnet build && dotnet build -p:HelloMessages=external
+        working-directory: examples/hello/dotnet
+        env:
+          CI: true
+      - name: Each client against each server
+        run: node examples/hello/pairs.mjs
+
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
@@ -326,7 +409,7 @@ jobs:
   ci-ok:
     name: CI ok
     if: always()
-    needs: [spec, typescript, dotnet, builder, commits]
+    needs: [spec, typescript, dotnet, builder, examples, commits]
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:

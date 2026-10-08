@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    The C# side's rules, by reference, as the TypeScript half extends the side's tsconfig and
+    oxlint bases; then where Hello's messages come from, read before the SDK so each build keeps
+    its own folders.
+  -->
+  <Import Project="../../../implementations/dotnet/Directory.Build.props" />
+  <PropertyGroup>
+    <HelloMessages Condition="'$(HelloMessages)' == ''">generate</HelloMessages>
+    <BaseOutputPath>bin/$(HelloMessages)/</BaseOutputPath>
+    <BaseIntermediateOutputPath>obj/$(HelloMessages)/</BaseIntermediateOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

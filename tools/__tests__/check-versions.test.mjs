@@ -359,6 +359,31 @@ describe('every ref: each version agrees with itself, and a released section sta
     assert.match(found[0], /bead\.http takes Bead\.Core at \[1\.0\.0, \), where <Version> 0\.1\.0/);
   });
 
+  test("an example's lock file's project range apart from <Version> fails", () => {
+    const { write, problems } = repository(released());
+    // as NuGet writes it beside the example's project: one project of the side's takes another
+    const example = (range) => {
+      return json({
+        version: 1,
+        dependencies: {
+          'net10.0': {
+            'bead.core': { type: 'Project' },
+            'bead.transport.websockets': {
+              type: 'Project',
+              dependencies: { 'Bead.Core': `[${range}, )` },
+            },
+          },
+        },
+      });
+    };
+    write({ 'examples/hello/dotnet/packages.lock.json': example('1.0.0') });
+    assert.deepEqual(problems(), [
+      'examples/hello/dotnet/packages.lock.json: bead.transport.websockets takes Bead.Core at [1.0.0, ), where <Version> 0.1.0 owes [0.1.0, )',
+    ]);
+    write({ 'examples/hello/dotnet/packages.lock.json': example('0.1.0') });
+    assert.deepEqual(problems(), []);
+  });
+
   test("a conformance file's specVersion apart from spec.md's fails", () => {
     const { write, problems } = repository(released());
     write({ 'spec/vectors.json': json({ specVersion: '0.2.0', headers: [] }) });
