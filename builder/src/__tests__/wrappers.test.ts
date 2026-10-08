@@ -1274,7 +1274,7 @@ test("each wrapper writes a project's files as the caller", () => {
 
     const files = filesOf(folder);
 
-    expect(files).toContain('gen/typescript/hello/v1/hello_bead.ts');
+    expect(files).toContain('typescript/gen/hello/v1/hello_bead.ts');
 
     // ! Docker Desktop maps every user to the caller on Windows, which holds no owner's id
     if (!WINDOWS) {

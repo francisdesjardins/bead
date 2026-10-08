@@ -60,9 +60,9 @@ test('writes a project that check passes and generate writes', () => {
   expect(beadc(['generate', '--check'], folder)).toEqual({ status: 0, stdout: '', stderr: '' });
   expect(existsSync(join(folder, 'gen', 'hello_world.blueprint.json'))).toBe(true);
   expect(
-    existsSync(join(folder, 'gen', 'typescript', 'hello_world', 'v1', 'hello_world_bead.ts'))
+    existsSync(join(folder, 'typescript', 'gen', 'hello_world', 'v1', 'hello_world_bead.ts'))
   ).toBe(true);
-  expect(existsSync(join(folder, 'gen', 'csharp', 'HelloWorld', 'V1', 'HelloWorldBead.cs'))).toBe(
+  expect(existsSync(join(folder, 'dotnet', 'gen', 'HelloWorld', 'V1', 'HelloWorldBead.cs'))).toBe(
     true
   );
 
@@ -72,11 +72,63 @@ test('writes a project that check passes and generate writes', () => {
   expect(lint.stdout + lint.stderr).toBe('');
   expect(lint.status).toBe(0);
 
-  // one language asked, one output written
+  // one language asked, one output written, under its half's folder, and its git line alone
   const typescript = folderOf('typescript');
 
   expect(beadc(['init', 'hello', '--language', 'typescript'], typescript).status).toBe(0);
-  expect(readFileSync(join(typescript, 'beadc.yaml'), 'utf8')).not.toContain('csharp');
+
+  const config = readFileSync(join(typescript, 'beadc.yaml'), 'utf8');
+
+  expect(config).toContain('    out: typescript/gen\n    importExtension: ts\n');
+  expect(config).not.toContain('csharp');
+  expect(config).not.toContain('dotnet/gen');
+  expect(readFileSync(join(typescript, '.gitattributes'), 'utf8')).toBe(
+    [
+      'beadc.sh text eol=lf',
+      'beadc.ps1 text eol=lf',
+      'gen/** text eol=lf linguist-generated=true',
+      'typescript/gen/** text eol=lf linguist-generated=true',
+      '',
+    ].join('\n')
+  );
+});
+
+test("lays each language's generated code under its own folder", () => {
+  const version = beadcVersion();
+  const folder = folderOf();
+
+  initProject('hello', { folder, version });
+
+  expect(readFileSync(join(folder, 'beadc.yaml'), 'utf8')).toContain(
+    [
+      'outputs:',
+      '  - language: typescript',
+      '    out: typescript/gen',
+      '    importExtension: ts',
+      '  - language: csharp',
+      '    out: dotnet/gen',
+      '',
+    ].join('\n')
+  );
+
+  // the C# output alone: its folder, and its git line after the blueprint's
+  const csharp = folderOf('csharp');
+
+  initProject('hello', { folder: csharp, version, languages: ['csharp'] });
+
+  const config = readFileSync(join(csharp, 'beadc.yaml'), 'utf8');
+
+  expect(config).toContain('outputs:\n  - language: csharp\n    out: dotnet/gen\n');
+  expect(config).not.toContain('typescript');
+  expect(readFileSync(join(csharp, '.gitattributes'), 'utf8')).toBe(
+    [
+      'beadc.sh text eol=lf',
+      'beadc.ps1 text eol=lf',
+      'gen/** text eol=lf linguist-generated=true',
+      'dotnet/gen/** text eol=lf linguist-generated=true',
+      '',
+    ].join('\n')
+  );
 });
 
 test('writes nothing over a file that is there, exit 2', () => {
@@ -145,6 +197,8 @@ test('appends its .gitattributes and .gitignore lines once', () => {
       'beadc.sh text eol=lf',
       'beadc.ps1 text eol=lf',
       'gen/** text eol=lf linguist-generated=true',
+      'typescript/gen/** text eol=lf linguist-generated=true',
+      'dotnet/gen/** text eol=lf linguist-generated=true',
       '',
     ].join('\n')
   );

@@ -1,8 +1,9 @@
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 // `beadc init <name>`: a project beadc generates, written in the folder it runs in (decision 0022).
-// Its `beadc.yaml`, a `.proto` of one service that `beadc check` passes and buf's STANDARD lint
-// takes, buf's own `buf.yaml` for an editor, the editor's copy of Bead's options, and the wrappers
+// Its `beadc.yaml`, each language's output under the folder of its half, `typescript/gen` and
+// `dotnet/gen`, a `.proto` of one service that `beadc check` passes and buf's STANDARD lint takes,
+// buf's own `buf.yaml` for an editor, the editor's copy of Bead's options, and the wrappers
 // `beadc.sh` and `beadc.ps1` filled with beadc's version; then the lines a project's `.gitignore`
 // and `.gitattributes` owe, each appended when absent. It writes over no file: every path is looked
 // at before the first write, and one there is refused, but a wrapper that is byte for byte the one
@@ -54,14 +55,13 @@ const NAME = /^[a-z][a-z0-9_]*$/u;
 
 const LANGUAGES: readonly string[] = Object.values(Language);
 
-// the lines a project's git files owe, each appended when absent
-const GIT_LINES: ReadonlyMap<string, readonly string[]> = new Map([
-  ['.gitignore', ['.beadc/']],
-  [
-    '.gitattributes',
-    ['beadc.sh text eol=lf', 'beadc.ps1 text eol=lf', 'gen/** text eol=lf linguist-generated=true'],
-  ],
-]);
+// * each language's generated code under the folder of its half, named as the repository names its
+// implementations: a generated `_bead.ts` resolves its packages from where it sits, so `<half>/gen`
+// serves a package at the project's root and one in the half's folder alike
+const OUT: Readonly<Record<Language, string>> = Object.freeze({
+  [Language.TYPESCRIPT]: 'typescript/gen',
+  [Language.CSHARP]: 'dotnet/gen',
+});
 
 // helpers
 
@@ -75,6 +75,25 @@ const pascalOf = (name: string): string => {
     .join('');
 };
 
+// the lines a project's git files owe, each appended when absent: the wrappers', the blueprint's,
+// then one for each language's output
+const gitLinesOf = (languages: readonly Language[]): ReadonlyMap<string, readonly string[]> => {
+  return new Map([
+    ['.gitignore', ['.beadc/']],
+    [
+      '.gitattributes',
+      [
+        'beadc.sh text eol=lf',
+        'beadc.ps1 text eol=lf',
+        'gen/** text eol=lf linguist-generated=true',
+        ...languages.map((language) => {
+          return `${OUT[language]}/** text eol=lf linguist-generated=true`;
+        }),
+      ],
+    ],
+  ]);
+};
+
 const configOf = (name: string, languages: readonly Language[]): string => {
   return [
     `# beadc.yaml: ${name}'s services, from its .proto, generated in each language. ./beadc.sh`,
@@ -86,8 +105,8 @@ const configOf = (name: string, languages: readonly Language[]): string => {
     'outputs:',
     ...languages.flatMap((language) => {
       return language === Language.TYPESCRIPT
-        ? ['  - language: typescript', '    out: gen/typescript', '    importExtension: ts']
-        : ['  - language: csharp', '    out: gen/csharp'];
+        ? ['  - language: typescript', `    out: ${OUT[language]}`, '    importExtension: ts']
+        : ['  - language: csharp', `    out: ${OUT[language]}`];
     }),
     '',
   ].join('\n');
@@ -123,9 +142,9 @@ const protoOf = (name: string): string => {
 };
 
 const BUF = [
-  "# buf's workspace, for an editor and for buf lint: beadc passes buf a configuration of its own",
-  "# and never reads this file. .beadc/include holds the editor's copy of Bead's options, which",
-  '# beadc generate writes.',
+  "# buf's workspace, for an editor, for buf lint, and for buf generate where a project's own build",
+  '# writes its messages: beadc passes buf a configuration of its own and never reads this file.',
+  "# .beadc/include holds the editor's copy of Bead's options, which beadc generate writes.",
   'version: v2',
   'modules:',
   '  - path: proto',
@@ -268,7 +287,7 @@ export const initProject = (
   writeEditorCopy(folder);
   written.push(editorCopy);
 
-  const appended = [...GIT_LINES].flatMap(([file, lines]) => {
+  const appended = [...gitLinesOf(languages)].flatMap(([file, lines]) => {
     const path = pathOf(file);
     const absent = absentOf(path, lines);
 
