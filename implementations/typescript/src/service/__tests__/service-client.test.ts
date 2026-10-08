@@ -25,7 +25,7 @@ test.describe('createServiceClient', () => {
     const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
       admissions: { loud },
     });
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
     const refused = await (async () => {
       try {
         await greeter.command.guarded('who')({ connectionHandle: CONNECTION, timeout: 1_000 });
@@ -79,7 +79,7 @@ test.describe('createServiceClient', () => {
         result: PAYLOAD_CODECS.text,
       }),
     });
-    const client = createServiceClient(procedures, { client: connected.client });
+    const client = createServiceClient(procedures, connected.client);
 
     expect(() => {
       client.on('clock', (_request, response) => {
@@ -100,8 +100,7 @@ test.describe('createServiceClient', () => {
       return declareRequester(procedure);
     };
 
-    const client = createServiceClient(GreeterProcedures, {
-      client: connected.client,
+    const client = createServiceClient(GreeterProcedures, connected.client, {
       windows: { news: 4 },
     });
 
@@ -117,11 +116,11 @@ test.describe('createServiceClient', () => {
     expect(declared.toSorted()).toEqual(['login', 'news', 'news', 'sayHello', 'shout', 'whoami']);
     // the same procedure at the same window gives the same notification; at another, a refusal
     expect(
-      createServiceClient(GreeterProcedures, { client: connected.client, windows: { news: 4 } })
+      createServiceClient(GreeterProcedures, connected.client, { windows: { news: 4 } })
         .notifications.news
     ).toBe(client.notifications.news);
     expect(() => {
-      return createServiceClient(GreeterProcedures, { client: connected.client });
+      return createServiceClient(GreeterProcedures, connected.client);
     }).toThrow(ProgrammerError);
   });
 
@@ -130,7 +129,7 @@ test.describe('createServiceClient', () => {
     const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
       admissions: { loud },
     });
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
     const opened: boolean[] = [];
 
     greeter.on('news', (request, response) => {
@@ -149,14 +148,12 @@ test.describe('createServiceClient', () => {
     await using connected = await connectWorker();
 
     expect(() => {
-      return createServiceClient(GreeterProcedures, {
-        client: connected.client,
+      return createServiceClient(GreeterProcedures, connected.client, {
         windows: { sayHello: 1 } as never,
       });
     }).toThrow(ProgrammerError);
     expect(() => {
-      return createServiceClient(GreeterProcedures, {
-        client: connected.client,
+      return createServiceClient(GreeterProcedures, connected.client, {
         windows: { news: 0 },
       });
     }).toThrow(ProgrammerError);
@@ -188,11 +185,8 @@ test.describe('createServiceClient', () => {
     });
     echo.offer(connected.server);
 
-    const validating = createServiceClient(procedures, {
-      client: connected.client,
-      validates: true,
-    });
-    const trusting = createServiceClient(procedures, { client: connected.client });
+    const validating = createServiceClient(procedures, connected.client, { validates: true });
+    const trusting = createServiceClient(procedures, connected.client);
 
     await expect(validating.request.echo('')()).rejects.toBeInstanceOf(RangeError);
     // * the server's layer holds it too: the request went, and its resolver never saw it

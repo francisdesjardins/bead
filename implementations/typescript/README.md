@@ -484,14 +484,14 @@ notifies a procedure's subscribers, and sends nothing before the service is offe
 `proceduresWithoutResolver()` lists what no `on` answers, which the router answers
 `PROCEDURE_UNKNOWN`. An admission rule is `none`; `session`, the server's `requireSession`; or a
 hook by name, `{ admits, detail }`, synchronous, refused `ACCESS_DENIED` with its detail: the
-options give every hook the procedures name, and a hook they lack, or one no procedure names, is a
-`ProgrammerError` as the server side is made. A resolver answers a result, a failure its procedure
-lists, `GreeterFailures.of(name, detail)`, or a refusal of admission; a code its procedure does not
-list, which only a cast reaches, goes as written and is reported through the router's `error`
-event.
+options give every hook the procedures name, and a hook they lack, one no procedure names, or one
+that is no hook, is a `ProgrammerError` as the server side is made. A resolver answers a result, a
+failure its procedure lists, `GreeterFailures.of(name, detail)`, or a refusal of admission; a code
+its procedure does not list, which only a cast reaches, goes as written and is reported through the
+router's `error` event.
 
 ```ts
-const greeter = createServiceClient(GreeterProcedures, { client, windows: { news: 1 } });
+const greeter = createServiceClient(GreeterProcedures, client, { windows: { news: 1 } });
 
 greeter.on('clock', (_request, response) => {
   return response('noon');
@@ -508,17 +508,17 @@ await using news = await greeter.notifications.news('subscribe', (item) => {
 })();
 ```
 
-The client side makes a requester of each procedure its server answers, `request.<name>`, and a
-notification of each that notifies, `notifications.<name>`, at the window its caller gives, unpaced
-by default; a request to a procedure that notifies opens no subscription. Its `on` answers a
-command, its `session` admission refused with the client router's own `SESSION_REQUIRED`; a client
-side is given no hooks, so a command a hook admits is a `ProgrammerError` there. Each requester and
-resolver is declared once. A call stays curried, `request.sayHello(payload)(options)`: what the
-payload gives is a bound call, `IBoundCall`, or `IRegistrar` for a notification, whose `then` no
-promise matches, so `await greeter.request.sayHello('Ada')`, its options' call forgotten, does not
-compile. A descriptor may carry `validate`, which throws on a request its rules refuse: the side
-that answers calls it before the resolver, and a client whose options say `validates: true` before
-the request is written.
+The client side takes its Bead client and, after it, its options, `IServiceClientOptions`. It makes
+a requester of each procedure its server answers, `request.<name>`, and a notification of each that
+notifies, `notifications.<name>`, at the window its caller gives, unpaced by default; a request to a
+procedure that notifies opens no subscription. Its `on` answers a command, its `session` admission
+refused with the client router's own `SESSION_REQUIRED`; a client side is given no hooks, so a
+command a hook admits is a `ProgrammerError` there. Each requester and resolver is declared once. A
+call stays curried, `request.sayHello(payload)(options)`: what the payload gives is a bound call,
+`IBoundCall`, or `IRegistrar` for a notification, whose `then` no promise matches, so
+`await greeter.request.sayHello('Ada')`, its options' call forgotten, does not compile. A descriptor
+may carry `validate`, which throws on a request its rules refuse: the side that answers calls it
+before the resolver, and a client whose options say `validates: true` before the request is written.
 
 ### Transfers
 

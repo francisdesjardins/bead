@@ -19,6 +19,8 @@ export const CLASS_SUFFIXES: readonly string[] = Object.freeze([
   'Client',
   'ClientOptions',
   'Resolvers',
+  'Admissions',
+  'Windows',
 ]);
 
 /**
@@ -89,6 +91,9 @@ export const RUNTIME_TYPES: ReadonlySet<string> = new Set([
   'ServiceManager',
   'ServiceServer',
   'ServiceServerOptions',
+  'IServiceAdmissions',
+  'IServiceClientOptions',
+  'IServiceWindows',
   'SessionManager',
   'WebSocketClient',
   'WebSocketClientOptions',

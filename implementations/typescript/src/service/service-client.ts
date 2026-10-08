@@ -64,6 +64,17 @@ export interface IServiceClient<S extends ServiceProcedures> {
   ) => void;
 }
 
+/**
+ * What a client side of a service is given besides its Bead client: the window of each procedure
+ * that notifies, by its name, and whether each requester validates.
+ */
+export interface IServiceClientOptions<S extends ServiceProcedures> {
+  /** Whether each requester runs its descriptor's `validate` before it encodes; not when none. */
+  readonly validates?: boolean | undefined;
+  /** The window of each procedure that notifies, a whole number above 0; one not given, unpaced. */
+  readonly windows?: { readonly [Name in NotifyingName<S>]?: number | undefined } | undefined;
+}
+
 // types
 
 /** A command's resolver registered. */
@@ -75,8 +86,8 @@ type AnyCallback = (
 // definition
 
 /**
- * The client side of a service, over `options.client`: a requester of each procedure its server
- * answers and a notification of each that notifies, each made once as it is built, at the window
+ * The client side of a service, over `client`: a requester of each procedure its server answers
+ * and a notification of each that notifies, each made once as it is built, at the window
  * `options.windows` gives it — unpaced when none — and `on`, for the commands it answers. A window
  * for a procedure that does not notify, or one that is not a whole number above 0, is a
  * {@link ProgrammerError}, and so is a second client side over one Bead client at another window.
@@ -94,20 +105,16 @@ type AnyCallback = (
  *     result: PAYLOAD_CODECS.text,
  *   }),
  * });
- * const greeter = createServiceClient(GreeterProcedures, { client });
+ * const greeter = createServiceClient(GreeterProcedures, client);
  *
  * const greeting = greeter.request.sayHello('Bead')({ timeout: 2_000 });
  */
 export const createServiceClient = <const S extends ServiceProcedures>(
   procedures: S,
-  options: {
-    client: IClient;
-    /** Whether each requester runs its descriptor's `validate` before it encodes; not when none. */
-    validates?: boolean | undefined;
-    windows?: { readonly [Name in NotifyingName<S>]?: number | undefined } | undefined;
-  }
+  client: IClient,
+  options: IServiceClientOptions<S> = {}
 ): IServiceClient<S> => {
-  const { client, validates = false } = options;
+  const { validates = false } = options;
   const windows: Readonly<Record<string, number | undefined>> = options.windows ?? {};
   const services = client.services;
   const callbacks = new Set<string>();

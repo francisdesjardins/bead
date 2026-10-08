@@ -2,8 +2,8 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import type { IServiceClient, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_1, PAYLOAD_CODECS, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
+import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_2, PAYLOAD_CODECS, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
 import type { Greeting, Greeting_Reply } from "./messages_pb.ts";
 import { Greeting_ReplySchema, GreetingSchema } from "./messages_pb.ts";
 import type { MessageInitShape } from "@bufbuild/protobuf";
@@ -67,9 +67,19 @@ export type GreeterResolvers = ServiceResolvers<typeof GreeterProcedures>;
 export type GreeterServerOptions = Exclude<ServiceServerOptions<typeof GreeterProcedures>[0], undefined>;
 
 /**
- * What a client side of `bead.messages.v1.GreeterService` is given besides its Bead client.
+ * The hooks of `bead.messages.v1.GreeterService`, by the names its procedures give them.
  */
-export type GreeterClientOptions = Omit<Parameters<typeof createServiceClient<typeof GreeterProcedures>>[1], 'client'>;
+export type GreeterAdmissions = NonNullable<GreeterServerOptions['admissions']>;
+
+/**
+ * What a client side of `bead.messages.v1.GreeterService` is given besides its Bead client: the windows of its notifications, and whether it validates.
+ */
+export type GreeterClientOptions = IServiceClientOptions<typeof GreeterProcedures>;
+
+/**
+ * The window each procedure of `bead.messages.v1.GreeterService` that notifies is asked for; none, unpaced.
+ */
+export type GreeterWindows = NonNullable<GreeterClientOptions['windows']>;
 
 /**
  * The server side of `bead.messages.v1.GreeterService`, offered on one Bead server: only its resolvers are written.
@@ -134,8 +144,8 @@ export class GreeterClient {
   /**
    * Its Bead client, and its options: the windows of its notifications, and whether it validates.
    */
-  public constructor(client: Parameters<typeof createServiceClient>[1]['client'], options: GreeterClientOptions = {}) {
-    const service = createServiceClient(GreeterProcedures, { ...options, client });
+  public constructor(client: Parameters<typeof createServiceClient>[1], options: GreeterClientOptions = {}) {
+    const service = createServiceClient(GreeterProcedures, client, options);
 
     this.sayHello = service.request.sayHello;
     this.watch = service.request.watch;
@@ -145,4 +155,4 @@ export class GreeterClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_1;
+void GENERATED_CODE_SUPPORTS_VERSION_2;

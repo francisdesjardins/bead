@@ -40,6 +40,8 @@ test("a service's classes, in every official target", () => {
     'InteropClient',
     'InteropClientOptions',
     'InteropResolvers',
+    'InteropAdmissions',
+    'InteropWindows',
   ]);
 });
 

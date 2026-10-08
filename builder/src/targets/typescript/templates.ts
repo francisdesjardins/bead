@@ -249,13 +249,28 @@ export const printService = (
     `<typeof ${procedures}>[0], undefined>;`
   );
   f.print();
-  f.print(f.jsDoc(`What a client side of \`${shown}\` is given besides its Bead client.`));
+  f.print(f.jsDoc(`The hooks of \`${shown}\`, by the names its procedures give them.`));
+  f.print(
+    f.export('type', `${name}Admissions`),
+    ` = NonNullable<${name}ServerOptions['admissions']>;`
+  );
+  f.print();
+  f.print(
+    f.jsDoc(
+      `What a client side of \`${shown}\` is given besides its Bead client: the windows of its notifications, and whether it validates.`
+    )
+  );
   f.print(
     f.export('type', `${name}ClientOptions`),
-    ' = Omit<Parameters<typeof ',
-    fromRuntime('createServiceClient'),
-    `<typeof ${procedures}>>[1], 'client'>;`
+    ' = ',
+    fromRuntime('IServiceClientOptions', true),
+    `<typeof ${procedures}>;`
   );
+  f.print();
+  f.print(
+    f.jsDoc(`The window each procedure of \`${shown}\` that notifies is asked for; none, unpaced.`)
+  );
+  f.print(f.export('type', `${name}Windows`), ` = NonNullable<${name}ClientOptions['windows']>;`);
 
   // * the server: the layer's members, taken in the constructor, its options one parameter
   f.print();
@@ -339,12 +354,12 @@ export const printService = (
   f.print(
     '  public constructor(client: Parameters<typeof ',
     fromRuntime('createServiceClient'),
-    `>[1]['client'], options: ${name}ClientOptions = {}) {`
+    `>[1], options: ${name}ClientOptions = {}) {`
   );
   f.print(
     '    const service = ',
     fromRuntime('createServiceClient'),
-    `(${procedures}, { ...options, client });`
+    `(${procedures}, client, options);`
   );
   f.print();
 

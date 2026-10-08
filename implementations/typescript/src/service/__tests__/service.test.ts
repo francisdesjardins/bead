@@ -15,7 +15,7 @@ test.describe('the service entry', () => {
     expect(PACKAGE.exports['./service']).toBe('./src/service/service.ts');
     expect(Object.keys(service).toSorted()).toEqual([
       'FailureError',
-      'GENERATED_CODE_SUPPORTS_VERSION_1',
+      'GENERATED_CODE_SUPPORTS_VERSION_2',
       'PAYLOAD_CODECS',
       'ProcedureKind',
       'ProgrammerError',

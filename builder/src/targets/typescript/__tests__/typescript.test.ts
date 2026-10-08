@@ -250,7 +250,7 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('export class CommentsServer<Data = unknown> {');
   expect(content).toContain('export class OtherServer<Data = unknown> {');
-  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_1;/gu)).toHaveLength(1);
+  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_2;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
 });
 
@@ -288,7 +288,7 @@ test('puts the header above the imports', () => {
     '// Do not edit: regenerate with beadc.',
     `// Messages: protoc-gen-es ${protocGenEsVersion()}, for @bufbuild/protobuf ${PROTOBUF_FLOOR} or later.`,
     '',
-    `import type { IServiceClient, IServiceServer, ServiceResolvers, ServiceServerOptions } from "${DEFAULT_RUNTIME}";`,
+    `import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "${DEFAULT_RUNTIME}";`,
   ]);
   expect(content).not.toContain('eslint-disable');
 });
@@ -306,7 +306,7 @@ test('aliases a runtime type a class of the service takes the name of', () => {
   );
 
   expect(content).toContain(
-    'import type { IServiceClient, IServiceServer, ServiceResolvers as ServiceResolvers$1, ServiceServerOptions as ServiceServerOptions$1 }'
+    'import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers as ServiceResolvers$1, ServiceServerOptions as ServiceServerOptions$1 }'
   );
   expect(content).toContain(
     'export type ServiceResolvers = ServiceResolvers$1<typeof ServiceProcedures>;'
