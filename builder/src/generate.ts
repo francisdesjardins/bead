@@ -33,9 +33,14 @@ import { InputError } from './diagnostics.ts';
 import { generateMessages } from './messages.ts';
 import { formOf } from './model/form.ts';
 import { OPTIONS_FILE, pathOnDisk } from './roots.ts';
-import type { IGeneratedFile, ITargetInput, SourceNames } from './targets/target.ts';
-import { Messages } from './targets/typescript/options.ts';
-import { bindsMessages, typescriptTarget } from './targets/typescript/typescript.ts';
+import {
+  bindsMessages,
+  type IGeneratedFile,
+  type ITargetInput,
+  Messages,
+  type SourceNames,
+} from './targets/target.ts';
+import { typescriptTarget } from './targets/typescript/typescript.ts';
 
 // types
 

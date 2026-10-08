@@ -10,6 +10,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Bead.Core.Tests/Bead.Core.Tests.csproj" />
+    <Project Path="tests/Bead.Goldens/Bead.Goldens.csproj" />
     <Project Path="tests/Bead.Interop.Tests/Bead.Interop.Tests.csproj" />
     <Project Path="tests/Bead.Transport.Http.Tests/Bead.Transport.Http.Tests.csproj" />
     <Project Path="tests/Bead.Transport.WebSockets.Tests/Bead.Transport.WebSockets.Tests.csproj" />

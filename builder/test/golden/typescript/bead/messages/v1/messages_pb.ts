@@ -14,7 +14,7 @@ import type { Message, UnknownEnum } from "@bufbuild/protobuf";
  * Describes the file bead/messages/v1/messages.proto.
  */
 export const file_bead_messages_v1_messages: GenFile = /*@__PURE__*/
-  fileDesc("Ch9iZWFkL21lc3NhZ2VzL3YxL21lc3NhZ2VzLnByb3RvEhBiZWFkLm1lc3NhZ2VzLnYxIlcKCEdyZWV0aW5nEgwKBG5hbWUYASABKAkSJgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wGhUKBVJlcGx5EgwKBHRleHQYASABKAkqTQoOR3JlZXRlckZhaWx1cmUSHwobR1JFRVRFUl9GQUlMVVJFX1VOU1BFQ0lGSUVEEAASGgoWR1JFRVRFUl9GQUlMVVJFX05PQk9EWRABMqQCCg5HcmVldGVyU2VydmljZRJoCghTYXlIZWxsbxIaLmJlYWQubWVzc2FnZXMudjEuR3JlZXRpbmcaIC5iZWFkLm1lc3NhZ2VzLnYxLkdyZWV0aW5nLlJlcGx5Ih6iyBwaCAE6FkdSRUVURVJfRkFJTFVSRV9OT0JPRFkSVAoFV2F0Y2gSGi5iZWFkLm1lc3NhZ2VzLnYxLkdyZWV0aW5nGgouYmVhZC5Kc29uIiOiyBwfCAISGwoZZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI4CgROYW1lEgouYmVhZC5UZXh0GhouYmVhZC5tZXNzYWdlcy52MS5HcmVldGluZyIIosgcBAgDGgAaGKLIHBQIAxABIg5HcmVldGVyRmFpbHVyZUIIosgcBAoCCgBiBnByb3RvMw", [file_bead_options, file_google_protobuf_timestamp]);
+  fileDesc("Ch9iZWFkL21lc3NhZ2VzL3YxL21lc3NhZ2VzLnByb3RvEhBiZWFkLm1lc3NhZ2VzLnYxIpQCCghHcmVldGluZxIMCgRuYW1lGAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIQCgZmb3JtYWwYAyABKAlIABIQCgZjYXN1YWwYBCABKAlIABI2CgZjb3VudHMYBSADKAsyJi5iZWFkLm1lc3NhZ2VzLnYxLkdyZWV0aW5nLkNvdW50c0VudHJ5EhUKCG5pY2tuYW1lGAYgASgJSAGIAQEaFQoFUmVwbHkSDAoEdGV4dBgBIAEoCRotCgtDb3VudHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAU6AjgBQgwKCnNhbHV0YXRpb25CCwoJX25pY2tuYW1lKk0KDkdyZWV0ZXJGYWlsdXJlEh8KG0dSRUVURVJfRkFJTFVSRV9VTlNQRUNJRklFRBAAEhoKFkdSRUVURVJfRkFJTFVSRV9OT0JPRFkQATKkAgoOR3JlZXRlclNlcnZpY2USaAoIU2F5SGVsbG8SGi5iZWFkLm1lc3NhZ2VzLnYxLkdyZWV0aW5nGiAuYmVhZC5tZXNzYWdlcy52MS5HcmVldGluZy5SZXBseSIeosgcGggBOhZHUkVFVEVSX0ZBSUxVUkVfTk9CT0RZElQKBVdhdGNoEhouYmVhZC5tZXNzYWdlcy52MS5HcmVldGluZxoKLmJlYWQuSnNvbiIjosgcHwgCEhsKGWdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASOAoETmFtZRIKLmJlYWQuVGV4dBoaLmJlYWQubWVzc2FnZXMudjEuR3JlZXRpbmciCKLIHAQIAxoAGhiiyBwUCAMQASIOR3JlZXRlckZhaWx1cmVCCKLIHAQKAgoAYgZwcm90bzM", [file_bead_options, file_google_protobuf_timestamp]);
 
 /**
  * A greeting.
@@ -31,6 +31,39 @@ export type Greeting = Message<"bead.messages.v1.Greeting"> & {
    * @generated from field: google.protobuf.Timestamp at = 2;
    */
   at?: Timestamp | undefined;
+
+  /**
+   * How it greets: one way or the other.
+   *
+   * @generated from oneof bead.messages.v1.Greeting.salutation
+   */
+  salutation: {
+    /**
+     * @generated from field: string formal = 3;
+     */
+    value: string;
+    case: "formal";
+  } | {
+    /**
+     * @generated from field: string casual = 4;
+     */
+    value: string;
+    case: "casual";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * How often each name was greeted.
+   *
+   * @generated from field: map<string, int32> counts = 5;
+   */
+  counts: { [key: string]: number };
+
+  /**
+   * A name it answers to, when it has one.
+   *
+   * @generated from field: optional string nickname = 6;
+   */
+  nickname?: string | undefined;
 };
 
 /**

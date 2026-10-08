@@ -162,7 +162,8 @@ layout and its modules.
 
 ```sh
 cd implementations/dotnet
-dotnet format Bead.slnx --verify-no-changes
+dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp
+dotnet build Bead.slnx
 dotnet test --solution Bead.slnx
 ```
 

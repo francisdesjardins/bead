@@ -15,13 +15,16 @@ The .NET 10 SDK, as `global.json` pins it, with the test runner, Microsoft.Testi
 this folder:
 
 ```sh
-dotnet format Bead.slnx --verify-no-changes
+dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp
+dotnet build Bead.slnx
 dotnet test --solution Bead.slnx
 ```
 
-With `CI=true`, a restore that would change a `packages.lock.json` fails. The interop against the
-TypeScript server needs that side installed; with `BEAD_INTEROP_REQUIRED=1`, an interop that would
-skip fails instead.
+`dotnet format` leaves the generated code to its generator. `dotnet build` builds every project,
+the builder's C# goldens among them, which `dotnet test` does not: it builds the test projects
+alone. With `CI=true`, a restore that would change a `packages.lock.json` fails. The interop against
+the TypeScript server needs that side installed; with `BEAD_INTEROP_REQUIRED=1`, an interop that
+would skip fails instead.
 
 ## Layout
 
@@ -41,6 +44,8 @@ interop/
   Bead.Interop.Server/          its server, which the TypeScript side's interop calls
 tests/
   Bead.*.Tests/                 a project's tests, beside it by name
+  Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled
+                                under this side's rules as a consumer compiles them
   Shared/                       what several test projects link: the test clock, the durations'
                                 helper
 ```

@@ -13,11 +13,11 @@ import nodePath, { type PlatformPath } from 'node:path';
 import { parse } from 'yaml';
 
 import { InputError } from './diagnostics.ts';
+import { Messages } from './targets/target.ts';
 import {
   DEFAULT_RUNTIME,
   IMPORT_EXTENSIONS,
   type ImportExtension,
-  Messages,
 } from './targets/typescript/options.ts';
 
 // types

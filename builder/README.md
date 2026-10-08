@@ -24,22 +24,23 @@ Yarn release vendored:
 
 ```sh
 yarn install --immutable
+export BEADC_PROTOC="$(node tools/fetch-protoc.mjs)"   # protoc, by its pin
 yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code
-yarn test         # beadc's tests, the target's goldens among them
+yarn test         # beadc's tests, the targets' goldens among them
 node src/cli.ts check ../spec/interop-blueprint.json
 node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 ```
 
-| Script               | What it runs                                                                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `yarn type-check`    | TypeScript 7 over `src/`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them |
-| `yarn lint`          | oxlint, type-aware, the TypeScript side's lint surface by reference                                                                                                |
-| `yarn format:check`  | oxfmt, the TypeScript side's options, copied                                                                                                                       |
-| `yarn buf:lint`      | `buf lint` over [`buf.yaml`](buf.yaml)'s modules: `proto/`, `test/fixtures/` and `test/messages/`                                                                  |
-| `yarn buf:format`    | `buf format --diff --exit-code` over the same                                                                                                                      |
-| `yarn options:check` | `src/generated/bead/options_pb.ts` written again apart and compared; `yarn options:generate` writes it in place                                                    |
-| `yarn test`          | Playwright's runner, no browser: one test file a module, in `__tests__/` beside it; `BEADC_WRITE_GOLDEN=1 yarn test` writes the target's goldens again             |
-| `yarn test:coverage` | the same under c8                                                                                                                                                  |
+| Script               | What it runs                                                                                                                                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `yarn type-check`    | TypeScript 7 over `src/`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them                                                                                                                                  |
+| `yarn lint`          | oxlint, type-aware, the TypeScript side's lint surface by reference                                                                                                                                                                                                                                 |
+| `yarn format:check`  | oxfmt, the TypeScript side's options, copied                                                                                                                                                                                                                                                        |
+| `yarn buf:lint`      | `buf lint` over [`buf.yaml`](buf.yaml)'s modules: `proto/`, `test/fixtures/` and `test/messages/`                                                                                                                                                                                                   |
+| `yarn buf:format`    | `buf format --diff --exit-code` over the same                                                                                                                                                                                                                                                       |
+| `yarn options:check` | `src/generated/bead/options_pb.ts` written again apart and compared; `yarn options:generate` writes it in place                                                                                                                                                                                     |
+| `yarn test`          | Playwright's runner, no browser: one test file a module, in `__tests__/` beside it; `BEADC_WRITE_GOLDEN=1 yarn test` writes the targets' goldens again; a test that runs protoc skips, with its reason, where none of the pin's version is found, and fails instead under `BEADC_PROTOC_REQUIRED=1` |
+| `yarn test:coverage` | the same under c8                                                                                                                                                                                                                                                                                   |
 
 **The pins are the TypeScript side's.** `@bufbuild/buf`, `@bufbuild/protobuf`,
 `@bufbuild/protoc-gen-es`, TypeScript, oxlint, oxlint-tsgolint, oxfmt, Playwright, c8 and
@@ -56,6 +57,15 @@ yarn install --immutable
 An upgrade moves both projects in one change: the descriptor in both `package.json`, then each
 lock, the builder's resolution set again to the TypeScript side's locked version.
 
+**protoc is pinned by [`protoc.json`](protoc.json)**: its version, 36.2, the oldest Google.Protobuf
+the C# it writes runs on, 3.36.2, the runtime its release pairs it with, and each release archive's
+sha256. beadc runs the protoc `BEADC_PROTOC` names, or `protoc` on the path, only where a C# output
+generates messages, and refuses one of another version, which writes other code.
+[`tools/fetch-protoc.mjs`](tools/fetch-protoc.mjs) downloads this platform's archive from
+protobuf's release, checks its sha256 before it reads it, extracts it into `.protoc/<version>/`,
+which git ignores, and prints the executable's path. An upgrade moves `protoc.json` whole, its
+version, its floor and its sums, and writes the C# goldens again.
+
 ## The commands
 
 | Command                                                     | What it does                                                                                                                                                                                                                                                                  |
@@ -65,7 +75,7 @@ lock, the builder's resolution set again to the TypeScript side's locked version
 | `beadc blueprint --check [<root or blueprint>] [-o <file>]` | Writes nothing: holds the file `-o` names, or the blueprint given, to the blueprint in its form, naming the first line off, an array out of its order, a missing final line feed or a byte order mark                                                                         |
 | `beadc generate`                                            | Runs `check` over `beadc.yaml`'s source, and writes nothing on an error; otherwise writes each output `beadc.yaml` names, and for a `.proto` source the blueprint it names and the editor's copy of the options, each file encoded whole, then moved over the one it replaces |
 | `beadc generate --check`                                    | Writes nothing: holds each file `generate` writes to what it would write, CRLF read as LF, naming a file that differs at its first line off, a file missing, and a file of a kind `generate` writes in an output's folder that it would not write; never the editor's copy    |
-| `beadc version`                                             | beadc's version, buf's, protobuf-es's, protoplugin's, protoc-gen-es's, the format, the spec's version and the options' number                                                                                                                                                 |
+| `beadc version`                                             | beadc's version, buf's, protobuf-es's, protoplugin's, protoc-gen-es's, protoc's, `protoc 36.2`, or another's beside the pin, `protoc 35.1, pinned 36.2`, or `protoc none, pinned 36.2`, the format, the spec's version and the options' number                                |
 
 Flags: `--error-format text|json|github`, `--fail-on-warning`, `--except <RULE>`, which leaves out a
 warning by its name and never an error.

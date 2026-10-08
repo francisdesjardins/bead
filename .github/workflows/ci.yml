@@ -115,10 +115,12 @@ jobs:
 
   # ── .NET ─────────────────────────────────────────────────────────────────────
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
-  # the analyzers; `dotnet test` builds with every warning an error, then runs the tests — and the
-  # interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts with
-  # Node, then the TypeScript client against the C# server. Only the TypeScript side is installed,
-  # for its interop server.
+  # the analyzers, the generated folders left to their generator; `dotnet build` builds every
+  # project with every warning an error, the builder's C# goldens among them, which `Bead.Goldens`
+  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests — and
+  # the interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts
+  # with Node, then the TypeScript client against the C# server. Only the TypeScript side is
+  # installed, for its interop server.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -147,7 +149,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: $YARN install --immutable
         working-directory: implementations/typescript
-      - run: dotnet format Bead.slnx --verify-no-changes
+      - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp
+      # every project, which `dotnet test` does not: it builds the test projects alone
+      - run: dotnet build Bead.slnx
       - run: dotnet test --solution Bead.slnx
       - run: $YARN test:interop
         working-directory: implementations/typescript
@@ -155,16 +159,23 @@ jobs:
   # ── Builder ──────────────────────────────────────────────────────────────────
   # beadc's own gate, from builder/, its toolchain its own. On Linux: types, the goldens' types,
   # lint, format, buf's lint and format over its options and its fixtures, and the options'
-  # generated code held to its generator, none of which a platform moves. On every leg: its tests,
-  # the interop's .proto among them, whose blueprint is the spec's byte for byte in either line
-  # ending, then beadc itself over the interop's blueprint, its rules and its form, then the
-  # TypeScript side's interop to what beadc generates from the root's `beadc.yaml`. On Windows,
-  # where buf is another binary, on the current line; on Linux, on the floor `engines.node` declares
-  # too.
+  # generated code held to its generator, none of which a platform moves. On every leg: protoc, the
+  # one `protoc.json` pins, fetched and checked by its sha256, then its tests, the interop's .proto
+  # among them, whose blueprint is the spec's byte for byte in either line ending, and the goldens of
+  # both targets, protoc's C# messages among them; then beadc itself over the interop's blueprint,
+  # its rules and its form, then the TypeScript side's interop to what beadc generates from the
+  # root's `beadc.yaml`. On Windows, where buf and protoc are other binaries, on the current line; on
+  # Linux, on the floor `engines.node` declares too. The C# goldens build in the .NET job, which has
+  # the SDK.
+  #
+  # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails: here a
+  # skip could only be a fetch gone wrong.
   builder:
     name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      BEADC_PROTOC_REQUIRED: 1
     strategy:
       fail-fast: false
       matrix:
@@ -194,6 +205,17 @@ jobs:
           restore-keys: builder-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
+      # protoc's archive, extracted, by the pin it was checked against
+      - uses: actions/cache@v6
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ hashFiles('builder/protoc.json') }}
+      # assigned first: a failed fetch fails the step, which a substitution inside echo's arguments
+      # would not
+      - name: protoc, by its pin's sha256
+        run: |
+          protoc="$(node tools/fetch-protoc.mjs)"
+          echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
       - if: runner.os == 'Linux'
         run: $YARN check
       - run: $YARN test

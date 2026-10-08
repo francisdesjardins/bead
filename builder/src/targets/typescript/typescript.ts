@@ -13,15 +13,17 @@ import { CodeGeneratorRequestSchema, FileDescriptorSetSchema } from '@bufbuild/p
 import { createEcmaScriptPlugin } from '@bufbuild/protoplugin';
 
 import type { IServiceEntry } from '../../model/blueprint.ts';
-import { beadcVersion } from '../../version.ts';
+import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../version.ts';
 import {
+  bindsMessages,
   headerOf,
   type IGeneratedFile,
   type ITarget,
   type ITargetInput,
+  Messages,
   sourceNameOf,
 } from '../target.ts';
-import { type ITypeScriptOptions, Messages } from './options.ts';
+import type { ITypeScriptOptions } from './options.ts';
 import { printService } from './templates.ts';
 
 // constants
@@ -58,15 +60,6 @@ const parameterOf = (options: ITypeScriptOptions): string => {
 };
 
 // definition
-
-/** Whether a procedure of `service` binds a message, which protoc-gen-es writes. */
-export const bindsMessages = (service: IServiceEntry): boolean => {
-  return service.procedures.some((procedure) => {
-    return [procedure.request, procedure.result, procedure.notification].some((binding) => {
-      return binding?.encoding === 'proto';
-    });
-  });
-};
 
 /** The TypeScript target: a `_bead.ts` for each service's file, over the service layer. */
 export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
@@ -140,9 +133,12 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
       const [service] = files.get(file.name) ?? [];
       const header = headerOf(blueprint, {
         source: sourceNameOf(input.sources, service?.proto?.file),
-        messages:
-          options.messages === Messages.GENERATE &&
-          (files.get(file.name) ?? []).some(bindsMessages),
+        ...(options.messages === Messages.GENERATE &&
+        (files.get(file.name) ?? []).some(bindsMessages)
+          ? {
+              messages: `protoc-gen-es ${protocGenEsVersion()}, for @bufbuild/protobuf ${PROTOBUF_FLOOR} or later`,
+            }
+          : {}),
       });
 
       return { name: file.name, content: `${header}${file.content}` };

@@ -3,3 +3,5 @@
 .yarn/*
 !.yarn/releases
 .pnp.*
+# protoc, fetched by its pin: `node tools/fetch-protoc.mjs`
+.protoc/

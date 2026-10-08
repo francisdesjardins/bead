@@ -53,6 +53,18 @@ message Greeting {
 
   string name = 1;
   google.protobuf.Timestamp at = 2;
+
+  // How it greets: one way or the other.
+  oneof salutation {
+    string formal = 3;
+    string casual = 4;
+  }
+
+  // How often each name was greeted.
+  map<string, int32> counts = 5;
+
+  // A name it answers to, when it has one.
+  optional string nickname = 6;
 }
 
 // The greeter's failures.
