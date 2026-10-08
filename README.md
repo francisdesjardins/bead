@@ -175,30 +175,34 @@ nothing it generates is committed.
 
 In `builder/`, `beadc`: it compiles a `.proto` with buf, resolves it into a blueprint, refuses a
 `.proto` or a blueprint by rule name, writes a blueprint in its form, and generates a typed server
-and client: the TypeScript side's interop is its output, the C# side's to come
+and client, in TypeScript and in C#: each side's interop is its output
 ([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 Node 24.9 or later, and a toolchain of its own, as the TypeScript side's: Yarn 4 vendored under
-`.yarn/releases/`, and buf from its lockfile. Node runs `src/cli.ts` as written.
+`.yarn/releases/`, buf from its lockfile, and protoc, which writes the C# messages, by its pin,
+`protoc.json`, whose archive `tools/fetch-protoc.mjs` fetches and checks by its sha256. Node runs
+`src/cli.ts` as written.
 
 ```sh
 cd builder
 yarn install --immutable
+export BEADC_PROTOC="$(node tools/fetch-protoc.mjs)"   # protoc, by its pin
 yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code
-yarn test         # beadc's tests, the interop's .proto and its blueprint among them
+yarn test         # beadc's tests, the interop's .proto and its blueprint, and both targets' goldens among them
 node src/cli.ts check ../spec/interop-blueprint.json
 node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 ```
 
 The last two hold the interop's blueprint to beadc's rules and to its form, as CI does. The root's
-[`beadc.yaml`](beadc.yaml) names what beadc generates from that blueprint, the TypeScript side's
-interop: from the root, `generate` writes it, and `generate --check`, CI's step, holds it there:
+[`beadc.yaml`](beadc.yaml) names what beadc generates from that blueprint, each side's interop: from
+the root, `generate` writes both, and `generate --check`, CI's step, holds them there; the
+interop's blueprint binds no message, so neither needs protoc:
 
 ```sh
 node builder/src/cli.ts generate --check
 ```
 
-Its [README](builder/README.md) gives the commands, the rules and their reasons, the TypeScript
-target, and what each option of `bead/options.proto` means.
+Its [README](builder/README.md) gives the commands, the rules and their reasons, the TypeScript and
+C# targets, and what each option of `bead/options.proto` means.
 
 ## Interop, both ways
 
@@ -339,14 +343,15 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 [`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on pinned
 runner images, `ubuntu-26.04`, and `windows-2025` for the builder's: `spec` (regenerate, then diff,
 then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9 (install, check, test, the
-demo's static build, and the root's files under the same formatter), `dotnet` (format, test, and
-the interop both ways with `BEAD_INTEROP_REQUIRED=1`), `builder` (install, test, then beadc over
-the interop's blueprint, its rules and its form, and `beadc generate --check` over the root's
-`beadc.yaml`, the TypeScript side's interop, on Node 26 on Linux and Windows and on 24.9 on Linux;
-its types, the goldens' among them, lint and format, buf's among them, on Linux), and `commits`
-(the subjects, the links, the versions, then the root's tools' own tests). `ci-ok` needs them all,
-so one check stands for every job; branch protection, which would make it the one check a branch
-requires, waits on GitHub Pro or a public repository.
+demo's static build, and the root's files under the same formatter), `dotnet` (format, build, the
+builder's C# goldens among its projects, test, and the interop both ways with
+`BEAD_INTEROP_REQUIRED=1`), `builder` (install, protoc by its pin's sha256, test with
+`BEADC_PROTOC_REQUIRED=1`, then beadc over the interop's blueprint, its rules and its form, and
+`beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
+Windows and on 24.9 on Linux; its types, the goldens' among them, lint and format, buf's among them,
+on Linux), and `commits` (the subjects, the links, the versions, then the root's tools' own tests).
+`ci-ok` needs them all, so one check stands for every job; branch protection, which would make it
+the one check a branch requires, waits on GitHub Pro or a public repository.
 
 ## Contributing
 
