@@ -44,7 +44,7 @@ test.describe('createServiceServer', () => {
     test('admits every call with none', async () => {
       await using connected = await connectWorker();
       const greeter = greeterOf();
-      const client = createServiceClient(GreeterProcedures, { client: connected.client });
+      const client = createServiceClient(GreeterProcedures, connected.client);
 
       greeter.on('sayHello', (request, response) => {
         return response(`Hello, ${request.payload}!`);
@@ -59,7 +59,7 @@ test.describe('createServiceServer', () => {
       const { router } = connected.server;
       const registerResolver = router.registerResolver;
       const greeter = greeterOf();
-      const client = createServiceClient(GreeterProcedures, { client: connected.client });
+      const client = createServiceClient(GreeterProcedures, connected.client);
 
       // * a resolver that forwards a credential unresolved reaches its admission in no session: the
       // one way a call that presented one meets the session rule there (spec 9.2, step 5)
@@ -87,7 +87,7 @@ test.describe('createServiceServer', () => {
         },
         detail: 'too quiet',
       });
-      const client = createServiceClient(GreeterProcedures, { client: connected.client });
+      const client = createServiceClient(GreeterProcedures, connected.client);
       const refusals: unknown[] = [];
 
       greeter.on('login', (request, response) => {
@@ -128,7 +128,7 @@ test.describe('createServiceServer', () => {
           throw thrown;
         },
       });
-      const client = createServiceClient(GreeterProcedures, { client: connected.client });
+      const client = createServiceClient(GreeterProcedures, connected.client);
       const reported: unknown[] = [];
 
       connected.server.router.on('error', (error, connectionHandle) => {
@@ -143,7 +143,15 @@ test.describe('createServiceServer', () => {
       expect(reported).toEqual([[thrown, CONNECTION]]);
     });
 
-    test('refuses a hook the options lack, and one no procedure names', () => {
+    test('refuses a hook the options lack, one no procedure names, and one that is no hook', () => {
+      expect(() => {
+        return createServiceServer(GreeterProcedures, { admissions: { loud: undefined as never } });
+      }).toThrow(ProgrammerError);
+      expect(() => {
+        return createServiceServer(GreeterProcedures, {
+          admissions: { loud: { admits: undefined as never } },
+        });
+      }).toThrow(ProgrammerError);
       expect(() => {
         return createServiceServer(GreeterProcedures, { admissions: {} as never });
       }).toThrow(ProgrammerError);
@@ -152,13 +160,19 @@ test.describe('createServiceServer', () => {
           admissions: { loud, quiet: loud } as never,
         });
       }).toThrow(ProgrammerError);
+      // each hook given is checked in turn, as the C# side checks it
+      expect(() => {
+        return createServiceServer(GreeterProcedures, {
+          admissions: { loud: null, quiet: loud } as never,
+        });
+      }).toThrow(/^the hook loud admits by a function/u);
     });
   });
 
   test('answers a failure its procedure lists', async () => {
     await using connected = await connectWorker();
     const greeter = greeterOf();
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
 
     greeter.on('sayHello', (request, response) => {
       return request.payload === ''
@@ -180,7 +194,7 @@ test.describe('createServiceServer', () => {
   test('sends an unlisted code as written, and reports it', async () => {
     await using connected = await connectWorker();
     const greeter = greeterOf();
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
     const reported: unknown[] = [];
 
     connected.server.router.on('error', (error, connectionHandle) => {
@@ -206,7 +220,7 @@ test.describe('createServiceServer', () => {
   test('registers before and after offer', async () => {
     await using connected = await connectWorker();
     const greeter = greeterOf();
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
 
     greeter.on('sayHello', (request, response) => {
       return response(`Hello, ${request.payload}!`);
@@ -260,7 +274,7 @@ test.describe('createServiceServer', () => {
   test("makes each command's requester once, as it is offered, and refuses one called before", async () => {
     await using connected = await connectWorker();
     const greeter = greeterOf();
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
     const declared: string[] = [];
     const { router } = connected.server;
     const declareRequester = router.declareRequester;
@@ -294,7 +308,7 @@ test.describe('createServiceServer', () => {
   test('notifies nothing before it is offered, and resolves', async () => {
     await using connected = await connectWorker();
     const greeter = greeterOf();
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
     const heard: string[] = [];
 
     await expect(greeter.notify.news('before')).resolves.toBeUndefined();
@@ -321,7 +335,7 @@ test.describe('createServiceServer', () => {
   test('lists the procedures without a resolver, which the router answers PROCEDURE_UNKNOWN', async () => {
     await using connected = await connectWorker();
     const greeter = greeterOf();
-    const client = createServiceClient(GreeterProcedures, { client: connected.client });
+    const client = createServiceClient(GreeterProcedures, connected.client);
 
     greeter.on('sayHello', (_request, response) => {
       return response('hi');
@@ -398,7 +412,7 @@ test.describe('createServiceServer', () => {
       }),
     });
     const echo = createServiceServer(procedures);
-    const client = createServiceClient(procedures, { client: connected.client });
+    const client = createServiceClient(procedures, connected.client);
 
     connected.server.router.on('error', (error) => {
       reported.push(error);

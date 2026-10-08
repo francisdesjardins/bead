@@ -33,7 +33,7 @@ public sealed class ServiceClientTests
     {
         return new ServiceServer<GreeterProcedures, string>(
             GreeterProcedures.All,
-            new ServiceServerOptions { Admissions = new Dictionary<string, AdmissionHook> { ["loud"] = Loud } });
+            new ServiceServerOptions<GreeterProcedures> { Admissions = new GreeterAdmissions { Loud = Loud } });
     }
 
     // a command's call to the link's one connection
@@ -52,7 +52,7 @@ public sealed class ServiceClientTests
     {
         await using var link = new ServiceLink();
         var greeter = GreeterOf();
-        var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, new ServiceClientOptions { Client = link.Client });
+        var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, link.Client);
 
         greeter.On(GreeterProcedures.Login, (request, response) =>
         {
@@ -96,7 +96,7 @@ public sealed class ServiceClientTests
         var clock = new CommandProcedure<GreeterProcedures, string, string, NoFailure>(
             new Procedure { ServiceId = 8, ProcedureId = 9, ProcedureName = "clock", ServiceRevision = 1 },
             new ProcedureBindings<string, string> { Admission = AdmissionRule.Hook("loud"), Request = PayloadCodecs.Text, Result = PayloadCodecs.Text });
-        var client = new ServiceClient<GreeterProcedures>([clock], new ServiceClientOptions { Client = link.Client });
+        var client = new ServiceClient<GreeterProcedures>([clock], link.Client);
 
         Assert.Throws<ArgumentException>(() =>
         {
@@ -112,8 +112,8 @@ public sealed class ServiceClientTests
     {
         await using var link = new ServiceLink();
         var intercepted = new InterceptedClient(link.Client);
-        var windows = new Dictionary<string, int> { ["news"] = 4 };
-        var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, new ServiceClientOptions { Client = intercepted, Windows = windows });
+        var windows = new GreeterWindows { News = 4 };
+        var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, intercepted, new ServiceClientOptions<GreeterProcedures> { Windows = windows });
 
         Assert.Equal(4, client.NotificationOf(GreeterProcedures.News).Window);
 
@@ -125,11 +125,11 @@ public sealed class ServiceClientTests
         // the same procedure at the same window gives the same notification; at another, a refusal
         Assert.Same(
             client.NotificationOf(GreeterProcedures.News),
-            new ServiceClient<GreeterProcedures>(GreeterProcedures.All, new ServiceClientOptions { Client = intercepted, Windows = windows })
+            new ServiceClient<GreeterProcedures>(GreeterProcedures.All, intercepted, new ServiceClientOptions<GreeterProcedures> { Windows = windows })
                 .NotificationOf(GreeterProcedures.News));
         Assert.Throws<InvalidOperationException>(() =>
         {
-            return new ServiceClient<GreeterProcedures>(GreeterProcedures.All, new ServiceClientOptions { Client = intercepted });
+            return new ServiceClient<GreeterProcedures>(GreeterProcedures.All, intercepted);
         });
     }
 
@@ -138,7 +138,7 @@ public sealed class ServiceClientTests
     {
         await using var link = new ServiceLink();
         var greeter = GreeterOf();
-        var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, new ServiceClientOptions { Client = link.Client });
+        var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, link.Client);
         var opened = new List<bool>();
 
         greeter.On(GreeterProcedures.News, (request, response) =>
@@ -163,13 +163,15 @@ public sealed class ServiceClientTests
         {
             return new ServiceClient<GreeterProcedures>(
                 GreeterProcedures.All,
-                new ServiceClientOptions { Client = link.Client, Windows = new Dictionary<string, int> { ["sayHello"] = 1 } });
+                link.Client,
+                new ServiceClientOptions<GreeterProcedures> { Windows = new AnyNames(windows: new Dictionary<string, int?> { ["sayHello"] = 1 }) });
         });
         Assert.Throws<ArgumentException>(() =>
         {
             return new ServiceClient<GreeterProcedures>(
                 GreeterProcedures.All,
-                new ServiceClientOptions { Client = link.Client, Windows = new Dictionary<string, int> { ["news"] = 0 } });
+                link.Client,
+                new ServiceClientOptions<GreeterProcedures> { Windows = new GreeterWindows { News = 0 } });
         });
     }
 
@@ -203,8 +205,8 @@ public sealed class ServiceClientTests
         });
         server.Offer(link.Server);
 
-        var validating = new ServiceClient<ServiceServerTests.EchoService>([echo], new ServiceClientOptions { Client = link.Client, Validates = true });
-        var trusting = new ServiceClient<ServiceServerTests.EchoService>([echo], new ServiceClientOptions { Client = link.Client });
+        var validating = new ServiceClient<ServiceServerTests.EchoService>([echo], link.Client, new ServiceClientOptions<ServiceServerTests.EchoService> { Validates = true });
+        var trusting = new ServiceClient<ServiceServerTests.EchoService>([echo], link.Client);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
         {

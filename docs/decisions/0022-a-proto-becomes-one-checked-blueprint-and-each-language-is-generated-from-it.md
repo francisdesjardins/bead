@@ -184,10 +184,12 @@ and refuses one that I-JSON forbids; `beadc blueprint --check` and `spec/check.p
 form.
 
 **The unit of generation is the service**, and one blueprint is one id space. A service gives
-`<Name>Procedures`, `<Name>Failures`, `<Name>Server` and its `<Name>ServerOptions`, `<Name>Client`
-and its `<Name>ClientOptions`, and in TypeScript `<Name>Resolvers`, its name its `.proto` name with
-a trailing `Service` taken off; on the C# side, a procedure that lists failures gives a class of
-them, nested in `<Name>Failures` under its rpc's name, and every type that holds a member a
+`<Name>Procedures`, `<Name>Failures`, `<Name>Server`, `<Name>Client`, `<Name>Admissions` and
+`<Name>Windows`, its name its `.proto` name with a trailing `Service` taken off; in TypeScript also
+`<Name>Resolvers`, and `<Name>ServerOptions` and `<Name>ClientOptions`, the layer's options named
+for the service, which C# names `ServiceServerOptions<<Name>Procedures>` and
+`ServiceClientOptions<<Name>Procedures>`; on the C# side, a procedure that lists failures gives a
+class of them, nested in `<Name>Failures` under its rpc's name, and every type that holds a member a
 procedure or a hook names is a sealed class of `init` properties, which synthesizes no member. A
 procedure's name is its rpc's, the first letter lowered (spec 16.4); a failure's is its enum
 value's, the enum's prefix taken off. A name that collides with a member any official target
@@ -204,7 +206,7 @@ options always, as one `<Name>ServerOptions`, required when a procedure names a 
 otherwise. A client class holds a requester of each procedure its server answers, under the
 procedure's name, its notifications under `notifications`, at the windows its caller gives, unpaced
 by default ([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it
-answers. A file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_1`, and imports
+answers. A file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_2`, and imports
 nothing of Bead's but `./service`, from a path relative to its output's folder or a package's name;
 the C# it writes qualifies every type as `global::Bead.` and `global::`. The TypeScript target runs
 on `@bufbuild/protoplugin`, in beadc's process, its `target=ts`, its header written above

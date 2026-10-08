@@ -27,8 +27,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `spec/interop-blueprint.json` byte for byte; CI's `builder` job runs its tests on Linux and on
   Windows (decision 0022).
 - `beadc generate`, the TypeScript target: from a blueprint, a `<name>_bead.ts` for each service,
-  its descriptors, its catalogue, a server class where only resolvers are written and a client class
-  holding a requester of each procedure by its name, over the service layer of
+  its descriptors, its catalogue, a server class where only resolvers are written, a client class
+  holding a requester of each procedure by its name, and the types of its hooks and its windows,
+  `<Name>Admissions` and `<Name>Windows`, over the service layer of
   `@francisdesjardins/bead/service`, with protoc-gen-es's messages where a binding is `proto`;
   `--check` writes nothing and fails on a difference (decision 0022).
 - The root's `beadc.yaml`, which generates the TypeScript side's interop; CI's `builder` job holds
@@ -51,11 +52,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   manager's accessor there.
 - `tools/check-format.mjs` holds `beadc.yaml`.
 - `tools/release.mjs prepare` moves the generated code's header to the release's versions.
+- The service layer's options are typed by the service on both sides. The C# side's
+  `ServiceServerOptions<TService>` takes the service's hooks as a record of one required member a
+  hook, `IServiceAdmissions<TService>`, and `ServiceClientOptions<TService>` the windows of its
+  procedures that notify as a record, `IServiceWindows<TService>`, in place of the records keyed by
+  name: a hook left out does not compile, and a service written without beadc writes its records.
+  `ServiceServer` takes its options in a constructor of their own, beside one that takes none. A
+  hook that is no hook is refused on both sides. A client side takes its Bead client apart from its
+  options, `createServiceClient(procedures, client, options)` and
+  `new ServiceClient<TService>(procedures, client, options)`, the TypeScript side naming its options
+  `IServiceClientOptions<S>` (decision 0018).
+- The contract with generated code is at 2, `GENERATED_CODE_SUPPORTS_VERSION_2` and
+  `GeneratedCode.SupportsVersion2`: generated code takes the layer's options typed by the service
+  (decision 0018).
 
 ### Removed
 
 - `spec/interop-service.json`'s `serviceId`, `serviceRevision`, `procedureId` and `offeredBy`: the
   interop's ids, revision and kinds are `spec/interop-blueprint.json`'s.
+- `GENERATED_CODE_SUPPORTS_VERSION_1` and `GeneratedCode.SupportsVersion1`: the runtime no longer
+  serves contract 1's code (decision 0018).
 
 ### Fixed
 

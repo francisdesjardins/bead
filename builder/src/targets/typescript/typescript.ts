@@ -111,7 +111,7 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           f.print(
             '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here'
           );
-          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_1', runtime), ';');
+          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_2', runtime), ';');
         }
       },
     });

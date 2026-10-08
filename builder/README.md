@@ -168,7 +168,7 @@ filters read:
 
 | Target     | Refuses                                                                                                                                                                                                                                                                                                                                                        |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every one  | A service whose types, `<Name>Procedures`, `<Name>Failures`, `<Name>Server`, `<Name>ServerOptions`, `<Name>Client`, `<Name>ClientOptions` and `<Name>Resolvers`, a message or a public type of the runtime holds already (`HttpServer`, `RouterClient`, `ServiceServer` and the others `src/targets/names.ts` lists)                                           |
+| Every one  | A service whose types, `<Name>Procedures`, `<Name>Failures`, `<Name>Server`, `<Name>ServerOptions`, `<Name>Admissions`, `<Name>Client`, `<Name>ClientOptions`, `<Name>Windows` and `<Name>Resolvers`, a message or a public type of the runtime holds already (`HttpServer`, `RouterClient`, `ServiceServer` and the others `src/targets/names.ts` lists)      |
 | TypeScript | A procedure named `on`, `notifications` or `then`, or one of `Object.prototype`'s seven a procedure's name can take (`constructor`, `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable`, `toLocaleString`, `toString`, `valueOf`): the generated client's own members, a thenable's, and the members it would shadow, or, for `constructor`, not compile |
 | C#         | A procedure whose rpc name is `All`, `On`, `Notifications`, `Is`, one of `object`'s members (`Equals`, `GetHashCode`, `GetType`, `ToString`, `MemberwiseClone`, `ReferenceEquals`, `Finalize`) or one of its service's classes; a hook whose C# name is one of `object`'s members; a failure whose C# name is `Code` or one of `object`'s members              |
 
@@ -187,14 +187,15 @@ from buf's set, or empty for a blueprint alone. A file holds, for each of its se
   limit among them, and its codecs, `PAYLOAD_CODECS.raw`, `.text` or `.json`, or `payloadCodecOf`
   over protobuf-es's `fromBinary` and `toBinary`, at a nesting limit of 101, for a `proto` binding;
 - **`<Name>Failures`**, its catalogue; **`<Name>Resolvers`**, for resolvers written in a module of
-  their own; **`<Name>ServerOptions`** and **`<Name>ClientOptions`**, the service layer's options;
+  their own; **`<Name>ServerOptions`** and **`<Name>ClientOptions`**, the service layer's options,
+  and **`<Name>Admissions`** and **`<Name>Windows`**, their hooks and their windows;
 - **`<Name>Server<Data>`**, where only resolvers are written: the layer's `command`, `notify`,
   `offer`, `on` and `proceduresWithoutResolver`, its options one parameter, required where a
   procedure names a hook;
-- **`<Name>Client`**: a requester of each procedure its server answers, by its name, its
-  `notifications` and `on`;
+- **`<Name>Client`**, over its Bead client, its options after it: a requester of each procedure
+  its server answers, by its name, its `notifications` and `on`;
 
-and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_1`
+and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_2`
 ([decision 0018](../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)). Every doc comment is the description, then what
 the procedure admits, through protoplugin's `jsDoc`, which writes `*/` as `*\/`.
 
