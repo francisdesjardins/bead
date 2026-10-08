@@ -1,0 +1,25 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/failures/0/failureName",
+      "value": "FAIL"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/1/failures/0",
+      "value": "FAIL"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/9/failures/0",
+      "value": "FAIL"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_TARGET",
+      "pointer": "/services/0/procedures/1/failures/0"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/4/admission",
+      "value": {
+        "hook": "interopAdmissions"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_TARGET",
+      "pointer": "/services/0/procedures/4/admission/hook"
+    }
+  ]
+}

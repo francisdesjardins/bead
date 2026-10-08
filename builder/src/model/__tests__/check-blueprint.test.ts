@@ -58,3 +58,31 @@ test('a proto binding whose message proto lists passes, and one it does not list
     'BINDING_SOURCE /services/0/procedures/0/request',
   ]);
 });
+
+test('a description holding a character no XML document holds is DESCRIPTION_TARGET, wherever it is', () => {
+  const blueprint = structuredClone(interop()) as unknown as {
+    services: {
+      description?: string;
+      failures: { description?: string }[];
+      procedures: { description?: string }[];
+    }[];
+  };
+  const [service] = blueprint.services;
+
+  if (service === undefined) {
+    throw new Error("the interop's blueprint declares a service");
+  }
+
+  // tab, LF, CR, DEL and C#'s other line ends are XML's: the C# target writes them, by reference
+  service.description = 'A tab\t, a line\nanother, a return\r, \u007F, \u0085, \u2028 and \u2029.';
+  expect(rulesOf(blueprint as unknown as IBlueprint)).toEqual([]);
+
+  service.description = 'A form feed\f.';
+  (service.procedures[2] as { description?: string }).description = 'A NUL\u0000.';
+  (service.failures[1] as { description?: string }).description = 'Not a character: \uFFFF.';
+  expect(rulesOf(blueprint as unknown as IBlueprint)).toEqual([
+    'DESCRIPTION_TARGET /services/0/description',
+    'DESCRIPTION_TARGET /services/0/failures/1/description',
+    'DESCRIPTION_TARGET /services/0/procedures/2/description',
+  ]);
+});

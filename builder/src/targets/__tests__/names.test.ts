@@ -8,8 +8,11 @@ import {
   C_SHARP_OBJECT_MEMBERS,
   classNamesOf,
   csharpNameOfFailure,
+  csharpNamespaceOf,
+  pascalOf,
   RUNTIME_TYPES,
   TYPESCRIPT_PROCEDURE_NAMES,
+  xmlExcludedOf,
 } from '../names.ts';
 
 const INTEROP = new URL('../../../../spec/interop-blueprint.json', import.meta.url);
@@ -42,7 +45,33 @@ test("a service's classes, in every official target", () => {
     'InteropResolvers',
     'InteropAdmissions',
     'InteropWindows',
+    'InteropCommands',
+    'InteropNotifiers',
+    'InteropNotifications',
   ]);
+});
+
+test("a C# namespace and a file's name, as protoc's C# generator gives them", () => {
+  expect(csharpNamespaceOf('bead.messages.v1')).toBe('Bead.Messages.V1');
+  expect(csharpNamespaceOf('acme.greeter_api.v1beta1')).toBe('Acme.GreeterApi.V1Beta1');
+  expect(csharpNamespaceOf('bead', 'Bead.Protobuf')).toBe('Bead.Protobuf');
+  expect(csharpNamespaceOf('x.v1', '')).toBe('X.V1');
+  expect(pascalOf('messages')).toBe('Messages');
+  expect(pascalOf('greeter_service_v2')).toBe('GreeterServiceV2');
+  expect(pascalOf('HTTP_rules')).toBe('HTTPRules');
+  expect(pascalOf('a.b')).toBe('AB');
+});
+
+test('the characters no XML document holds, raw or by reference', () => {
+  for (const code of [0x00, 0x01, 0x08, 0x0b, 0x0c, 0x0e, 0x1f, 0xfffe, 0xffff]) {
+    const character = String.fromCodePoint(code);
+
+    expect(xmlExcludedOf(`a${character}b`), code.toString(16)).toBe(character);
+  }
+
+  expect(xmlExcludedOf('a tab\t, a line\n, a return\r, \u007F, \u0085, \u2028 and 😀')).toBe(
+    undefined
+  );
 });
 
 test("a failure's C# name: its words, each its first letter kept", () => {
@@ -55,6 +84,32 @@ test('the names each target reserves', () => {
   expect(TYPESCRIPT_PROCEDURE_NAMES.has('then')).toBe(true);
   expect(C_SHARP_OBJECT_MEMBERS.has('GetHashCode')).toBe(true);
   expect(RUNTIME_TYPES.has('HttpServer')).toBe(true);
+});
+
+test('refuses a hook and a failure named as the C# class they sit in', () => {
+  const blueprint = structuredClone(interop()) as unknown as {
+    services: {
+      failures: { failureName: string }[];
+      procedures: { admission: unknown; failures: string[] }[];
+    }[];
+  };
+  const [service] = blueprint.services;
+
+  if (service === undefined) {
+    throw new Error("the interop's blueprint declares a service");
+  }
+
+  const { procedures } = service;
+
+  (procedures[4] as { admission: unknown }).admission = { hook: 'interopAdmissions' };
+  (service.failures[0] as { failureName: string }).failureName = 'FAIL';
+  (procedures[1] as { failures: string[] }).failures = ['FAIL'];
+  (procedures[9] as { failures: string[] }).failures = ['FAIL'];
+
+  expect(findingsOf(blueprint as unknown as IBlueprint)).toEqual([
+    'NAME_TARGET /services/0/procedures/1/failures/0',
+    'NAME_TARGET /services/0/procedures/4/admission/hook',
+  ]);
 });
 
 test("refuses Object.prototype's seven names and the two classes a TypeScript service adds", () => {
