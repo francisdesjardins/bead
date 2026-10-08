@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +17,10 @@ import type { ICSharpOptions } from '../options.ts';
 
 const BUILDER = fileURLToPath(new URL('../../../../', import.meta.url));
 const INTEROP = new URL('../../../../../spec/interop-blueprint.json', import.meta.url);
+const COMMITTED = new URL(
+  '../../../../../implementations/dotnet/interop/Bead.Interop/Generated/InteropBead.cs',
+  import.meta.url
+);
 const GOLDEN = fileURLToPath(new URL('../../../../test/golden/csharp/', import.meta.url));
 const EDITORCONFIG = new URL(
   '../../../../../implementations/dotnet/.editorconfig',
@@ -365,4 +369,11 @@ test("names an external output's messages by their namespace, and names no gener
   );
   expect(content).toContain('global::Google.Protobuf.WellKnownTypes.Timestamp');
   expect(content).not.toContain('// Messages:');
+});
+
+test("writes the interop's file as implementations/dotnet commits it", () => {
+  expect(existsSync(COMMITTED)).toBe(true);
+  expect(contentOf(csharpTarget.generate(interopInput(), INTEROP_OPTIONS), 'InteropBead.cs')).toBe(
+    readFileSync(COMMITTED, 'utf8').replaceAll('\r\n', '\n')
+  );
 });

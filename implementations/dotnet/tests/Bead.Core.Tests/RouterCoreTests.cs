@@ -29,7 +29,10 @@ public sealed partial class RouterCoreTests
         return new CoreRequest
         {
             ConnectionHandle = Handle,
-            Procedure = InteropService.ProcedureOf(procedureName),
+            Procedure = InteropProcedures.All.Single((procedure) =>
+                {
+                    return procedure.Procedure.ProcedureName == procedureName;
+                }).Procedure,
             Options = new ResolvedRequestOptions { Timeout = options.Timeout, CancellationToken = options.Token },
         };
     }
@@ -66,7 +69,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal(FailureScope.Application, failure.Scope);
         Assert.Equal(FailureOrigin.Peer, failure.Origin);
         Assert.Equal(RouterSide.Server, failure.Side);
-        Assert.Equal(InteropService.ProcedureOf("fail").Address, failure.ProcedureAddress);
+        Assert.Equal(InteropProcedures.Fail.Procedure.Address, failure.ProcedureAddress);
         Assert.Equal("server application failure 7 (service 1, procedure 2): this procedure fails, on purpose", failure.Message);
     }
 
@@ -218,7 +221,7 @@ public sealed partial class RouterCoreTests
         {
             return link.Client.Request(
                 JsonOf("\"too long\""),
-                RequestOf("echo") with { Procedure = InteropService.ProcedureOf("echo") with { MaximumPayloadBytes = 4 } })
+                RequestOf("echo") with { Procedure = InteropProcedures.Echo.Procedure with { MaximumPayloadBytes = 4 } })
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
 
@@ -234,8 +237,8 @@ public sealed partial class RouterCoreTests
         await using var link = new Link(server: (router) =>
         {
             new ServiceManager(router).GetRequestResolver(
-                InteropService.ProcedureOf("echo") with { ProcedureId = 50, ProcedureName = "block" },
-                new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = InteropService.Json })((request, response) =>
+                InteropProcedures.Echo.Procedure with { ProcedureId = 50, ProcedureName = "block" },
+                new RequestResolverDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() })((request, response) =>
                 {
                     // a resolver that holds its thread, as a careless one would
                     released.Wait(Patience, TestContext.Current.CancellationToken);
@@ -246,7 +249,7 @@ public sealed partial class RouterCoreTests
 
         var blocked = link.Client.Request(
             JsonOf("\"held\""),
-            RequestOf("echo") with { Procedure = InteropService.ProcedureOf("echo") with { ProcedureId = 50 } });
+            RequestOf("echo") with { Procedure = InteropProcedures.Echo.Procedure with { ProcedureId = 50 } });
 
         // the server still reads and answers while one of its resolvers blocks
         Assert.Equal("\"free\"", await link.Ask("echo", "\"free\""));
@@ -271,7 +274,7 @@ public sealed partial class RouterCoreTests
             Facade = new Server<string>(
                 this,
                 new ServerOptions { ResolverScheduler = _serverScheduler, Scheduler = _serverScheduler });
-            InteropService.Offer(Facade);
+            InteropHandlers.Offer(Facade);
             server?.Invoke(Server);
             Connection?.Invoke(Handle);
         }

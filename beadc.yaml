@@ -8,3 +8,6 @@ outputs:
     out: implementations/typescript/interop/generated
     importExtension: none
     runtime: ../../src/service/service
+  - language: csharp
+    out: implementations/dotnet/interop/Bead.Interop/Generated
+    namespace: Bead.Interop

@@ -36,8 +36,11 @@ public sealed partial class RouterClientTests
     private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(ServiceManager services, string procedureName)
     {
         return services.GetRequest(
-            InteropService.ProcedureOf(procedureName),
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked });
+            InteropProcedures.All.Single((procedure) =>
+            {
+                return procedure.Procedure.ProcedureName == procedureName;
+            }).Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
     }
 
     private static JsonElement JsonOf(string text)
@@ -107,7 +110,7 @@ public sealed partial class RouterClientTests
     {
         using var link = new Link();
 
-        InteropService.OfferClient(link.ClientServices);
+        InteropHandlers.OfferClient(new InteropClient(link.AsClient));
 
         var asked = await RequesterOf(link.ClientServices, "ask")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
 
@@ -124,8 +127,8 @@ public sealed partial class RouterClientTests
         using var link = new Link();
 
         var clock = link.ServerServices.GetCommand(
-            InteropService.ProcedureOf("clock"),
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked });
+            InteropProcedures.Clock.Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
 
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
@@ -143,7 +146,7 @@ public sealed partial class RouterClientTests
         using var link = new Link();
 
         var requester = link.ClientServices.GetRequest(
-            InteropService.ProcedureOf("echo"),
+            InteropProcedures.Echo.Procedure,
             new RequestDependencies<JsonElement, int> { Serializer = new Unreadable() });
 
         var failure = await Assert.ThrowsAsync<FailureException>(() =>
@@ -154,7 +157,7 @@ public sealed partial class RouterClientTests
         Assert.Equal((ushort)ProtocolCode.PayloadUndecodable, failure.Code);
         Assert.Equal(FailureOrigin.Local, failure.Origin);
         Assert.Equal(RouterSide.Client, failure.Side);
-        Assert.Equal(InteropService.ProcedureOf("echo").Address, failure.ProcedureAddress);
+        Assert.Equal(InteropProcedures.Echo.Procedure.Address, failure.ProcedureAddress);
     }
 
     [Fact]
@@ -177,38 +180,38 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public void Offers_every_procedure_of_the_interop_service_s_API_on_the_side_its_kind_names()
+    public async Task Offers_every_procedure_of_the_interop_service_s_API_on_the_side_its_kind_names()
     {
-        var server = new Registrations(RouterSide.Server);
-        var client = new Registrations(RouterSide.Client);
+        await using var link = new ServiceLink();
 
-        // the destinations go to a server's router, which takes none of these resolvers
-        using var link = new Link();
+        var server = new InterceptedServer(link.Server);
+        var client = new InterceptedClient(link.Client);
+        var interop = InteropHandlers.Offer(server);
 
-        InteropService.Offer(new ServiceManager(server), (new SessionManager<string>(), new BeforeRequest((_) =>
+        InteropHandlers.OfferClient(new InteropClient(client));
+
+        IEnumerable<string> NamesOf(bool isCommand)
         {
-            return true;
-        }), link.Server));
-        InteropService.OfferClient(new ServiceManager(client));
+            return InteropProcedures.All.Where((procedure) =>
+            {
+                return (procedure.Procedure.ProcedureKind == ProcedureKind.Command) == isCommand;
+            }).Select((procedure) =>
+            {
+                return $"resolver {procedure.Procedure.ProcedureName}";
+            }).Order(StringComparer.Ordinal);
+        }
 
-        Assert.Equal(
-            InteropService.Procedures.Where((procedure) =>
+        IEnumerable<string> ResolversOf(InterceptingRouter router)
+        {
+            return router.Declared.Where((declared) =>
             {
-                return !procedure.IsCommand;
-            }).Select((procedure) =>
-            {
-                return procedure.ProcedureName;
-            }).Order(),
-            server.Names.Order());
-        Assert.Equal(
-            InteropService.Procedures.Where((procedure) =>
-            {
-                return procedure.IsCommand;
-            }).Select((procedure) =>
-            {
-                return procedure.ProcedureName;
-            }).Order(),
-            client.Names.Order());
+                return declared.StartsWith("resolver ", StringComparison.Ordinal);
+            }).Order(StringComparer.Ordinal);
+        }
+
+        Assert.Empty(interop.ProceduresWithoutResolver());
+        Assert.Equal(NamesOf(false), ResolversOf(server.Intercepted));
+        Assert.Equal(NamesOf(true), ResolversOf(client.Intercepted));
     }
 
     [Fact]
@@ -1659,7 +1662,7 @@ public sealed partial class RouterClientTests
     {
         public ReadOnlyMemory<byte> Encode(JsonElement request)
         {
-            return InteropService.JsonAsked.Encode(request);
+            return new JsonPayloads().Encode(request);
         }
 
         public int Decode(ReadOnlyMemory<byte> response)
@@ -2098,9 +2101,10 @@ public sealed partial class RouterClientTests
             _server.Peer = _client;
             Client = new RouterClient(_client, new RouterClientOptions { MetricsRegistry = registry });
             Facade = new Server<string>(_server, new ServerOptions { MetricsRegistry = registry });
-            ClientServices = new ServiceManager(Client);
+            AsClient = new ServiceLink.LinkedClient(Client);
+            ClientServices = AsClient.Services;
             ServerServices = Facade.Services;
-            InteropService.Offer(Facade);
+            InteropHandlers.Offer(Facade);
             _server.Open();
             Client.Debug += (direction, envelope) =>
             {
@@ -2127,6 +2131,9 @@ public sealed partial class RouterClientTests
         }
 
         public ServiceManager ClientServices { get; }
+
+        // the client as a Bead client, its services those above, for the interop's generated client
+        public ServiceLink.LinkedClient AsClient { get; }
 
         public ServiceManager ServerServices { get; }
 

@@ -397,9 +397,12 @@ form is no rule of `check`, as `buf lint` leaves layout to `buf format`.
 
 ## Its gates
 
-CI's `builder` job installs, then runs `yarn test`, `beadc check` and `beadc blueprint --check` over
-the interop's blueprint, and from the repository's root `node builder/src/cli.ts generate --check`
-over the root's [`beadc.yaml`](../beadc.yaml), which holds the TypeScript side's interop to what
-beadc generates from its blueprint, on Linux and on Windows, on Node 26, and on Linux on Node 24.9
-besides; and `yarn check` on Linux, whose types, the goldens' types, lint, format and generated code
-no platform moves.
+CI's `builder` job installs, fetches protoc by its pin and checks its sha256, then runs `yarn test`,
+`BEADC_PROTOC_REQUIRED=1` turning a test that would skip without protoc into one that fails, then
+`beadc check` and `beadc blueprint --check` over the interop's blueprint, and from the repository's
+root `node builder/src/cli.ts generate --check` over the root's [`beadc.yaml`](../beadc.yaml), which
+holds each side's interop to what beadc generates from its blueprint, on Linux and on Windows, on
+Node 26, and on Linux on Node 24.9 besides; and `yarn check` on Linux, whose types, the goldens'
+types, lint, format and generated code no platform moves. The C# side's `dotnet` job builds the C#
+goldens in its solution, under that side's gates, and `dotnet format` leaves them to their
+generator.

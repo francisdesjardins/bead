@@ -32,8 +32,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `<Name>Admissions` and `<Name>Windows`, over the service layer of
   `@francisdesjardins/bead/service`, with protoc-gen-es's messages where a binding is `proto`;
   `--check` writes nothing and fails on a difference (decision 0022).
-- The root's `beadc.yaml`, which generates the TypeScript side's interop; CI's `builder` job holds
-  the interop to it.
 - `beadc generate`'s C# target: from a blueprint, a `<Name>Bead.cs` for each service, its
   descriptors, its catalogue and a class of failures for each procedure that lists any, the records
   of its hooks and its windows, `<Name>Admissions` and `<Name>Windows`, a server class where only
@@ -77,6 +75,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The contract with generated code is at 2, `GENERATED_CODE_SUPPORTS_VERSION_2` and
   `GeneratedCode.SupportsVersion2`: generated code takes the layer's options typed by the service
   (decision 0018).
+- The root's `beadc.yaml` generates each side's interop; CI's `builder` job holds both to it.
+- The C# side's interop is generated from `spec/interop-blueprint.json`:
+  `interop/Bead.Interop/Generated/InteropBead.cs`; its resolvers are written in
+  `InteropHandlers.cs` and its credentials in `InteropCredentials.cs`, and `InteropService.cs` is
+  gone. The banned-API analyzer refuses the service manager there, and `dotnet format` leaves the
+  generated folders out.
+- `NAME_TARGET` refuses a procedure named `code`, a hook and a failure named as the C# class they
+  sit in, and, on a `.proto`, a class a message or an enum of its C# namespace holds.
 
 ### Removed
 

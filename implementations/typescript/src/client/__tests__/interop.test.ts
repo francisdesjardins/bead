@@ -344,7 +344,7 @@ test.describe('the C# server of the interop service', () => {
         await expect(interop().ask(null)()).resolves.toBe('noon');
       });
 
-      test('a subscription hears each tick, then a paced one each tick its callbacks settled', async () => {
+      test('an unpaced subscription hears each tick', async () => {
         const heard: unknown[] = [];
         const ticks = interop().notifications.ticks;
         const registration = await ticks(null, (value) => {

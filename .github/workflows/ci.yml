@@ -149,7 +149,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: $YARN install --immutable
         working-directory: implementations/typescript
-      - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp
+      - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
       # every project, which `dotnet test` does not: it builds the test projects alone
       - run: dotnet build Bead.slnx
       - run: dotnet test --solution Bead.slnx
@@ -163,8 +163,8 @@ jobs:
   # one `protoc.json` pins, fetched and checked by its sha256, then its tests, the interop's .proto
   # among them, whose blueprint is the spec's byte for byte in either line ending, and the goldens of
   # both targets, protoc's C# messages among them; then beadc itself over the interop's blueprint,
-  # its rules and its form, then the TypeScript side's interop to what beadc generates from the
-  # root's `beadc.yaml`. On Windows, where buf and protoc are other binaries, on the current line; on
+  # its rules and its form, then each side's interop to what beadc generates from the root's
+  # `beadc.yaml`. On Windows, where buf and protoc are other binaries, on the current line; on
   # Linux, on the floor `engines.node` declares too. The C# goldens build in the .NET job, which has
   # the SDK.
   #
@@ -223,7 +223,7 @@ jobs:
         run: node src/cli.ts check ../spec/interop-blueprint.json
       - name: The interop's blueprint, in its form
         run: node src/cli.ts blueprint --check ../spec/interop-blueprint.json
-      - name: The TypeScript side's interop, what beadc generates from its blueprint
+      - name: Each side's interop, what beadc generates from its blueprint
         working-directory: .
         run: node builder/src/cli.ts generate --check
 

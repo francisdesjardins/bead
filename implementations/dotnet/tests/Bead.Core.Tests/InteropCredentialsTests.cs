@@ -7,12 +7,11 @@ using Microsoft.Extensions.Time.Testing;
 namespace Bead.Tests;
 
 /// <summary>
-/// <see cref="InteropService"/>'s credentials: the ELSEWHERE verifier of
-/// <c>credentials.elsewhere</c>, by its grammar, on the clock its server is given, by the rows the
-/// TypeScript side's verifier answers alike; the key set of <c>credentials.jwt</c>, each issuer it
-/// names answered as its words say; and what <c>endSessionsOf</c> takes.
+/// <see cref="InteropCredentials"/>: the ELSEWHERE verifier of <c>credentials.elsewhere</c>, by its
+/// grammar, on the clock its server is given, by the rows the TypeScript side's verifier answers
+/// alike; and the key set of <c>credentials.jwt</c>, each issuer it names answered as its words say.
 /// </summary>
-public sealed class InteropServiceTests
+public sealed class InteropCredentialsTests
 {
     // constants
 
@@ -86,7 +85,7 @@ public sealed class InteropServiceTests
             ? (long.Parse(delayed.Groups[1].Value, CultureInfo.InvariantCulture), delayed.Groups[2].Value)
             : (0L, settled);
         var clock = new FakeTimeProvider();
-        var verify = InteropService.CredentialsOf(clock).Verify!;
+        var verify = InteropCredentials.Of(clock).Verify!;
 
         using var ended = new CancellationTokenSource();
 
@@ -114,7 +113,7 @@ public sealed class InteropServiceTests
 
         var second = TimeSpan.FromMilliseconds(1_000);
         var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
-        var keySet = InteropService.CredentialsOf(clock).KeySet!;
+        var keySet = InteropCredentials.Of(clock).KeySet!;
 
         using var ended = new CancellationTokenSource();
 
@@ -164,40 +163,12 @@ public sealed class InteropServiceTests
         Assert.Empty(clock.Dues());
 
         // its asks counted per key set built: another server's answers its first anew
-        var another = InteropService.CredentialsOf(clock).KeySet!.Ask(RotatedIssuer, ended.Token).AsTask();
+        var another = InteropCredentials.Of(clock).KeySet!.Ask(RotatedIssuer, ended.Token).AsTask();
 
         await clock.Advance(second);
         Assert.Single(await another.WaitAsync(Patience, Cancelled));
 
         // asked for an issuer it does not name, it fails at once
         Assert.True(keySet.Ask("https://unnamed.interop.bead.example", ended.Token).AsTask().IsFaulted);
-    }
-
-    [Fact]
-    public void The_interop_service_s_endSessionsOf_takes_an_issuer_alone_a_string_and_throws_for_anything_else()
-    {
-        const string Issuer = "https://hs256.interop.bead.example";
-
-        Assert.Equal(Issuer, InteropService.IssuerOf(JsonSerializer.SerializeToElement(new { issuer = Issuer })));
-        Assert.Equal("", InteropService.IssuerOf(JsonSerializer.SerializeToElement(new { issuer = "" })));
-
-        foreach (var request in new[]
-        {
-            "[]",
-            "null",
-            "7",
-            "\"https://hs256.interop.bead.example\"",
-            "{}",
-            "{\"issuer\":7}",
-            "{\"issuer\":null}",
-            "{\"issuer\":\"https://hs256.interop.bead.example\",\"sub\":\"grace\"}",
-            "{\"iss\":\"https://hs256.interop.bead.example\"}",
-        })
-        {
-            Assert.Throws<ArgumentException>(() =>
-            {
-                return InteropService.IssuerOf(JsonSerializer.Deserialize<JsonElement>(request));
-            });
-        }
     }
 }

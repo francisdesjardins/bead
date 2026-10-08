@@ -240,7 +240,7 @@ public sealed class TransportsTests
     // limits whose chunk or envelope is under 1,024 bytes, which section 12.2 forbids beside them
     private static Credentials CredentialsOf((RouterLimits Limits, TimeProvider Clock) server)
     {
-        var credentials = InteropService.CredentialsOf(server.Clock);
+        var credentials = InteropCredentials.Of(server.Clock);
 
         return server.Limits.ChunkBytes < 1_024 || server.Limits.MaximumEnvelopeBytes < 1_024
             ? credentials with { Keys = [], KeySet = null }
@@ -279,7 +279,7 @@ public sealed class TransportsTests
             Scheduler = runsOn.Scheduler,
         });
 
-        InteropService.Offer(server);
+        InteropHandlers.Offer(server);
 
         return new Served
         {
@@ -317,7 +317,7 @@ public sealed class TransportsTests
         });
         var transport = server.Transport;
 
-        InteropService.Offer(server);
+        InteropHandlers.Offer(server);
 
         return new Served
         {
