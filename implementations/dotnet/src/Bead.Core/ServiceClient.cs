@@ -1,17 +1,31 @@
 namespace Bead;
 
-/// <summary>What a client side is given: its Bead client, and a window for each procedure that notifies.</summary>
-public sealed record ServiceClientOptions
+/// <summary>
+/// The window of each procedure of <typeparamref name="TService"/> that notifies, as the service
+/// layer reads them: each by its procedure's name, none where its procedure goes unpaced. A
+/// service's record of windows, which beadc generates with a member a procedure that notifies,
+/// implements it.
+/// </summary>
+/// <typeparam name="TService">The service's type tag: the windows of another service are another type.</typeparam>
+public interface IServiceWindows<TService>
 {
-    /// <summary>The Bead client it calls through.</summary>
-    public required IClient Client { get; init; }
+    /// <summary>Each window, by its procedure's name, in a dictionary of its own: null, unpaced.</summary>
+    IReadOnlyDictionary<string, int?> ToDictionary();
+}
 
+/// <summary>
+/// What a client side of <typeparamref name="TService"/> is given besides its Bead client, every
+/// member optional: the windows of its procedures that notify, and whether it validates.
+/// </summary>
+/// <typeparam name="TService">The service's type tag.</typeparam>
+public sealed record ServiceClientOptions<TService>
+{
     /// <summary>
-    /// The window of each procedure that notifies, by its name, above 0: its subscription paced at
-    /// it (spec 11.4). One not given goes unpaced. A window for a procedure the service lacks, or
-    /// one that does not notify, is an <see cref="ArgumentException"/>.
+    /// The window of each procedure that notifies, above 0: its subscription paced at it (spec
+    /// 11.4). One not given goes unpaced. A window for a procedure the service lacks, or one that
+    /// does not notify, is an <see cref="ArgumentException"/>.
     /// </summary>
-    public IReadOnlyDictionary<string, int> Windows { get; init; } = new Dictionary<string, int>();
+    public IServiceWindows<TService>? Windows { get; init; }
 
     /// <summary>
     /// Whether each requester checks a request's value by its procedure's <c>Validate</c> before it
@@ -45,19 +59,19 @@ public sealed class ServiceClient<TService>
     private readonly HashSet<ProcedureAddress> _answered = [];
 
     /// <summary>
-    /// The client side of <paramref name="procedures"/>: two at one address, one the service layer
-    /// did not describe, and a window for a procedure the service lacks or one that does not notify,
-    /// are an <see cref="ArgumentException"/>; a window below 1 too, as its notification refuses it.
+    /// The client side of <paramref name="procedures"/>, over <paramref name="client"/>: two at one
+    /// address, one the service layer did not describe, and a window for a procedure the service
+    /// lacks or one that does not notify, are an <see cref="ArgumentException"/>; a window below 1
+    /// too, as its notification refuses it.
     /// A procedure its client's services hold already at another window, a second client side over
     /// one Bead client, is an <see cref="InvalidOperationException"/>.
     /// </summary>
-    public ServiceClient(IReadOnlyList<IServiceProcedure<TService>> procedures, ServiceClientOptions options)
+    public ServiceClient(IReadOnlyList<IServiceProcedure<TService>> procedures, IClient client, ServiceClientOptions<TService>? options = null)
     {
         ArgumentNullException.ThrowIfNull(procedures);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(options.Client, nameof(options));
+        ArgumentNullException.ThrowIfNull(client);
 
-        _services = options.Client.Services;
+        _services = client.Services;
 
         foreach (var procedure in procedures)
         {
@@ -74,7 +88,9 @@ public sealed class ServiceClient<TService>
             },
             StringComparer.Ordinal);
 
-        foreach (var name in options.Windows.Keys)
+        var windows = options?.Windows?.ToDictionary() ?? new Dictionary<string, int?>();
+
+        foreach (var name in windows.Keys)
         {
             if (!notifying.ContainsKey(name))
             {
@@ -91,13 +107,13 @@ public sealed class ServiceClient<TService>
             var described = (IDescribedProcedure)procedure;
             var address = procedure.Procedure.Address;
 
-            _requesters[address] = described.RequesterOn(_services, options.Validates);
+            _requesters[address] = described.RequesterOn(_services, options?.Validates ?? false);
 
             if (procedure.Procedure.ProcedureKind == ProcedureKind.Notifies)
             {
                 _notifications[address] = described.NotificationOn(
                     _services,
-                    options.Windows.TryGetValue(procedure.Procedure.ProcedureName, out var window) ? window : null)!;
+                    windows.TryGetValue(procedure.Procedure.ProcedureName, out var window) ? window : null)!;
             }
         }
     }

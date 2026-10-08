@@ -43,14 +43,28 @@ public delegate Task ServiceResolverCallback<TRequest, TResult, TFailure>(Reques
 public delegate Task ServiceNotificationResolverCallback<TRequest, TResult, TFailure>(RequestProps<TRequest> request, IServiceNotificationResponse<TResult, TFailure> response)
     where TFailure : IApplicationFailure;
 
-/// <summary>What a server side is given: its hooks, by the names its procedures give them.</summary>
-public sealed record ServiceServerOptions
+/// <summary>
+/// The hooks a server side of <typeparamref name="TService"/> is given, as the service layer reads
+/// them: each by the name its procedures give it. A service's record of hooks, which beadc generates
+/// with a required member a hook, implements it.
+/// </summary>
+/// <typeparam name="TService">The service's type tag: the hooks of another service are another type.</typeparam>
+public interface IServiceAdmissions<TService>
+{
+    /// <summary>Each hook, by the name its procedures give it, in a dictionary of its own.</summary>
+    IReadOnlyDictionary<string, AdmissionHook> ToDictionary();
+}
+
+/// <summary>What a server side of <typeparamref name="TService"/> is given: its hooks.</summary>
+/// <typeparam name="TService">The service's type tag.</typeparam>
+public sealed record ServiceServerOptions<TService>
 {
     /// <summary>
-    /// The hooks its procedures name, each by its name: one a procedure names that this lacks, and
-    /// one this gives that no procedure names, are an <see cref="ArgumentException"/>.
+    /// The hooks its procedures name, an empty record where they name none: a hook a procedure
+    /// names that they lack, one they give that no procedure names, and one that is null, are an
+    /// <see cref="ArgumentException"/>.
     /// </summary>
-    public IReadOnlyDictionary<string, AdmissionHook> Admissions { get; init; } = new Dictionary<string, AdmissionHook>();
+    public required IServiceAdmissions<TService> Admissions { get; init; }
 }
 
 /// <summary>
@@ -80,21 +94,44 @@ public sealed class ServiceServer<TService, TData>
 
     /// <summary>
     /// The server side of <paramref name="procedures"/>: two at one address, one the service layer
-    /// did not describe, a hook a procedure names that the options lack, and one they give that no
-    /// procedure names, are an <see cref="ArgumentException"/>.
+    /// did not describe, a hook a procedure names that the options lack, one they give that no
+    /// procedure names, and one that is no hook, are an <see cref="ArgumentException"/>.
     /// </summary>
-    public ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures, ServiceServerOptions? options = null)
+    public ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures, ServiceServerOptions<TService> options)
+        : this(procedures, HooksOf(options))
+    {
+    }
+
+    /// <summary>
+    /// The server side of <paramref name="procedures"/>, given no options: as the constructor that
+    /// takes them, for procedures that name no hook.
+    /// </summary>
+    public ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures)
+        : this(procedures, new Dictionary<string, AdmissionHook>())
+    {
+    }
+
+    private ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures, IReadOnlyDictionary<string, AdmissionHook> hooks)
     {
         ArgumentNullException.ThrowIfNull(procedures);
 
-        _hooks = options?.Admissions ?? new Dictionary<string, AdmissionHook>();
+        _hooks = hooks;
 
         foreach (var procedure in procedures)
         {
             ServiceLayer.Hold(_procedures, procedure);
         }
 
-        ServiceLayer.CheckHooks(_procedures.Values, _hooks.Keys);
+        ServiceLayer.CheckHooks(_procedures.Values, _hooks);
+    }
+
+    // the hooks the options give, by name, read once
+    private static IReadOnlyDictionary<string, AdmissionHook> HooksOf(ServiceServerOptions<TService> options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        // ! a record past the types, null, gives no hook, as the TypeScript side reads admissions undefined
+        return options.Admissions?.ToDictionary() ?? new Dictionary<string, AdmissionHook>();
     }
 
     /// <summary>
@@ -356,24 +393,37 @@ internal static class ServiceLayer
 
     /// <summary>
     /// Refuses, with an <see cref="ArgumentException"/>, a hook a procedure names that
-    /// <paramref name="hooks"/> lacks, and one it gives that no procedure names.
+    /// <paramref name="hooks"/> lacks; then, each hook it gives in turn, one that no procedure names,
+    /// and one that is no hook, null or without its <c>Admits</c>.
     /// </summary>
-    public static void CheckHooks<TService>(IEnumerable<IServiceProcedure<TService>> procedures, IEnumerable<string> hooks)
+    public static void CheckHooks<TService>(IEnumerable<IServiceProcedure<TService>> procedures, IReadOnlyDictionary<string, AdmissionHook> hooks)
     {
-        var named = procedures.Select((procedure) =>
-        {
-            return procedure.Admission.HookName;
-        }).OfType<string>().ToHashSet(StringComparer.Ordinal);
-        var given = hooks.ToHashSet(StringComparer.Ordinal);
+        var named = new HashSet<string>(StringComparer.Ordinal);
 
-        if (named.Except(given).FirstOrDefault() is { } missing)
+        foreach (var procedure in procedures)
         {
-            throw new ArgumentException($"a procedure names the hook {missing}, which the options lack", nameof(hooks));
+            if (procedure.Admission.HookName is { } name)
+            {
+                if (!hooks.ContainsKey(name))
+                {
+                    throw new ArgumentException($"a procedure names the hook {name}, which the options lack", nameof(hooks));
+                }
+
+                named.Add(name);
+            }
         }
 
-        if (given.Except(named).FirstOrDefault() is { } unnamed)
+        foreach (var (name, hook) in hooks)
         {
-            throw new ArgumentException($"the options give the hook {unnamed}, which no procedure names", nameof(hooks));
+            if (!named.Contains(name))
+            {
+                throw new ArgumentException($"the options give the hook {name}, which no procedure names", nameof(hooks));
+            }
+
+            if (hook?.Admits is null)
+            {
+                throw new ArgumentException($"the hook {name} admits by a function, Admits", nameof(hooks));
+            }
         }
     }
 

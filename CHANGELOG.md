@@ -51,11 +51,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   manager's accessor there.
 - `tools/check-format.mjs` holds `beadc.yaml`.
 - `tools/release.mjs prepare` moves the generated code's header to the release's versions.
+- The service layer's options are typed by the service on both sides. The C# side's
+  `ServiceServerOptions<TService>` takes the service's hooks as a record of one required member a
+  hook, `IServiceAdmissions<TService>`, and `ServiceClientOptions<TService>` the windows of its
+  procedures that notify as a record, `IServiceWindows<TService>`, in place of the records keyed by
+  name: a hook left out does not compile, and a service written without beadc writes its records.
+  `ServiceServer` takes its options in a constructor of their own, beside one that takes none. A
+  hook that is no hook is refused on both sides. A client side takes its Bead client apart from its
+  options, `new ServiceClient<TService>(procedures, client, options)` (decision 0018).
+- The contract with generated code is at 2, `GeneratedCode.SupportsVersion2`: generated code takes
+  the layer's options typed by the service (decision 0018).
 
 ### Removed
 
 - `spec/interop-service.json`'s `serviceId`, `serviceRevision`, `procedureId` and `offeredBy`: the
   interop's ids, revision and kinds are `spec/interop-blueprint.json`'s.
+- `GeneratedCode.SupportsVersion1`: the runtime no longer serves contract 1's code (decision 0018).
 
 ### Fixed
 
