@@ -26,6 +26,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds one to it; `beadc version`. The interop's `.proto` is its fixture, whose blueprint is
   `spec/interop-blueprint.json` byte for byte; CI's `builder` job runs its tests on Linux and on
   Windows (decision 0022).
+- `beadc generate`, the TypeScript target: from a blueprint, a `<name>_bead.ts` for each service,
+  its descriptors, its catalogue, a server class where only resolvers are written and a client class
+  holding a requester of each procedure by its name, over the service layer of
+  `@francisdesjardins/bead/service`, with protoc-gen-es's messages where a binding is `proto`;
+  `--check` writes nothing and fails on a difference (decision 0022).
 
 ### Changed
 

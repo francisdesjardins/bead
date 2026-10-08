@@ -2,8 +2,9 @@ import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
 
-import { isInside, parseConfig } from '../config.ts';
+import { type IConfig, isInside, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
+import { DEFAULT_RUNTIME } from '../targets/typescript/options.ts';
 
 test("a path outside the folder is refused in Windows' forms, a backslash, a drive letter and a second drive, through path.win32", () => {
   const folder = 'C:\\work\\project';
@@ -64,5 +65,79 @@ test('refuses a key it does not read, and a source of neither or both kinds', ()
     expect(() => {
       return parseConfig(text, { folder: '/work', path: path.posix });
     }, text).toThrow(InputError);
+  }
+});
+
+test("reads an output's keys and refuses another, a csharp output among them, and messagesOut without external", () => {
+  const folder = '/work';
+  const posix = path.posix;
+  const read = (outputs: string): IConfig => {
+    return parseConfig(`version: 1\nsource:\n  blueprint: a.json\noutputs:\n${outputs}`, {
+      folder,
+      path: posix,
+    });
+  };
+
+  expect(read('  - language: typescript\n    out: gen\n').outputs).toEqual([
+    {
+      language: 'typescript',
+      out: '/work/gen',
+      importExtension: 'ts',
+      runtime: DEFAULT_RUNTIME,
+      messages: 'generate',
+    },
+  ]);
+  expect(
+    read(
+      [
+        '  - language: typescript',
+        '    out: interop/generated',
+        '    importExtension: none',
+        '    runtime: ../../src/service/service',
+        '    messages: external',
+        '    messagesOut: interop/messages',
+        '',
+      ].join('\n')
+    ).outputs
+  ).toEqual([
+    {
+      language: 'typescript',
+      out: '/work/interop/generated',
+      importExtension: 'none',
+      runtime: '../../src/service/service',
+      messages: 'external',
+      messagesOut: '/work/interop/messages',
+    },
+  ]);
+
+  const refused: readonly (readonly [string, RegExp])[] = [
+    ['  - language: csharp\n    out: gen\n', /no target csharp in this beadc/u],
+    ['  - language: go\n    out: gen\n', /outputs\[0\]\.language: typescript/u],
+    [
+      '  - language: typescript\n    out: gen\n    namespace: X\n',
+      /outputs\[0\]\.namespace, a key/u,
+    ],
+    ['  - language: typescript\n', /outputs\[0\]\.out is a path/u],
+    ['  - language: typescript\n    out: ../gen\n', /outside the folder/u],
+    ['  - language: typescript\n    out: gen\n    importExtension: mjs\n', /none, js or ts/u],
+    ['  - language: typescript\n    out: gen\n    runtime: ./service.ts\n', /names no extension/u],
+    [
+      '  - language: typescript\n    out: gen\n    runtime: /abs/service\n',
+      /runtime is a package's name/u,
+    ],
+    ['  - language: typescript\n    out: gen\n    messages: none\n', /generate or external/u],
+    ['  - language: typescript\n    out: gen\n    messagesOut: msgs\n', /messagesOut/u],
+    ['  - language: typescript\n    out: gen\n    messages: external\n', /messagesOut/u],
+    [
+      '  - language: typescript\n    out: gen\n  - language: typescript\n    out: ./gen\n',
+      /two outputs write one folder/u,
+    ],
+    ['  []\n', /outputs lists one output at least/u],
+  ];
+
+  for (const [outputs, reason] of refused) {
+    expect(() => {
+      return read(outputs);
+    }, outputs).toThrow(reason);
   }
 });
