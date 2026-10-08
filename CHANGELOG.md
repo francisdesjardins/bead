@@ -47,6 +47,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `NAME_TARGET` refuses a procedure named `code`, a hook and a failure named as the C# class they
   sit in, and, on a `.proto`, a class a message or an enum of its C# namespace holds.
 - The root's `beadc.yaml` generates each side's interop; CI's `builder` job holds both to it.
+- `beadc wrapper` and `beadc init`: `init` writes a project, its `beadc.yaml`, a `.proto`,
+  `buf.yaml`, the editor's copy of the options and the wrappers `beadc.sh` and `beadc.ps1`, which
+  `wrapper` prints; the two wrappers run beadc's image as the caller, without a network, read-only,
+  making one engine call from the arguments as each shell hands them (decision 0022).
+- beadc's image, `builder/Dockerfile`: Node, beadc, buf, protoc-gen-es, protoc at its pin, the
+  files of `spec/` it reads and the licence texts of what it adds, its tests run on the image
+  itself; CI builds it on amd64 and arm64 and runs the wrappers against it (decision 0022).
 
 ### Changed
 

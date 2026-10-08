@@ -25,8 +25,8 @@ the conformance files and the interop. The records bind, in the present, parts t
 not hold:
 
 - **the builder, `beadc`** ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)),
-  which generates a typed server and client in each language from a `.proto`: its image and its
-  wrappers, `examples/hello` and `beadc breaking`; its name and its C#
+  which generates a typed server and client in each language from a `.proto`: its image's
+  publication, `examples/hello` and `beadc breaking`; its name and its C#
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)), the clock its
   code runs on ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), the call's
   session it binds to ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), the names it

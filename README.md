@@ -66,6 +66,9 @@ implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, tools/
   dotnet/                     Bead.slnx: src/, interop/, tests/
 builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
+  Dockerfile                  beadc's image, built from the root, its tests run on the image itself
+  wrappers/                   beadc.sh and beadc.ps1, which run the image, as templates beadc fills
+  licenses/                   protobuf's licence, which the image ships for protoc and a package that carry none
 beadc.yaml                    the interop's code, generated from its blueprint by beadc
 docs/
   decisions/                  the decision records, and their index
@@ -202,7 +205,7 @@ node builder/src/cli.ts generate --check
 ```
 
 Its [README](builder/README.md) gives the commands, the rules and their reasons, the TypeScript and
-C# targets, and what each option of `bead/options.proto` means.
+C# targets, the image and its wrappers, and what each option of `bead/options.proto` means.
 
 ## Interop, both ways
 
@@ -276,7 +279,8 @@ node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --unde
 
 [`docs/support.md`](docs/support.md) shows, feature by feature, what each implementation supports
 and the test that proves it: the aim is one behaviour in every language, and a difference stays
-there only until it closes.
+there only until it closes. It holds beadc's two wrappers alike, `beadc.sh` beside `beadc.ps1`,
+with what one shell cannot do and the test that shows it.
 
 ## Repository checks
 
@@ -330,6 +334,10 @@ node tools/release.mjs tag                     # spec-v… and debugging-v… at
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
 ```
 
+Before `prepare`, the release moves by hand the three digests beadc's image and its lint pin: the
+Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
+image in `ci.yml`, each to its tag's current digest; CI then builds and tests the image on them.
+
 A document whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
 change to keep passing, `patch` when a conforming one passes unchanged, and `minor` at least when a
 file, a key or a property was added
@@ -341,15 +349,19 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 ## CI
 
 [`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on pinned
-runner images, `ubuntu-26.04`, and `windows-2025` for the builder's: `spec` (regenerate, then diff,
-then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9 (install, check, test, the
-demo's static build, and the root's files under the same formatter), `dotnet` (format, build, the
-builder's C# goldens among its projects, test, and the interop both ways with
-`BEAD_INTEROP_REQUIRED=1`), `builder` (install, protoc by its pin's sha256, test with
-`BEADC_PROTOC_REQUIRED=1`, then beadc over the interop's blueprint, its rules and its form, and
+runner images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
+(regenerate, then diff, then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9
+(install, check, test, the demo's static build, and the root's files under the same formatter),
+`dotnet` (format, build, the builder's C# goldens among its projects, test, and the interop both
+ways with `BEAD_INTEROP_REQUIRED=1`), `builder` (install, protoc by its pin's sha256, test with
+`BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
+a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
 `beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
 Windows and on 24.9 on Linux; its types, the goldens' among them, lint and format, buf's among them,
-on Linux), and `commits` (the subjects, the links, the versions, then the root's tools' own tests).
+on Linux; and on the image's legs, Linux on Node 26, amd64 and arm64, each natively: beadc's image
+built, its test stage run on the image itself, each wrapper run against it with
+`BEADC_IMAGE_REQUIRED=1`, and the wrappers' lint, each linter at its pin), and `commits` (the
+subjects, the links, the versions, then the root's tools' own tests).
 `ci-ok` needs them all, so one check stands for every job; branch protection, which would make it
 the one check a branch requires, waits on GitHub Pro or a public repository.
 

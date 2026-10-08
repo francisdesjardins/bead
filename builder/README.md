@@ -68,23 +68,25 @@ version, its floor and its sums, and writes the C# goldens again.
 
 ## The commands
 
-| Command                                                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `beadc check [<root or blueprint>]`                         | Runs [the rules](#the-rules) over the input named, a folder of `.proto` files or a blueprint's file, or over `beadc.yaml`'s source                                                                                                                                                                                                                                                                                |
-| `beadc blueprint [<root or blueprint>] -o <file>`           | Runs `check`, and writes nothing on an error; otherwise writes the blueprint in [its form](#the-form), encoded whole, then moved over the file. `--descriptor-set-out` writes buf's set                                                                                                                                                                                                                           |
-| `beadc blueprint --check [<root or blueprint>] [-o <file>]` | Writes nothing: holds the file `-o` names, or the blueprint given, to the blueprint in its form, naming the first line off, an array out of its order, a missing final line feed or a byte order mark                                                                                                                                                                                                             |
-| `beadc generate`                                            | Runs `check` over `beadc.yaml`'s source, and writes nothing on an error; otherwise writes each output `beadc.yaml` names, and for a `.proto` source the blueprint it names and the editor's copy of the options, each file encoded whole, then moved over the one it replaces; refuses, before it writes anything, two files at one path, compared as a system that folds case compares them, naming both sources |
-| `beadc generate --check`                                    | Writes nothing: holds each file `generate` writes to what it would write, CRLF read as LF, naming a file that differs at its first line off, a file missing, and a file of a kind `generate` writes in an output's folder that it would not write; never the editor's copy, and never a file under an output's `bin/`, `obj/` or `node_modules/`                                                                  |
-| `beadc version`                                             | beadc's version, buf's, protobuf-es's, protoplugin's, protoc-gen-es's, protoc's, `protoc 36.2`, or another's beside the pin, `protoc 35.1, pinned 36.2`, or `protoc none, pinned 36.2`, the format, the spec's version and the options' number                                                                                                                                                                    |
+| Command                                                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beadc check [<root or blueprint>]`                         | Runs [the rules](#the-rules) over the input named, a folder of `.proto` files or a blueprint's file, or over `beadc.yaml`'s source                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `beadc blueprint [<root or blueprint>] -o <file>`           | Runs `check`, and writes nothing on an error; otherwise writes the blueprint in [its form](#the-form), encoded whole, then moved over the file. `--descriptor-set-out` writes buf's set                                                                                                                                                                                                                                                                                                                                                |
+| `beadc blueprint --check [<root or blueprint>] [-o <file>]` | Writes nothing: holds the file `-o` names, or the blueprint given, to the blueprint in its form, naming the first line off, an array out of its order, a missing final line feed or a byte order mark                                                                                                                                                                                                                                                                                                                                  |
+| `beadc generate`                                            | Runs `check` over `beadc.yaml`'s source, and writes nothing on an error; otherwise writes each output `beadc.yaml` names, and for a `.proto` source the blueprint it names and the editor's copy of the options, each file encoded whole, then moved over the one it replaces; refuses, before it writes anything, two files at one path, compared as a system that folds case compares them, naming both sources                                                                                                                      |
+| `beadc generate --check`                                    | Writes nothing: holds each file `generate` writes to what it would write, CRLF read as LF, naming a file that differs at its first line off, a file missing, and a file of a kind `generate` writes in an output's folder that it would not write; never the editor's copy, and never a file under an output's `bin/`, `obj/` or `node_modules/`                                                                                                                                                                                       |
+| `beadc init <name> [--language typescript\|csharp]`         | Writes a project in the folder it runs in: its `beadc.yaml`, an output for each language named, both when none is; `proto/<name>/v1/<name>.proto`, one service that `check` passes and buf's STANDARD lint takes; buf's `buf.yaml` for an editor; the editor's copy of the options; the wrappers `beadc.sh`, executable, and `beadc.ps1`; and appends to `.gitignore` and `.gitattributes` each line they lack. It writes over no file, every path looked at first, but a wrapper byte for byte the one it would write, which it keeps |
+| `beadc wrapper beadc.sh\|beadc.ps1`                         | Prints the wrapper named, filled with beadc's version, and nothing else: it reads and writes no file, so the image's first run needs no mount ([the image and its wrappers](#the-image-and-its-wrappers))                                                                                                                                                                                                                                                                                                                              |
+| `beadc version`                                             | beadc's version, buf's, protobuf-es's, protoplugin's, protoc-gen-es's, protoc's, `protoc 36.2`, or another's beside the pin, `protoc 35.1, pinned 36.2`, or `protoc none, pinned 36.2`, the format, the spec's version and the options' number                                                                                                                                                                                                                                                                                         |
 
 Flags: `--error-format text|json|github`, `--fail-on-warning`, `--except <RULE>`, which leaves out a
-warning by its name and never an error.
+warning by its name and never an error; `--language`, `init`'s, repeated.
 
-| Exit | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0    | done, warnings included unless `--fail-on-warning`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 1    | an error, a warning under `--fail-on-warning`, or a difference under `blueprint --check` or `generate --check`                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 2    | the input or the call: a `.proto` buf does not compile, its messages as they came; a text that is no JSON; a bad flag; an input named to `generate`, which reads `beadc.yaml` alone; a bad `beadc.yaml`, an output of a language this beadc has no target for among them; a path outside its folder; a blueprint whose bindings name messages, as `generate`'s source; two files `generate` would write at one path; where a C# output generates messages, no protoc, one off its pin, or protoc's refusal, in its words |
+| Exit | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | done, warnings included unless `--fail-on-warning`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 1    | an error, a warning under `--fail-on-warning`, or a difference under `blueprint --check` or `generate --check`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 2    | the input or the call: a `.proto` buf does not compile, its messages as they came; a text that is no JSON; a bad flag; an input named to `generate`, which reads `beadc.yaml` alone; a bad `beadc.yaml`, an output of a language this beadc has no target for among them; a path outside its folder; a blueprint whose bindings name messages, as `generate`'s source; two files `generate` would write at one path; where a C# output generates messages, no protoc, one off its pin, or protoc's refusal, in its words; `init`'s name missing or no proto package's part, a language it has no target for, a file it would write over; a wrapper's name other than `beadc.sh` or `beadc.ps1` |
 
 A finding prints one a line, `file:line:column: severity RULE: message` at a `.proto`'s place, as
 buf's source info gives it, and `file#/services/0/serviceId: severity RULE: message` at a
@@ -120,6 +122,83 @@ move `beadc.yaml` up. A key beadc does not read is refused, an output's among th
 `generate` writes a copy of Bead's options to `.beadc/include/bead/options.proto` beside
 `beadc.yaml`, for an editor to resolve `import "bead/options.proto";`: it is git's to ignore, and
 `--check` never compares it.
+
+## The image and its wrappers
+
+beadc ships as an image, `ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and
+linux/arm64, built by [`Dockerfile`](Dockerfile) from the repository's root, since beadc's tests
+read `spec/` and the files of each side they hold the generated code to; the context's ignore file,
+[`Dockerfile.dockerignore`](Dockerfile.dockerignore), is beside it:
+
+```sh
+docker build -f builder/Dockerfile --target test .   # beadc's tests, on the image itself, protoc required
+docker build -f builder/Dockerfile -t beadc:local .  # the image
+BEADC_IMAGE=beadc:local yarn test                    # from builder/: each wrapper runs it besides
+```
+
+It holds Node from `node:26.10.0-trixie-slim`, pinned by its digest; beadc as this folder holds it,
+with its production packages, run by Node as written; buf, protoc-gen-es, protoc at its pin with its
+well-known types, `bead/options.proto`, the files of `spec/` beadc reads at their places beside it;
+and under `/opt/bead/licenses/` the licence texts of what it adds to its base, which
+[`tools/licenses.mjs`](tools/licenses.mjs) writes and holds to the image's
+`org.opencontainers.image.licenses` label: a package whose licence leaves the label fails the
+build. It has no SDK; its own user, 65532, is not root.
+
+A project runs it through two wrappers, `beadc.sh` for bash 3.2 or later and `beadc.ps1` for
+PowerShell 7.6 or later, which `beadc wrapper` prints and `beadc init` writes, filled with beadc's
+version; a project commits both. The first run asks nothing but the engine:
+
+```sh
+docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.sh > beadc.sh
+bash beadc.sh init hello
+./beadc.sh generate
+git add --chmod=+x beadc.sh   # git on Windows records no mode
+```
+
+```powershell
+docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.ps1 > beadc.ps1
+./beadc.ps1 init hello
+./beadc.ps1 generate
+```
+
+The two wrappers are one contract, which
+[`src/__tests__/wrappers.test.ts`](src/__tests__/wrappers.test.ts) holds them to, each case run by
+bash, by `pwsh -File` and inside a pwsh session, to one engine call, one output and one exit:
+
+- **The folder**: the nearest upward that holds `beadc.yaml`, else the current one, by its physical
+  path, asked of the system, a link or a junction on the way resolved, mounted at `/work`, the run
+  kept at the same place under it. A path beadc is given is the container's: relative, with `/`.
+- **The engine and the image**: `docker`, or the engine `BEADC_ENGINE` names, told Docker or
+  Podman by what its `--version` reports; `ghcr.io/francisdesjardins/beadc:<version>`, or the image
+  `BEADC_IMAGE` names, by a tag or a digest.
+- **The run**: `--rm --init --network none --read-only --tmpfs /tmp --cap-drop ALL`,
+  `--security-opt no-new-privileges` and `--security-opt label=disable`; no terminal, which would
+  end each line with CRLF and merge stderr into stdout, and no variable passed; the engine's output
+  read as UTF-8.
+- **Who writes the files**: the caller. `--user <uid>:<gid>` to a rootful engine,
+  `--userns=keep-id` to rootless Podman, `--user 0:0` to rootless Docker, whose root is the caller,
+  and the image's own user on Windows, where Docker Desktop maps every user to the caller.
+- **The arguments**, as the shell hands them. Inside a pwsh session, PowerShell takes a bare `--`
+  and cuts a `-name:value` token, which `pwsh -File` splits; quoted, `'--'` and `'-o:f'` pass whole,
+  and beadc's own forms, `--except=A` and `--except A`, pass alike every way. A session's `>` on
+  Windows ends each line it writes with CRLF. [The support matrix](../docs/support.md) lists what
+  each shell cannot do.
+
+| Exit     | From a wrapper                                                                                                                                                                                                                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0, 1, 2  | beadc's own                                                                                                                                                                                                                                                                                         |
+| 3        | the environment: no engine on the path, an engine that does not answer, Docker in Windows containers' mode, the engine's own failure, its 125, 126 or 127, an image it cannot pull among them; and a shell the wrapper is not written for, `sh beadc.sh`, Windows PowerShell, PowerShell 7.4 or 7.5 |
+| 130, 143 | an interrupt, a termination, which the engine's init passes on to beadc                                                                                                                                                                                                                             |
+
+An execution policy that refuses `beadc.ps1`, Windows PowerShell's `Restricted`, the Windows
+client's default, a group policy's `AllSigned`, or `RemoteSigned` on a downloaded file, stops
+PowerShell before the wrapper's first line, with PowerShell's exit 1:
+`pwsh -ExecutionPolicy Bypass -File ./beadc.ps1 generate` runs it. On Windows, `bash` run from
+PowerShell is WSL's, where `beadc.sh` acts as on Linux, its folder a `/mnt/<drive>/` path; Git Bash
+runs it as Windows.
+
+The repository runs beadc on Node from this folder, and commits no filled wrapper: the templates are
+in [`wrappers/`](wrappers/), their image's tag a token that `wrapper` and `init` fill.
 
 ## The options
 
@@ -403,6 +482,15 @@ CI's `builder` job installs, fetches protoc by its pin and checks its sha256, th
 root `node builder/src/cli.ts generate --check` over the root's [`beadc.yaml`](../beadc.yaml), which
 holds each side's interop to what beadc generates from its blueprint, on Linux and on Windows, on
 Node 26, and on Linux on Node 24.9 besides; and `yarn check` on Linux, whose types, the goldens'
-types, lint, format and generated code no platform moves. The C# side's `dotnet` job builds the C#
-goldens in its solution, under that side's gates, and `dotnet format` leaves them to their
+types, lint, format and generated code no platform moves. On every leg, the wrappers' tests hold
+`beadc.sh` and `beadc.ps1` to one contract against a stand-in engine, a native `docker.exe` on
+Windows, `BEADC_WRAPPERS_REQUIRED=1` turning a test that would skip without bash, pwsh 7.6 or, on
+Windows, the right to make a symbolic link into one that fails. On the image's legs, Linux on
+Node 26, amd64 on `ubuntu-26.04` and arm64 on `ubuntu-26.04-arm`, each natively: the image's test
+stage, beadc's tests on the image's own Node, protoc and environment; then the image, which
+`yarn test` runs through each wrapper under `BEADC_IMAGE_REQUIRED=1`: `beadc version`,
+`generate --check` over the root's `beadc.yaml`, the messages fixture in both languages, a
+project's files written as the caller and an interrupt's 130; and shellcheck 0.11.0, from its image
+by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The C# side's `dotnet` job builds the
+C# goldens in its solution, under that side's gates, and `dotnet format` leaves them to their
 generator.

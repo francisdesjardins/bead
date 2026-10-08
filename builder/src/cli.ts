@@ -1,15 +1,18 @@
 // ── beadc ─────────────────────────────────────────────────────────────────────
 
-// beadc's command line: `check`, `blueprint`, `generate` and `version` (decision 0022). It parses
-// the call, runs the command, prints each finding a line, and exits 0, 1 on an error — a warning too
-// under `--fail-on-warning`, a difference under `blueprint --check` or `generate --check` — or 2 when
-// the input or the call is one beadc cannot take. `generate` alone loads the targets, by a dynamic
-// import: they load a TypeScript compiler, which the other commands never need.
+// beadc's command line: `check`, `blueprint`, `generate`, `init`, `wrapper` and `version` (decision
+// 0022). It parses the call, runs the command, prints each finding a line, and exits 0, 1 on an
+// error — a warning too under `--fail-on-warning`, a difference under `blueprint --check` or
+// `generate --check` — or 2 when the input or the call is one beadc cannot take. `generate` and
+// `init` alone load the targets, by a dynamic import: they load a TypeScript compiler, which the
+// other commands never need.
 //
 //   node src/cli.ts check [<root or blueprint>]
 //   node src/cli.ts blueprint [<root or blueprint>] -o <file> [--descriptor-set-out <file>]
 //   node src/cli.ts blueprint --check [<root or blueprint>] [-o <file>]
 //   node src/cli.ts generate [--check]
+//   node src/cli.ts init <name> [--language typescript|csharp]...
+//   node src/cli.ts wrapper beadc.sh|beadc.ps1
 //   node src/cli.ts version
 
 // dependencies
@@ -30,7 +33,8 @@ import {
 import { formDifferencesOf, formOf, type IFormDifference } from './model/form.ts';
 import { displayOf } from './roots.ts';
 import { isRuleName, RULES, Severity } from './rules.ts';
-import { versionLines } from './version.ts';
+import { beadcVersion, versionLines } from './version.ts';
+import { isWrapperName, WRAPPERS, wrapperText } from './wrappers.ts';
 
 // types
 
@@ -65,9 +69,12 @@ const USAGE = [
   '  blueprint --check [-o <file>] holds a blueprint to its form, writing nothing',
   "  generate                      writes beadc.yaml's outputs",
   '  generate --check              holds them to what generate writes, writing nothing',
+  '  init <name>                   writes a project here, its .proto, its beadc.yaml and its wrappers',
+  "  wrapper beadc.sh|beadc.ps1    prints a wrapper that runs beadc's image",
   '  version                       beadc, its tools, the format, the spec and the options',
   'flags: --error-format text|json|github, --fail-on-warning, --except <RULE> (a warning),',
-  '       --descriptor-set-out <file> (blueprint, from a .proto)',
+  '       --descriptor-set-out <file> (blueprint, from a .proto),',
+  '       --language typescript|csharp (init, repeated; both when none is named)',
 ].join('\n');
 
 // what GitHub titles a difference under each --check
@@ -280,6 +287,32 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
   return differences.length === 0 ? Exit.DONE : Exit.FINDINGS;
 };
 
+const runInit = async (name: string | undefined, languages: readonly string[]): Promise<Exit> => {
+  // * the editor's copy is written as generate writes it, which loads the targets
+  const { initLines, initProject } = await import('./init.ts');
+  const initialized = initProject(name, {
+    folder: process.cwd(),
+    version: beadcVersion(),
+    languages,
+  });
+
+  for (const line of initLines(initialized)) {
+    print(line);
+  }
+
+  return Exit.DONE;
+};
+
+const runWrapper = (name: string | undefined): Exit => {
+  if (name === undefined || !isWrapperName(name)) {
+    throw new InputError(`wrapper names one of ${WRAPPERS.join(' and ')}, not ${String(name)}`);
+  }
+
+  process.stdout.write(wrapperText(name, { version: beadcVersion() }));
+
+  return Exit.DONE;
+};
+
 // the call, its flags checked: a format beadc prints, and a rule it knows that is a warning
 const callOf = (
   values: Readonly<Record<string, string | boolean | string[] | undefined>>,
@@ -340,6 +373,7 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
         output: { type: 'string', short: 'o' },
         check: { type: 'boolean' },
         'descriptor-set-out': { type: 'string' },
+        language: { type: 'string', multiple: true },
       },
     });
     const [command, input, ...rest] = positionals;
@@ -350,6 +384,10 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
 
     if (command === undefined) {
       throw new InputError(USAGE);
+    }
+
+    if (values.language !== undefined && command !== 'init') {
+      throw new InputError(`--language is init's, not ${command}'s`);
     }
 
     switch (command) {
@@ -367,6 +405,12 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
       }
       case 'generate': {
         return await runGenerate(callOf(values, input));
+      }
+      case 'init': {
+        return await runInit(input, values.language ?? []);
+      }
+      case 'wrapper': {
+        return runWrapper(input);
       }
       default: {
         throw new InputError(`${command}: no command of beadc's\n${USAGE}`);

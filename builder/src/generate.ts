@@ -21,7 +21,6 @@
 // dependencies
 
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -390,6 +389,18 @@ export const differencesOf = (plan: IPlan): IFileDifference[] => {
 };
 
 /**
+ * Writes the editor's copy of Bead's options into `folder`, under {@link EDITOR_COPY}, by its
+ * content: a copy of the file would carry its mode, which an image built from a Windows checkout
+ * gives as 0755.
+ */
+export const writeEditorCopy = (folder: string): void => {
+  const copy = join(folder, ...EDITOR_COPY.split('/'), ...OPTIONS_FILE.split('/'));
+
+  mkdirSync(dirname(copy), { recursive: true });
+  writeFileSync(copy, readFileSync(join(OPTIONS_ROOT, ...OPTIONS_FILE.split('/'))));
+};
+
+/**
  * Writes `plan` for `config`: each file whose text differs, whole, then moved over; each file left
  * over taken out; and, for a `.proto` source, the editor's copy of Bead's options beside
  * `beadc.yaml`.
@@ -406,9 +417,6 @@ export const writePlan = (plan: IPlan, config: IConfig): void => {
   }
 
   if ('proto' in config.source) {
-    const copy = join(config.folder, ...EDITOR_COPY.split('/'), ...OPTIONS_FILE.split('/'));
-
-    mkdirSync(dirname(copy), { recursive: true });
-    copyFileSync(join(OPTIONS_ROOT, ...OPTIONS_FILE.split('/')), copy);
+    writeEditorCopy(config.folder);
   }
 };
