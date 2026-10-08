@@ -43,6 +43,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds both ways.
 - `tools/check-versions.mjs` holds the builder's `package.json`, where the tree has one, at the
   product's version, and `tools/release.mjs prepare` moves it with the product's (decision 0008).
+- `tools/release.mjs prepare` moves the generated code's header to the release's versions.
 
 ### Removed
 
