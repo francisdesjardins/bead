@@ -125,10 +125,28 @@ move `beadc.yaml` up. A key beadc does not read is refused, an output's among th
 
 ## The image and its wrappers
 
-A project runs beadc's image, `ghcr.io/francisdesjardins/beadc:<version>`, through two wrappers,
-`beadc.sh` for bash 3.2 or later and `beadc.ps1` for PowerShell 7.6 or later, which
-`beadc wrapper` prints and `beadc init` writes, filled with beadc's version; a project commits both.
-The first run asks nothing but the engine:
+beadc ships as an image, `ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and
+linux/arm64, built by [`Dockerfile`](Dockerfile) from the repository's root, since beadc's tests
+read `spec/` and the files of each side they hold the generated code to; the context's ignore file,
+[`Dockerfile.dockerignore`](Dockerfile.dockerignore), is beside it:
+
+```sh
+docker build -f builder/Dockerfile --target test .   # beadc's tests, on the image itself, protoc required
+docker build -f builder/Dockerfile -t beadc:local .  # the image
+BEADC_IMAGE=beadc:local yarn test                    # from builder/: each wrapper runs it besides
+```
+
+It holds Node from `node:26.10.0-trixie-slim`, pinned by its digest; beadc as this folder holds it,
+with its production packages, run by Node as written; buf, protoc-gen-es, protoc at its pin with its
+well-known types, `bead/options.proto`, the files of `spec/` beadc reads at their places beside it;
+and under `/opt/bead/licenses/` the licence texts of what it adds to its base, which
+[`tools/licenses.mjs`](tools/licenses.mjs) writes and holds to the image's
+`org.opencontainers.image.licenses` label: a package whose licence leaves the label fails the
+build. It has no SDK; its own user, 65532, is not root.
+
+A project runs it through two wrappers, `beadc.sh` for bash 3.2 or later and `beadc.ps1` for
+PowerShell 7.6 or later, which `beadc wrapper` prints and `beadc init` writes, filled with beadc's
+version; a project commits both. The first run asks nothing but the engine:
 
 ```sh
 docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.sh > beadc.sh
@@ -467,7 +485,12 @@ Node 26, and on Linux on Node 24.9 besides; and `yarn check` on Linux, whose typ
 types, lint, format and generated code no platform moves. On every leg, the wrappers' tests hold
 `beadc.sh` and `beadc.ps1` to one contract against a stand-in engine, a native `docker.exe` on
 Windows, `BEADC_WRAPPERS_REQUIRED=1` turning a test that would skip without bash, pwsh 7.6 or, on
-Windows, the right to make a symbolic link into one that fails; and on Linux on Node 26,
-shellcheck 0.11.0, from its image by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The
-C# side's `dotnet` job builds the C# goldens in its solution, under that side's gates, and
-`dotnet format` leaves them to their generator.
+Windows, the right to make a symbolic link into one that fails. On the image's legs, Linux on
+Node 26, amd64 on `ubuntu-26.04` and arm64 on `ubuntu-26.04-arm`, each natively: the image's test
+stage, beadc's tests on the image's own Node, protoc and environment; then the image, which
+`yarn test` runs through each wrapper under `BEADC_IMAGE_REQUIRED=1`: `beadc version`,
+`generate --check` over the root's `beadc.yaml`, the messages fixture in both languages, a
+project's files written as the caller and an interrupt's 130; and shellcheck 0.11.0, from its image
+by its digest, and PSScriptAnalyzer 1.25.0 over the wrappers. The C# side's `dotnet` job builds the
+C# goldens in its solution, under that side's gates, and `dotnet format` leaves them to their
+generator.

@@ -1,0 +1,15 @@
+# What builder/Dockerfile never reads, from the repository's root: what a build or an install wrote,
+# and the history
+.git
+.claude
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/coverage
+**/playwright-report
+**/test-results
+**/TestResults
+builder/.protoc
+builder/.yarn/*
+!builder/.yarn/releases

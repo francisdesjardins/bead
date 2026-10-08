@@ -46,6 +46,9 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 | A blueprint keeps section 16 and the builder's rules, and its form, the interop's by `beadc check` and `beadc blueprint --check` ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md), [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                            | `builder`                                        |
 | Each side's interop code is what beadc generates from the interop's blueprint, and the TypeScript target's goldens type-check as a consumer compiles them ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                | `builder`                                        |
 | protoc's C# messages from buf's set are what protoc writes from the `.proto`, its embedded descriptor aside ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                              | `builder`                                        |
+| beadc's image builds on amd64 and arm64, its test stage passes on the image itself, and each wrapper runs `beadc version`, `beadc generate --check` over the repository and the messages fixture through it ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                              | `builder`                                        |
+| The two wrappers make the same engine calls, print the same bytes and exit alike, on Linux and on Windows, by `pwsh -File` and in a session, and each passes its shell's lint at its pin ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                 | `builder`                                        |
+| The image's build fails when a package's licence leaves its label ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                                                                        | `builder`                                        |
 | A lockfile changes only on purpose                                                                                                                                                                                                                                                                                                                      | `spec`, `typescript`, `dotnet`, `builder`        |
 | The root's files keep the house format                                                                                                                                                                                                                                                                                                                  | `typescript`                                     |
 | A commit subject is a Conventional Commit                                                                                                                                                                                                                                                                                                               | `commits`                                        |
@@ -57,9 +60,10 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
 with exit code 8, and Playwright one that found no test; `BEAD_INTEROP_REQUIRED=1` turns an interop
-that would skip into one that fails, and `BEADC_PROTOC_REQUIRED=1` a builder test that would skip
-without protoc; `tools/check-versions.mjs` fails where no `v*` is reached and where a released
-section of the CHANGELOG has no tag, and a document none of whose files repeats its version. A floor is passed by a wide margin and fails only when code really went away, which is
+that would skip into one that fails, `BEADC_PROTOC_REQUIRED=1` a builder test that would skip
+without protoc, `BEADC_WRAPPERS_REQUIRED=1` a wrapper's test that would skip without bash,
+PowerShell 7.6 or, on Windows, the right to make a symbolic link, and `BEADC_IMAGE_REQUIRED=1` one that would skip without beadc's image;
+`tools/check-versions.mjs` fails where no `v*` is reached and where a released section of the CHANGELOG has no tag, and a document none of whose files repeats its version. A floor is passed by a wide margin and fails only when code really went away, which is
 worth being told.
 
 **A ceiling is a policy, and is chosen as one.** The comment budget's, 50 words to a comment and 120
@@ -104,8 +108,7 @@ vector cannot.
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
 - `beadc breaking`, which holds a blueprint to the last release's
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
-- the image's and the wrappers' tests, and `examples/hello`'s two builds, its C# messages
-  generated and external
+- `examples/hello`'s two builds, its C# messages generated and external
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
 - tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
   root's tools' tests, in Node's runner, would hold.
