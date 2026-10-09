@@ -96,6 +96,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `InteropHandlers.cs` and its credentials in `InteropCredentials.cs`, and `InteropService.cs` is
   gone. The banned-API analyzer refuses the service manager there, and `dotnet format` leaves the
   generated folders out.
+- `tools/release.mjs prepare` lists, among what it owes by hand, each `--except` of CI's
+  `beadc breaking` step and each of decision 0006's gates owed that names the version it prepares.
 
 ### Removed
 

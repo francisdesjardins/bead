@@ -164,14 +164,15 @@ jobs:
   # among them, whose blueprint is the spec's byte for byte in either line ending, and the goldens of
   # both targets, protoc's C# messages among them; then beadc itself over the interop's blueprint,
   # its rules and its form, then each side's interop to what beadc generates from the root's
-  # `beadc.yaml`. On Windows, where buf and protoc are other binaries, on the current line; on
-  # Linux, on the floor `engines.node` declares too. The C# goldens build in the .NET job, which has
-  # the SDK. The wrappers, `beadc.sh` and `beadc.ps1`, are held to one contract on every leg, against
-  # a stand-in engine. On the image's legs, Linux on Node 26, amd64 and arm64, each natively: beadc's
-  # image built from `builder/Dockerfile`, its test stage built on the image itself, so beadc's
-  # tests run once on the image's Node, protoc and environment, then once more from `builder/`, where
-  # each wrapper runs the image it built, over the repository's projects and `examples/hello`; and
-  # the wrappers' lint, each linter at its pin.
+  # `beadc.yaml`, then, on Linux, `beadc breaking`, the interop's blueprint and `examples/hello`
+  # against the last release that carries one, from 0.3.0. On Windows, where buf and protoc are
+  # other binaries, on the current line; on Linux, on the floor `engines.node` declares too. The C#
+  # goldens build in the .NET job, which has the SDK. The wrappers, `beadc.sh` and `beadc.ps1`, are
+  # held to one contract on every leg, against a stand-in engine. On the image's legs, Linux on
+  # Node 26, amd64 and arm64, each natively: beadc's image built from `builder/Dockerfile`, its test
+  # stage built on the image itself, so beadc's tests run once on the image's Node, protoc and
+  # environment, then once more from `builder/`, where each wrapper runs the image it built, over
+  # the repository's projects and `examples/hello`; and the wrappers' lint, each linter at its pin.
   #
   # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails: here a
   # skip could only be a fetch gone wrong.
@@ -266,6 +267,27 @@ jobs:
       - name: Each side's interop, what beadc generates from its blueprint
         working-directory: .
         run: node builder/src/cli.ts generate --check
+      # ! beadc breaking, against the last release that carries a blueprint, the interop's and
+      # examples/hello's: 0.3.0 is the first, and a later tag without one fails, so the step never
+      # passes by comparing nothing once a release carries it
+      - if: runner.os == 'Linux'
+        name: The interop's blueprint and examples/hello, against the last release
+        working-directory: .
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
+          tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "$tag" ] || ! git cat-file -e "$tag:spec/interop-blueprint.json" 2> /dev/null; then
+            if [ "$(printf '%s\n' v0.3.0 "$tag" | sort -V | head -n 1)" = v0.3.0 ]; then
+              echo "::error title=beadc breaking::$tag carries no spec/interop-blueprint.json"
+              exit 1
+            fi
+            echo "::notice title=beadc breaking::${tag:-no v* tag} carries no blueprint: nothing to hold against before 0.3.0"
+            exit 0
+          fi
+          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github
+          cd examples/hello
+          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
