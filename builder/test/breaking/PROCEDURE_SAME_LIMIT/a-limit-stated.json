@@ -1,0 +1,20 @@
+{
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/maximumPayloadBytes",
+      "value": 1024
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_SAME_LIMIT",
+      "pointer": "/services/0/procedures/0/maximumPayloadBytes"
+    }
+  ]
+}

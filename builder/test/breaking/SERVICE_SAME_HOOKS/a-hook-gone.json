@@ -1,0 +1,39 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/4/deprecation",
+      "value": {}
+    }
+  ],
+  "current": [
+    {
+      "op": "remove",
+      "path": "/services/0/procedures/4"
+    },
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureIds/-",
+      "value": {
+        "first": 5,
+        "last": 5
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureNames/-",
+      "value": "denied"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_SAME_HOOKS",
+      "pointer": "/services/0"
+    }
+  ]
+}

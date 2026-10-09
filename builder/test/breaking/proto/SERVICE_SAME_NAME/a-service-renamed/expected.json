@@ -1,0 +1,15 @@
+{
+  "WIRE": [],
+  "API": [
+    {
+      "rule": "NAME_NO_DELETE",
+      "line": 14,
+      "column": 3
+    },
+    {
+      "rule": "SERVICE_SAME_NAME",
+      "line": 18,
+      "column": 9
+    }
+  ]
+}

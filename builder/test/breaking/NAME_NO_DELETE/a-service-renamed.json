@@ -1,0 +1,24 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/serviceName",
+      "value": "Interplay"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_NO_DELETE",
+      "pointer": "/reservedServices/names"
+    },
+    {
+      "rule": "SERVICE_SAME_NAME",
+      "pointer": "/services/0/serviceName"
+    }
+  ]
+}

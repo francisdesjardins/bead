@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_SAME_ENCODING",
+      "line": 33,
+      "column": 16
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROCEDURE_SAME_ENCODING",
+      "line": 33,
+      "column": 16
+    }
+  ]
+}

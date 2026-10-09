@@ -1,0 +1,25 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureIds/-",
+      "value": {
+        "first": 19,
+        "last": 19
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "RESERVED_NO_DELETE",
+      "pointer": "/services/0/reserved/procedureIds"
+    }
+  ]
+}

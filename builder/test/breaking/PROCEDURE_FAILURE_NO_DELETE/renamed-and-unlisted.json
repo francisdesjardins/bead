@@ -1,0 +1,38 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/failures/0/failureName",
+      "value": "DELIBERATE"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/1/failures",
+      "value": []
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/9/failures",
+      "value": []
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "FAILURE_SAME_NAME",
+      "pointer": "/services/0/failures/0/failureName"
+    },
+    {
+      "rule": "PROCEDURE_FAILURE_NO_DELETE",
+      "pointer": "/services/0/procedures/1/failures"
+    },
+    {
+      "rule": "PROCEDURE_FAILURE_NO_DELETE",
+      "pointer": "/services/0/procedures/9/failures"
+    }
+  ]
+}

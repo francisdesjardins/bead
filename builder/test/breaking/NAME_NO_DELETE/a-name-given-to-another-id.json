@@ -1,0 +1,51 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/7/deprecation",
+      "value": {}
+    }
+  ],
+  "current": [
+    {
+      "op": "remove",
+      "path": "/services/0/procedures/7"
+    },
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureIds/-",
+      "value": {
+        "first": 8,
+        "last": 8
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/0/procedures/-",
+      "value": {
+        "admission": "none",
+        "failures": [],
+        "procedureId": 19,
+        "procedureKind": "request",
+        "procedureName": "ask",
+        "request": {
+          "encoding": "json"
+        },
+        "result": {
+          "encoding": "json"
+        }
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_NO_DELETE",
+      "pointer": "/services/0/reserved/procedureNames"
+    }
+  ]
+}

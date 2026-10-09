@@ -1,0 +1,21 @@
+{
+  "WIRE": [
+    {
+      "rule": "SERVICE_NO_DELETE",
+      "line": 11,
+      "column": 3
+    }
+  ],
+  "API": [
+    {
+      "rule": "SERVICE_NO_DELETE",
+      "line": 11,
+      "column": 3
+    },
+    {
+      "rule": "NAME_NO_DELETE",
+      "line": 14,
+      "column": 3
+    }
+  ]
+}

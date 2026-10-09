@@ -1,0 +1,20 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/admission",
+      "value": "session"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_ADMISSION_TIGHTENED",
+      "pointer": "/services/0/procedures/0/admission"
+    }
+  ]
+}

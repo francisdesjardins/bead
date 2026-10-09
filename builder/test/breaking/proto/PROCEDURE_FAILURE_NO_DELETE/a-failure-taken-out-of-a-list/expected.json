@@ -1,0 +1,10 @@
+{
+  "WIRE": [],
+  "API": [
+    {
+      "rule": "PROCEDURE_FAILURE_NO_DELETE",
+      "line": 47,
+      "column": 7
+    }
+  ]
+}
