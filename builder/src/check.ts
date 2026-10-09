@@ -13,7 +13,7 @@ import { hasError, type IDiagnostic, InputError } from './diagnostics.ts';
 import { blueprintOf } from './front-end/blueprint-of.ts';
 import { checkProto } from './front-end/check-proto.ts';
 import { readSet } from './front-end/input.ts';
-import { checkValue, type IBlueprint, readBlueprint } from './model/blueprint.ts';
+import { checkValue, type IBlueprint, type PlaceOf, readBlueprint } from './model/blueprint.ts';
 import { assertRoots, optionsCopiesOf, pathOnDisk } from './roots.ts';
 
 // types
@@ -22,7 +22,9 @@ import { assertRoots, optionsCopiesOf, pathOnDisk } from './roots.ts';
 export interface IChecked {
   readonly diagnostics: readonly IDiagnostic[];
   readonly blueprint?: IBlueprint;
-  /** buf's set, for a `.proto` input that compiled. */
+  /** Where each of the blueprint's pointers is in the input, a `.proto`'s line or a text's. */
+  readonly placeOf?: PlaceOf;
+  /** buf's set, for a `.proto` input that compiled; buf's image under `image`. */
   readonly set?: Uint8Array;
   /** The input's text, for a blueprint's file. */
   readonly text?: string;
@@ -31,12 +33,13 @@ export interface IChecked {
 // definition
 
 /**
- * Checks the `.proto` files of `roots`, or only `files` among them by their import paths. Throws an
- * {@link InputError} for a root that is no folder or a set buf does not compile.
+ * Checks the `.proto` files of `roots`, or only `files` among them by their import paths; `image`
+ * compiles buf's image, for `beadc breaking`, which reads as a set. Throws an {@link InputError} for
+ * a root that is no folder or a set buf does not compile.
  */
 export const checkRoots = (
   roots: readonly string[],
-  options: { readonly files?: readonly string[] } = {}
+  options: { readonly files?: readonly string[]; readonly image?: boolean } = {}
 ): IChecked => {
   assertRoots(roots);
 
@@ -55,7 +58,10 @@ export const checkRoots = (
 
     return path;
   });
-  const set = compile(roots, files === undefined ? {} : { files });
+  const set = compile(roots, {
+    ...(files === undefined ? {} : { files }),
+    ...(options.image === true ? { image: true } : {}),
+  });
   const input = readSet(set, {
     roots,
     ...(options.files === undefined ? {} : { files: options.files }),
@@ -72,6 +78,7 @@ export const checkRoots = (
   return {
     diagnostics: [...proto, ...reading.diagnostics],
     set,
+    placeOf,
     ...(reading.blueprint === undefined ? {} : { blueprint: reading.blueprint }),
   };
 };

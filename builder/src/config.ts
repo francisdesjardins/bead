@@ -3,7 +3,8 @@
 // `beadc.yaml`, at a project's root: its `version`, its `source` — `.proto` roots, or a blueprint —
 // where `beadc blueprint` writes, and the `outputs` `beadc generate` writes, a language and a folder
 // each, TypeScript or C#. Every path stays under the folder that holds it, since the image sees nothing else; a key
-// beadc does not read is refused, never left unchecked.
+// beadc does not read is refused, never left unchecked. An earlier release's, which `beadc breaking`
+// compares against, is read for its `version`, its `source` and its `blueprint` alone.
 
 // dependencies
 
@@ -50,14 +51,25 @@ export interface ICSharpOutput {
 /** An output `beadc generate` writes. */
 export type Output = ITypeScriptOutput | ICSharpOutput;
 
-/** `beadc.yaml`, read, each path resolved against its folder. */
-export interface IConfig {
+/** What an earlier release's `beadc.yaml` gives `beadc breaking`: its source, and its blueprint. */
+export interface IAgainstConfig {
   readonly folder: string;
   readonly source: Source;
   /** Where `beadc blueprint` writes, for a `.proto` source; `beadc generate` writes it too. */
   readonly blueprint?: string;
+}
+
+/** `beadc.yaml`, read, each path resolved against its folder. */
+export interface IConfig extends IAgainstConfig {
   /** What `beadc generate` writes, when `beadc.yaml` names any. */
   readonly outputs?: readonly Output[];
+}
+
+// a `beadc.yaml` read as a mapping: how it refuses, and how a path of it resolves under its folder
+interface IDocument {
+  readonly value: Record<string, unknown>;
+  readonly refuse: (reason: string) => never;
+  readonly resolved: (given: unknown, key: string) => string;
 }
 
 // constants
@@ -108,14 +120,16 @@ export const isInside = (
   );
 };
 
-/**
- * Reads `text`, a `beadc.yaml` in `folder`, each path resolved by `path`'s rules, the platform's
- * unless given. Throws an {@link InputError} for a file beadc cannot take, with the fix.
- */
-export const parseConfig = (
+// `text` read as a mapping whose version is 1, each path resolved by `path`'s rules under `folder`;
+// with `keys`, a key it does not list refused
+const documentOf = (
   text: string,
-  options: { readonly folder: string; readonly path?: PlatformPath }
-): IConfig => {
+  options: {
+    readonly folder: string;
+    readonly path?: PlatformPath;
+    readonly keys?: ReadonlySet<string>;
+  }
+): IDocument => {
   const path = options.path ?? nodePath;
   const { folder } = options;
   const refuse = (reason: string): never => {
@@ -134,7 +148,7 @@ export const parseConfig = (
   }
 
   for (const key of Object.keys(value)) {
-    if (!KEYS.has(key)) {
+    if (options.keys !== undefined && !options.keys.has(key)) {
       refuse(`${key}, a key beadc does not read`);
     }
   }
@@ -156,6 +170,60 @@ export const parseConfig = (
 
     return path.resolve(folder, given);
   };
+
+  return { value, refuse, resolved };
+};
+
+// a document's source, its `.proto` roots or a blueprint, and the blueprint it writes from roots
+const sourceOf = (document: IDocument): { source: Source; blueprint?: string } => {
+  const { value, refuse, resolved } = document;
+  const source = value['source'];
+
+  if (!isRecord(source)) {
+    return refuse('source is a mapping of proto, its roots, or blueprint, a blueprint');
+  }
+
+  for (const key of Object.keys(source)) {
+    if (!SOURCE_KEYS.has(key)) {
+      refuse(`source.${key}, a key beadc does not read`);
+    }
+  }
+
+  if ('proto' in source === 'blueprint' in source) {
+    refuse('source names its proto roots or a blueprint, one of them');
+  }
+
+  if ('blueprint' in source) {
+    if ('blueprint' in value) {
+      refuse('blueprint, an output, beside a blueprint as the source, which is that file');
+    }
+
+    return { source: { blueprint: resolved(source['blueprint'], 'source.blueprint') } };
+  }
+
+  const given = source['proto'];
+  const roots = (Array.isArray(given) ? given : [given]).map((root: unknown) => {
+    return resolved(root, 'source.proto');
+  });
+
+  return {
+    source: { proto: roots },
+    ...('blueprint' in value ? { blueprint: resolved(value['blueprint'], 'blueprint') } : {}),
+  };
+};
+
+/**
+ * Reads `text`, a `beadc.yaml` in `folder`, each path resolved by `path`'s rules, the platform's
+ * unless given. Throws an {@link InputError} for a file beadc cannot take, with the fix.
+ */
+export const parseConfig = (
+  text: string,
+  options: { readonly folder: string; readonly path?: PlatformPath }
+): IConfig => {
+  const path = options.path ?? nodePath;
+  const { folder } = options;
+  const document = documentOf(text, { ...options, keys: KEYS });
+  const { value, refuse, resolved } = document;
   // a C# output, its keys read or refused: a namespace for a blueprint's services, and only then
   const csharpOutputOf = (given: Record<string, unknown>, key: string): ICSharpOutput => {
     const source = value['source'];
@@ -277,45 +345,21 @@ export const parseConfig = (
 
     return { outputs };
   };
-  const source = value['source'];
+  const read = sourceOf(document);
 
-  if (!isRecord(source)) {
-    return refuse('source is a mapping of proto, its roots, or blueprint, a blueprint');
-  }
+  return { folder, ...read, ...outputsOf() };
+};
 
-  for (const key of Object.keys(source)) {
-    if (!SOURCE_KEYS.has(key)) {
-      refuse(`source.${key}, a key beadc does not read`);
-    }
-  }
-
-  if ('proto' in source === 'blueprint' in source) {
-    refuse('source names its proto roots or a blueprint, one of them');
-  }
-
-  if ('blueprint' in source) {
-    if ('blueprint' in value) {
-      refuse('blueprint, an output, beside a blueprint as the source, which is that file');
-    }
-
-    return {
-      folder,
-      source: { blueprint: resolved(source['blueprint'], 'source.blueprint') },
-      ...outputsOf(),
-    };
-  }
-
-  const given = source['proto'];
-  const roots = (Array.isArray(given) ? given : [given]).map((root: unknown) => {
-    return resolved(root, 'source.proto');
-  });
-
-  return {
-    folder,
-    source: { proto: roots },
-    ...('blueprint' in value ? { blueprint: resolved(value['blueprint'], 'blueprint') } : {}),
-    ...outputsOf(),
-  };
+/**
+ * Reads `text`, an earlier release's `beadc.yaml` in `folder`, for `beadc breaking`: its `version`,
+ * its `source` and its `blueprint` alone, each path under its folder, so that a key a later beadc
+ * dropped stops no comparison. Throws an {@link InputError} for a file beadc cannot take.
+ */
+export const againstOfText = (
+  text: string,
+  options: { readonly folder: string; readonly path?: PlatformPath }
+): IAgainstConfig => {
+  return { folder: options.folder, ...sourceOf(documentOf(text, options)) };
 };
 
 /** The `beadc.yaml` nearest `from`, upward, or none. */

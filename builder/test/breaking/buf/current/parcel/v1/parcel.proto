@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package parcel.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Tracks parcels.
+service ParcelService {
+  option (bead.service) = {
+    id: 1
+    revision: 2
+    reserved_names: ["trace"]
+  };
+
+  // Gives where a parcel is.
+  rpc Find(LocateRequest) returns (LocateResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}
+
+// The parcel to locate.
+message LocateRequest {
+  string parcel = 1;
+}
+
+// Where the parcel is.
+message LocateResponse {
+  string depot = 1;
+}
