@@ -97,12 +97,13 @@ export const pointerOf = (keys: readonly (string | number)[]): string => {
     .join('');
 };
 
-// a property or a message of a workflow command, escaped as the runner reads them
-const escapeData = (text: string): string => {
+/** A workflow command's message, escaped as GitHub's runner reads it. */
+export const escapeData = (text: string): string => {
   return text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
 };
 
-const escapeProperty = (text: string): string => {
+/** A workflow command's property, its `file` or its `title`, escaped as GitHub's runner reads it. */
+export const escapeProperty = (text: string): string => {
   return escapeData(text).replaceAll(':', '%3A').replaceAll(',', '%2C');
 };
 

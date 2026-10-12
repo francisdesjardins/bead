@@ -188,6 +188,30 @@ test("node runs src/cli.ts generate, then generate --check, over a fixture's bea
   );
 });
 
+test("generate --check in the github format escapes its file as a workflow command's property", () => {
+  const folder = interopProject();
+
+  writeFileSync(
+    join(folder, 'beadc.yaml'),
+    [
+      'version: 1',
+      'source:',
+      '  blueprint: spec/interop-blueprint.json',
+      'outputs:',
+      '  - language: typescript',
+      "    out: 'gen,v2%'",
+      '',
+    ].join('\n')
+  );
+
+  const run = beadc(['generate', '--check', '--error-format', 'github'], { cwd: folder });
+
+  expect(run.status).toBe(1);
+  expect(run.stdout).toBe(
+    '::error file=gen%2Cv2%25/interop_bead.ts,title=not what beadc generates::no such file; beadc generate writes it\n'
+  );
+});
+
 test('check, blueprint, breaking and version load no TypeScript compiler', () => {
   const hook = test.info().outputPath('compilers.mjs');
   const folder = interopProject();

@@ -29,6 +29,8 @@ import { checkBlueprintFile, checkRoots, type IChecked } from './check.ts';
 import { findConfig, type IConfig, parseConfig, type Source } from './config.ts';
 import {
   ErrorFormat,
+  escapeData,
+  escapeProperty,
   formatDiagnostic,
   hasError,
   type IDiagnostic,
@@ -182,7 +184,9 @@ const printDifference = (
     case ErrorFormat.GITHUB: {
       const line = difference.line === undefined ? '' : `,line=${String(difference.line)}`;
 
-      print(`::error file=${file}${line},title=${title}::${message}`);
+      print(
+        `::error file=${escapeProperty(file)}${line},title=${escapeProperty(title)}::${escapeData(message)}`
+      );
       break;
     }
   }
