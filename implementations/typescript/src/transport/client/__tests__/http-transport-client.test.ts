@@ -681,6 +681,30 @@ test.describe('createHTTPTransportClient', () => {
       new ConnectError('the server drew no connection: 503')
     );
 
+    // a refusal the server marked is named by its status and its reason; a gateway's, unmarked,
+    // by its status alone
+    for (const [answer, message] of [
+      [
+        { headers: { [REFUSAL_HEADER]: 'busy' }, status: 503 },
+        'the server drew no connection: 503 busy',
+      ],
+      [
+        { headers: { [REFUSAL_HEADER]: 'host-refused' }, status: 403 },
+        'the server drew no connection: 403 host-refused',
+      ],
+      [{ status: 502 }, 'the server drew no connection: 502'],
+    ] as const) {
+      const named = createFakeFetch();
+      const naming = createHTTPTransportClient({ isListening: false, fetch: named.fetch }).connect({
+        host,
+        port: 80,
+      });
+
+      named.calls[0]?.answer(answer);
+
+      await expect(naming).rejects.toThrow(new ConnectError(message));
+    }
+
     // a token without its 201, or a 201 without its token, draws nothing
     for (const answer of [
       { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 200 },

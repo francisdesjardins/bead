@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.WebSockets;
 
 namespace Bead.Transport.WebSockets;
@@ -460,6 +461,23 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         return new Uri($"{(options.Secured ? "wss" : "ws")}://{host}:{options.Port}{path}");
     }
 
+    // what a refused upgrade is named by: its status, then its mark where it has one
+    private static string RefusalOf(ClientWebSocket socket)
+    {
+        var mark = (socket.HttpResponseHeaders ?? new Dictionary<string, IEnumerable<string>>())
+            .Where((field) =>
+            {
+                return string.Equals(field.Key, HostsAndOrigins.RefusalHeader, StringComparison.OrdinalIgnoreCase);
+            })
+            .SelectMany((field) =>
+            {
+                return field.Value;
+            })
+            .FirstOrDefault();
+
+        return mark is null ? $"{(int)socket.HttpStatusCode}" : $"{(int)socket.HttpStatusCode} {mark}";
+    }
+
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -515,6 +533,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             socket.Options.KeepAliveInterval = _options.Heartbeat;
             socket.Options.KeepAliveTimeout = _options.Heartbeat;
 
+            // a refused upgrade's status and fields, read before the socket goes
+            socket.Options.CollectHttpResponseDetails = true;
+
             foreach (var protocol in options.Protocols ?? [])
             {
                 socket.Options.AddSubProtocol(protocol);
@@ -530,6 +551,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {
                 throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
+            }
+            catch (WebSocketException reason) when (socket.HttpStatusCode is not (0 or HttpStatusCode.SwitchingProtocols))
+            {
+                // named by its status, and by its mark where it is a refusal of the transport's own
+                // (spec 15.6), as the platform's message, "The server returned status code…", never
+                // names the mark
+                throw new WebSocketException(reason.WebSocketErrorCode, $"the server refused the upgrade: {RefusalOf(socket)}", reason);
             }
 
             lock (_gate)

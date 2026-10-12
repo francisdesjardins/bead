@@ -199,12 +199,20 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         // refuses the handshake with a status of its own, which the client's error names, and hangs up
-        public static async Task Refuse(TcpClient peer, int status)
+        public static Task Refuse(TcpClient peer, int status)
         {
+            return Refuse(peer, (status, null));
+        }
+
+        // and with its mark, when it is a refusal of the transport's own
+        public static async Task Refuse(TcpClient peer, (int Status, string? Reason) refusal)
+        {
+            var mark = refusal.Reason is { } reason ? $"Bead-Refusal: {reason}\r\n" : "";
+
             using (peer)
             {
                 await peer.GetStream().WriteAsync(
-                    Encoding.ASCII.GetBytes($"HTTP/1.1 {status} Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                    Encoding.ASCII.GetBytes($"HTTP/1.1 {refusal.Status} Refused\r\n{mark}Content-Length: 0\r\nConnection: close\r\n\r\n"),
                     Cancelled);
             }
         }
@@ -1439,6 +1447,39 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(
             [(null, 1), (TimeSpan.FromMilliseconds(10), 2), (TimeSpan.FromMilliseconds(20), 3)],
             seen);
+    }
+
+    [Fact]
+    public async Task Names_the_status_and_the_reason_of_an_upgrade_refused()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var failures = new List<(string Message, WebSocketError Error, Type? Inner)>();
+
+        // marked, as a server's refusal of its own; then unmarked, a gateway's
+        foreach (var refusal in new (int, string?)[] { (403, "host-refused"), (502, null) })
+        {
+            await using var client = new WebSocketTransportClient();
+            var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+            var (peer, _) = await listener.Next();
+
+            await Listener.Refuse(peer, refusal);
+
+            var thrown = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            failures.Add((thrown.Message, thrown.WebSocketErrorCode, thrown.InnerException?.GetType()));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+
+        // the platform's own failure kept as its cause
+        Assert.Equal(
+            [
+                ("the server refused the upgrade: 403 host-refused", WebSocketError.NotAWebSocket, typeof(WebSocketException)),
+                ("the server refused the upgrade: 502", WebSocketError.NotAWebSocket, typeof(WebSocketException)),
+            ],
+            failures);
     }
 
     [Fact]

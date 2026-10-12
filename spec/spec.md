@@ -1149,9 +1149,13 @@ its body is read: the field is no list to combine
 one.
 
 15.6. A refusal of the transport's own has an empty body, and is marked in `bead-refusal`. A client
-rejects a send on a marked refusal: nothing was tried. Any other status that is not 2xx — a
-gateway's 502, a proxy's 404 — may come after the request ran: the client counts the exchange
-lost.
+rejects a send on a marked refusal: nothing was tried. It names the status and the reason in what it
+fails with, its connect's and its upgrade's among them, where its platform lets it read the response
+([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)); a page's WebSocket reads
+none, the [WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/) failing its connection
+with no detail, and its server's tell (section 15.1) is then what says why. Any other status that is
+not 2xx — a gateway's 502, a proxy's 404 — may come after the request ran: the client counts the
+exchange lost.
 
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                               |
 | ------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

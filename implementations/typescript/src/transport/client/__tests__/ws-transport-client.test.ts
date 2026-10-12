@@ -1,5 +1,8 @@
+import { once } from 'node:events';
+import { createServer as createNodeServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
-import type { WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
   CancelError,
   ConnectError,
@@ -1048,5 +1051,125 @@ test.describe('WSTransportClient, heartbeat', () => {
       await stopServer(server);
       await allClosed();
     }
+  });
+});
+
+// an upgrade refused by the server's transport, marked, and one by a gateway, unmarked
+const FORBIDDEN =
+  'HTTP/1.1 403 Forbidden\r\nbead-refusal: host-refused\r\ncontent-length: 0\r\nconnection: close\r\n\r\n';
+const BAD_GATEWAY = 'HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n';
+
+/**
+ * An HTTP server that upgrades as `ws` does until `refusal` is set, then answers each upgrade with
+ * it, raw.
+ */
+const startRefusing = async (refusal?: string) => {
+  const http = createNodeServer();
+  const upgrading = new WebSocketServer({ noServer: true });
+  const state = { refusal };
+
+  // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+  http.on('upgrade', (request, socket, head) => {
+    if (state.refusal !== undefined) {
+      return (socket.end(state.refusal), undefined);
+    }
+
+    return (
+      upgrading.handleUpgrade(request, socket, head, (upgraded) => {
+        upgrading.emit('connection', upgraded, request);
+      }),
+      undefined
+    );
+  });
+  http.listen(0, host);
+  await once(http, 'listening');
+
+  return {
+    port: (http.address() as AddressInfo).port,
+    state,
+    upgrading,
+    [Symbol.asyncDispose]: async () => {
+      for (const socket of upgrading.clients) {
+        socket.terminate();
+      }
+
+      http.closeAllConnections();
+      await new Promise((resolve) => {
+        http.close(resolve);
+      });
+      await allClosed();
+    },
+  };
+};
+
+test.describe('WSTransportClient, an upgrade refused', () => {
+  const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
+
+  test('names the status and the reason of an upgrade refused', async () => {
+    for (const [refusal, message] of [
+      [FORBIDDEN, 'the server refused the upgrade: 403 host-refused'],
+      [BAD_GATEWAY, 'the server refused the upgrade: 502'],
+    ] as const) {
+      await using refusing = await startRefusing(refusal);
+      const client = createWSTransportClient({
+        WebSocket: TrackedWs as unknown as IWebSocketConstructor,
+      });
+      const reason: unknown = await client
+        .connect({ host, port: refusing.port })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      expect(reason).toBeInstanceOf(ConnectError);
+      expect((reason as ConnectError).message).toBe(message);
+      // `ws`'s own, which ended the socket
+      expect((reason as ConnectError).cause).toBeInstanceOf(Error);
+      expect(client.isClosed()).toBe(true);
+    }
+  });
+
+  test('names nothing of an upgrade refused but its close, over the global WebSocket', async () => {
+    await using refusing = await startRefusing(FORBIDDEN);
+    const client = createWSTransportClient({ WebSocket: TrackedGlobal });
+
+    const reason: unknown = await client
+      .connect({ host, port: refusing.port })
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    // its close's code alone, its error's message empty, as the WHATWG WebSockets Standard has it
+    expect([reason instanceof ConnectError, (reason as ConnectError).message]).toEqual([
+      true,
+      '1006',
+    ]);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('carries the last failure of a reconnect, an upgrade refused unmarked named by its status, over ws', async () => {
+    await using refusing = await startRefusing();
+    const client = createWSTransportClient({
+      WebSocket: TrackedWs as unknown as IWebSocketConstructor,
+    });
+    const reconnectOutcome = new Promise<unknown>((resolve) => {
+      client.once('close', () => {
+        client.reconnect({ delay: 10, maxAttempts: 2 }).then(resolve, resolve);
+      });
+    });
+
+    await client.connect({ host, port: refusing.port });
+    refusing.state.refusal = BAD_GATEWAY;
+
+    for (const socket of refusing.upgrading.clients) {
+      socket.terminate();
+    }
+
+    const reason = await reconnectOutcome;
+
+    expect(reason).toBeInstanceOf(ReconnectError);
+    expect((reason as ReconnectError).cause).toEqual(
+      new ConnectError('the server refused the upgrade: 502')
+    );
+    expect(client.isClosed()).toBe(true);
   });
 });

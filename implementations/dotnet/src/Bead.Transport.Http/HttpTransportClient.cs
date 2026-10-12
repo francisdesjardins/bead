@@ -719,7 +719,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                 if (response.StatusCode != HttpStatusCode.Created || connectionToken is null)
                 {
-                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}");
+                    // named by its status, and by its mark where it is a refusal of the transport's
+                    // own (spec 15.6)
+                    var mark = HeaderOf(response, HttpTransport.RefusalHeader) is { } refusal ? $" {refusal}" : "";
+
+                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}{mark}");
                 }
 
                 // taken where the server said it back, and nowhere else

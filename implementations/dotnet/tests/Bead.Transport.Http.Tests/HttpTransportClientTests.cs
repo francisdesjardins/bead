@@ -1263,9 +1263,10 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(NotListening with { Handler = refused });
         var connecting = client.Connect(new HttpConnectOptions { Host = "::1", Pathname = "api", Port = 8_080, Secured = true }, Cancelled);
 
-        (await refused.CallOf(0)).Answer(new Answer { Status = 503 });
+        // named by its status and its mark, a refusal of the transport's own
+        (await refused.CallOf(0)).Answer(new Answer { Status = 503, Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = "busy" } });
 
-        Assert.Equal("the server drew no connection: 503", (await Assert.ThrowsAsync<HttpRequestException>(() =>
+        Assert.Equal("the server drew no connection: 503 busy", (await Assert.ThrowsAsync<HttpRequestException>(() =>
         {
             return connecting.WaitAsync(Patience, Cancelled);
         })).Message);
