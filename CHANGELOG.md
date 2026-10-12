@@ -67,8 +67,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   siblings have it.
 - `beadc breaking`: a project held to its last release by id, in two categories, `WIRE` within
   `API`, the default: 20 rules of Bead's over the two blueprints, `SERVICE_SAME_HOOKS`,
-  `NAME_NO_DELETE` and `SERVICE_REVISION` among them, and buf's over the messages of two buf
-  images, each finding `buf:`-prefixed, its rules keyed by a service's or an rpc's name excepted;
+  `NAME_NO_DELETE` and `SERVICE_REVISION` among them, `API` holding a service or a procedure gone
+  even where `WIRE` passes it, deprecated, then its id reserved; and buf's over the messages of two
+  buf images, each finding `buf:`-prefixed, its rules keyed by a service's or an rpc's name excepted;
   `--against` a folder, its committed blueprint read for Bead's rules, `-` for a tar on standard
   input, or a blueprint, `PROTO_SKIPPED` where a `.proto` side goes uncompared; `--except` waives a
   finding by its rule, scoped to its pointer or file. The wrappers' `--against-ref <ref>` pipes the

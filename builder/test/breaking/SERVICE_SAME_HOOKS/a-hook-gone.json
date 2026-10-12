@@ -34,6 +34,10 @@
     {
       "rule": "SERVICE_SAME_HOOKS",
       "pointer": "/services/0"
+    },
+    {
+      "rule": "PROCEDURE_NO_DELETE",
+      "pointer": "/services/0/reserved/procedureIds"
     }
   ]
 }

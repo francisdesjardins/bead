@@ -221,6 +221,31 @@ test("a deletion is placed at the reservation that would waive it, naming the ea
   }
 });
 
+test('a procedure or a service gone, deprecated then reserved, passes WIRE, and under API is its deletion, its generated code named', () => {
+  const gone = [
+    ['PROCEDURE_NO_DELETE', 'deprecated-by-its-service-then-reserved-under-api', 'its requester'],
+    ['SERVICE_NO_DELETE', 'deprecated-then-its-id-and-name-reserved-under-api', 'its generated'],
+  ] as const;
+
+  for (const [rule, name, named] of gone) {
+    const each = breakingCases().find((one) => {
+      return one.rule === rule && one.name === name;
+    });
+
+    if (each === undefined) {
+      throw new Error(`${rule}/${name} is a case`);
+    }
+
+    const [finding, ...others] = runCase(each, Category.API);
+
+    expect(runCase(each, Category.WIRE), `${rule}/${name} under WIRE`).toEqual([]);
+    expect(others, `${rule}/${name}`).toEqual([]);
+    expect(finding?.rule).toBe(rule);
+    expect(finding?.message).toContain(`deprecated and its id reserved: ${named}`);
+    expect(finding?.message).toContain('take it out in a release that moves the major');
+  }
+});
+
 test('a revision is read through the model: an earlier in another form changes nothing', () => {
   // every object's members in reverse, every array of entries in reverse: a blueprint no form writes
   const reversed = (value: unknown): unknown => {

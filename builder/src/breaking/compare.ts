@@ -5,10 +5,11 @@
 // placed in the current input at its pointer, a deletion at the reservation that would waive it
 // (decision 0022). `WIRE` keeps a peer built from the earlier talking with one built from the
 // current; `API` holds every `WIRE` rule and keeps code written against the earlier's generated API
-// compiling and meaning the same. A revision is never lowered, and moves where its service changed:
-// a finding of any rule, an addition, or a message its bindings reach where both sides are buf
-// images. Read through the model, never as bytes: an earlier in another member or array order, and
-// a description, change nothing.
+// compiling and meaning the same, so a service or a procedure gone is its finding even where `WIRE`
+// waives it, deprecated, then its id reserved. A revision is never lowered, and moves where its
+// service changed: a finding of any rule, an addition, or a message its bindings reach where both
+// sides are buf images. Read through the model, never as bytes: an earlier in another member or
+// array order, and a description, change nothing.
 
 // dependencies
 
@@ -274,11 +275,22 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
     const named = `service ${String(serviceId)} ${was.serviceName}`;
 
     if (now === undefined) {
-      if (!(was.deprecation !== undefined && covers(current.reservedServices.ids, serviceId))) {
+      const deprecated = was.deprecation !== undefined;
+      const reserved = covers(current.reservedServices.ids, serviceId);
+
+      // * deprecated, then its id reserved, it passes WIRE (16.8); under API, its generated client
+      // and server go with it, as buf's FILE refuses
+      if (!(deprecated && reserved)) {
         find({
           rule: 'SERVICE_NO_DELETE',
           pointer: '/reservedServices/ids',
-          message: `${named}, the earlier's /services/${String(wasAt)}, is gone${was.deprecation === undefined ? ', never deprecated' : ''}${covers(current.reservedServices.ids, serviceId) ? '' : ', its id not reserved'}: a peer's call is answered SERVICE_UNKNOWN; deprecate it in a release, then reserve its id`,
+          message: `${named}, the earlier's /services/${String(wasAt)}, is gone${deprecated ? '' : ', never deprecated'}${reserved ? '' : ', its id not reserved'}: a peer's call is answered SERVICE_UNKNOWN; deprecate it in a release, then reserve its id`,
+        });
+      } else if (options.category === Category.API) {
+        find({
+          rule: 'SERVICE_NO_DELETE',
+          pointer: '/reservedServices/ids',
+          message: `${named}, the earlier's /services/${String(wasAt)}, is gone, deprecated and its id reserved: its generated client and server go with it; take it out in a release that moves the major, the minor before 1.0, and waive this there`,
         });
       }
 
@@ -463,11 +475,20 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         const deprecated = before.deprecation !== undefined || was.deprecation !== undefined;
         const reserved = covers(now.reserved.procedureIds, before.procedureId);
 
+        // * deprecated, then its id reserved, it passes WIRE (16.8); under API, its requester and
+        // its resolver go with it, as buf's FILE refuses
         if (!(deprecated && reserved)) {
           find({
             rule: 'PROCEDURE_NO_DELETE',
             pointer: `${service}/reserved/procedureIds`,
             message: `${procedureNamed}, the earlier's /services/${String(wasAt)}/procedures/${String(beforeAt)}, is gone${deprecated ? '' : ', never deprecated'}${reserved ? '' : ', its id not reserved'}: a peer's call is answered PROCEDURE_UNKNOWN; deprecate it in a release, then reserve its id`,
+            serviceId,
+          });
+        } else if (options.category === Category.API) {
+          find({
+            rule: 'PROCEDURE_NO_DELETE',
+            pointer: `${service}/reserved/procedureIds`,
+            message: `${procedureNamed}, the earlier's /services/${String(wasAt)}/procedures/${String(beforeAt)}, is gone, deprecated and its id reserved: its requester and its resolver go with it; take it out in a release that moves the major, the minor before 1.0, and waive this there`,
             serviceId,
           });
         }
