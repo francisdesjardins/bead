@@ -201,6 +201,20 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.True(condition(), "what was awaited never came");
     }
 
+    // once the token is cancelled, within the tests' patience
+    private static async Task WhenCancelled(CancellationToken token)
+    {
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using (token.Register(() =>
+        {
+            cancelled.TrySetResult();
+        }))
+        {
+            await cancelled.Task.WaitAsync(Patience, Cancelled);
+        }
+    }
+
     private static async Task<HttpResponseMessage> Fetch(HttpClient client, HttpRequestMessage request)
     {
         using (request)
@@ -449,12 +463,6 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             var head = await ReadHead();
 
             return (head, await ReadBody(head));
-        }
-
-        // some of what comes, however little
-        public async Task<int> ReadSome()
-        {
-            return await _stream.ReadAsync(new byte[4_096], Cancelled).AsTask().WaitAsync(Patience, Cancelled);
         }
 
         // whether the server ended it: a read that finds its end, or its reset
@@ -1983,27 +1991,29 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             refused.Reset();
         }
 
-        // an answer too large to be taken by a client that reads nothing, which then goes: as it is
-        // sent, or once its writing is under way — which Kestrel drops without a word, or throws on
-        foreach (var (callId, isUnderWay) in new[] { (1u, false), (3u, true) })
+        // an answer whose client goes as it is sent: held until the server is told, whatever the
+        // machine's pace, as no answer is too large to be taken whole by a socket that takes it at
+        // once — Windows takes 64 MiB a client never reads before its reset is told
+        using (var asking = await Wire.Open(_port))
         {
-            using var asking = await Wire.Open(_port);
-
             await asking.Write(PostHead(connectionToken, "Content-Length: 8"));
-            await asking.Write(EnvelopeOf(EnvelopeKind.Request, callId));
+            await asking.Write(EnvelopeOf(EnvelopeKind.Request, 1));
 
             Assert.Equal(200, (await asking.ReadHead()).Status);
 
-            var sending = _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, (callId, 64 << 20)), false), connectionHandle);
-
-            Assert.True(!isUnderWay || await asking.ReadSome() > 0);
-            asking.Reset();
+            _server.Answering = async (aborted) =>
+            {
+                asking.Reset();
+                await WhenCancelled(aborted);
+            };
 
             Assert.Equal("the exchange closed before its answer went out", (await Assert.ThrowsAsync<IOException>(() =>
             {
-                return sending.WaitAsync(Patience, Cancelled);
+                return _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 1), false), connectionHandle).WaitAsync(Patience, Cancelled);
             })).Message);
         }
+
+        _server.Answering = null;
 
         Assert.Empty(_closes);
 
