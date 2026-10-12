@@ -32,7 +32,13 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0020](../docs/decisions/0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md): HTTP,
   section 15;
 - [0021](../docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md): a broker,
-  section 15.
+  section 15;
+- [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
+  a transport's listener that throws, and its stop, section 15;
+- [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md):
+  a server's hosts, and a request's authority, section 15;
+- [0025](../docs/decisions/0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md): a
+  connection's handle, section 15.
 
 **Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is

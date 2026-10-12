@@ -76,5 +76,55 @@ share.
 - **The clock** is a `TimeProvider`, named `Clock`, which every layer takes and exposes ([decision
   0011](../../docs/decisions/0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
+## Hosts and origins
+
+Both transport servers judge a request's host and origin alike, by spec 15.12, through
+`HttpTransportServerOptions` and `WebSocketTransportServerOptions`: `Hosts` before anything else of
+a request but its form, `Origins` on an exchange, and on a WebSocket's upgrade once its version and
+its form are a handshake's.
+
+A request names its authority by its target when the target is in absolute-form, `http://` or
+`https://` in lower case, its `Host` judged as one field line alone, which an HTTP/1.0 request may
+leave out (RFC 9112 §3.2.2), for which both servers set Kestrel's `AllowHostHeaderOverride` and read
+the authority from the target as it came, never as Kestrel's `Uri` normalizes it; over HTTP/2, by its `:authority`, a `host` beside it
+ignored (RFC 9113 §8.3.1), which Kestrel puts in the `Host`; otherwise by its `Host`. An authority
+is a host and an optional port of 15.12's grammar, RFC 3986's narrowed: no userinfo, no
+percent-encoded octet, no `*`, `+`, `,`, `;` or `=` in a name, no `IPvFuture` literal, no colon
+without a port. Kestrel
+answers an HTTP/1.1 request without a `Host`, or with two, or with an authority that is none, 400
+before the application runs, unmarked, and resets the stream of such an HTTP/2 request,
+`PROTOCOL_ERROR`, nothing written; the transport answers alike what Kestrel reads past.
+
+Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
+address, by the request's host, its port aside: no name a browser fetches is written as an IP
+literal, and a localhost name resolves to the loopback, so a page cannot rebind its name to any of
+them. `Hosts` names the hosts it takes besides, each a host without its port, compared in any ASCII
+case as the field carries it, an IDN host in the punycode a browser sends: `["bead.example"]` takes
+`bead.example` and `bead.example:8443` alike; none and `[]` take no other. Any other host, an empty
+one and none are refused 403 `host-refused`, whatever the request, a page that rebinds its name to
+the server's address among them. So a server reached by a name names it in `Hosts`: a public one,
+one behind a proxy that keeps the `Host`, as Caddy and Traefik do by default, and a service reached
+by its in-cluster name, a docker-compose service's or a Kubernetes Service's; behind a proxy that
+writes its upstream's address, as nginx does by default, none is needed. `["*"]` takes every host,
+and so reopens what the check closes: a page that rebinds its name to the server's address is then
+its own origin.
+
+`Origins` names the origins a request may come from besides the server's own, `http://` or
+`https://` followed by the request's authority, none by default, each compared exactly, `null` among
+them taking every page that sends it. A request with no `Origin` comes from no page, and is taken.
+
+A server is refused as it is built, an `ArgumentException` naming the option and the entry, a
+`Hosts` entry with a port, an empty one, one that is no host, or `*` beside another; and an
+`Origins` entry that is `*`, since no origin wildcard exists, or neither `null` nor an origin as a
+browser serializes it (RFC 6454 §6.2): a scheme in lower case, a host, a port with no leading
+zero, nothing after; for `http`, `https`, `ws` and `wss`, the host in lower case and no default
+port.
+
+A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which `curl -i` and a
+browser's network panel show, and by `BeadHttpClient`, whose error names it; a `WebSocketClient`'s
+connect throws a `WebSocketException` naming the status alone, and a page's WebSocket sees its close
+alone, 1006. The server itself reports no refusal: no event tells one, and the C# side has no
+logger.
+
 Where the platform makes the sides differ, or a difference is still open, the [support
 matrix](../../docs/support.md) has the row and its test.

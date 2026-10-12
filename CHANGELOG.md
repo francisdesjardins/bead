@@ -7,6 +7,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- On the TypeScript side, `IHTTPResponseLike.stream`, through which an HTTP/2 stream is reset, and
+  `IHandshakeRequestLike.url`, the target an upgrade's authority is read from, both optional.
+
+### Changed
+
+- A WebSocket server names each connection `type=WS;ip=…;port=…;ordinal=…`, by its peer's port and
+  the rank it was taken at, so no two connections share a handle. On the TypeScript side,
+  `generateHandle` takes `{ ip, ordinal, port, type }`, `port` optional, one
+  `ITransportServerHandleInfo` in place of `ITransportServerClientHandleInfo` and
+  `ITransportServerDrawnHandleInfo`; `generateDrawnHandle` goes, and the socket form of
+  `TransportServerConnectionHandle` ends in its ordinal (decision 0025).
+- `hosts`, `Hosts`, lists hosts without their port, taken besides `localhost`, the names under
+  `.localhost` and IP literals, which every server takes; each is compared by its host, the
+  request's port aside, so `bead.test` takes `bead.test:8443` and `bead.test:80`; `[]` takes those
+  every server takes; `['*']` takes every host. An entry with a port, an empty one, one that is no
+  host, or `*` beside another is refused as the transport is built (decision 0024).
+- `origins`, `Origins`, is checked as the transport is built: each entry is `null` or an origin as
+  RFC 6454 serializes it, and `*`, which matched nothing, is refused.
+- A request names its host by its absolute-form target, then over HTTP/2 by its `:authority`, then by
+  its `Host` (RFC 9112 §3.2.2, RFC 9113 §8.3.1), on both sides: the TypeScript side answered an
+  absolute-form target 404 and read `host` before `:authority`; the C# side answered 400 a `Host`
+  that differed from its absolute-form target. Such a target is read as it came, `http://` or
+  `https://` in lower case and an authority, a userinfo or a colon with no port answered 400; the
+  `Host` beside it is judged as one field line alone, which an HTTP/1.0 request may leave out.
+- Both sides answer a host holding a percent-encoded octet, `*`, `+`, `,`, `;` or `=` in a name, an
+  `IPvFuture` literal or a colon with no port 400 over HTTP/1.1 and with a stream reset over HTTP/2,
+  as the C# side's server did: the TypeScript side took them.
+- `spec.md` 15.1 states that a transport draws each connection's handle and gives none twice, 14.4
+  follows it, 15.12 states a request's authority, a host's grammar and the hosts every server takes,
+  and 15.13 goes: one point is open, section 8.3. `transports.json` adds nine cases, the hosts every
+  server takes, a list adding to them, `[]`, `*` and an absolute-form target, over HTTP and at a
+  WebSocket's address, and the forms a host is not to the 400 it answers; a step's request names
+  its version and its target, absolute-form among them.
+- The TypeScript side names a client that comes over IPv4 to a dual-stack listener by its IPv4
+  address, in its handle and its address, as the C# side does.
+
+### Security
+
+- A server takes, besides the hosts it lists, only `localhost`, the names under `.localhost` and IP
+  literals, over HTTP and at a WebSocket's address, on both sides. A page that rebinds its name to a
+  server's address is refused 403 `host-refused`, as is a request that names no host. A server
+  reached by a name, a public one, one behind a proxy that keeps the `Host`, or a service reached by
+  its in-cluster name, now names it in `hosts`, or refuses it. The refusal is told on the wire and by
+  the HTTP clients; the server reports nothing, and a page's WebSocket sees only its close.
+- A WebSocket server no longer takes two sockets from one address and port, to two of its addresses,
+  as one connection: each is its own, in its own session, and a stop closes both, 1001.
+
 ## [0.3.0] - 2026-10-12
 
 ### Added

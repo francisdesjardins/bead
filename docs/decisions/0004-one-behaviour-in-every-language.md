@@ -421,7 +421,9 @@ the twins.
 The order of an HTTP exchange's refusals, stated as both sides play it, a `Content-Length` read as
 its number; the TypeScript side's reader of a JSON name that holds an escape; where each stock
 `proto` library reads what protobuf refuses, four open rows; and a server's hosts by default and two
-WebSocket sockets taken as one, two points open in section 15.13 for the security pass. Each part's
+WebSocket sockets taken as one, two points open in section 15.13 for the security pass, which
+[0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) and
+[0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md) close. Each part's
 own text is in [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md),
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md) and
 [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md).
