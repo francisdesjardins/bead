@@ -1457,3 +1457,37 @@ test.describe('createHTTPTransportClient, listening', () => {
     await client.disconnect({ isQuick: true });
   });
 });
+
+test.describe('createHTTPTransportClient, by a name', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
+    for (const address of ['127.0.0.1', '::1']) {
+      const server = createHTTPTransportServer({
+        createServer: (listener) => {
+          return createServer(listener);
+        },
+      });
+      const { port } = await server.start({ address, findOpenPort: true });
+      const client = createHTTPTransportClient({ isListening: false });
+
+      try {
+        const began = performance.now();
+
+        await client.connect({ host: 'localhost', port });
+
+        // the families raced, as RFC 8305 asks: no wait on the one that is refused
+        expect([address, client.isOpen(), performance.now() - began < 1_500]).toEqual([
+          address,
+          true,
+          true,
+        ]);
+        await client.disconnect();
+      } finally {
+        await server.stop();
+      }
+    }
+  });
+});

@@ -150,6 +150,42 @@ export const isIPv4Address = (value: string): boolean => {
 };
 
 /**
+ * Whether `value` is an IP address a server may listen on (spec 15.12): RFC 3986's `IPv4address`
+ * or `IPv6address`, bare, with no zone, and not IPv4-mapped — an IPv4 node's address is written as
+ * one (RFC 4291 §2.5.5.2). By the grammar alone, never as a platform's parser reads one, which takes
+ * `127.1`, `0` or `[::1]`.
+ */
+export const isIPAddress = (value: string): boolean => {
+  if (isIPv4Address(value)) {
+    return true;
+  }
+
+  if (value.includes('%') || !isIPv6(value)) {
+    return false;
+  }
+
+  // a mapped address in any of its forms, as the URL Standard serializes each
+  return URL.parse(`http://[${value}]/`)?.hostname.startsWith('[::ffff:') === false;
+};
+
+/**
+ * Refuses, with a {@link ProgrammerError} naming it, an address a server cannot listen on: any
+ * that {@link isIPAddress} does not take, a name among them, which another host would resolve
+ * otherwise. A bracketed IPv6 address is told how to write itself.
+ */
+export const assertListeningAddress = (address: string): void => {
+  if (isIPAddress(address)) {
+    return;
+  }
+
+  const literal = IP_LITERAL.exec(address)?.groups?.['literal'];
+  const hint =
+    literal !== undefined && isIPAddress(literal) ? `: write ${literal}, not ${address}` : '';
+
+  throw new ProgrammerError(`a server listens on an IP address, not "${address}"${hint}`);
+};
+
+/**
  * Whether a field value is one a server reads (spec 15.12): visible ASCII, spaces and tabs alone.
  * A control character but a tab, `DEL` among them, and an octet past ASCII, which a request
  * carries as the character of its Latin-1 code, are none (RFC 9110 §5.5).

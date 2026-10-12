@@ -96,7 +96,12 @@ export interface ITransportServerOptions {
 }
 
 export interface ITransportServerStartOptions {
-  /** The address to listen on. */
+  /**
+   * An IP address, bare, as RFC 3986 writes one (spec 15.12): `127.0.0.1`, the loopback, by
+   * default; `0.0.0.0` or `::` for every interface, which a container needs. A name, a bracketed
+   * or zoned address, an IPv4-mapped one or a form outside the grammar, `127.1` or `0` among them,
+   * is a {@link ProgrammerError} as the start begins, ending CLOSED. A worker's listens on none.
+   */
   address?: string | undefined;
   /** Lets the system pick a free port, which `start` then reports; `port` is ignored. */
   findOpenPort?: boolean | undefined;
@@ -132,8 +137,8 @@ export interface ITransportServer<
   /**
    * Whether a connection is secure (spec 13.4): as its application says what stands in front of
    * the server, when it says, whatever the server listens on; otherwise by what the server listens
-   * on, never by what a name resolves to — under TLS, on a loopback host, or never leaving the
-   * machine, as a worker.
+   * on, never by what a name resolves to — under TLS, on the loopback, 127.0.0.0/8 or `::1`, or
+   * never leaving the machine, as a worker.
    */
   isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
   emit<K extends TRANSPORT_SERVER_EVENTS>(
@@ -200,7 +205,7 @@ export interface ITransportServerImplementation<Socket = unknown> {
   readonly clock?: IClock | undefined;
   /**
    * Whether it is secure whatever it listens on: under TLS, or never leaving the machine, as a
-   * worker; when not, it is so on a loopback host alone.
+   * worker; when not, it is so on a loopback address alone.
    */
   readonly isSecure?: boolean | undefined;
   /**
@@ -442,7 +447,7 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * What stands in front of it, which it cannot tell (spec 13.4): `true` for TLS terminated before
    * it, which makes each connection secure; `false` for a proxy that serves the network in the
    * clear, which leaves each in the clear, a loopback listener among them. When not given, a
-   * connection is secure as the server listens on a loopback host alone.
+   * connection is secure as the server listens on a loopback address alone.
    */
   secure?: boolean | undefined;
   /** `ws`'s `WebSocketServer`: there is no global one to default to. */
@@ -629,7 +634,7 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * it, which makes each connection secure; `false` for a proxy that serves the network in the
    * clear, which leaves each in the clear, a loopback listener or a server of its own under TLS
    * among them. When not given, a connection is secure as the server is under TLS or listens on a
-   * loopback host.
+   * loopback address.
    */
   secure?: boolean | undefined;
 }

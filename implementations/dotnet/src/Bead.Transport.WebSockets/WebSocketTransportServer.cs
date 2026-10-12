@@ -87,8 +87,14 @@ public sealed record WebSocketTransportServerOptions
 /// <summary>Where a transport server listens.</summary>
 public sealed record WebSocketTransportStartOptions
 {
-    /// <summary>The address it listens on.</summary>
-    public string Address { get; init; } = "0.0.0.0";
+    /// <summary>
+    /// The address it listens on (spec 15.12), an IP address written bare: <c>127.0.0.1</c>, the
+    /// loopback, by default; <c>0.0.0.0</c> or <c>::</c> for every interface, which a container, or any
+    /// server another machine reaches, needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or
+    /// <c>IPv6address</c>, with no brackets, no zone, and not IPv4-mapped; a name or any other form is
+    /// an <see cref="ArgumentException"/> as it starts, which ends Closed.
+    /// </summary>
+    public string Address { get; init; } = "127.0.0.1";
 
     /// <summary>The port it listens on.</summary>
     public int Port { get; init; } = 80;
@@ -294,6 +300,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var (start, cancellationToken) = call;
         WebApplication? application = null;
         TransportServerAddress bound;
+
+        // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
+        // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
+        HostsAndOrigins.AssertAddress(start.Address, nameof(WebSocketTransportStartOptions.Address));
 
         try
         {

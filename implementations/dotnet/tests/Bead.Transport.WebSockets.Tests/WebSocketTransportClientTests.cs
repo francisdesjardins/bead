@@ -1483,6 +1483,30 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alone_whichever_it_is()
+    {
+        var connects = new List<(string Address, TimeSpan Took)>();
+
+        foreach (var address in Addresses.ReachedByLocalhost())
+        {
+            await using var server = new WebSocketTransportServer();
+            var port = (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Port;
+            await using var client = new WebSocketTransportClient();
+            var started = TimeProvider.System.GetTimestamp();
+
+            await client.Connect(new WebSocketConnectOptions { Host = "localhost", Port = port }, Cancelled).WaitAsync(Patience, Cancelled);
+            connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
+            Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
+        }
+
+        // the families raced: neither waits out the other's refusal, two seconds on Windows
+        Assert.All(connects, (connect) =>
+        {
+            Assert.True(connect.Took < TimeSpan.FromSeconds(1.5), $"{connect.Address}: {connect.Took}");
+        });
+    }
+
+    [Fact]
     public async Task Throws_a_ReconnectException_carrying_the_last_failure_ending_closed()
     {
         using var listener = new Listener(IPAddress.Loopback);

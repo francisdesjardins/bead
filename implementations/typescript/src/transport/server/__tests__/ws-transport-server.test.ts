@@ -29,12 +29,14 @@ import {
   createWSTransportServer,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
+  START_DEFAULTS,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IIncomingMessageLike,
   type IServerSocketLike,
   type IWSTransportServerOptions,
   type WSTransportServer,
 } from '../ws-transport-server';
+import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
 import { createFakeSocket, createFakeWebSocketServer } from './fake-websocket-server';
 
 type ServerEvents = TransportServerEventMap<IServerSocketLike, IIncomingMessageLike>;
@@ -1721,5 +1723,137 @@ test.describe('WSTransportServer, the refusals it tells', () => {
     expect(await statusLineOf(port, requestOf('GET / HTTP/1.1'))).toBe(
       'HTTP/1.1 101 Switching Protocols'
     );
+  });
+});
+
+test.describe('WSTransportServer, the address it listens on', () => {
+  test('listens on 127.0.0.1, port 80, and beats every 30 seconds when told nothing', async () => {
+    using timers = spyIntervals();
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+
+    expect([server.address, server.port, START_DEFAULTS]).toEqual([
+      '127.0.0.1',
+      80,
+      { address: '127.0.0.1', findOpenPort: false, port: 80 },
+    ]);
+
+    const starting = server.start({ findOpenPort: true });
+
+    fake.instances[0]?.emit('listening');
+    await starting;
+    fake.connect(createFakeSocket(), { server });
+
+    expect([
+      server.address,
+      timers.armed.map(({ delay }) => {
+        return delay;
+      }),
+    ]).toEqual(['127.0.0.1', [30_000]]);
+
+    await server.stop();
+  });
+
+  test('listens on the loopback when given no address, reached by 127.0.0.1 and by localhost, and is secure there', async () => {
+    const server = createWSTransportServer({ WebSocketServer });
+    const clients: WSTransportClient[] = [];
+
+    try {
+      const { address, port } = await server.start({ findOpenPort: true });
+
+      expect(address).toBe('127.0.0.1');
+
+      for (const name of [host, 'localhost']) {
+        const client = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+        clients.push(client);
+        await client.connect({ host: name, port });
+      }
+
+      expect(
+        server.clients.map(({ address: from, connectionHandle }) => {
+          return [from, server.isSecure(connectionHandle)];
+        })
+      ).toEqual([
+        ['127.0.0.1', true],
+        ['127.0.0.1', true],
+      ]);
+    } finally {
+      for (const client of clients) {
+        await client.disconnect().catch(() => {});
+      }
+
+      await server.stop();
+      await allClosed();
+    }
+  });
+
+  test('refuses to start on an address that is no bare IP address, ending closed', async () => {
+    const startedOn = async (address: string) => {
+      const fake = createFakeWebSocketServer({ address: { address, port: 4_321 } });
+      const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+      const starting = server.start({ address, findOpenPort: true });
+
+      fake.instances[0]?.emit('listening');
+
+      const outcome = await starting.then(
+        () => {
+          return 'listening';
+        },
+        (reason: unknown) => {
+          return reason instanceof ProgrammerError ? reason.message : String(reason);
+        }
+      );
+
+      await server.stop();
+
+      // a server refused opened nothing
+      return [address, outcome, server.isClosed(), fake.instances.length];
+    };
+
+    expect(await Promise.all(LISTENING_ADDRESSES.map(startedOn))).toEqual(
+      LISTENING_ADDRESSES.map((address) => {
+        return [address, 'listening', true, 1];
+      })
+    );
+    expect(await Promise.all(NO_LISTENING_ADDRESSES.map(startedOn))).toEqual(
+      NO_LISTENING_ADDRESSES.map((address) => {
+        return [
+          address,
+          address === '[::1]'
+            ? 'a server listens on an IP address, not "[::1]": write ::1, not [::1]'
+            : `a server listens on an IP address, not "${address}"`,
+          true,
+          0,
+        ];
+      })
+    );
+  });
+
+  test('is secure on the IPv6 loopback or an address in 127.0.0.0/8, and not on a wildcard', async () => {
+    const securedOn = async (address: string) => {
+      const fake = createFakeWebSocketServer({ address: { address, port: 4_321 } });
+      const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+      const starting = server.start({ address, findOpenPort: true });
+
+      fake.instances[0]?.emit('listening');
+      await starting;
+
+      try {
+        return [address, server.isSecure(fake.connect(createFakeSocket(), { server }))];
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all(['::1', '127.0.0.1', '127.0.0.2', '0.0.0.0', '::'].map(securedOn))
+    ).toEqual([
+      ['::1', true],
+      ['127.0.0.1', true],
+      ['127.0.0.2', true],
+      ['0.0.0.0', false],
+      ['::', false],
+    ]);
   });
 });

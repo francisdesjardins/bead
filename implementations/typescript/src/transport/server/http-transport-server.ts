@@ -26,6 +26,7 @@ import { gaugesOf } from '../shared/gauges';
 import type { Data } from '../shared/types';
 import {
   assertHosts,
+  assertListeningAddress,
   assertOrigins,
   authorityOf,
   clientAddressOf,
@@ -187,7 +188,7 @@ export const PATHNAME = '/bead';
 
 /** What an omitted start option resolves to. */
 export const START_DEFAULTS = Object.freeze({
-  address: '0.0.0.0',
+  address: '127.0.0.1',
   findOpenPort: false,
   port: 80,
 } satisfies ITransportServerStartOptions);
@@ -1236,6 +1237,8 @@ export const createHTTPTransportServer = (
         type: TRANSPORT_HTTP,
 
         start: async ({ address, findOpenPort, port, signal }) => {
+          assertListeningAddress(address);
+
           let opened: IHTTPServerLike | undefined;
           let isListening = false;
 

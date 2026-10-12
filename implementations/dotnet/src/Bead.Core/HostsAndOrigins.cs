@@ -284,6 +284,41 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
+    /// Whether a string is an IP address a server listens on (spec 15.12): RFC 3986's
+    /// <c>IPv4address</c>, or its <c>IPv6address</c> written bare, with no brackets and no zone, and
+    /// not IPv4-mapped (<c>::ffff:0:0/96</c>, RFC 4291 §2.5.5.2), whose node's address is written as
+    /// the IPv4 one — never as the platform's parser reads one, which takes <c>0</c> for
+    /// <c>0.0.0.0</c>, <c>127.1</c>, octal, hexadecimal and a zone.
+    /// </summary>
+    public static bool IsIpAddress(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return IsIPv4Address(text)
+            || (IsIPv6Address(text) && !System.Net.IPAddress.Parse(text).IsIPv4MappedToIPv6);
+    }
+
+    /// <summary>
+    /// The address a server is to listen on, as it starts: one <see cref="IsIpAddress"/> refuses is
+    /// an <see cref="ArgumentException"/> naming the option, which tells how to write an IPv6
+    /// address given in brackets.
+    /// </summary>
+    public static void AssertAddress(string address, string name)
+    {
+        ArgumentNullException.ThrowIfNull(address, name);
+
+        if (IsIpAddress(address))
+        {
+            return;
+        }
+
+        var bare = address.Length > 2 && address.StartsWith('[') && address.EndsWith(']') ? address[1..^1] : null;
+        var hint = bare is not null && IsIpAddress(bare) ? $": write {bare}, not {address}" : "";
+
+        throw new ArgumentException($"a server listens on an IP address, not \"{address}\"{hint}", name);
+    }
+
+    /// <summary>
     /// Whether a field's value is one a server reads (spec 15.12): HTAB, SP and visible ASCII alone,
     /// so never a control character but HTAB, DEL among them, which RFC 9110 §5.5 calls invalid, nor
     /// a character past ASCII, which it keeps out of every field defined since, and which no origin

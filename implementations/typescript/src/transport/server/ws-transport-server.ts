@@ -23,7 +23,12 @@ import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
-import { assertHosts, assertOrigins, clientAddressOf } from './hosts-and-origins';
+import {
+  assertHosts,
+  assertListeningAddress,
+  assertOrigins,
+  clientAddressOf,
+} from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   IIncomingMessageLike,
@@ -68,7 +73,7 @@ export const MAXIMUM_MESSAGE_BYTES = 16_778_240;
 
 /** What an omitted start option resolves to. */
 export const START_DEFAULTS = Object.freeze({
-  address: '0.0.0.0',
+  address: '127.0.0.1',
   findOpenPort: false,
   port: 80,
 } satisfies ITransportServerStartOptions);
@@ -388,6 +393,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         type: TRANSPORT_WS,
 
         start: async ({ address, findOpenPort, port, signal }) => {
+          assertListeningAddress(address);
+
           let opened: { http: Server; instance: IWebSocketServerLike } | undefined;
           let isListening = false;
 

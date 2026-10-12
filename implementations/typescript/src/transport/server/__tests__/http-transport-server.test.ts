@@ -34,10 +34,12 @@ import {
   REFUSAL_HEADER,
   REFUSALS,
   SEQUENCE_HEADER,
+  START_DEFAULTS,
   type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
 import type { ITransportServerRefusal, TransportServerConnectionHandle } from '../types';
+import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
 import { createFakeHTTPServer } from './fake-http-server';
 import { TLS_FIXTURE } from './tls-fixture';
 
@@ -248,6 +250,7 @@ test.describe('createHTTPTransportServer', () => {
     });
     expect(BURIAL_MILLISECONDS).toBe(RESERVATION_MILLISECONDS);
     expect(MAXIMUM_BODY_BYTES).toBe(LIMIT_DEFAULTS.maximumEnvelopeBytes);
+    expect(START_DEFAULTS).toEqual({ address: '127.0.0.1', findOpenPort: false, port: 80 });
   });
 
   test('draws a connection on a connect: a token of 16 bytes, a 201, and "connection" first, showing neither', async () => {
@@ -3297,5 +3300,112 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     ]);
     // and it draws a connection as before
     expect((await post(url)).status).toBe(201);
+  });
+});
+
+test.describe('createHTTPTransportServer, the address it listens on', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('listens on the loopback when given no address, reached by 127.0.0.1 and by localhost, and is secure there', async () => {
+    const server = createHTTPTransportServer({
+      createServer: (listener) => {
+        return createServer(listener);
+      },
+    });
+
+    try {
+      const { address, port } = await server.start({ findOpenPort: true });
+
+      expect([address, server.address, START_DEFAULTS.address]).toEqual([
+        '127.0.0.1',
+        '127.0.0.1',
+        '127.0.0.1',
+      ]);
+
+      for (const name of [host, 'localhost']) {
+        const response = await post(`http://${name}:${String(port)}/bead`);
+
+        expect([name, response.status]).toEqual([name, 201]);
+      }
+
+      expect(
+        server.clients.map(({ connectionHandle }) => {
+          return server.isSecure(connectionHandle);
+        })
+      ).toEqual([true, true]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('refuses to start on an address that is no bare IP address, ending closed', async () => {
+    const startedOn = async (address: string) => {
+      const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
+      const server = createHTTPTransportServer({ createServer: fake.createServer });
+      const starting = server.start({ address, port: 50_000 });
+
+      fake.listen();
+
+      const outcome = await starting.then(
+        () => {
+          return 'listening';
+        },
+        (reason: unknown) => {
+          return reason instanceof ProgrammerError ? reason.message : String(reason);
+        }
+      );
+
+      await server.stop();
+
+      // a server refused opened nothing
+      return [address, outcome, server.isClosed(), fake.servers.length];
+    };
+
+    expect(await Promise.all(LISTENING_ADDRESSES.map(startedOn))).toEqual(
+      LISTENING_ADDRESSES.map((address) => {
+        return [address, 'listening', true, 1];
+      })
+    );
+    expect(await Promise.all(NO_LISTENING_ADDRESSES.map(startedOn))).toEqual(
+      NO_LISTENING_ADDRESSES.map((address) => {
+        return [
+          address,
+          address === '[::1]'
+            ? 'a server listens on an IP address, not "[::1]": write ::1, not [::1]'
+            : `a server listens on an IP address, not "${address}"`,
+          true,
+          0,
+        ];
+      })
+    );
+  });
+
+  test('is secure on the IPv6 loopback or an address in 127.0.0.0/8, and not on a wildcard', async () => {
+    const securedOn = async (address: string) => {
+      const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
+      const server = createHTTPTransportServer({ createServer: fake.createServer });
+      const starting = server.start({ address, port: 50_000 });
+
+      fake.listen();
+      await starting;
+
+      try {
+        return [address, server.isSecure('type=HTTP;ip=192.0.2.9;ordinal=1')];
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all(['::1', '127.0.0.1', '127.0.0.2', '0.0.0.0', '::'].map(securedOn))
+    ).toEqual([
+      ['::1', true],
+      ['127.0.0.1', true],
+      ['127.0.0.2', true],
+      ['0.0.0.0', false],
+      ['::', false],
+    ]);
   });
 });

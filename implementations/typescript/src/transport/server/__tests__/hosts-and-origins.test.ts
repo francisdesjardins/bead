@@ -2,9 +2,11 @@ import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../shared/errors';
 import {
   assertHosts,
+  assertListeningAddress,
   assertOrigins,
   hasVisibleFields,
   HOST_REFUSAL,
+  isIPAddress,
   isIPv4Address,
   isTakenHost,
   isTakenOrigin,
@@ -13,6 +15,7 @@ import {
   ORIGIN_REFUSAL,
   originOf,
 } from '../hosts-and-origins';
+import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
 
 // constants
 
@@ -420,6 +423,34 @@ test.describe('hosts and origins', () => {
         return isTakenOrigin(origin, { host, origins: [] });
       })
     ).toEqual([]);
+  });
+
+  test('isIPAddress takes a bare IP address by RFC 3986’s grammar, and refuses a name, every other form, brackets, a zone and an IPv4-mapped address', () => {
+    expect(LISTENING_ADDRESSES.filter(isIPAddress)).toEqual(LISTENING_ADDRESSES);
+    expect(NO_LISTENING_ADDRESSES.filter(isIPAddress)).toEqual([]);
+    // the long forms of an IPv6 address are its own, and a mapped one is refused in any of them
+    expect(
+      ['0:0:0:0:0:0:0:1', 'FE80::A', '::ffff:7f00:1', '0:0:0:0:0:ffff:127.0.0.1', '::1:'].map(
+        isIPAddress
+      )
+    ).toEqual([true, true, false, false, false]);
+  });
+
+  test('refuses to listen on an address that is no bare IP address, naming it, and tells a bracketed one how to write itself', () => {
+    for (const address of LISTENING_ADDRESSES) {
+      expect(() => {
+        assertListeningAddress(address);
+      }).not.toThrow();
+    }
+
+    expect(() => {
+      assertListeningAddress('localhost');
+    }).toThrow(new ProgrammerError('a server listens on an IP address, not "localhost"'));
+    expect(() => {
+      assertListeningAddress('[::1]');
+    }).toThrow(
+      new ProgrammerError('a server listens on an IP address, not "[::1]": write ::1, not [::1]')
+    );
   });
 
   test('isVisibleField takes HTAB, SP and visible ASCII, and refuses each other control character, DEL and 0x80 to 0xFF', () => {

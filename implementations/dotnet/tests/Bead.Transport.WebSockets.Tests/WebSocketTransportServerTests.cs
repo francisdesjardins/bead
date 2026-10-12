@@ -7,6 +7,7 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
+using Bead.Tests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.Time.Testing;
@@ -28,6 +29,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     private const int EnvelopeLimit = 16_778_240;
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    // the addresses a server is secure on, the loopback's, and those it is not, the wildcards
+    private static readonly string[] OnTheLoopbackOrNot = ["::1", "127.0.0.1", "127.0.0.2", "0.0.0.0", "::"];
 
     // RFC 6455 §1.3's key, 16 bytes in base64
     private const string Key = "dGhlIHNhbXBsZSBub25jZQ==";
@@ -660,6 +664,85 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         var (client, _) = await Connect();
 
         client.Dispose();
+    }
+
+    [Fact]
+    public async Task Listens_on_the_loopback_when_given_no_address_reached_by_127_0_0_1_and_by_localhost_and_is_secure_there()
+    {
+        await using var server = new WebSocketTransportServer();
+        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var connected = 0;
+
+        server.Connection += (_) =>
+        {
+            Interlocked.Increment(ref connected);
+        };
+
+        Assert.Equal("127.0.0.1", bound.Address);
+        Assert.True(server.IsSecure("any"));
+
+        foreach (var host in new[] { "127.0.0.1", "localhost" })
+        {
+            await using var client = new WebSocketTransportClient();
+
+            await client.Connect(new WebSocketConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+            Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
+        }
+
+        Assert.Equal(2, connected);
+    }
+
+    [Fact]
+    public async Task Refuses_to_start_on_an_address_that_is_no_bare_IP_address_ending_closed()
+    {
+        foreach (var address in Addresses.NotListening)
+        {
+            await using var server = new WebSocketTransportServer();
+            var refused = await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+            });
+
+            Assert.Equal((address, nameof(WebSocketTransportStartOptions.Address), ReadyState.Closed), (address, refused.ParamName, server.ReadyState));
+            Assert.StartsWith($"a server listens on an IP address, not \"{address}\"", refused.Message, StringComparison.Ordinal);
+        }
+
+        foreach (var address in Addresses.Listening.Where((address) =>
+        {
+            return Socket.OSSupportsIPv6 || !address.Contains(':', StringComparison.Ordinal);
+        }))
+        {
+            await using var server = new WebSocketTransportServer();
+
+            Assert.Equal(address, (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Address);
+            await server.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task Is_secure_on_the_IPv6_loopback_or_an_address_in_127_0_0_0_8_and_not_on_a_wildcard()
+    {
+        var addresses = OnTheLoopbackOrNot.Where((address) =>
+        {
+            return Socket.OSSupportsIPv6 || !address.Contains(':', StringComparison.Ordinal);
+        });
+        var secured = new List<(string Address, bool IsSecure)>();
+
+        foreach (var address in addresses)
+        {
+            await using var server = new WebSocketTransportServer();
+
+            await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+            secured.Add((address, server.IsSecure("any")));
+            await server.Stop();
+        }
+
+        Assert.Equal(
+            addresses.Select((address) =>
+            {
+                return (address, address is "::1" or "127.0.0.1" or "127.0.0.2");
+            }),
+            secured);
     }
 
     [Fact]
@@ -1297,12 +1380,12 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Listens_on_0_0_0_0_port_80_and_beats_every_30_seconds_when_told_nothing()
+    public void Listens_on_127_0_0_1_port_80_and_beats_every_30_seconds_when_told_nothing()
     {
         var start = new WebSocketTransportStartOptions();
         var options = new WebSocketTransportServerOptions();
 
-        Assert.Equal(("0.0.0.0", 80, false), (start.Address, start.Port, start.FindOpenPort));
+        Assert.Equal(("127.0.0.1", 80, false), (start.Address, start.Port, start.FindOpenPort));
         Assert.Equal(TimeSpan.FromSeconds(30), options.Heartbeat);
         Assert.Equal(TimeSpan.FromSeconds(5), options.CloseTimeout);
         Assert.Null(options.MaximumMessageBytes);

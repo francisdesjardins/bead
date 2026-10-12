@@ -36,5 +36,7 @@
     <Compile Include="../Shared/SteppingClock.cs" Link="SteppingClock.cs" />
     <!-- what reads the durations, for the harness that plays every place -->
     <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
+    <!-- the addresses a server listens on, and the forms it refuses, as the TypeScript side's tests hold them -->
+    <Compile Include="../Shared/Addresses.cs" Link="Addresses.cs" />
   </ItemGroup>
 </Project>

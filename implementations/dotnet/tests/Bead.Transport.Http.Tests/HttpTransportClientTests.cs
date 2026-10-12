@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Threading.Channels;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -1254,6 +1255,30 @@ public sealed class HttpTransportClientTests
             }
         });
         Assert.Equal([answer], faked.Heard);
+    }
+
+    [Fact]
+    public async Task Connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alone_whichever_it_is()
+    {
+        var connects = new List<(string Address, TimeSpan Took)>();
+
+        foreach (var address in Addresses.ReachedByLocalhost())
+        {
+            await using var server = new HttpTransportServer();
+            var port = (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Port;
+            await using var client = new HttpTransportClient(NotListening);
+            var started = TimeProvider.System.GetTimestamp();
+
+            await client.Connect(new HttpConnectOptions { Host = "localhost", Port = port }, Cancelled).WaitAsync(Patience, Cancelled);
+            connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
+            Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
+        }
+
+        // the families raced: neither waits out the other's refusal, two seconds on Windows
+        Assert.All(connects, (connect) =>
+        {
+            Assert.True(connect.Took < TimeSpan.FromSeconds(1.5), $"{connect.Address}: {connect.Took}");
+        });
     }
 
     [Fact]

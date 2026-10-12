@@ -48,6 +48,10 @@ public sealed class HostsAndOriginsTests
         "",
     ];
 
+    // the long forms of an IPv6 address, the loopback's and another, and a mapped one's, then one
+    // that ends in a colon
+    private static readonly string[] LongIPv6Forms = ["0:0:0:0:0:0:0:1", "FE80::A", "::ffff:7f00:1", "0:0:0:0:0:ffff:127.0.0.1", "::1:"];
+
     // RFC 3986's IPv4address, four dec-octet
     private static readonly string[] IPv4Addresses = ["0.0.0.0", "127.0.0.1", "192.0.2.1", "10.0.0.255", "255.255.255.255", "1.22.199.249"];
 
@@ -400,6 +404,37 @@ public sealed class HostsAndOriginsTests
             Assert.False(HostsAndOrigins.IsIPv4Address(address), address);
         });
         Assert.True(System.Net.IPAddress.TryParse("127.1", out _));
+    }
+
+    [Fact]
+    public void IsIpAddress_takes_a_bare_IP_address_by_RFC_3986_s_grammar_and_refuses_a_name_every_other_form_brackets_a_zone_and_an_IPv4_mapped_address()
+    {
+        Assert.Equal(Addresses.Listening, Addresses.Listening.Where(HostsAndOrigins.IsIpAddress));
+        Assert.DoesNotContain(Addresses.NotListening, HostsAndOrigins.IsIpAddress);
+
+        // the long forms of an IPv6 address are its own, and a mapped one is refused in any of them
+        Assert.Equal([true, true, false, false, false], LongIPv6Forms.Select(HostsAndOrigins.IsIpAddress));
+    }
+
+    [Fact]
+    public void Refuses_to_listen_on_an_address_that_is_no_bare_IP_address_naming_it_and_tells_a_bracketed_one_how_to_write_itself()
+    {
+        foreach (var address in Addresses.Listening)
+        {
+            HostsAndOrigins.AssertAddress(address, "Address");
+        }
+
+        var named = Assert.Throws<ArgumentException>(() =>
+        {
+            HostsAndOrigins.AssertAddress("localhost", "Address");
+        });
+        var bracketed = Assert.Throws<ArgumentException>(() =>
+        {
+            HostsAndOrigins.AssertAddress("[::1]", "Address");
+        });
+
+        Assert.Equal(("a server listens on an IP address, not \"localhost\" (Parameter 'Address')", "Address"), (named.Message, named.ParamName));
+        Assert.Equal("a server listens on an IP address, not \"[::1]\": write ::1, not [::1] (Parameter 'Address')", bracketed.Message);
     }
 
     [Fact]

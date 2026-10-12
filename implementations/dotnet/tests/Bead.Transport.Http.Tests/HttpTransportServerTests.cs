@@ -10,6 +10,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -40,6 +41,9 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     private static readonly TimeSpan Burial = TimeSpan.FromSeconds(5);
 
     private static readonly Lazy<X509Certificate2> Certificate = new(CertificateOf);
+
+    // the addresses a server is secure on, the loopback's, and those it is not, the wildcards
+    private static readonly string[] OnTheLoopbackOrNot = ["::1", "127.0.0.1", "127.0.0.2", "0.0.0.0", "::"];
 
     private readonly ConcurrentQueue<string> _connections = new();
     private readonly ConcurrentQueue<(byte[] Bytes, string ConnectionHandle)> _messages = new();
@@ -604,7 +608,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(TimeSpan.FromSeconds(30), options.MaximumWait);
         Assert.Equal((10_000, 64, 64), (options.MaximumConnections, options.MaximumConnectionsPerAddress, options.MaximumWaitingExchanges));
         Assert.Equal("/bead", options.Pathname);
-        Assert.Equal(("0.0.0.0", 80, false), (start.Address, start.Port, start.FindOpenPort));
+        Assert.Equal(("127.0.0.1", 80, false), (start.Address, start.Port, start.FindOpenPort));
     }
 
     [Fact]
@@ -2198,6 +2202,77 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         }));
         Assert.Equal([(thrown, "")], errors);
         Assert.NotEmpty((await Connect()).ConnectionToken);
+    }
+
+    [Fact]
+    public async Task Listens_on_the_loopback_when_given_no_address_reached_by_127_0_0_1_and_by_localhost_and_is_secure_there()
+    {
+        await using var server = new HttpTransportServer();
+        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+        using var racing = new HttpClient(new SocketsHttpHandler { ConnectCallback = HappyEyeballs.ConnectCallback });
+
+        Assert.Equal("127.0.0.1", bound.Address);
+        Assert.True(server.IsSecure("any"));
+
+        foreach (var host in new[] { "127.0.0.1", "localhost" })
+        {
+            using var drew = await Fetch(racing, With(PostOf(new Uri($"http://{host}:{bound.Port}/bead"), (null, null)), ("origin", $"http://{host}:{bound.Port}")));
+
+            Assert.Equal((host, 201), (host, (int)drew.StatusCode));
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_to_start_on_an_address_that_is_no_bare_IP_address_ending_closed()
+    {
+        foreach (var address in Addresses.NotListening)
+        {
+            await using var server = new HttpTransportServer();
+            var refused = await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+            });
+
+            Assert.Equal((address, nameof(HttpTransportStartOptions.Address), ReadyState.Closed), (address, refused.ParamName, server.ReadyState));
+            Assert.StartsWith($"a server listens on an IP address, not \"{address}\"", refused.Message, StringComparison.Ordinal);
+        }
+
+        foreach (var address in Addresses.Listening.Where((address) =>
+        {
+            return Socket.OSSupportsIPv6 || !address.Contains(':', StringComparison.Ordinal);
+        }))
+        {
+            await using var server = new HttpTransportServer();
+
+            Assert.Equal(address, (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Address);
+            await server.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task Is_secure_on_the_IPv6_loopback_or_an_address_in_127_0_0_0_8_and_not_on_a_wildcard()
+    {
+        var addresses = OnTheLoopbackOrNot.Where((address) =>
+        {
+            return Socket.OSSupportsIPv6 || !address.Contains(':', StringComparison.Ordinal);
+        });
+        var secured = new List<(string Address, bool IsSecure)>();
+
+        foreach (var address in addresses)
+        {
+            await using var server = new HttpTransportServer();
+
+            await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+            secured.Add((address, server.IsSecure("any")));
+            await server.Stop();
+        }
+
+        Assert.Equal(
+            addresses.Select((address) =>
+            {
+                return (address, address is "::1" or "127.0.0.1" or "127.0.0.2");
+            }),
+            secured);
     }
 
     [Fact]

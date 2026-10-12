@@ -682,17 +682,18 @@ envelope alone, a server's over HTTP (section 15.9) — and for one that present
 `ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential crosses
 only TLS off the machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A
 transport is judged by what it is given, never by what a name resolves to. It is secure under TLS,
-its scheme `wss` or `https`; on the loopback, its host — the one a client names in its URL, or the
-one a server listens on, bracketed when it is an IPv6 address — as the
+its scheme `wss` or `https`; on the loopback: a client by the host it names in its URL — `localhost`
+or a name that ends in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8,
+or the IPv6 loopback, `[::1]` in a URL — as the
 [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
-the W3C's Secure Contexts reads an origin: `localhost` or a name that ends in `.localhost`, compared
-in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback, `::1`, `[::1]` in a URL,
-as [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
-potentially trustworthy; or when it never leaves the machine, a Web Worker or a router called in
-process. Every side reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as
-127.0.0.1, are on the loopback; a host it fails on, one followed by a space among them, is not, nor
-is `localhost.`, which it keeps as given. A side takes a `localhost` name on the loopback without
-resolving it, as Secure Contexts does where the platform resolves such names there alone
+the W3C's Secure Contexts reads an origin, and as
+[Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
+potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8 or
+`::1`; or when it never leaves the machine, a Web Worker or a router called in process. Every client
+reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as 127.0.0.1, are on the
+loopback; a host it fails on, one followed by a space among them, is not, nor is `localhost.`,
+which it keeps as given. A client takes a `localhost` name on the loopback without resolving it, as
+Secure Contexts does where the platform resolves such names there alone
 ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a platform whose resolver
 sends one elsewhere, its application gives another host. Any other leaves the machine in the clear.
 A server cannot tell what stands in front of it: its application MAY say so, and is then believed
@@ -1338,6 +1339,19 @@ address an IPv6 socket carries mapped read as that IPv4 address
 the same machine, which the server is told to trust, `isProxyTrusted`, it is the last entry of the
 proxy's `X-Forwarded-For`, when that entry is an address. Its port is the socket's, the proxy's
 connection's behind a proxy.
+
+A server listens on the IPv4 loopback, `127.0.0.1`
+([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), unless it is given an
+address: an `IPv4address` or an `IPv6address` of
+[RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), bare, with no zone, and
+not IPv4-mapped ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)),
+never a name, which another host would resolve otherwise. A server the network reaches is one its
+application opened to it, `0.0.0.0` or `::` among them
+([CWE-1327](https://cwe.mitre.org/data/definitions/1327.html)). Its address keeps the network out,
+and `hosts` a page on its own machine that rebinds its name to it; neither stands for the other. A
+client that connects by `localhost` reaches it whichever loopback family it tries first, racing
+them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); another process listening on the other
+family's loopback, on the same port, answers a client that tries that one first.
 
 ## 16. Services and procedures
 

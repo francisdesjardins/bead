@@ -38,6 +38,7 @@ import {
   type IWebSocketConstructor,
   type WSTransportClient,
 } from '../ws-transport-client';
+import { createWSTransportServer } from '../../server/ws-transport-server';
 import { createFakeWebSocket } from './fake-websocket';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
@@ -1171,5 +1172,37 @@ test.describe('WSTransportClient, an upgrade refused', () => {
       new ConnectError('the server refused the upgrade: 502')
     );
     expect(client.isClosed()).toBe(true);
+  });
+});
+
+test.describe('WSTransportClient, by a name', () => {
+  test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
+    for (const address of ['127.0.0.1', '::1']) {
+      const server = createWSTransportServer({ WebSocketServer });
+      const { port } = await server.start({ address, findOpenPort: true });
+
+      try {
+        for (const [label, Tracked] of IMPLEMENTATIONS) {
+          const client = createWSTransportClient({
+            WebSocket: Tracked as unknown as IWebSocketConstructor,
+          });
+          const began = performance.now();
+
+          await client.connect({ host: 'localhost', port });
+
+          // the families raced, as RFC 8305 asks: no wait on the one that is refused
+          expect([address, label, client.isOpen(), performance.now() - began < 1_500]).toEqual([
+            address,
+            label,
+            true,
+            true,
+          ]);
+          await client.disconnect();
+        }
+      } finally {
+        await server.stop();
+        await allClosed();
+      }
+    }
   });
 });

@@ -39,9 +39,9 @@ public sealed record WebSocketTransportClientOptions
     public TimeProvider? Clock { get; init; }
 
     /// <summary>
-    /// What sends its opening handshakes, the platform's own when none: the tests' way to open a
-    /// socket from an address and a port of their own, as the TypeScript side's tests give their
-    /// <c>WebSocket</c>.
+    /// What sends its opening handshakes, one of its own when none, which races the address families
+    /// of a name (RFC 8305): the tests' way to open a socket from an address and a port of their own,
+    /// as the TypeScript side's tests give their <c>WebSocket</c>.
     /// </summary>
     internal HttpMessageInvoker? Invoker { get; init; }
 }
@@ -86,6 +86,17 @@ public sealed record WebSocketConnectOptions
 public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDisposable
 {
     // constants
+
+    // what sends every client's opening handshake: the platform's handler for a socket with no
+    // proxy, cookie, credential or certificate of its own, as a ClientWebSocket builds it, but for
+    // its connect, which races the address families of a name, as RFC 8305 asks, where the
+    // platform's tries each address in turn and waits out a family's refusal, two seconds on Windows
+    private static readonly HttpMessageInvoker Racing = new(new SocketsHttpHandler
+    {
+        ConnectCallback = HappyEyeballs.ConnectCallback,
+        PooledConnectionLifetime = TimeSpan.Zero,
+        UseCookies = false,
+    });
 
     private readonly WebSocketTransportClientOptions _options;
     private readonly TimeProvider _clock;
@@ -546,7 +557,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
             try
             {
-                await (_options.Invoker is { } invoker ? socket.ConnectAsync(UriOf(options), invoker, linked.Token) : socket.ConnectAsync(UriOf(options), linked.Token));
+                await socket.ConnectAsync(UriOf(options), _options.Invoker ?? Racing, linked.Token);
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {

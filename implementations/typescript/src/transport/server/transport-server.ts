@@ -123,7 +123,7 @@ export const generateHandle = ({
  * @example
  * const server = createTransportServer((server, connections) => {
  *   return {
- *     defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
+ *     defaults: { address: '127.0.0.1', findOpenPort: false, port: 80 },
  *     type: 'WS',
  *     close: () => Promise.resolve(),
  *     send: () => Promise.resolve(),
