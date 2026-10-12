@@ -307,7 +307,9 @@ pairs, two today and six with a third language.
 
 **No side decides by default.** What one language could add on its own waits for the others, or for
 a decision that brings it to all of them; what a platform cannot do at all stays a row of the
-matrix, never a silent fork.
+matrix, never a silent fork. Where every side keeps to what one platform can do and a standard
+allows more, that leveling is a row of the matrix's ["Leveled down"](../support.md#leveled-down),
+to lift when the platform can.
 
 **What lands with this revision**, in one change: the spec's sections 14 and 15 naming the files
 that check them, section 15's table of the transport's bounds and the forwarded address of section
