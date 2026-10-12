@@ -2013,6 +2013,8 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             })).Message);
         }
 
+        _server.Answering = null;
+
         Assert.Empty(_closes);
 
         // a request that failed as it came lets go of what it held, and its connection is lost
