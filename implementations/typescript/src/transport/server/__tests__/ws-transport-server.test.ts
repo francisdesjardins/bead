@@ -309,6 +309,30 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+$/);
         expect(await greeted).toEqual([{ credential: undefined, data: 'hi' }]);
       });
+
+      test('keeps a connection whose connection listener throws, its messages heard, the throw reported with it', async () => {
+        const thrown = new Error('a connection listener that throws');
+        const reported = nextServerEvent(server, 'error');
+
+        server.once('connection', () => {
+          throw thrown;
+        });
+
+        // the listener after it, told all the same
+        const [, , connectionHandle] = await connectClient(client);
+
+        expect(await reported).toEqual([thrown, connectionHandle]);
+
+        const heard = nextServerEvent(server, 'message');
+
+        await client.send({ data: 'still here' });
+
+        expect(await heard).toEqual([
+          { credential: undefined, data: 'still here' },
+          connectionHandle,
+        ]);
+        expect(server.clients).toHaveLength(1);
+      });
     });
 
     test.describe('WSTransportServer "message" event', () => {
@@ -331,6 +355,30 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(new TextDecoder().decode(data as ArrayBuffer)).toBe('bytes');
 
         expect(server.clients[0]?.lastActivity).toBeGreaterThan(0);
+      });
+
+      test('hears the next message after a message listener throws, the throw reported with its connection', async () => {
+        const [, , connectionHandle] = await connectClient(client);
+        const thrown = new Error('a message listener that throws');
+
+        server.once('message', () => {
+          throw thrown;
+        });
+
+        const reported = nextServerEvent(server, 'error');
+        const first = nextServerEvent(server, 'message');
+
+        await client.send({ data: 'first' });
+
+        expect(await first).toEqual([{ credential: undefined, data: 'first' }, connectionHandle]);
+        expect(await reported).toEqual([thrown, connectionHandle]);
+
+        const second = nextServerEvent(server, 'message');
+
+        await client.send({ data: 'second' });
+
+        expect(await second).toEqual([{ credential: undefined, data: 'second' }, connectionHandle]);
+        expect(server.clients).toHaveLength(1);
       });
     });
 

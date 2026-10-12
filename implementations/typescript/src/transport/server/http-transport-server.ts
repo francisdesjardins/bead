@@ -488,7 +488,7 @@ export const createHTTPTransportServer = (
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
 
   const transport = createTransportServer<IDrawnConnection, IDrawingRequest>(
-    (server, connections) => {
+    (server, connections, { tell }) => {
       let httpServer: IHTTPServerLike | undefined;
       let ordinal = 0;
       // the bytes of body the exchanges under way hold, all together, counted as they come
@@ -602,7 +602,7 @@ export const createHTTPTransportServer = (
           answer(connection.listen, UNKNOWN_CONNECTION);
         }
 
-        server.emit(CLOSE_EVENT, isClean, connectionHandle);
+        tell(CLOSE_EVENT, [isClean, connectionHandle]);
       };
 
       // a listen ends: with what waits for it, as a batch, or, nothing waiting, with `end`
@@ -706,11 +706,11 @@ export const createHTTPTransportServer = (
 
           if (drawn.get(connection.connectionHandle) === connection) {
             rest(connection);
-            server.emit(LISTEN_EVENT, false, connection.connectionHandle);
+            tell(LISTEN_EVENT, [false, connection.connectionHandle]);
           }
         });
         // said before the listen it replaces ends, so a second keeps its connection held throughout
-        server.emit(LISTEN_EVENT, true, connection.connectionHandle);
+        tell(LISTEN_EVENT, [true, connection.connectionHandle]);
 
         if (connection.listen !== undefined) {
           answer(connection.listen, NOTHING);
@@ -807,8 +807,9 @@ export const createHTTPTransportServer = (
           type: TRANSPORT_HTTP,
         });
         rest(connection);
+
         // a listener meets the connection registered, before its client has its token
-        server.emit(CONNECTION_EVENT, shown, drawing, connectionHandle);
+        tell(CONNECTION_EVENT, [shown, drawing, connectionHandle]);
 
         // the listen taken, said back, so a client whose header something on the way dropped never
         // listens where it would be refused
@@ -1028,7 +1029,7 @@ export const createHTTPTransportServer = (
             const credential = credentialOf(authorizations[0]);
 
             state.isDelivered = true;
-            server.emit(MESSAGE_EVENT, { credential, data: envelope }, connectionHandle);
+            tell(MESSAGE_EVENT, [{ credential, data: envelope }, connectionHandle]);
 
             // still waiting — not answered as it came — its head goes now, so its client knows the
             // router has it; and it waits for its answer no longer than it may
@@ -1046,7 +1047,7 @@ export const createHTTPTransportServer = (
             return undefined;
           }
 
-          server.emit(MESSAGE_EVENT, { credential: undefined, data: envelope }, connectionHandle);
+          tell(MESSAGE_EVENT, [{ credential: undefined, data: envelope }, connectionHandle]);
 
           if (kind === ENVELOPE_KINDS.CANCEL) {
             const cancelled = connection.waiting.get(callId);

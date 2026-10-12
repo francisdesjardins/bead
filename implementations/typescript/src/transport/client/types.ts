@@ -189,6 +189,19 @@ export interface ITransportClientImplementation<
   [dispose](): void;
 }
 
+/** What {@link createTransportClient} gives its transport beside the client. */
+export interface ITransportClientDefineOptions {
+  /**
+   * Calls each listener of a `message` or a `close` within a guard (spec 15.1): what one throws is
+   * reported through `error`, and the listeners after it are called all the same. Returns whether
+   * `event` had any.
+   */
+  readonly tell: <K extends TransportClientToldEvent>(
+    event: K,
+    params: TransportClientEventMap[K]
+  ) => boolean;
+}
+
 // types
 
 /** Event name → the arguments its listeners receive. */
@@ -199,8 +212,8 @@ export type TransportClientEventMap = {
    */
   close: [wasClean: boolean, wasQuick: boolean];
   /**
-   * What went wrong on the connection; when it ends the connection, its `close` follows. No transport
-   * client in this package emits it: a failure there shows as `connect` rejecting, or as `close`.
+   * What a listener of its `message` or its `close` threw, which changes nothing the client does.
+   * A failure of the connection itself shows as `connect` rejecting, or as `close`.
    */
   error: [error: Error];
   /**
@@ -217,6 +230,9 @@ export type TransportClientEventMap = {
 
 /** The events a client emits, named by the table that types them. */
 export type TRANSPORT_CLIENT_EVENTS = keyof TransportClientEventMap;
+
+/** The events its transport tells a client's listeners of within a guard. */
+export type TransportClientToldEvent = CLOSE_EVENT | MESSAGE_EVENT;
 
 export type TransportClientOnCloseCallback = EmitterListener<TransportClientEventMap[CLOSE_EVENT]>;
 export type TransportClientOnErrorCallback = EmitterListener<TransportClientEventMap[ERROR_EVENT]>;

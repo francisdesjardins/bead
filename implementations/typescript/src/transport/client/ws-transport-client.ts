@@ -91,276 +91,282 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
   };
   const heartbeat = assertHeartbeat(givenHeartbeat);
 
-  return createTransportClient<IWebSocketLike, IWSTransportClientConnectOptions>((client) => {
-    // settle the connect or the disconnect in flight, so a socket dropped under either cannot leave
-    // it pending, and the client with it
-    let rejectConnect: ((reason: Error) => void) | undefined;
-    // told whether a dispose dropped the socket, rather than its close handshake ending
-    let resolveDisconnect: ((isDropped: boolean) => void) | undefined;
-    // the open socket's, when it can ping
-    let beating: IHeartbeat | undefined;
-    // whether the URL of the last connect is secure
-    let isSecure = false;
+  return createTransportClient<IWebSocketLike, IWSTransportClientConnectOptions>(
+    (client, { tell }) => {
+      // settle the connect or the disconnect in flight, so a socket dropped under either cannot leave
+      // it pending, and the client with it
+      let rejectConnect: ((reason: Error) => void) | undefined;
+      // told whether a dispose dropped the socket, rather than its close handshake ending
+      let resolveDisconnect: ((isDropped: boolean) => void) | undefined;
+      // the open socket's, when it can ping
+      let beating: IHeartbeat | undefined;
+      // whether the URL of the last connect is secure
+      let isSecure = false;
 
-    // a drop closes as a network does, and the open socket's `onclose` reports it
-    const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
-      if (!('ping' in socket) || !('on' in socket) || !('terminate' in socket)) {
-        return undefined;
-      }
+      // a drop closes as a network does, and the open socket's `onclose` reports it
+      const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
+        if (!('ping' in socket) || !('on' in socket) || !('terminate' in socket)) {
+          return undefined;
+        }
 
-      const beats = createHeartbeat(heartbeat, {
-        drop: () => {
-          socket.terminate?.();
+        const beats = createHeartbeat(heartbeat, {
+          drop: () => {
+            socket.terminate?.();
+          },
+          ping: () => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.ping?.();
+            }
+          },
+        });
+
+        socket.on('pong', () => {
+          beats.answer();
+        });
+
+        return beats;
+      };
+
+      const stopBeating = (): void => {
+        beating?.stop();
+        beating = undefined;
+      };
+
+      return {
+        carriesCredential: false,
+        clock,
+        get isSecure() {
+          return isSecure;
         },
-        ping: () => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.ping?.();
-          }
-        },
-      });
 
-      socket.on('pong', () => {
-        beats.answer();
-      });
+        connect: async (connectOptions) => {
+          const {
+            host,
+            pathname = CONNECT_DEFAULTS.pathname,
+            port,
+            protocols,
+            secured = CONNECT_DEFAULTS.secured,
+            signal,
+            timeout = CONNECT_DEFAULTS.timeout,
+          } = { ...CONNECT_DEFAULTS, ...connectOptions };
 
-      return beats;
-    };
+          // an IPv6 literal is bracketed, or its colons would read as the port's
+          const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+          const url = `${secured ? 'wss' : 'ws'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/, '/$1')}`;
+          let opened: IWebSocketLike | undefined;
 
-    const stopBeating = (): void => {
-      beating?.stop();
-      beating = undefined;
-    };
+          isSecure = isSecureUrl(url);
 
-    return {
-      carriesCredential: false,
-      clock,
-      get isSecure() {
-        return isSecure;
-      },
+          try {
+            await createPromise(
+              (resolve, reject) => {
+                if (!client.isReconnecting()) {
+                  setReadyStateConnecting(client);
+                }
 
-      connect: async (connectOptions) => {
-        const {
-          host,
-          pathname = CONNECT_DEFAULTS.pathname,
-          port,
-          protocols,
-          secured = CONNECT_DEFAULTS.secured,
-          signal,
-          timeout = CONNECT_DEFAULTS.timeout,
-        } = { ...CONNECT_DEFAULTS, ...connectOptions };
+                let socket: IWebSocketLike;
 
-        // an IPv6 literal is bracketed, or its colons would read as the port's
-        const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-        const url = `${secured ? 'wss' : 'ws'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/, '/$1')}`;
-        let opened: IWebSocketLike | undefined;
+                try {
+                  socket = opened = client.socket = new WebSocket(url, protocols, { maxPayload });
+                } catch (reason) {
+                  return (reject(wrapReason(ConnectError, reason)), undefined);
+                }
 
-        isSecure = isSecureUrl(url);
+                let lastError: unknown;
 
-        try {
-          await createPromise(
-            (resolve, reject) => {
-              if (!client.isReconnecting()) {
-                setReadyStateConnecting(client);
-              }
+                rejectConnect = reject;
 
-              let socket: IWebSocketLike;
+                socket.binaryType = binaryType;
 
-              try {
-                socket = opened = client.socket = new WebSocket(url, protocols, { maxPayload });
-              } catch (reason) {
-                return (reject(wrapReason(ConnectError, reason)), undefined);
-              }
+                socket.onerror = (event) => {
+                  lastError = errorOf(event);
+                };
+                socket.onclose = (closeEvent) => {
+                  const message = closeEvent.reason
+                    ? `${closeEvent.reason} (${String(closeEvent.code)})`
+                    : String(closeEvent.code);
 
-              let lastError: unknown;
-
-              rejectConnect = reject;
-
-              socket.binaryType = binaryType;
-
-              socket.onerror = (event) => {
-                lastError = errorOf(event);
-              };
-              socket.onclose = (closeEvent) => {
-                const message = closeEvent.reason
-                  ? `${closeEvent.reason} (${String(closeEvent.code)})`
-                  : String(closeEvent.code);
-
-                reject(
-                  new ConnectError(
-                    message,
-                    lastError === undefined ? undefined : { cause: lastError }
-                  )
-                );
-              };
-              socket.onopen = () => {
-                // an error is always followed by its close, and once open the close is what reports it
-                socket.onerror = noop;
-                socket.onmessage = ({ data }) => {
-                  if (client.isClosing()) {
-                    return undefined;
-                  }
-
-                  return (
-                    client.emit(MESSAGE_EVENT, { credential: undefined, data: data as Data }),
-                    undefined
+                  reject(
+                    new ConnectError(
+                      message,
+                      lastError === undefined ? undefined : { cause: lastError }
+                    )
                   );
                 };
+                socket.onopen = () => {
+                  // an error is always followed by its close, and once open the close is what reports it
+                  socket.onerror = noop;
+                  socket.onmessage = ({ data }) => {
+                    if (client.isClosing()) {
+                      return undefined;
+                    }
 
-                socket.onclose = () => {
-                  stopBeating();
+                    return (
+                      tell(MESSAGE_EVENT, [{ credential: undefined, data: data as Data }]),
+                      undefined
+                    );
+                  };
 
-                  if (!client.isReconnecting()) {
-                    setReadyStateClosed(client);
+                  socket.onclose = () => {
+                    stopBeating();
 
-                    client.emit(CLOSE_EVENT, false, false);
-                  }
+                    if (!client.isReconnecting()) {
+                      setReadyStateClosed(client);
+
+                      tell(CLOSE_EVENT, [false, false]);
+                    }
+                  };
+
+                  beating = beatOf(socket);
+                  resolve();
                 };
 
-                beating = beatOf(socket);
-                resolve();
-              };
+                return undefined;
+              },
+              { clock: client.clock, signal, timeout }
+            );
 
-              return undefined;
-            },
-            { clock: client.clock, signal, timeout }
-          );
+            // a close or a dispose between the open and here comes after it: what it left is kept
+            if (client.socket !== opened || opened.readyState !== WebSocket.OPEN) {
+              throw new ConnectError('closed as it opened');
+            }
+          } catch (reason) {
+            if (!client.isReconnecting()) {
+              setReadyStateClosed(client);
+            }
 
-          // a close or a dispose between the open and here comes after it: what it left is kept
-          if (client.socket !== opened || opened.readyState !== WebSocket.OPEN) {
-            throw new ConnectError('closed as it opened');
+            // a ConnectError means the socket closed or never existed; anything else leaves one behind
+            if (!(reason instanceof ConnectError)) {
+              client[dispose]();
+            }
+
+            throw reason;
+          } finally {
+            rejectConnect = undefined;
           }
-        } catch (reason) {
-          if (!client.isReconnecting()) {
-            setReadyStateClosed(client);
+
+          setReadyStateOpen(client);
+        },
+
+        disconnect: async (disconnectOptions) => {
+          const { isClean = DISCONNECT_DEFAULTS.isClean, isQuick = DISCONNECT_DEFAULTS.isQuick } =
+            disconnectOptions ?? {};
+
+          // this call's own resolver, so that only this call clears the shared one
+          let ownResolve: ((isDropped: boolean) => void) | undefined;
+
+          const closing = createPromise<boolean>((resolve, reject) => {
+            const { socket } = client;
+
+            if (!client.isOpen() || socket === null) {
+              return (
+                reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN)), undefined
+              );
+            }
+
+            setReadyStateClosing(client);
+            stopBeating();
+
+            if (isQuick) {
+              client[dispose]();
+
+              return (resolve(false), undefined);
+            }
+
+            resolveDisconnect = ownResolve = resolve;
+
+            socket.onerror = noop;
+            socket.onclose = () => {
+              resolve(false);
+            };
+
+            try {
+              socket.close(1000); // @see https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent
+            } catch (reason) {
+              return (reject(wrapReason(ProgrammerError, reason)), undefined);
+            }
+
+            return undefined;
+          }).finally(() => {
+            // a second disconnect, rejected because this one is under way, must not orphan this one
+            if (resolveDisconnect === ownResolve) {
+              resolveDisconnect = undefined;
+            }
+          });
+
+          let isDropped: boolean;
+
+          try {
+            isDropped = await closing;
+          } catch (reason) {
+            // a close that throws leaves a socket nothing can close: it is dropped as `[dispose]`
+            // drops one, without a `close`, and the client ends CLOSED rather than stuck CLOSING
+            if (reason instanceof ProgrammerError) {
+              client[dispose]();
+              setReadyStateClosed(client);
+            }
+
+            throw reason;
           }
 
-          // a ConnectError means the socket closed or never existed; anything else leaves one behind
-          if (!(reason instanceof ConnectError)) {
-            client[dispose]();
+          setReadyStateClosed(client);
+
+          // a dispose dropped the socket meanwhile, without a handshake: it tells no `close`, as a
+          // dispose never does
+          if (!isDropped) {
+            tell(CLOSE_EVENT, [isClean, isQuick]);
           }
+        },
 
-          throw reason;
-        } finally {
-          rejectConnect = undefined;
-        }
+        // a credential given here is not carried: the client fails a call that presents one its
+        // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+        send: ({ data }) => {
+          return createPromise((resolve, reject) => {
+            const { socket } = client;
 
-        setReadyStateOpen(client);
-      },
+            if (!client.isOpen() || socket === null) {
+              return (
+                reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN)), undefined
+              );
+            }
 
-      disconnect: async (disconnectOptions) => {
-        const { isClean = DISCONNECT_DEFAULTS.isClean, isQuick = DISCONNECT_DEFAULTS.isQuick } =
-          disconnectOptions ?? {};
+            socket.send(data);
 
-        // this call's own resolver, so that only this call clears the shared one
-        let ownResolve: ((isDropped: boolean) => void) | undefined;
+            return (resolve(), undefined);
+          });
+        },
 
-        const closing = createPromise<boolean>((resolve, reject) => {
+        [dispose]: () => {
           const { socket } = client;
 
-          if (!client.isOpen() || socket === null) {
-            return (reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN)), undefined);
-          }
-
-          setReadyStateClosing(client);
+          rejectConnect?.(new ConnectError('disposed while connecting'));
+          resolveDisconnect?.(true);
           stopBeating();
 
-          if (isQuick) {
-            client[dispose]();
-
-            return (resolve(false), undefined);
+          if (socket === null) {
+            return;
           }
 
-          resolveDisconnect = ownResolve = resolve;
-
+          // parked on `noop` rather than `null`: `ws` emits `error` when a connecting socket is aborted,
+          // and an `error` nobody listens to throws
           socket.onerror = noop;
-          socket.onclose = () => {
-            resolve(false);
-          };
+          socket.onclose = noop;
+          socket.onmessage = noop;
+          socket.onopen = noop;
 
-          try {
-            socket.close(1000); // @see https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent
-          } catch (reason) {
-            return (reject(wrapReason(ProgrammerError, reason)), undefined);
+          // a connecting socket is aborted rather than left to open; `close()` ends the handshake on
+          // both implementations
+          if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
+            try {
+              socket.close();
+            } catch {
+              /* a close that throws changes nothing: the socket is dropped below either way */
+            }
           }
 
-          return undefined;
-        }).finally(() => {
-          // a second disconnect, rejected because this one is under way, must not orphan this one
-          if (resolveDisconnect === ownResolve) {
-            resolveDisconnect = undefined;
-          }
-        });
-
-        let isDropped: boolean;
-
-        try {
-          isDropped = await closing;
-        } catch (reason) {
-          // a close that throws leaves a socket nothing can close: it is dropped as `[dispose]`
-          // drops one, without a `close`, and the client ends CLOSED rather than stuck CLOSING
-          if (reason instanceof ProgrammerError) {
-            client[dispose]();
-            setReadyStateClosed(client);
-          }
-
-          throw reason;
-        }
-
-        setReadyStateClosed(client);
-
-        // a dispose dropped the socket meanwhile, without a handshake: it tells no `close`, as a
-        // dispose never does
-        if (!isDropped) {
-          client.emit(CLOSE_EVENT, isClean, isQuick);
-        }
-      },
-
-      // a credential given here is not carried: the client fails a call that presents one its
-      // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
-      send: ({ data }) => {
-        return createPromise((resolve, reject) => {
-          const { socket } = client;
-
-          if (!client.isOpen() || socket === null) {
-            return (reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN)), undefined);
-          }
-
-          socket.send(data);
-
-          return (resolve(), undefined);
-        });
-      },
-
-      [dispose]: () => {
-        const { socket } = client;
-
-        rejectConnect?.(new ConnectError('disposed while connecting'));
-        resolveDisconnect?.(true);
-        stopBeating();
-
-        if (socket === null) {
-          return;
-        }
-
-        // parked on `noop` rather than `null`: `ws` emits `error` when a connecting socket is aborted,
-        // and an `error` nobody listens to throws
-        socket.onerror = noop;
-        socket.onclose = noop;
-        socket.onmessage = noop;
-        socket.onopen = noop;
-
-        // a connecting socket is aborted rather than left to open; `close()` ends the handshake on
-        // both implementations
-        if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
-          try {
-            socket.close();
-          } catch {
-            /* a close that throws changes nothing: the socket is dropped below either way */
-          }
-        }
-
-        client.socket = null;
-      },
-    };
-  });
+          client.socket = null;
+        },
+      };
+    }
+  );
 };

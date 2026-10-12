@@ -1010,6 +1010,133 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Draws_a_connection_whose_connection_listener_throws_the_next_listener_told_the_throw_reported_with_it()
+    {
+        await Start();
+
+        var thrown = new InvalidOperationException("a connection listener that throws");
+        var told = new ConcurrentQueue<string>();
+        var errors = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Connection += (_) =>
+        {
+            throw thrown;
+        };
+        _server.Connection += told.Enqueue;
+        _server.Error += (reason, connectionHandle) =>
+        {
+            errors.Enqueue((reason, connectionHandle));
+        };
+
+        // drawn as if it returned: its 201 and its token, its connection held
+        var (connectionToken, connectionHandle) = await Connect();
+
+        Assert.NotEmpty(connectionToken);
+        Assert.Equal([connectionHandle], told);
+        Assert.Equal([(thrown, connectionHandle)], errors);
+        Assert.Equal([connectionHandle], _server.ConnectionHandles);
+        Assert.Equal((1, 1), (Count("connections"), Count("addresses")));
+        Assert.Empty(_closes);
+    }
+
+    [Fact]
+    public async Task Hands_on_a_request_whose_message_listener_throws_its_answer_still_written_the_throw_reported_with_its_connection()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var thrown = new InvalidOperationException("a message listener that throws");
+        var answer = EnvelopeOf(EnvelopeKind.Result, (1, 3));
+        var errors = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+        Task? answered = null;
+
+        _server.Message += (_, _) =>
+        {
+            throw thrown;
+        };
+
+        // a listener after it, as a router answering, hears the request all the same
+        _server.Message += (_, handle) =>
+        {
+            answered = _server.Send(new TransportMessage(answer, false), handle);
+        };
+        _server.Error += (reason, handle) =>
+        {
+            errors.Enqueue((reason, handle));
+        };
+
+        using var response = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        Assert.Equal(200, (int)response.StatusCode);
+        Assert.Equal(answer, await BytesOf(response));
+        await answered!.WaitAsync(Patience, Cancelled);
+        Assert.Equal([(thrown, connectionHandle)], errors);
+        Assert.Equal(0, Count("waitingExchanges"));
+        Assert.Equal([connectionHandle], _server.ConnectionHandles);
+        Assert.Empty(_closes);
+    }
+
+    [Fact]
+    public async Task Stops_though_a_close_listener_throws_each_connection_still_ends_its_close_told_the_throw_reported()
+    {
+        await Start();
+
+        var (_, first) = await Connect();
+        var (_, second) = await Connect();
+        var thrown = new InvalidOperationException("a close listener that throws");
+        var told = new ConcurrentQueue<string>();
+        var errors = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Close += (_, _) =>
+        {
+            throw thrown;
+        };
+        _server.Close += (_, connectionHandle) =>
+        {
+            told.Enqueue(connectionHandle);
+        };
+        _server.Error += (reason, connectionHandle) =>
+        {
+            errors.Enqueue((reason, connectionHandle));
+        };
+
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([(false, first), (false, second)], _closes);
+        Assert.Equal([first, second], told);
+        Assert.Equal([(thrown, first), (thrown, second)], errors);
+        Assert.Equal(ReadyState.Closed, _server.ReadyState);
+        Assert.Empty(_server.ConnectionHandles);
+    }
+
+    [Fact]
+    public async Task Closes_a_connection_idle_past_its_timeout_though_a_close_listener_throws_the_throw_reported()
+    {
+        await Start(new HttpTransportServerOptions { InactivityTimeout = TimeSpan.FromSeconds(2) });
+
+        var (_, connectionHandle) = await Connect();
+        var thrown = new InvalidOperationException("a close listener that throws");
+        var errors = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Close += (_, _) =>
+        {
+            throw thrown;
+        };
+        _server.Error += (reason, handle) =>
+        {
+            errors.Enqueue((reason, handle));
+        };
+
+        // out of its timer, which no call waits on
+        _time.Advance(TimeSpan.FromSeconds(2));
+
+        Assert.Equal([(false, connectionHandle)], _closes);
+        Assert.Equal([(thrown, connectionHandle)], errors);
+        Assert.Empty(_server.ConnectionHandles);
+        Assert.Equal((0, 0), (Count("connections"), Count("addresses")));
+    }
+
+    [Fact]
     public async Task Closes_a_connection_the_server_closes_cutting_the_exchange_of_a_request_it_handed_on()
     {
         await Start();

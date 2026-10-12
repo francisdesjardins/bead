@@ -12,11 +12,14 @@ import {
   generateHandle,
   ProgrammerError,
   type ITransportServerAddress,
+  type ITransportServerDefineOptions,
   type TransportServerConnectionHandle,
 } from '../transport-server';
 
 const A = generateHandle({ ip: '10.0.0.1', port: 1, type: 'WS' });
 const B = generateHandle({ ip: '10.0.0.2', port: 2, type: 'WS' });
+
+type StubDefineOptions = ITransportServerDefineOptions<{ id: string }, undefined>;
 
 /** A transport with no socket: it records its calls, and `start` waits on `gate` when one is set. */
 const createStubServer = (options?: {
@@ -28,45 +31,49 @@ const createStubServer = (options?: {
   // the stub fails its starts while this holds an error
   let startError = options?.startError;
   let register: (connectionHandle: TransportServerConnectionHandle) => void = noop;
+  let defineOptions: StubDefineOptions | undefined;
 
-  const server = createTransportServer<{ id: string }, undefined>((end, connections) => {
-    register = (connectionHandle) => {
-      connections.set(connectionHandle, {
-        address: '127.0.0.1',
-        connectionHandle,
-        lastActivity: undefined,
-        port: 1,
-        socket: { id: connectionHandle },
+  const server = createTransportServer<{ id: string }, undefined>(
+    (end, connections, given: StubDefineOptions) => {
+      defineOptions = given;
+      register = (connectionHandle) => {
+        connections.set(connectionHandle, {
+          address: '127.0.0.1',
+          connectionHandle,
+          lastActivity: undefined,
+          port: 1,
+          socket: { id: connectionHandle },
+          type: 'WS',
+        });
+      };
+
+      return {
+        defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
         type: 'WS',
-      });
-    };
-
-    return {
-      defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
-      type: 'WS',
-      close: ({ connectionHandle }) => {
-        calls.push(`close:${connectionHandle}`);
-        connections.delete(connectionHandle);
-        end.emit('close', true, connectionHandle);
-        return Promise.resolve();
-      },
-      send: (_, { connectionHandle }) => {
-        calls.push(`send:${connectionHandle}`);
-        return Promise.resolve();
-      },
-      start: ({ address, findOpenPort, port }) => {
-        calls.push('start');
-        if (startError !== undefined) {
-          return Promise.reject(startError);
-        }
-        return options?.gate ?? Promise.resolve({ address, port: findOpenPort ? 50_000 : port });
-      },
-      stop: () => {
-        calls.push('stop');
-        return options?.onStop?.() ?? Promise.resolve();
-      },
-    };
-  });
+        close: ({ connectionHandle }) => {
+          calls.push(`close:${connectionHandle}`);
+          connections.delete(connectionHandle);
+          end.emit('close', true, connectionHandle);
+          return Promise.resolve();
+        },
+        send: (_, { connectionHandle }) => {
+          calls.push(`send:${connectionHandle}`);
+          return Promise.resolve();
+        },
+        start: ({ address, findOpenPort, port }) => {
+          calls.push('start');
+          if (startError !== undefined) {
+            return Promise.reject(startError);
+          }
+          return options?.gate ?? Promise.resolve({ address, port: findOpenPort ? 50_000 : port });
+        },
+        stop: () => {
+          calls.push('stop');
+          return options?.onStop?.() ?? Promise.resolve();
+        },
+      };
+    }
+  );
 
   const recover = () => {
     startError = undefined;
@@ -74,6 +81,7 @@ const createStubServer = (options?: {
 
   return {
     calls,
+    defineOptions: defineOptions as StubDefineOptions,
     recover,
     register: (connectionHandle: TransportServerConnectionHandle) => {
       register(connectionHandle);
@@ -442,6 +450,33 @@ test.describe('createTransportServer', () => {
     await server.stop();
 
     expect(server.clients).toHaveLength(0);
+  });
+
+  test('calls each listener though one throws, reporting the throw with its connection', () => {
+    const { defineOptions, server } = createStubServer();
+    const thrown = new Error('a listener that throws');
+    const told: TransportServerConnectionHandle[] = [];
+    const reported: [Error, string][] = [];
+
+    server.on('message', () => {
+      throw thrown;
+    });
+    server.on('message', (_, connectionHandle) => {
+      told.push(connectionHandle);
+    });
+    server.on('error', (error, connectionHandle) => {
+      reported.push([error, connectionHandle]);
+    });
+
+    expect(defineOptions.tell('message', [{ data: new Uint8Array([1]) }, A])).toBe(true);
+    expect(defineOptions.tell('message', [{ data: new Uint8Array([2]) }, B])).toBe(true);
+
+    expect(told).toEqual([A, B]);
+    expect(reported).toEqual([
+      [thrown, A],
+      [thrown, B],
+    ]);
+    expect(reported[0]?.[0]).toBe(thrown);
   });
 
   test('counts the connections it holds, and gives their handles, for no one outside the process', () => {

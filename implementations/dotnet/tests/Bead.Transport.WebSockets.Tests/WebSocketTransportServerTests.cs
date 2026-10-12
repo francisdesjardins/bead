@@ -901,6 +901,80 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Keeps_a_connection_whose_connection_listener_throws_its_messages_heard_the_throw_reported_with_it()
+    {
+        var server = new WebSocketTransportServer();
+        var thrown = new InvalidOperationException("a connection listener that throws");
+        var errors = Channel.CreateUnbounded<(Exception Reason, string ConnectionHandle)>();
+
+        // before the tests' own listeners, which are told all the same
+        server.Connection += (_) =>
+        {
+            throw thrown;
+        };
+        server.Error += (reason, connectionHandle) =>
+        {
+            errors.Writer.TryWrite((reason, connectionHandle));
+        };
+        await Start(server);
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            Assert.Equal((thrown, connectionHandle), await Next(errors));
+
+            await client.SendAsync(new byte[] { 1 }, WebSocketMessageType.Binary, true, Cancelled);
+
+            var (message, heardOn) = await Next(_messages);
+
+            Assert.Equal(new byte[] { 1 }, message.Bytes.ToArray());
+            Assert.Equal(connectionHandle, heardOn);
+            Assert.Equal([connectionHandle], _server.ConnectionHandles);
+            Assert.True(_closes.Reader.Count == 0);
+            Assert.Equal(WebSocketState.Open, client.State);
+        }
+    }
+
+    [Fact]
+    public async Task Hears_the_next_message_after_a_message_listener_throws_the_throw_reported_with_its_connection()
+    {
+        var server = new WebSocketTransportServer();
+        var thrown = new InvalidOperationException("a message listener that throws");
+        var errors = Channel.CreateUnbounded<(Exception Reason, string ConnectionHandle)>();
+        var throws = 1;
+
+        // before the tests' own listeners, which are told all the same
+        server.Message += (_, _) =>
+        {
+            if (Interlocked.Exchange(ref throws, 0) == 1)
+            {
+                throw thrown;
+            }
+        };
+        server.Error += (reason, connectionHandle) =>
+        {
+            errors.Writer.TryWrite((reason, connectionHandle));
+        };
+        await Start(server);
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            await client.SendAsync(new byte[] { 1 }, WebSocketMessageType.Binary, true, Cancelled);
+            await client.SendAsync(new byte[] { 2 }, WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Equal(new byte[] { 1 }, (await Next(_messages)).Message.Bytes.ToArray());
+            Assert.Equal(new byte[] { 2 }, (await Next(_messages)).Message.Bytes.ToArray());
+            Assert.Equal((thrown, connectionHandle), await Next(errors));
+            Assert.True(errors.Reader.Count == 0);
+            Assert.Equal([connectionHandle], _server.ConnectionHandles);
+            Assert.True(_closes.Reader.Count == 0);
+        }
+    }
+
+    [Fact]
     public async Task Carries_no_credential_either_way()
     {
         var (client, connectionHandle) = await Connect();

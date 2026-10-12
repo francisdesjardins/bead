@@ -61,7 +61,7 @@ export const createWorkerTransportServer = ({
   clock,
   scope,
 }: IWorkerTransportServerOptions): WorkerTransportServer => {
-  return createTransportServer<IWorkerPortLike, undefined>((server, connections) => {
+  return createTransportServer<IWorkerPortLike, undefined>((server, connections, { tell }) => {
     let ordinal = 0;
 
     // a connection held ends: its port closes, and what it still had queued goes unheard
@@ -70,7 +70,7 @@ export const createWorkerTransportServer = ({
 
       port.close();
       connections.delete(connectionHandle);
-      server.emit(CLOSE_EVENT, true, connectionHandle);
+      tell(CLOSE_EVENT, [true, connectionHandle]);
     };
 
     // a connect: the port it carries is the connection, accepted on it
@@ -99,7 +99,7 @@ export const createWorkerTransportServer = ({
           connection.lastActivity = server.clock.Date.now();
 
           return (
-            server.emit(MESSAGE_EVENT, { credential: undefined, data }, connectionHandle), undefined
+            tell(MESSAGE_EVENT, [{ credential: undefined, data }, connectionHandle]), undefined
           );
         }
 
@@ -111,7 +111,7 @@ export const createWorkerTransportServer = ({
       port.addEventListener('message', onMessage);
       port.start();
       connections.set(connectionHandle, connection);
-      server.emit(CONNECTION_EVENT, port, undefined, connectionHandle);
+      tell(CONNECTION_EVENT, [port, undefined, connectionHandle]);
       port.postMessage(WORKER_MESSAGES.OPEN);
     };
 
