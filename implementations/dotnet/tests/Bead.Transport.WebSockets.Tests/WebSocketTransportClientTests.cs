@@ -373,15 +373,26 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Refuses_a_connect_while_its_close_is_under_way_and_connects_again_once_closed()
     {
-        await _client.Connect(Target, Cancelled);
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
 
-        var closing = _client.CloseConnection();
-
-        Assert.Equal("the transport client is already closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
         {
-            return _client.Connect(Target, Cancelled);
-        })).Message);
-        await closing.WaitAsync(Patience, Cancelled);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            // under way as long as the server's end reads nothing, whatever the machine's pace
+            var closing = _client.CloseConnection();
+
+            Assert.Equal("the transport client is already closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return _client.Connect(Target, Cancelled);
+            })).Message);
+            Assert.Equal(WebSocketMessageType.Close, (await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled)).MessageType);
+            await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+        }
 
         await _client.Connect(Target, Cancelled);
 
