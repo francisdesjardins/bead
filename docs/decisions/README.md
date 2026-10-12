@@ -76,13 +76,16 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ### Transports and relays
 
-| #                                                                                                 | Decision                                                                                             | Status   |
-| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                                                      | A listen held is not silence, and a connection without a session is its server's                     | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                            | A relay terminates each leg between two transports, and routes nothing past it                       | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                          | HTTP draws a connection by a token, and a listen holds it                                            | accepted |
-| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own | accepted |
-| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) | A transport goes on through its listener's throw, and takes nothing new once its stop began          | accepted |
+| #                                                                                                 | Decision                                                                                                                                | Status   |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                                                      | A listen held is not silence, and a connection without a session is its server's                                                        | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                            | A relay terminates each leg between two transports, and routes nothing past it                                                          | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                          | HTTP draws a connection by a token, and a listen holds it                                                                               | accepted |
+| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                                    | accepted |
+| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) | A transport goes on through its listener's throw, and takes nothing new once its stop began                                             | accepted |
+| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)           | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority | accepted |
+| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                    | A transport draws each connection's handle, and gives none twice                                                                        | accepted |
+| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)         | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII             | accepted |
 
 ### Time
 
@@ -117,7 +120,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ## Writing one
 
-The next decision is 0024. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0027. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

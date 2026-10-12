@@ -53,7 +53,7 @@ tests/
   Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled
                                 under this side's rules as a consumer compiles them
   Shared/                       what several test projects link: the test clock, the durations'
-                                helper, the JSON payloads
+                                helper, the JSON payloads, the addresses a server listens on
 ```
 
 A transport that needs a framework has a project of its own. Each transport server is a Kestrel
@@ -72,9 +72,84 @@ share.
   503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `x-forwarded-for`
   is read by one rule of its own. `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
 - **The transports** hold the same ready states on both sides, and the client reconnects alike, its
-  delay, attempts, token and tap, its router rejecting what waited on the connection replaced.
+  delay, attempts, token and tap, its router rejecting what waited on the connection replaced. A
+  server listens on `127.0.0.1` unless `Start` is given an `Address`, an IP address written bare,
+  RFC 3986's grammar and not the platform's parser's: a container, or any server another machine
+  reaches, says `0.0.0.0` or `::`, and names its hosts; a name, `[::1]`, `127.1` or `0` is an
+  `ArgumentException` as it starts. On the loopback it is secure (spec 13.4); behind a proxy on the
+  same machine that serves the network in the clear, it says `Secure = false`. Both clients race
+  the address families of a name, as RFC 8305 asks and Node's clients and the browsers do, through
+  `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a connect by `localhost` to a server on
+  one family never waits out the other's refusal; an HTTP client given a `Handler` keeps the
+  handler's behaviour.
 - **The clock** is a `TimeProvider`, named `Clock`, which every layer takes and exposes ([decision
   0011](../../docs/decisions/0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
+
+## Hosts and origins
+
+Both transport servers judge a request's host and origin alike, by spec 15.12, through
+`HttpTransportServerOptions` and `WebSocketTransportServerOptions`: `Hosts` before anything else of
+a request but its form, `Origins` on an exchange, and on a WebSocket's upgrade once its version and
+its form are a handshake's.
+
+A field value that holds a control character other than HTAB, or a character past ASCII, is
+answered 400 unmarked before anything else of the request is judged, at both transports, as HTTP
+answers a malformed field (spec 15.12): Kestrel refuses an octet that is no UTF-8 and takes a
+control character, which the transport refuses; over HTTP/2, its stream reset, `PROTOCOL_ERROR`.
+
+A request names its authority by its target when the target is in absolute-form, `http://` or
+`https://` in lower case, its `Host` judged as one field line alone, which an HTTP/1.0 request may
+leave out (RFC 9112 §3.2.2), for which both servers set Kestrel's `AllowHostHeaderOverride` and read
+the authority from the target as it came, never as Kestrel's `Uri` normalizes it; over HTTP/2, by its `:authority`, a `host` beside it
+ignored (RFC 9113 §8.3.1), which Kestrel puts in the `Host`; otherwise by its `Host`. An authority
+is a host and an optional port of 15.12's grammar, RFC 3986's narrowed: no userinfo, no
+percent-encoded octet, no `*`, `+`, `,`, `;` or `=` in a name, no `IPvFuture` literal, no colon
+without a port. Kestrel
+answers an HTTP/1.1 request without a `Host`, or with two, or with an authority that is none, 400
+before the application runs, unmarked, and resets the stream of such an HTTP/2 request,
+`PROTOCOL_ERROR`, nothing written; the transport answers alike what Kestrel reads past.
+
+Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
+address, by the request's host, its port aside: no name a browser fetches is written as an IP
+literal, and a localhost name resolves to the loopback, so a page cannot rebind its name to any of
+them. `Hosts` names the hosts it takes besides, each a host without its port, compared in any ASCII
+case as the field carries it, an IDN host in the punycode a browser sends: `["bead.example"]` takes
+`bead.example` and `bead.example:8443` alike; none and `[]` take no other. Any other host, an empty
+one and none are refused 403 `host-refused`, whatever the request, a page that rebinds its name to
+the server's address among them. So a server reached by a name names it in `Hosts`: a public one,
+one behind a proxy that keeps the `Host`, as Caddy and Traefik do by default, and a service reached
+by its in-cluster name, a docker-compose service's or a Kubernetes Service's; behind a proxy that
+writes its upstream's address, as nginx does by default, none is needed. `["*"]` takes every host,
+and so reopens what the check closes: a page that rebinds its name to the server's address is then
+its own origin.
+
+`Origins` names the origins a request may come from besides the server's own, `http://` or
+`https://` followed by the request's authority, none by default, each compared exactly, `null` among
+them taking every page that sends it. A request with no `Origin` comes from no page, and is taken.
+
+A server is refused as it is built, an `ArgumentException` naming the option and the entry, a
+`Hosts` entry with a port, an empty one, one that is no host, or `*` beside another; and an
+`Origins` entry that is `*`, since no origin wildcard exists, or neither `null` nor an origin as a
+browser serializes it (RFC 6454 §6.2): a scheme in lower case, a host, a port with no leading
+zero, nothing after; for `http`, `https`, `ws` and `wss`, the host in lower case and no default
+port.
+
+A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which `curl -i` and a
+browser's network panel show. Each refusal the server judges of its own it tells, the event
+`Refusal`, a `TransportServerRefusal` of its status, its reason, the request's authority and origin
+as they came and the client's address and port, never the target, a token or a credential: what to
+add to `Hosts` or `Origins`. The 404 that ends a listen or an exchange as its connection closes is
+told by `Close` alone. A client names the status and the reason it was refused with:
+`BeadHttpClient` and `HttpTransportClient`'s connect, and `WebSocketTransportClient`'s, through
+`CollectHttpResponseDetails`, "the server refused the upgrade: 403 host-refused"; a page's
+WebSocket reads nothing past its close, 1006, and its server's tell is then what says why.
+
+```csharp
+server.Transport.Refusal += (refusal) =>
+{
+    Console.Error.WriteLine($"refused {refusal.Status} {refusal.Reason}: authority {JsonSerializer.Serialize(refusal.Authority)}, origin {JsonSerializer.Serialize(refusal.Origin)}, from {refusal.Address}:{refusal.Port}");
+};
+```
 
 Where the platform makes the sides differ, or a difference is still open, the [support
 matrix](../../docs/support.md) has the row and its test.

@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events';
-import { generateHandle } from '../transport-server';
+import type { TransportServerConnectionHandle, TransportServerEventMap } from '../transport-server';
 import type {
   IIncomingMessageLike,
   IServerSocketLike,
   IWebSocketServerConstructor,
+  WSTransportServer,
 } from '../ws-transport-server';
 
 /**
@@ -100,10 +101,29 @@ export const createFakeWebSocketServer = (options?: {
     return { headers: {}, httpVersion: '1.1', rawHeaders: [], socket };
   };
 
-  const connect = (socket: IServerSocketLike, remotePort = 40_000) => {
+  /**
+   * A connection from `10.0.0.1`, on `remotePort`, 40,000 unless it says: the handle `server` drew
+   * for it, as its `connection` event tells it, never one the test predicts.
+   */
+  const connect = (
+    socket: IServerSocketLike,
+    { remotePort = 40_000, server }: { remotePort?: number; server: WSTransportServer }
+  ): TransportServerConnectionHandle => {
     const request = requestOf({ remoteAddress: '10.0.0.1', remotePort });
+    let drawn: TransportServerConnectionHandle | undefined;
+    const listener = (...params: TransportServerEventMap['connection']) => {
+      [, , drawn] = params;
+    };
+
+    server.on('connection', listener);
     instances.at(-1)?.emit('connection', socket, request);
-    return generateHandle({ ip: '10.0.0.1', port: remotePort, type: 'WS' });
+    server.off('connection', listener);
+
+    if (drawn === undefined) {
+      throw new Error('the transport took no connection');
+    }
+
+    return drawn;
   };
 
   /** A connection whose TCP socket was torn down before the server saw it: it reports no address. */

@@ -121,8 +121,8 @@ type SessionTimeout = 'connectionInactivityTimeout' | 'sessionInactivityTimeout'
 
 // constants
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: Handle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 const host = '127.0.0.1';
 
 const echo: IProcedure = Object.freeze({

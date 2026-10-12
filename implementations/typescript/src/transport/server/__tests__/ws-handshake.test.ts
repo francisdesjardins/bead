@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { refusalOfHandshake, WS_REFUSALS, type IHandshakeRequestLike } from '../ws-handshake';
+import {
+  refusalOfHandshake,
+  toldOfHandshake,
+  WS_REFUSALS,
+  type IHandshakeRequestLike,
+} from '../ws-handshake';
 
 // constants
 
@@ -20,15 +25,16 @@ const TAKEN = { hosts: ['bead.test'], origins: ['https://bead.example'] };
 
 /**
  * A request: the handshake's fields but those `without` names, then `fields`, in a request of
- * `method` and `httpVersion`, `GET` and `1.1` unless they say.
+ * `method` and `httpVersion`, `GET` and `1.1` unless they say, at `url`, none unless it says.
  */
 const requestOf = (
   fields: readonly (readonly [string, string])[] = [],
   {
     httpVersion = '1.1',
     method = 'GET',
+    url,
     without = [],
-  }: { httpVersion?: string; method?: string; without?: readonly string[] } = {}
+  }: { httpVersion?: string; method?: string; url?: string; without?: readonly string[] } = {}
 ): IHandshakeRequestLike => {
   const kept = HANDSHAKE.filter(([name]) => {
     return !without.includes(name.toLowerCase());
@@ -38,6 +44,7 @@ const requestOf = (
     httpVersion,
     method,
     rawHeaders: [...kept, ...fields].flat(),
+    url,
   };
 };
 
@@ -190,16 +197,43 @@ test.describe('refusalOfHandshake', () => {
       ].map(answerOf)
     ).toEqual([HOST, HOST, HOST, HOST, HOST, HOST, HOST]);
 
-    // an HTTP/1.0 request may name none, and asks no WebSocket
+    // an HTTP/1.0 request may name none, which names no host taken, and asks no WebSocket
     expect(answerOf(requestOf([], { httpVersion: '1.0', without: ['host'] }))).toEqual(
       HOST_REFUSED
     );
     expect(
       refusalOfHandshake(requestOf([], { httpVersion: '1.0', without: ['host'] }), {
-        hosts: undefined,
+        hosts: ['*'],
         origins: [],
       })?.refusal
     ).toBe(WS_REFUSALS.UPGRADE);
+  });
+
+  test('refuses first, unmarked, a field holding a control character but a tab or an octet past ASCII, whatever else the request holds', () => {
+    // in Origin, in a field it never reads, in its Host; from a host it does not take, under
+    // another method, with no upgrade
+    expect(
+      [
+        requestOf([['Origin', 'http://café.example']]),
+        requestOf([['X-Other', 'café']]),
+        requestOf([['X-Other', 'a\u0007b']]),
+        requestOf([['X-Other', 'a\u007Fb']]),
+        requestOf(
+          [
+            ['Host', 'béad.test'],
+            ['Origin', 'https://elsewhere.test'],
+          ],
+          { without: ['host'] }
+        ),
+        requestOf([['X-Other', 'café']], { method: 'POST', without: ['upgrade'] }),
+      ].map(answerOf)
+    ).toEqual(
+      Array.from({ length: 6 }, () => {
+        return HOST;
+      })
+    );
+    // a tab is taken, and the origin judged as any other
+    expect(answerOf(requestOf([['Origin', 'http://a.example\tb']]))).toEqual(ORIGIN);
   });
 
   test('refuses a host it does not take before anything else of the request is read', () => {
@@ -221,7 +255,7 @@ test.describe('refusalOfHandshake', () => {
         }),
         requestOf([...elsewhere, ['Origin', 'https://elsewhere.test']], { without: ['host'] }),
         requestOf([['Host', '']], { without: ['host'] }),
-        requestOf([['Host', 'bead.test:8080']], { without: ['host'] }),
+        requestOf([['Host', 'bead.test.']], { without: ['host'] }),
       ].map(answerOf)
     ).toEqual(
       Array.from({ length: 11 }, () => {
@@ -395,36 +429,114 @@ test.describe('refusalOfHandshake', () => {
     ).toEqual([ORIGIN, ORIGIN, ORIGIN, ORIGIN]);
   });
 
-  test('takes every host, and any origin’s page of its own, when given no hosts, but never a Host HTTP refuses', () => {
-    const answerUntold = (request: IHandshakeRequestLike) => {
-      const refusal = refusalOfHandshake(request, { hosts: undefined, origins: [] });
+  test('takes whatever its hosts the hosts every server takes and any page of its own, and refuses 403 any other host, an empty one and none, before its method and its upgrade', () => {
+    const answerGiven = (hosts: readonly string[] | undefined) => {
+      return (request: IHandshakeRequestLike) => {
+        const refusal = refusalOfHandshake(request, { hosts, origins: [] });
 
-      return refusal === undefined ? 'taken' : [refusal.status, refusal.refusal];
+        return refusal === undefined ? 'taken' : [refusal.status, refusal.refusal];
+      };
+    };
+    // a request naming `host`, with `fields` besides
+    const naming = (
+      host: string,
+      fields: readonly (readonly [string, string])[] = [],
+      {
+        method,
+        url,
+        without = [],
+      }: { method?: string; url?: string; without?: readonly string[] } = {}
+    ) => {
+      return requestOf([['Host', host], ...fields], {
+        ...(method === undefined ? {} : { method }),
+        ...(url === undefined ? {} : { url }),
+        without: ['host', ...without],
+      });
     };
 
+    for (const hosts of [undefined, [], ['bead.test']]) {
+      expect(
+        [
+          naming('localhost'),
+          naming('a.localhost:8080', [['Origin', 'http://a.localhost:8080']]),
+          naming('127.0.0.1:8080', [['Origin', 'https://127.0.0.1:8080']]),
+          naming('[::1]'),
+          // a target in absolute-form names the authority, its Host ignored but for being one
+          requestOf([['Origin', 'http://127.0.0.1:8080']], { url: 'http://127.0.0.1:8080/' }),
+          naming('bad host', [], { url: 'http://localhost/' }),
+          naming('rebind.example:8080', [['Origin', 'http://rebind.example:8080']]),
+          naming('rebind.example', [], { method: 'POST' }),
+          naming('rebind.example', [], { without: ['upgrade'] }),
+          naming('localhost.'),
+          naming(''),
+          requestOf([], { httpVersion: '1.0', without: ['host'] }),
+          naming('127.0.0.1', [], { url: 'http://rebind.example/' }),
+          // what HTTP refuses of its own, first
+          naming('a*b.test'),
+          requestOf([], { url: 'http://a%41.test/' }),
+          requestOf([], { url: 'http:///' }),
+          requestOf([], { url: 'HTTP://127.0.0.1/' }),
+          requestOf([], { url: 'ftp://127.0.0.1/' }),
+          requestOf([], { url: 'http://localhost:/' }),
+          requestOf([], { url: 'http://user@localhost/' }),
+        ].map(answerGiven(hosts)),
+        String(hosts)
+      ).toEqual([
+        ...Array.from({ length: 6 }, () => {
+          return 'taken';
+        }),
+        ...Array.from({ length: 7 }, () => {
+          return HOST_REFUSED;
+        }),
+        ...Array.from({ length: 7 }, () => {
+          return HOST;
+        }),
+      ]);
+    }
+
+    // no Host beside a target in absolute-form, as an HTTP/1.0 request may send it, its target
+    // naming the host, and its version asking no WebSocket
     expect(
       [
-        requestOf([['Host', 'elsewhere.test']], { without: ['host'] }),
-        requestOf(
-          [
-            ['Host', 'xn---bad-cpa.test'],
-            ['Origin', 'http://xn---bad-cpa.test'],
-          ],
-          { without: ['host'] }
-        ),
-        requestOf(
-          [
-            ['Host', 'elsewhere.test'],
-            ['Origin', 'https://bead.example'],
-          ],
-          { without: ['host'] }
-        ),
-        requestOf([], { without: ['host'] }),
+        requestOf([], { httpVersion: '1.0', url: 'http://127.0.0.1/', without: ['host'] }),
+        requestOf([], { httpVersion: '1.0', url: 'http://rebind.example/', without: ['host'] }),
+      ].map(answerGiven(undefined))
+    ).toEqual([UPGRADE, HOST_REFUSED]);
+
+    // every host under *, an empty one and none, which asks no WebSocket; and a page of its own
+    expect(
+      [
+        naming('rebind.example:8080', [['Origin', 'http://rebind.example:8080']]),
+        naming(''),
         requestOf([], { httpVersion: '1.0', without: ['host'] }),
-        requestOf([['Host', '[::1']], { without: ['host'] }),
-        // HTTP/2's authority is its server's
-        requestOf([], { httpVersion: '2.0', method: 'POST', without: ['host'] }),
-      ].map(answerUntold)
-    ).toEqual(['taken', 'taken', ORIGIN, HOST, UPGRADE, HOST, METHOD]);
+        naming('[::1', [], { method: 'POST' }),
+      ].map(answerGiven(['*']))
+    ).toEqual(['taken', 'taken', UPGRADE, HOST]);
+  });
+});
+
+test.describe('toldOfHandshake', () => {
+  test('tells a request’s authority, its port included, and its Origin, its lines joined by a comma and a space, as the judgement reads them, or none', () => {
+    expect(
+      [
+        requestOf([
+          ['Origin', 'http://rebind.example:8080'],
+          ['Origin', 'null'],
+        ]),
+        requestOf([['Host', 'rebind.example:8080']], { without: ['host'] }),
+        requestOf([], { url: 'http://elsewhere.test:81/' }),
+        requestOf([['Host', '']], { without: ['host'] }),
+        requestOf([], { httpVersion: '1.0', without: ['host'] }),
+        requestOf([], { without: ['host'] }),
+      ].map(toldOfHandshake)
+    ).toEqual([
+      { authority: 'bead.test', origin: 'http://rebind.example:8080, null' },
+      { authority: 'rebind.example:8080', origin: undefined },
+      { authority: 'elsewhere.test:81', origin: undefined },
+      { authority: '', origin: undefined },
+      { authority: undefined, origin: undefined },
+      // what HTTP refuses of its own, which nothing tells
+      { authority: undefined, origin: undefined },
+    ]);
   });
 });

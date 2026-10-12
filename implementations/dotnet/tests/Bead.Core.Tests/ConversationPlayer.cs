@@ -560,7 +560,7 @@ internal static class ConversationPlayer
         {
             if (!_handles.TryGetValue(name, out var handle))
             {
-                handle = $"type=WS;ip=127.0.0.1;port={50001 + _handles.Count}";
+                handle = $"type=WS;ip=127.0.0.1;port={50001 + _handles.Count};ordinal=1";
                 _handles[name] = handle;
                 _names[handle] = name;
             }

@@ -6,6 +6,7 @@ export const ERROR_EVENT = 'error';
 export const LISTEN_EVENT = 'listen';
 export const MESSAGE_EVENT = 'message';
 export const RECONNECT_EVENT = 'reconnect';
+export const REFUSAL_EVENT = 'refusal';
 
 export const TRANSPORT_HTTP = 'HTTP';
 export const TRANSPORT_WORKER = 'WORKER';
@@ -71,6 +72,7 @@ export type ERROR_EVENT = typeof ERROR_EVENT;
 export type LISTEN_EVENT = typeof LISTEN_EVENT;
 export type MESSAGE_EVENT = typeof MESSAGE_EVENT;
 export type RECONNECT_EVENT = typeof RECONNECT_EVENT;
+export type REFUSAL_EVENT = typeof REFUSAL_EVENT;
 
 export type TRANSPORT_HTTP = typeof TRANSPORT_HTTP;
 export type TRANSPORT_WORKER = typeof TRANSPORT_WORKER;

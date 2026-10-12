@@ -549,8 +549,11 @@ export const createHTTPTransportClient = (
                     drain(response);
 
                     if (response.status !== 201 || connectionToken === null) {
+                      // its status, and its reason where the server marked it (spec 15.6)
+                      const reason = response.headers.get(REFUSAL_HEADER);
+                      const status = String(response.status);
                       const refused = new ConnectError(
-                        `the server drew no connection: ${String(response.status)}`
+                        `the server drew no connection: ${reason === null ? status : `${status} ${reason}`}`
                       );
 
                       return (reject(refused), undefined);

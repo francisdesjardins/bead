@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.WebSockets;
 
 namespace Bead.Transport.WebSockets;
@@ -36,6 +37,13 @@ public sealed record WebSocketTransportClientOptions
     /// them; the system's clock when none.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// What sends its opening handshakes, one of its own when none, which races the address families
+    /// of a name (RFC 8305): the tests' way to open a socket from an address and a port of their own,
+    /// as the TypeScript side's tests give their <c>WebSocket</c>.
+    /// </summary>
+    internal HttpMessageInvoker? Invoker { get; init; }
 }
 
 /// <summary>
@@ -78,6 +86,17 @@ public sealed record WebSocketConnectOptions
 public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDisposable
 {
     // constants
+
+    // what sends every client's opening handshake: the platform's handler for a socket with no
+    // proxy, cookie, credential or certificate of its own, as a ClientWebSocket builds it, but for
+    // its connect, which races the address families of a name, as RFC 8305 asks, where the
+    // platform's tries each address in turn and waits out a family's refusal, two seconds on Windows
+    private static readonly HttpMessageInvoker Racing = new(new SocketsHttpHandler
+    {
+        ConnectCallback = HappyEyeballs.ConnectCallback,
+        PooledConnectionLifetime = TimeSpan.Zero,
+        UseCookies = false,
+    });
 
     private readonly WebSocketTransportClientOptions _options;
     private readonly TimeProvider _clock;
@@ -453,6 +472,23 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         return new Uri($"{(options.Secured ? "wss" : "ws")}://{host}:{options.Port}{path}");
     }
 
+    // what a refused upgrade is named by: its status, then its mark where it has one
+    private static string RefusalOf(ClientWebSocket socket)
+    {
+        var mark = (socket.HttpResponseHeaders ?? new Dictionary<string, IEnumerable<string>>())
+            .Where((field) =>
+            {
+                return string.Equals(field.Key, HostsAndOrigins.RefusalHeader, StringComparison.OrdinalIgnoreCase);
+            })
+            .SelectMany((field) =>
+            {
+                return field.Value;
+            })
+            .FirstOrDefault();
+
+        return mark is null ? $"{(int)socket.HttpStatusCode}" : $"{(int)socket.HttpStatusCode} {mark}";
+    }
+
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -508,6 +544,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             socket.Options.KeepAliveInterval = _options.Heartbeat;
             socket.Options.KeepAliveTimeout = _options.Heartbeat;
 
+            // a refused upgrade's status and fields, read before the socket goes
+            socket.Options.CollectHttpResponseDetails = true;
+
             foreach (var protocol in options.Protocols ?? [])
             {
                 socket.Options.AddSubProtocol(protocol);
@@ -518,11 +557,18 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
             try
             {
-                await socket.ConnectAsync(UriOf(options), linked.Token);
+                await socket.ConnectAsync(UriOf(options), _options.Invoker ?? Racing, linked.Token);
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {
                 throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"timed out after {options.Timeout.TotalMilliseconds}ms"), reason);
+            }
+            catch (WebSocketException reason) when (socket.HttpStatusCode is not (0 or HttpStatusCode.SwitchingProtocols))
+            {
+                // named by its status, and by its mark where it is a refusal of the transport's own
+                // (spec 15.6), as the platform's message, "The server returned status code…", never
+                // names the mark
+                throw new WebSocketException(reason.WebSocketErrorCode, $"the server refused the upgrade: {RefusalOf(socket)}", reason);
             }
 
             lock (_gate)

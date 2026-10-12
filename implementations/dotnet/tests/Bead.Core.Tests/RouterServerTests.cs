@@ -16,9 +16,9 @@ public sealed partial class RouterServerTests : IDisposable
 {
     // constants
 
-    private const string First = "type=WS;ip=127.0.0.1;port=50001";
-    private const string Second = "type=WS;ip=127.0.0.1;port=50002";
-    private const string Third = "type=WS;ip=127.0.0.1;port=50003";
+    private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
+    private const string Second = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
+    private const string Third = "type=WS;ip=127.0.0.1;port=50003;ordinal=1";
 
     // what a test notifies to see who is subscribed
     private const string Probe = "probe";

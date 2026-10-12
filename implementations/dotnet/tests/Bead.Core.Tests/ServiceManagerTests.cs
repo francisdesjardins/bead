@@ -12,7 +12,7 @@ public sealed class ServiceManagerTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 

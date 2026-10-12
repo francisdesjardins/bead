@@ -9,8 +9,8 @@ import {
 
 // helpers
 
-const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 
 // definition
 
@@ -206,7 +206,7 @@ test.describe('createNotificationManager', () => {
 
     notifications.clean(first);
     notifications.clean(first);
-    notifications.clean('type=WS;ip=127.0.0.1;port=1');
+    notifications.clean('type=WS;ip=127.0.0.1;port=1;ordinal=1');
 
     expect(notifications.subscriptions()).toEqual([
       { callId: 3, connectionHandle: second, procedureId: 1, serviceId: 10 },
@@ -287,7 +287,7 @@ test.describe('createNotificationManager', () => {
     expect(
       notifications.subscriptionOf(
         { procedureId: 1, serviceId: 10 },
-        { connectionHandle: 'type=WS;ip=127.0.0.1;port=1' }
+        { connectionHandle: 'type=WS;ip=127.0.0.1;port=1;ordinal=1' }
       )
     ).toBeUndefined();
   });

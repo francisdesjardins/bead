@@ -475,8 +475,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// <summary>
     /// Registers a connection of the router's own as a destination, which the relay asks by a request
     /// of the router's: the destination given, or drawn. Once that connection closes, the destination
-    /// is unreachable, whoever connects under the same handle next, until it is registered anew. A
-    /// timeout under a millisecond, or past 2³¹ − 1 ms, is an
+    /// is unreachable until it is registered anew, on another connection: no connection takes a
+    /// handle its transport gave before. A timeout under a millisecond, or past 2³¹ − 1 ms, is an
     /// <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered already, an
     /// <see cref="ArgumentException"/>.
     /// </summary>

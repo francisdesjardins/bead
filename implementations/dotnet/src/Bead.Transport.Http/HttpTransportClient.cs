@@ -9,8 +9,9 @@ namespace Bead.Transport.Http;
 public sealed record HttpTransportClientOptions
 {
     /// <summary>
-    /// What its exchanges go through; a handler of its own when none, which follows no redirect. The
-    /// tests' way, as the TypeScript side's give it a <c>fetch</c>.
+    /// What its exchanges go through; a handler of its own when none, which follows no redirect and
+    /// races the address families of a name (RFC 8305), as Node's and a browser's do; one given
+    /// keeps its own behaviour. The tests' way, as the TypeScript side's give it a <c>fetch</c>.
     /// </summary>
     public HttpMessageHandler? Handler { get; init; }
 
@@ -558,11 +559,13 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
+    // its own handler races the address families of a name, as RFC 8305 asks, where the
+    // platform's tries each address in turn
     private HttpClient NewHttp()
     {
         return _options.Handler is { } handler
             ? new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan }
-            : new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+            : new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback }) { Timeout = Timeout.InfiniteTimeSpan };
     }
 
     // a request carrying the connection's token, as each exchange after the connect does
@@ -719,7 +722,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                 if (response.StatusCode != HttpStatusCode.Created || connectionToken is null)
                 {
-                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}");
+                    // named by its status, and by its mark where it is a refusal of the transport's
+                    // own (spec 15.6)
+                    var mark = HeaderOf(response, HttpTransport.RefusalHeader) is { } refusal ? $" {refusal}" : "";
+
+                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}{mark}");
                 }
 
                 // taken where the server said it back, and nowhere else

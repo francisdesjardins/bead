@@ -29,7 +29,6 @@ import { createServer } from '../../../server/server';
 import type { IServer, IServerTransportLike } from '../../../server/types';
 import { createWSServer } from '../../../server/ws-server';
 import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
-import { TRANSPORT_WS } from '../../shared/constants';
 import {
   BODY_BYTES_BUDGET,
   createHTTPTransportServer,
@@ -44,8 +43,11 @@ import {
   type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
-import { generateHandle } from '../transport-server';
-import type { ITransportServer, TransportServerConnectionHandle } from '../types';
+import type {
+  ITransportServer,
+  ITransportServerRefusal,
+  TransportServerConnectionHandle,
+} from '../types';
 import { createWSTransportServer, HEARTBEAT } from '../ws-transport-server';
 import { createFakeWebSocketServer } from './fake-websocket-server';
 import {
@@ -68,6 +70,19 @@ interface IShaped {
   shape: keyof typeof SHAPES;
 }
 
+/**
+ * What the server's transport tells of a refusal (spec 15.1), as a case writes it: `null` for what
+ * the request names none of, and `{port}` for the port of the socket the exchange was sent on.
+ */
+interface ITold {
+  address: string | null;
+  authority: string | null;
+  origin: string | null;
+  port: string;
+  reason: string;
+  status: number;
+}
+
 /** A response a case expects: its status, its fields, and its body, envelope or batch. */
 interface IExpectation {
   batch?: (IExpected | string)[];
@@ -77,6 +92,8 @@ interface IExpectation {
   /** The exchange may be lost instead: its socket ends, reset or not, before any status line. */
   orLost?: true;
   status: number;
+  /** What the server tells of the refusal; `null` where it tells none. */
+  told?: ITold | null;
 }
 
 /** What a case expects the server to send next on a WebSocket. */
@@ -150,7 +167,9 @@ interface IReport {
 
 /** A server of the interop service, whichever its transport, as a case plays it. */
 type ServerUnderTest = AsyncDisposable &
-  IServer<IServerTransportLike, string> & { transport: Pick<ITransportServer, 'gauges' | 'start'> };
+  IServer<IServerTransportLike, string> & {
+    transport: Pick<ITransportServer, 'clients' | 'gauges' | 'on' | 'start'>;
+  };
 
 // constants
 
@@ -399,8 +418,12 @@ const serverOf = (
   );
 };
 
-/** Offers the interop service on `server`, starts it on a free port, and records what it reports. */
+/**
+ * Offers the interop service on `server`, starts it on a free port, and records what it reports
+ * and each refusal its transport tells.
+ */
 const serve = async (server: ServerUnderTest) => {
+  const refusals: ITransportServerRefusal[] = [];
   const reports: IReport[] = [];
 
   server.router.on('error', (error, connectionHandle) => {
@@ -409,19 +432,62 @@ const serve = async (server: ServerUnderTest) => {
       connectionHandle,
     });
   });
+  server.transport.on('refusal', (refusal) => {
+    refusals.push(refusal);
+  });
   offerInterop(server);
 
   const { port } = await server.transport.start({ address: HOST, findOpenPort: true });
 
-  return { port, reports };
+  return { port, refusals, reports };
 };
 
-/** Checks the response of `exchange` against `expectation`, and keeps what its fields capture. */
+/** A refusal told, in a case's terms: `null` for none, and its port as the socket's it came from. */
+const toldOf = (
+  { address, authority, origin, port, reason, status }: ITransportServerRefusal,
+  localPort: number | undefined
+): ITold => {
+  return {
+    address: address ?? null,
+    authority: authority ?? null,
+    origin: origin ?? null,
+    port: port === localPort ? '{port}' : String(port),
+    reason,
+    status,
+  };
+};
+
+/** `told` with each `{name}` its strings hold replaced by the value it names, as in a head. */
+const filledOf = (told: ITold, values: ReadonlyMap<string, string>): ITold => {
+  const fill = (text: string | null): string | null => {
+    return (
+      text?.replaceAll(/\{(\w+)\}/gu, (match, name: string) => {
+        return name === 'port' ? match : (values.get(name) ?? match);
+      }) ?? null
+    );
+  };
+
+  return {
+    ...told,
+    address: fill(told.address),
+    authority: fill(told.authority),
+    origin: fill(told.origin),
+  };
+};
+
+/**
+ * Checks the response of `exchange` against `expectation`, and keeps what its fields capture; then
+ * what the server told of it, when the case says.
+ */
 const expectResponse = async (
   { at, exchange, milliseconds }: { at: string; exchange: IExchange; milliseconds: number },
-  { expectation, values }: { expectation: IExpectation; values: Map<string, string> }
+  {
+    expectation,
+    refusals,
+    values,
+  }: { expectation: IExpectation; refusals: ITransportServerRefusal[]; values: Map<string, string> }
 ): Promise<void> => {
-  const { orLost, ...expected } = expectation;
+  const { orLost, told, ...expected } = expectation;
   const hasBody =
     expected.body !== undefined || expected.envelope !== undefined || expected.batch !== undefined;
 
@@ -464,6 +530,22 @@ const expectResponse = async (
     if (typeof expected === 'object' && expected?.capture !== undefined && value !== undefined) {
       values.set(expected.capture, value);
     }
+  }
+
+  // ! a refusal is told once written, so none told by now is none at all
+  if (told === null) {
+    expect(refusals, `${at}: the refusals told`).toEqual([]);
+  } else if (told !== undefined) {
+    await pollWithinPatience(() => {
+      return refusals.length > 0;
+    });
+
+    const refusal = refusals.shift();
+
+    expect(
+      refusal === undefined ? 'none told' : toldOf(refusal, exchange.localPort),
+      `${at}: the refusal told`
+    ).toEqual(filledOf(told, values));
   }
 };
 
@@ -569,7 +651,7 @@ test.describe('the transports', () => {
       // a ping's among them, stay on the real clock
       const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
       const server = serverOf(testCase, clock);
-      const { port, reports } = await serve(server);
+      const { port, refusals, reports } = await serve(server);
       const exchanges = new Map<string, IExchange>();
       const values = new Map([['host', `${HOST}:${String(port)}`]]);
       let isStopped = false;
@@ -582,19 +664,25 @@ test.describe('the transports', () => {
 
         return exchange;
       };
-      // the handle a WebSocket's connection has on the server: the address and port it came from
+      // the handle a WebSocket's connection has on the server: the one it holds from the port the
+      // exchange's socket came from, as the C# side finds it
       const handleOf = (on: string, at: string): TransportServerConnectionHandle => {
         const { localPort } = exchangeOf(on, at);
+        const held = server.transport.clients.find(({ port: peerPort }) => {
+          return peerPort === localPort;
+        });
 
-        if (transport !== 'websocket' || localPort === undefined) {
-          throw new Error(`${at}: the exchange ${on} names no connection of its own`);
+        if (transport !== 'websocket' || localPort === undefined || held === undefined) {
+          throw new Error(`${at}: the exchange ${on} names no connection the server holds`);
         }
 
-        return generateHandle({ ip: HOST, port: localPort, type: TRANSPORT_WS });
+        return held.connectionHandle;
       };
-      // what the server reported that its case did not expect: nothing, between steps
+      // what the server reported, or told of a refusal, that its case did not expect: nothing,
+      // between steps
       const expectNothingReported = (when: string): void => {
         expect(reports, when).toEqual([]);
+        expect(refusals, `${when}: the refusals told`).toEqual([]);
       };
 
       try {
@@ -638,7 +726,7 @@ test.describe('the transports', () => {
           if (step.expect !== undefined && 'status' in step.expect) {
             await expectResponse(
               { at, exchange: exchangeOf(step.on, at), milliseconds },
-              { expectation: step.expect, values }
+              { expectation: step.expect, refusals, values }
             );
           } else if (step.expect !== undefined) {
             await expectHeard({ at, exchange: exchangeOf(step.on, at), milliseconds }, step.expect);

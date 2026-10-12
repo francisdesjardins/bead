@@ -33,7 +33,7 @@ import {
 
 type Handle = TransportServerConnectionHandle;
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1243,7 +1243,7 @@ test.describe('createServer', () => {
 
     test('fail what a layer keeps for a connection the transport does not hold, and say why', async () => {
       const { server } = createSessionServer(forever);
-      const gone: Handle = 'type=WS;ip=127.0.0.1;port=50009';
+      const gone: Handle = 'type=WS;ip=127.0.0.1;port=50009;ordinal=1';
 
       // a timer set by hand for a connection that is not there
       server.sessions.timers.setConnectionInactivityTimeout(

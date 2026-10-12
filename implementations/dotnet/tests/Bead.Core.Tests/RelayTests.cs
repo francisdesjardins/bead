@@ -9,9 +9,9 @@ public sealed class RelayTests
 {
     // constants
 
-    private const string First = "type=WS;ip=127.0.0.1;port=50001";
+    private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
-    private const string Device = "type=WS;ip=127.0.0.1;port=50002";
+    private const string Device = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 

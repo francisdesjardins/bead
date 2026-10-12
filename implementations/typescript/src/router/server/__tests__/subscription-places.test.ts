@@ -7,8 +7,8 @@ import { createSubscriptionPlaces, type ISubscribed } from '../subscription-plac
 
 // helpers
 
-const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 
 const news = { procedureId: 5, serviceId: 2 };
 const other = { procedureId: 7, serviceId: 2 };

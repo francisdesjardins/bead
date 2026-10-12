@@ -102,7 +102,7 @@ const subscriptionOfTarget = ({
  *
  * notifications.register(
  *   { procedureId: 1, serviceId: 2 },
- *   { callId: 13, connectionHandle: 'type=WS;ip=127.0.0.1;port=50000' }
+ *   { callId: 13, connectionHandle: 'type=WS;ip=127.0.0.1;port=50000;ordinal=1' }
  * );
  */
 export const createNotificationManager = (

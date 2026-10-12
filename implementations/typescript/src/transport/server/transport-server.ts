@@ -18,8 +18,7 @@ import {
 import { isLoopbackHost } from '../shared/secure';
 import type {
   ITransportServer,
-  ITransportServerClientHandleInfo,
-  ITransportServerDrawnHandleInfo,
+  ITransportServerHandleInfo,
   ITransportServerImplementation,
   ITransportServerDefineOptions,
   TransportServerConnectionHandle,
@@ -37,6 +36,7 @@ export {
   ERROR_EVENT,
   LISTEN_EVENT,
   MESSAGE_EVENT,
+  REFUSAL_EVENT,
   TRANSPORT_HTTP,
   TRANSPORT_WS,
 } from '../shared/constants';
@@ -73,11 +73,11 @@ export type {
   ITransportServerAddress,
   ITransportServerClient,
   ITransportServerClientAware,
-  ITransportServerClientHandleInfo,
-  ITransportServerDrawnHandleInfo,
+  ITransportServerHandleInfo,
   ITransportServerImplementation,
   ITransportServerDefineOptions,
   ITransportServerOptions,
+  ITransportServerRefusal,
   ITransportServerStartOptions,
   TRANSPORT_SERVER_EVENTS,
   TransportServerConnectionHandle,
@@ -87,27 +87,27 @@ export type {
   TransportServerOnConnectionCallback,
   TransportServerOnErrorCallback,
   TransportServerOnMessageCallback,
+  TransportServerOnRefusalCallback,
   TransportServerResolvedStartOptions,
   TransportServerToldEvent,
 } from './types';
 
 // helpers
 
-/** `type=WS;ip=127.0.0.1;port=50000`: one connection, named by who is on the other end. */
-export const generateHandle = (
-  handleInfo: ITransportServerClientHandleInfo
-): TransportServerConnectionHandle => {
-  return `type=${handleInfo.type};ip=${handleInfo.ip};port=${handleInfo.port}`;
-};
-
 /**
- * `type=HTTP;ip=127.0.0.1;ordinal=7`: one connection a transport drew, named by the rank it was drawn
- * at, since the socket it came on does not outlive the exchange that drew it.
+ * `type=WS;ip=127.0.0.1;port=50000;ordinal=3`: one connection, named by who it came from, its peer's
+ * port when it has a socket of its own, and the rank its transport took it at, which no other
+ * connection of that transport shares (spec 15.1); `type=HTTP;ip=127.0.0.1;ordinal=7` without a port.
  */
-export const generateDrawnHandle = (
-  handleInfo: ITransportServerDrawnHandleInfo
-): TransportServerConnectionHandle => {
-  return `type=${handleInfo.type};ip=${handleInfo.ip};ordinal=${handleInfo.ordinal}`;
+export const generateHandle = ({
+  ip,
+  ordinal,
+  port,
+  type,
+}: ITransportServerHandleInfo): TransportServerConnectionHandle => {
+  return port === undefined
+    ? `type=${type};ip=${ip};ordinal=${ordinal}`
+    : `type=${type};ip=${ip};port=${port};ordinal=${ordinal}`;
 };
 
 // definition
@@ -123,7 +123,7 @@ export const generateDrawnHandle = (
  * @example
  * const server = createTransportServer((server, connections) => {
  *   return {
- *     defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
+ *     defaults: { address: '127.0.0.1', findOpenPort: false, port: 80 },
  *     type: 'WS',
  *     close: () => Promise.resolve(),
  *     send: () => Promise.resolve(),
@@ -154,12 +154,18 @@ export const createTransportServer = <Socket extends object, Request>(
   // each listener within a guard (spec 15.1): what one throws is reported with the connection it
   // was told of, and the transport goes on as if it returned
   const defineOptions: ITransportServerDefineOptions<Socket, Request> = {
+    isHeard: (event) => {
+      return emitter.listenerCount(event) > 0;
+    },
     tell: <K extends TransportServerToldEvent>(
       event: K,
       params: TransportServerEventMap<Socket, Request>[K]
     ) => {
-      // ! every event but `error` carries its connection's handle last
-      const connectionHandle = params[params.length - 1] as TransportServerConnectionHandle;
+      // ! every event but `error` and `refusal` carries its connection's handle last; a refusal
+      // names none, so what its listener throws is reported with the empty handle
+      const last: unknown = params.at(-1);
+      const connectionHandle =
+        typeof last === 'string' ? (last as TransportServerConnectionHandle) : '';
 
       return emitter.emitEach(event, {
         onError: (error) => {

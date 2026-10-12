@@ -8,7 +8,7 @@ public sealed class ListenerGuardTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=1";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=1;ordinal=1";
 
     // definition
 
@@ -62,5 +62,32 @@ public sealed class ListenerGuardTests
 
         Assert.Equal([$"connection {Handle}", $"close False {Handle}", "closed True False"], told);
         Assert.Equal([(thrown, Handle), (thrown, Handle), (thrown, null)], reported);
+    }
+
+    [Fact]
+    public void Reports_a_throw_of_a_listener_told_no_connection_with_the_empty_handle()
+    {
+        var reported = new List<(Exception Reason, string? ConnectionHandle)>();
+        var guard = new ListenerGuard((reason, connectionHandle) =>
+        {
+            reported.Add((reason, connectionHandle));
+        });
+        var thrown = new InvalidOperationException("a listener that throws");
+        var told = new List<TransportServerRefusal>();
+        var refusal = new TransportServerRefusal("127.0.0.1", "rebind.example:8080", null, 50_000, "host-refused", 403);
+        Action<TransportServerRefusal>? refused = null;
+
+        // a refusal names no connection: its listener's throw is reported with none, which a
+        // transport reports with the empty handle, and the listeners after it are told all the same
+        refused += (_) =>
+        {
+            throw thrown;
+        };
+        refused += told.Add;
+
+        guard.Tell(refused, refusal);
+
+        Assert.Equal([refusal], told);
+        Assert.Equal([(thrown, null)], reported);
     }
 }

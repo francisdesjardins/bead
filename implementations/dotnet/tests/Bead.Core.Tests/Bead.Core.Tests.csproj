@@ -50,5 +50,7 @@
     <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
     <!-- JSON as a service manager's accessor takes it, for the calls no generated client makes -->
     <Compile Include="../Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
+    <!-- the addresses a server listens on, and the forms it refuses, as the TypeScript side's tests hold them -->
+    <Compile Include="../Shared/Addresses.cs" Link="Addresses.cs" />
   </ItemGroup>
 </Project>

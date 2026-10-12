@@ -264,6 +264,14 @@ export interface IMessageEventLike {
   data: unknown;
 }
 
+/** The response to an upgrade refused, as `ws` hands it over: Node's. */
+export interface IUpgradeResponseLike {
+  readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  readonly statusCode?: number | undefined;
+  /** Reads its body to its end, unread, so its socket is free to go. */
+  resume?(): unknown;
+}
+
 /** The part of a WebSocket this transport touches — met by the global `WebSocket` and by `ws`. */
 export interface IWebSocketLike {
   binaryType: string;
@@ -275,6 +283,14 @@ export interface IWebSocketLike {
   close(code?: number, reason?: string): void;
   /** `ws`'s alone: a browser's socket cannot ping, and answers its server's pings by itself. */
   on?(event: 'pong', listener: () => void): unknown;
+  /**
+   * As `on`: an upgrade answered by any status but 101, its response readable (RFC 6455 §4.1),
+   * which a browser's socket never shows.
+   */
+  on?(
+    event: 'unexpected-response',
+    listener: (request: unknown, response: IUpgradeResponseLike) => void
+  ): unknown;
   /** As `on`. */
   ping?(): void;
   send(data: Data): void;

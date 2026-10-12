@@ -44,12 +44,40 @@ a connection is alive is its transport's to know.
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
 its `maxPayload` says otherwise, and closes a larger one with 1009; over the global `WebSocket`, its
 platform's bound applies. A WebSocket server judges a request at its address in the order of spec
-15.2: 400 as HTTP answers it to a `Host` missing, repeated or no host; 403 to a host not among
-`hosts`, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a request that asks no
-WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but 13, the one it
-speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among `origins`. Each
-refusal but HTTP's own is marked, its body empty, and closes its connection; an `Upgrade` listing
-`websocket` among other protocols is taken — see [HTTP](#http).
+15.2: 400 as HTTP answers it to a field holding a control character but a tab or an octet past
+ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
+403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
+request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
+13, the one it speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among
+`origins`. Each refusal but HTTP's own is marked, its body empty, closes its connection, and is
+told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
+[HTTP](#http).
+
+A server listens on `127.0.0.1` unless `start` is given an `address`, an IP address written bare, as
+RFC 3986 writes one: a container, or any server another machine reaches, says `0.0.0.0` or `::`, and
+names its hosts. A name, `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
+loopback it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
+clear, it says `secure: false`. A client that connects by `localhost` reaches it whichever family it
+tries first, Node's and the browsers' racing them (RFC 8305); another process that listens on `::1`,
+on the same port, answers a client that tries that family first. A server meant for other machines
+and given no address is refused there by the network, its connection reset or refused, never by a
+Bead refusal: no socket opens, so nothing is told.
+
+Each refusal a server judges of its own it tells, `refusal`, once written: its status, its reason,
+the request's authority and its `Origin` as they came, and the client's address and port — never
+the target, a token or a credential: what to add to `hosts` or `origins`, or who is refused. The 404
+that ends a listen or an exchange as its connection closes is told by `close`; what HTTP refuses of
+its own, unmarked, by nothing. A client names the status and the reason it was refused with, but
+over the global `WebSocket`, a page's, which reads nothing past its close, 1006. Each string a
+refusal carries is the client's, visible ASCII, spaces and tabs: a log quotes it.
+
+```ts
+server.on('refusal', ({ address, authority, origin, port, reason, status }) => {
+  console.warn(
+    `refused ${String(status)} ${reason}: authority ${JSON.stringify(authority)}, origin ${JSON.stringify(origin)}, from ${String(address)}:${String(port)}`
+  );
+});
+```
 
 ```ts
 import { WebSocketServer } from 'ws';
@@ -80,8 +108,8 @@ it goes a call whose credential it cannot: `carriesCredential`, and `isSecure`, 
 end was given, never by what a name resolves to — a client by the URL of its connect, under TLS
 (`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`, the
 host as the WHATWG URL Standard's host parser reads it: `127.0.0.1.` is on the loopback, a host
-followed by a space is not); a server, per connection, by what it listens on — a loopback host, or,
-over HTTP, a server under TLS — unless its application tells it what stands in front of it,
+followed by a space is not); a server, per connection, by what it listens on — an address in
+127.0.0.0/8 or `::1`, or, over HTTP, a server under TLS — unless its application tells it what stands in front of it,
 `secure`: `true` for TLS terminated before it, which makes each connection secure, `false` for a
 proxy that serves the network in the clear, which leaves each in the clear; a worker always, since
 it never leaves the machine.
@@ -612,9 +640,9 @@ the relay calls through, or `{ connectionHandle }`, a connection of its own it a
 and gives the destination: given, or drawn, never 0. Its `audience` is the one the destination
 verifies, as a resource is named for a token (RFC 8707); a destination registered with none takes
 no credential the relay forwards. `destinations()` lists them, for the application to publish. A
-destination on a connection dies with it: once that connection closes, it is unreachable, whoever
-connects under the same handle next, until the application unregisters it and registers the
-newcomer anew.
+destination on a connection dies with it: once that connection closes, it is unreachable until the
+application unregisters it and registers it anew, on another connection: no connection takes a
+handle its transport gave before.
 
 The relay terminates each leg. Leg A, from the requester, and leg B, to the target, each have their
 own call ids, limits and session; what crosses is the payload's bytes, undecoded, the answer, and a
@@ -677,7 +705,9 @@ bytes from `crypto` and answers 201 with them, in base64url, in `bead-connection
 exchange after presents that token, and a `DELETE` ends the connection. The router, the sessions and
 the relays see a connection, as over a socket. The connection's token names the connection and
 nothing else — no session, no credential — and is a secret that enters no handle —
-`type=HTTP;ip=…;ordinal=…` names the connection — no event and no report.
+`type=HTTP;ip=…;ordinal=…` names the connection by the rank it was drawn at, as
+`type=WS;ip=…;port=…;ordinal=…` names a WebSocket's by its peer's port and the rank it was taken
+at, so no two connections share a handle — no event and no report.
 `createHTTPTransportServer({ createServer })` takes the server's factory — `node:http`'s,
 `node:https`'s, or `node:http2`'s with `allowHTTP1` — as the WebSocket one takes `WebSocketServer`,
 and the application sets its timeouts.
@@ -705,7 +735,7 @@ before it goes. A relay that calls a destination through an HTTP client writes i
 request presenting `ELSEWHERE`, the `Authorization` leg A carried, as it came; what came beside any
 other request stays at the relay. The client is secure under `https` or to a loopback host, by the
 URL of its connect; the server under TLS — built on `node:https`'s server, or `node:http2`'s
-`createSecureServer` — or on a loopback host it listens on.
+`createSecureServer` — or on a loopback address it listens on.
 
 A client's `send` settles on the head of its answer, so a caller — a relay, say — knows whether the
 server had the envelope: a 2xx resolves, the server sending its head as it hands the request on.
@@ -725,7 +755,7 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 | 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                          |
 | 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                             |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed |
-| 403    | `host-refused`, `origin-refused`      | a host not among `hosts`, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                    |
+| 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                             |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                              |
 | 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                  |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                   |
@@ -737,17 +767,49 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
 `maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
-read at once across them all. An HTTP/1.1 request without a `Host`, and one with two `Host` fields
-or a `Host` that is no host, `uri-host` and an optional port, is answered 400 as HTTP answers it,
-unmarked, before anything else of it is read (RFC 9112 §3.2): an empty `Host` is one, and so is a
-name of invalid punycode. `hosts` names the hosts a request may name, every host when not given,
-compared in any ASCII case (RFC 9110 §4.2.3) with its `Host` as the field carries it: an IDN host is
-named in the punycode a browser sends. `origins` names the origins a request may come from besides
-the server's own, none when not given, compared exactly; a WebSocket server takes both alike,
+read at once across them all.
+
+A request names its authority by its target when the target is in absolute-form, `http://` or
+`https://` in lower case, read as it came, its `Host` judged as one field line alone, which an
+HTTP/1.0 request may leave out (RFC 9112 §3.2.2); over HTTP/2, by its `:authority`, a `host` beside
+it ignored (RFC 9113 §8.3.1); otherwise by its `Host`. An authority is a host and an optional port
+of spec 15.12's grammar, RFC 3986's narrowed: no userinfo, no percent-encoded octet, no `*`, `+`,
+`,`, `;` or `=` in a name, no `IPvFuture` literal, no colon without a port. An HTTP/1.1 request without a `Host`,
+and one with two `Host` fields or an authority that is none, is answered 400 as HTTP answers it,
+unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its stream is reset,
+`PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and so is a name of
+invalid punycode. So is a request answered whose field holds a control character but a tab, or an
+octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of every field
+defined since, and Node's parser answers the first itself.
+
+Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
+address, by the request's host, its port aside: no name a browser fetches is written as an IP
+literal, and a localhost name resolves to the loopback, so a page cannot rebind its name to any of
+them. `hosts` names the hosts it takes besides, each a host without its port, compared in any ASCII
+case (RFC 9110 §4.2.3) as the field carries it, an IDN host in the punycode a browser sends:
+`hosts: ['bead.example']` takes `bead.example` and `bead.example:8443` alike. Any other host, an
+empty one and none are refused 403 `host-refused`, whatever the request, a page that rebinds its
+name to the server's address among them. So a server reached by a name names it in `hosts`: a public
+one, one behind a proxy that keeps the `Host`, as Caddy and Traefik do by default, and a service
+reached by its in-cluster name, a docker-compose service's or a Kubernetes Service's; behind a proxy
+that writes its upstream's address, as nginx does by default, none is needed. `hosts: ['*']` takes
+every host, and so reopens what the check closes: a page that rebinds its name to the server's
+address is then its own origin. An entry with a port, an empty one, one that is no host, or `*`
+beside another throws a `ProgrammerError` as the transport is built; so does an `origins` entry that
+is `*`, since no origin wildcard exists, or that is neither `null` nor an origin as a browser
+serializes it. A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which
+`curl -i` and a browser's network panel show; by the HTTP client, "the server drew no connection:
+403 host-refused", and the WebSocket client over `ws`, "the server refused the upgrade: 403
+host-refused", each in its `ConnectError`; and by the
+server's `refusal`, which names the authority to add to `hosts`. A page's WebSocket sees its close
+alone, 1006.
+
+`origins` names the origins a request may come from besides the server's own, none when not given,
+compared exactly; a WebSocket server takes both alike,
 `hosts` on any request at its address, `origins` on an upgrade, after its version and its form. Any
 client that sends an `Origin` is judged by it, a browser's page or not: it gets in by sending none,
 by sending the server's own, or by being named in `origins`. The server's own is `http://` or
-`https://` followed by the request's `Host`, compared in any ASCII case, the field read as the
+`https://` followed by the request's authority, compared in any ASCII case, the field read as the
 serialized origin it carries (RFC 6454 §6.2), never parsed as a URL: a browser writes both from one
 URL alike, and a client that writes a default port, a path or another form on one side alone is
 refused. Any other `Origin` is none of its own, whatever host it names: `null`, an extension's, a

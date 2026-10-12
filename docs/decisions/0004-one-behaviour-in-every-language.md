@@ -307,7 +307,9 @@ pairs, two today and six with a third language.
 
 **No side decides by default.** What one language could add on its own waits for the others, or for
 a decision that brings it to all of them; what a platform cannot do at all stays a row of the
-matrix, never a silent fork.
+matrix, never a silent fork. Where every side keeps to what one platform can do and a standard
+allows more, that leveling is a row of the matrix's ["Leveled down"](../support.md#leveled-down),
+to lift when the platform can.
 
 **What lands with this revision**, in one change: the spec's sections 14 and 15 naming the files
 that check them, section 15's table of the transport's bounds and the forwarded address of section
@@ -421,7 +423,9 @@ the twins.
 The order of an HTTP exchange's refusals, stated as both sides play it, a `Content-Length` read as
 its number; the TypeScript side's reader of a JSON name that holds an escape; where each stock
 `proto` library reads what protobuf refuses, four open rows; and a server's hosts by default and two
-WebSocket sockets taken as one, two points open in section 15.13 for the security pass. Each part's
+WebSocket sockets taken as one, two points open in section 15.13 for the security pass, which
+[0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) and
+[0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md) close. Each part's
 own text is in [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md),
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md) and
 [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md).

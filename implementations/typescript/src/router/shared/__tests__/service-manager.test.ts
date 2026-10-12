@@ -85,7 +85,7 @@ const echo: IProcedure = {
 };
 /** A request's header, as the router hands it over. */
 const header: IRequestHeader = { callId: 7, kind: 0x10, procedureId: 1, serviceId: 2 };
-const connectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
+const connectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
 
 /** A request as its router hands it to a resolver: on `header`, carrying `payload`. */
 const propsOf = (

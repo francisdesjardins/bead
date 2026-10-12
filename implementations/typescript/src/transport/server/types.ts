@@ -7,6 +7,7 @@ import type {
   CONNECTION_EVENT,
   ERROR_EVENT,
   MESSAGE_EVENT,
+  REFUSAL_EVENT,
   TRANSPORTS,
 } from '../shared/constants';
 import type {
@@ -41,24 +42,48 @@ export interface ITransportServerClient {
   type: TRANSPORTS;
 }
 
+/**
+ * A refusal its transport judged of its own (spec 15.1): a request refused as it arrived, or whose
+ * body it refused as it came, marked in `bead-refusal` — never the 404 that ends an exchange or a
+ * listen already taken as its connection closes, which `close` tells, nor what HTTP refuses of its
+ * own, unmarked. It carries nothing else of the request: neither its target, nor a connection's
+ * token, nor a credential, nor any other field; and it names no connection, a refusal being a
+ * request's. Each string is visible ASCII, spaces and tabs, as the client wrote it: a listener that
+ * logs one quotes it.
+ */
+export interface ITransportServerRefusal {
+  /**
+   * The client's address, as `clients` reports one (spec 15.12): behind a proxy the transport
+   * trusts, the last it forwarded; `undefined` for a socket already gone.
+   */
+  address: string | undefined;
+  /**
+   * The request's authority as it came, its port included: its absolute-form target's, else its
+   * `Host`; `''` for an empty `Host`, `undefined` when it names none.
+   */
+  authority: string | undefined;
+  /** Its `Origin` as it came, its field lines joined by `, `; `undefined` when it sends none. */
+  origin: string | undefined;
+  /** The client's port, as `clients` reports one: behind a proxy, its connection's. */
+  port: number;
+  /** The mark it was refused with, its `bead-refusal`: `host-refused`, `busy`… */
+  reason: string;
+  status: number;
+}
+
 /** One connection with its socket, as a transport registers it. */
 export interface ITransportServerClientAware<Socket> extends ITransportServerClient {
   socket: Socket;
 }
 
-export interface ITransportServerClientHandleInfo {
-  ip: string;
-  port: number;
-  type: TRANSPORTS;
-}
-
 /**
- * A connection with no address of its own — one a transport draws, one a worker takes — named by who
- * it came from and the rank it came at.
+ * What names a connection a transport holds (spec 15.1): its type, who it came from, its peer's port
+ * when it comes on a socket of its own, and the rank its transport took it at, which none shares.
  */
-export interface ITransportServerDrawnHandleInfo {
+export interface ITransportServerHandleInfo {
   ip: string;
   ordinal: number;
+  port?: number | undefined;
   type: TRANSPORTS;
 }
 
@@ -71,7 +96,12 @@ export interface ITransportServerOptions {
 }
 
 export interface ITransportServerStartOptions {
-  /** The address to listen on. */
+  /**
+   * An IP address, bare, as RFC 3986 writes one (spec 15.12): `127.0.0.1`, the loopback, by
+   * default; `0.0.0.0` or `::` for every interface, which a container needs. A name, a bracketed
+   * or zoned address, an IPv4-mapped one or a form outside the grammar, `127.1` or `0` among them,
+   * is a {@link ProgrammerError} as the start begins, ending CLOSED. A worker's listens on none.
+   */
   address?: string | undefined;
   /** Lets the system pick a free port, which `start` then reports; `port` is ignored. */
   findOpenPort?: boolean | undefined;
@@ -107,8 +137,8 @@ export interface ITransportServer<
   /**
    * Whether a connection is secure (spec 13.4): as its application says what stands in front of
    * the server, when it says, whatever the server listens on; otherwise by what the server listens
-   * on, never by what a name resolves to — under TLS, on a loopback host, or never leaving the
-   * machine, as a worker.
+   * on, never by what a name resolves to — under TLS, on the loopback, 127.0.0.0/8 or `::1`, or
+   * never leaving the machine, as a worker.
    */
   isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
   emit<K extends TRANSPORT_SERVER_EVENTS>(
@@ -175,7 +205,7 @@ export interface ITransportServerImplementation<Socket = unknown> {
   readonly clock?: IClock | undefined;
   /**
    * Whether it is secure whatever it listens on: under TLS, or never leaving the machine, as a
-   * worker; when not, it is so on a loopback host alone.
+   * worker; when not, it is so on a loopback address alone.
    */
   readonly isSecure?: boolean | undefined;
   /**
@@ -199,9 +229,15 @@ export interface ITransportServerImplementation<Socket = unknown> {
 /** What {@link createTransportServer} gives its transport beside the server and its registry. */
 export interface ITransportServerDefineOptions<Socket = unknown, Request = unknown> {
   /**
+   * Whether `event` has a listener now: what a transport builds for its listeners alone, a
+   * refusal's record, it builds once this holds.
+   */
+  readonly isHeard: (event: TransportServerToldEvent) => boolean;
+  /**
    * Calls each listener of `event` but `error` within a guard (spec 15.1): what one throws is
-   * reported through `error`, with the connection `params` ends with, and the listeners after it
-   * are called all the same. Returns whether `event` had any.
+   * reported through `error`, with the connection `params` ends with — the empty handle for a
+   * refusal, which names none — and the listeners after it are called all the same. Returns
+   * whether `event` had any.
    */
   readonly tell: <K extends TransportServerToldEvent>(
     event: K,
@@ -212,14 +248,17 @@ export interface ITransportServerDefineOptions<Socket = unknown, Request = unkno
 // types
 
 /**
- * `type=WS;ip=127.0.0.1;port=50000`, a connection named by who is on the other end, which
- * {@link generateHandle} makes; or `type=HTTP;ip=127.0.0.1;ordinal=7`, one a transport that keeps no
- * connection draws, named by the rank it was drawn at, which {@link generateDrawnHandle} makes. A
- * handle is never a secret: it names a connection in reports and events, and no token enters it.
+ * What names a connection its transport holds (spec 15.1), which {@link generateHandle} writes:
+ * `type=WS;ip=127.0.0.1;port=50000;ordinal=3`, one on a socket of its own, by its peer's port and
+ * the rank its transport took it at; `type=HTTP;ip=127.0.0.1;ordinal=7`, one a transport draws, or a
+ * worker takes, by its rank alone. A transport gives none twice, so no two connections it holds
+ * share one, two sockets from one address and port among them. Its form is this implementation's,
+ * written for a reader of a trace: an application compares a handle whole. A handle is never a
+ * secret: it names a connection in reports and events, and no token enters it.
  */
 export type TransportServerConnectionHandle =
   | `type=${TRANSPORTS};ip=${string};ordinal=${number}`
-  | `type=${TRANSPORTS};ip=${string};port=${number}`;
+  | `type=${TRANSPORTS};ip=${string};port=${number};ordinal=${number}`;
 
 /** The connections by handle: what a transport registers each one in and removes it from. */
 export type TransportServerConnections<Socket> = Map<
@@ -243,7 +282,7 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
   /**
    * What went wrong on a connection, or what a listener of its events threw, which changes nothing
    * the server does; when it ends the connection, its `close` follows. An empty handle is the
-   * server's own error.
+   * server's own error, or what a `refusal` listener threw, which no connection was told with.
    */
   error: [error: Error, connectionHandle: TransportServerConnectionHandle | ''];
   /**
@@ -254,6 +293,11 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
   listen: [isHeld: boolean, connectionHandle: TransportServerConnectionHandle];
   /** An envelope, and the credential carried beside it: over HTTP alone, with a request. */
   message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
+  /**
+   * Each refusal the transport judged of its own, once written: what to add to `hosts` or
+   * `origins`, or who is refused. A worker's never refuses.
+   */
+  refusal: [refusal: ITransportServerRefusal];
 };
 
 /** The events a server emits, named by the table that types them. */
@@ -270,6 +314,9 @@ export type TransportServerOnConnectionCallback<
 export type TransportServerOnErrorCallback = EmitterListener<TransportServerEventMap[ERROR_EVENT]>;
 export type TransportServerOnMessageCallback = EmitterListener<
   TransportServerEventMap[MESSAGE_EVENT]
+>;
+export type TransportServerOnRefusalCallback = EmitterListener<
+  TransportServerEventMap[REFUSAL_EVENT]
 >;
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -306,6 +353,8 @@ export interface IIncomingMessageLike {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
   };
+  /** Its target, which names its authority when it is in absolute-form. */
+  readonly url?: string | undefined;
 }
 
 /** The socket of a request the transport answers itself, raw: a `CONNECT`'s, or an upgrade's. */
@@ -363,11 +412,19 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   heartbeat?: number | undefined;
   /**
-   * The hosts — `Host` — a request at the server's address may name; any other is refused 403,
+   * The hosts a request at the server's address may name besides those every server takes —
+   * `localhost`, a name under `.localhost`, an IP literal — by its authority: its absolute-form
+   * target's, else its `Host` (spec 15.12). Any other, an empty one and none are refused 403,
    * whatever the request, before anything else of it is read, which a page that rebinds its name to
-   * this server's address cannot pass. Compared ASCII case-insensitively, in the form the field
-   * carries, an IDN host in punycode. Every host, when not given. A `Host` missing, repeated or no
-   * host is answered 400 before it, as HTTP answers it (RFC 9112 §3.2).
+   * this server's address cannot pass: a server a browser, a proxy that keeps `Host`, or a service
+   * reaches by a name names it here. Each entry is a host without its port, compared by the
+   * request's host on any port, ASCII case-insensitively, an IDN host in punycode. `[]`, or none, is
+   * those every server takes alone; `['*']` takes every host, and so reopens the rebinding the
+   * check closes. An entry with a port, an empty one, one that is no host, or `*` beside another is
+   * a {@link ProgrammerError} as the server is built. A refusal is told on the wire, to a client
+   * over `ws`, and by the server's `refusal`; a page's WebSocket reads nothing of it but its close.
+   * A `Host` missing, repeated or no host is answered 400 before it, as HTTP answers it (RFC 9112
+   * §3.2).
    */
   hosts?: readonly string[] | undefined;
   /**
@@ -378,17 +435,19 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
   maxPayload?: number | undefined;
   /**
    * The origins an upgrade that sends an `Origin` may come from, besides the server's own —
-   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly,
+   * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly,
    * checked on the upgrade, after its version and its form; any other is refused 403, since no
    * same-origin policy guards an upgrade. `null` among them takes every upgrade that sends it; one
-   * with no `Origin` comes from anywhere. None, when not given.
+   * with no `Origin` comes from anywhere. None, when not given. Each entry is `null` or an origin as
+   * a browser serializes it (RFC 6454 §6.2): `*`, which no origin is, and any other are a
+   * {@link ProgrammerError} as the server is built.
    */
   origins?: readonly string[] | undefined;
   /**
    * What stands in front of it, which it cannot tell (spec 13.4): `true` for TLS terminated before
    * it, which makes each connection secure; `false` for a proxy that serves the network in the
    * clear, which leaves each in the clear, a loopback listener among them. When not given, a
-   * connection is secure as the server listens on a loopback host alone.
+   * connection is secure as the server listens on a loopback address alone.
    */
   secure?: boolean | undefined;
   /** `ws`'s `WebSocketServer`: there is no global one to default to. */
@@ -453,6 +512,8 @@ export interface IHTTPResponseLike {
   /** Sends the head now; HTTP/2's has it, though its type says nothing of it. */
   flushHeaders?(): void;
   on(event: 'close' | 'finish', listener: () => void): unknown;
+  /** HTTP/2's stream, which a malformed request's reset closes with its error code. */
+  readonly stream?: { close(code?: number): void } | undefined;
   write(chunk: Uint8Array): unknown;
   writeHead(statusCode: number, headers?: Record<string, string>): unknown;
 }
@@ -499,11 +560,18 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   exchangeTimeout?: number | undefined;
   /**
-   * The hosts — `Host`, or HTTP/2's `:authority` — a request may name; any other is refused 403
+   * The hosts a request may name besides those every server takes — `localhost`, a name under
+   * `.localhost`, an IP literal — by its authority: its absolute-form target's, else over HTTP/2 its
+   * `:authority`, else its `Host` (spec 15.12). Any other, an empty one and none are refused 403
    * before anything else is read, which a page that rebinds its name to this server's address
-   * cannot pass. Compared ASCII case-insensitively, in the form the field carries, an IDN host in
-   * punycode. Every host, when not given. An HTTP/1.1 request without a `Host`, with two, or with one
-   * that is no host is answered 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2).
+   * cannot pass: a server a browser, a proxy that keeps `Host`, or a service reaches by a name names
+   * it here. Each entry is a host without its port, compared by the request's host on any port,
+   * ASCII case-insensitively, an IDN host in punycode. `[]`, or none, is those every server takes
+   * alone; `['*']` takes every host, and so reopens the rebinding the check closes. An entry with a
+   * port, an empty one, one that is no host, or `*` beside another is a {@link ProgrammerError} as
+   * the server is built. A refusal is told on the wire, to an HTTP client, and by the server's
+   * `refusal`. An HTTP/1.1 request without a `Host`, with two, or with an authority that is no host is answered
+   * 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2); over HTTP/2, its stream is reset.
    */
   hosts?: readonly string[] | undefined;
   /**
@@ -551,10 +619,12 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   maximumWaitingExchanges?: number | undefined;
   /**
    * The origins an exchange that sends an `Origin` may come from, besides the server's own —
-   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly; any
-   * other is refused 403. `null` among them takes every exchange that sends it; one with no `Origin`
-   * comes from anywhere. It serves a proxy that rewrites the host: a page of another origin also
-   * needs CORS, which the transport does not answer yet. None, when not given.
+   * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly;
+   * any other is refused 403. `null` among them takes every exchange that sends it; one with no
+   * `Origin` comes from anywhere. It serves a proxy that rewrites the host: a page of another origin
+   * also needs CORS, which the transport does not answer yet. None, when not given. Each entry is
+   * `null` or an origin as a browser serializes it (RFC 6454 §6.2): `*`, which no origin is, and any
+   * other are a {@link ProgrammerError} as the server is built.
    */
   origins?: readonly string[] | undefined;
   /** The path the transport answers on; anything else is 404. Defaults to {@link PATHNAME}. */
@@ -564,7 +634,7 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * it, which makes each connection secure; `false` for a proxy that serves the network in the
    * clear, which leaves each in the clear, a loopback listener or a server of its own under TLS
    * among them. When not given, a connection is secure as the server is under TLS or listens on a
-   * loopback host.
+   * loopback address.
    */
   secure?: boolean | undefined;
 }

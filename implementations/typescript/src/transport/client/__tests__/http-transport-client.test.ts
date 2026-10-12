@@ -13,7 +13,12 @@ import {
   ReadyStateError,
   TimeoutError,
 } from '../../shared/errors';
-import { createTestClock, tcpSocketsClosed, timersUntil } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  reachedByLocalhost,
+  tcpSocketsClosed,
+  timersUntil,
+} from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -680,6 +685,30 @@ test.describe('createHTTPTransportClient', () => {
     await expect(connecting).rejects.toThrow(
       new ConnectError('the server drew no connection: 503')
     );
+
+    // a refusal the server marked is named by its status and its reason; a gateway's, unmarked,
+    // by its status alone
+    for (const [answer, message] of [
+      [
+        { headers: { [REFUSAL_HEADER]: 'busy' }, status: 503 },
+        'the server drew no connection: 503 busy',
+      ],
+      [
+        { headers: { [REFUSAL_HEADER]: 'host-refused' }, status: 403 },
+        'the server drew no connection: 403 host-refused',
+      ],
+      [{ status: 502 }, 'the server drew no connection: 502'],
+    ] as const) {
+      const named = createFakeFetch();
+      const naming = createHTTPTransportClient({ isListening: false, fetch: named.fetch }).connect({
+        host,
+        port: 80,
+      });
+
+      named.calls[0]?.answer(answer);
+
+      await expect(naming).rejects.toThrow(new ConnectError(message));
+    }
 
     // a token without its 201, or a 201 without its token, draws nothing
     for (const answer of [
@@ -1431,5 +1460,39 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     expect([fake.calls.length, fake.calls[0]?.init.headers[LISTEN_HEADER]]).toEqual([1, undefined]);
     await client.disconnect({ isQuick: true });
+  });
+});
+
+test.describe('createHTTPTransportClient, by a name', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
+    for (const address of await reachedByLocalhost()) {
+      const server = createHTTPTransportServer({
+        createServer: (listener) => {
+          return createServer(listener);
+        },
+      });
+      const { port } = await server.start({ address, findOpenPort: true });
+      const client = createHTTPTransportClient({ isListening: false });
+
+      try {
+        const began = performance.now();
+
+        await client.connect({ host: 'localhost', port });
+
+        // the families raced, as RFC 8305 asks: no wait on the one that is refused
+        expect([address, client.isOpen(), performance.now() - began < 1_500]).toEqual([
+          address,
+          true,
+          true,
+        ]);
+        await client.disconnect();
+      } finally {
+        await server.stop();
+      }
+    }
   });
 });

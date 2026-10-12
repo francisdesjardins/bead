@@ -158,7 +158,7 @@ const createConnections = () => {
   const sent = new Map<TransportServerConnectionHandle, ISent[]>();
   const handleOf = (name: string): TransportServerConnectionHandle => {
     const port = 50_001 + handles.size;
-    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port}` as const);
+    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port};ordinal=1` as const);
 
     handles.set(name, handle);
 

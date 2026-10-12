@@ -1,3 +1,5 @@
+import { ADDRCONFIG } from 'node:dns';
+import { lookup } from 'node:dns/promises';
 import { once } from 'node:events';
 import { expect } from '@playwright/test';
 import { createClock } from '@sinonjs/fake-timers';
@@ -281,6 +283,21 @@ export const spyIntervals = () => {
       globalThis.clearInterval = realClear;
     },
   };
+};
+
+/**
+ * The loopback addresses a client reaches by `localhost` here, as the C# side's `Addresses` reads
+ * them: `::1` only where the name resolves to it under `ADDRCONFIG`, as a connect resolves it, which
+ * a host or a container with no IPv6 address configured drops.
+ */
+export const reachedByLocalhost = async (): Promise<string[]> => {
+  const resolved = await lookup('localhost', { all: true, hints: ADDRCONFIG });
+
+  return resolved.some(({ address }) => {
+    return address === '::1';
+  })
+    ? ['127.0.0.1', '::1']
+    : ['127.0.0.1'];
 };
 
 /**

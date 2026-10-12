@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Threading.Channels;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -1257,15 +1258,40 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
+    public async Task Connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alone_whichever_it_is()
+    {
+        var connects = new List<(string Address, TimeSpan Took)>();
+
+        foreach (var address in Addresses.ReachedByLocalhost())
+        {
+            await using var server = new HttpTransportServer();
+            var port = (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Port;
+            await using var client = new HttpTransportClient(NotListening);
+            var started = TimeProvider.System.GetTimestamp();
+
+            await client.Connect(new HttpConnectOptions { Host = "localhost", Port = port }, Cancelled).WaitAsync(Patience, Cancelled);
+            connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
+            Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
+        }
+
+        // the families raced: neither waits out the other's refusal, two seconds on Windows
+        Assert.All(connects, (connect) =>
+        {
+            Assert.True(connect.Took < TimeSpan.FromSeconds(1.5), $"{connect.Address}: {connect.Took}");
+        });
+    }
+
+    [Fact]
     public async Task Refuses_to_connect_where_no_connection_is_drawn_and_lets_go_of_one_drawn_as_it_gave_up()
     {
         using var refused = new Fetch();
         await using var client = new HttpTransportClient(NotListening with { Handler = refused });
         var connecting = client.Connect(new HttpConnectOptions { Host = "::1", Pathname = "api", Port = 8_080, Secured = true }, Cancelled);
 
-        (await refused.CallOf(0)).Answer(new Answer { Status = 503 });
+        // named by its status and its mark, a refusal of the transport's own
+        (await refused.CallOf(0)).Answer(new Answer { Status = 503, Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = "busy" } });
 
-        Assert.Equal("the server drew no connection: 503", (await Assert.ThrowsAsync<HttpRequestException>(() =>
+        Assert.Equal("the server drew no connection: 503 busy", (await Assert.ThrowsAsync<HttpRequestException>(() =>
         {
             return connecting.WaitAsync(Patience, Cancelled);
         })).Message);
