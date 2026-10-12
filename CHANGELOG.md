@@ -106,6 +106,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript side compiles under a consumer's `strict` without `exactOptionalPropertyTypes`:
+  the WebSocket client's heartbeat guards the methods it calls by their value, which narrows them
+  under either setting, where TS2722 refused its call.
 - A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
   deletes it, so nothing reaches origin before that push.
 
