@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `.claude/workflows/bead-release-documents.js`: a release brings to itself every document that
+  states what holds and where Bead goes — the records, the spec and its companion, the READMEs, the
+  matrix, `CLAUDE.md` — what landed in the present and what is ahead kept ahead, the spec moving in
+  form alone, records regrouped, renamed or renumbered where that reads clearer, every citation moved
+  with them; `tools/release.mjs prepare` lists it among what a release owes by hand.
+
+### Changed
+
+- A record's number names one decision within a release: between two releases, records may be
+  renumbered, and the release's CHANGELOG section maps the old numbers to the new.
+
 ## [0.3.0] - 2026-10-12
 
 ### Added
