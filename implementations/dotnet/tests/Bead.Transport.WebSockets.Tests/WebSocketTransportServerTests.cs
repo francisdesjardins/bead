@@ -52,6 +52,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     private readonly Channel<(TransportMessage Message, string ConnectionHandle)> _messages = Channel.CreateUnbounded<(TransportMessage, string)>();
     private readonly Channel<(bool WasClean, string ConnectionHandle)> _closes = Channel.CreateUnbounded<(bool, string)>();
     private readonly Channel<string> _connections = Channel.CreateUnbounded<string>();
+    private readonly ConcurrentQueue<TransportServerRefusal> _refusals = new();
     private WebSocketTransportServer _server = new();
     private int _port;
 
@@ -106,6 +107,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             _connections.Writer.TryWrite(connectionHandle);
         };
+        _server.Refusal += _refusals.Enqueue;
         _port = (await _server.Start(start, Cancelled)).Port;
     }
 
@@ -191,6 +193,37 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             return client.ConnectionHandle;
         })];
+    }
+
+    // what the server answers a head on a socket of its own, written one octet per character
+    // (ISO-8859-1), read until it lets go of the socket: its status and its mark, and the socket's
+    // own port, which the server sees as its peer's
+    private async Task<(int Status, string? Reason, int Port)> RefusalOf(string head)
+    {
+        using var tcp = await OpenTcp();
+        var stream = tcp.GetStream();
+        var answer = new MemoryStream();
+
+        await stream.WriteAsync(Encoding.Latin1.GetBytes(head), Cancelled);
+        await stream.CopyToAsync(answer, Cancelled).WaitAsync(Patience, Cancelled);
+
+        var lines = Encoding.ASCII.GetString(answer.ToArray()).Split("\r\n");
+        var reason = lines.FirstOrDefault((line) =>
+        {
+            return line.StartsWith("bead-refusal:", StringComparison.OrdinalIgnoreCase);
+        })?["bead-refusal:".Length..].Trim();
+
+        return (int.Parse(lines[0].Split(' ')[1], CultureInfo.InvariantCulture), reason, ((IPEndPoint)tcp.Client.LocalEndPoint!).Port);
+    }
+
+    private static async Task Until(Func<bool> condition)
+    {
+        var watch = Stopwatch.StartNew();
+
+        while (!condition() && watch.Elapsed < Patience)
+        {
+            await Task.Delay(5, Cancelled);
+        }
     }
 
     private static byte[] UpgradeRequest()
@@ -481,6 +514,152 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal((true, false), await SecuredBy(null));
         Assert.Equal((true, true), await SecuredBy(true));
         Assert.Equal((false, false), await SecuredBy(false));
+    }
+
+    [Fact]
+    public async Task Tells_each_refusal_it_judges_of_its_own_its_status_its_reason_the_request_s_authority_and_origin_and_the_client_s_address_and_port_and_nothing_of_HTTP_s_own_at_its_address()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var own = $"127.0.0.1:{_port}";
+        var upgrade = $"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\n";
+
+        // a host not taken, its Origin in two field lines joined by ", "; an absolute-form target's
+        // authority over its Host; an empty Host; HTTP/1.0 naming none; a method, an upgrade, a
+        // version, a form and an origin refused
+        var refused = new[]
+        {
+            await RefusalOf($"GET / HTTP/1.1\r\nHost: rebind.example:8080\r\nOrigin: http://a.example\r\nOrigin: http://b.example\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
+            await RefusalOf($"GET http://rebind.example/ HTTP/1.1\r\nHost: {own}\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
+            await RefusalOf($"GET / HTTP/1.1\r\nHost: \r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
+            await RefusalOf("GET / HTTP/1.0\r\n\r\n"),
+            await RefusalOf($"PUT / HTTP/1.1\r\nHost: {own}\r\nContent-Length: 0\r\n\r\n"),
+            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\n\r\n"),
+            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\n{upgrade}Sec-WebSocket-Version: 8\r\n\r\n"),
+            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n"),
+            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\nOrigin: http://elsewhere.example\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
+        };
+
+        // what HTTP refuses of its own, unmarked: an authority that is no host, two Host lines
+        Assert.Equal((400, null), ((await RefusalOf($"GET / HTTP/1.1\r\nHost: localhost:\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n")).Status, (await RefusalOf("GET / HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n\r\n")).Reason));
+
+        // and, its stop under way, an upgrade it would take: 503, busy
+        var (client, _) = await Connect();
+        (int Status, string? Reason, int Port)? busy = null;
+
+        _server.Close += (_, _) =>
+        {
+            busy ??= RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n").GetAwaiter().GetResult();
+        };
+
+        using (client)
+        {
+            var answering = AnswerClose(client);
+
+            await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
+            await answering.WaitAsync(Patience, Cancelled);
+        }
+
+        Assert.Equal((503, WebSocketRefusals.Busy), (busy!.Value.Status, busy.Value.Reason));
+        await Until(() =>
+        {
+            return _refusals.Count == refused.Length + 1;
+        });
+
+        Assert.Equal(
+            [
+                new("127.0.0.1", "rebind.example:8080", "http://a.example, http://b.example", refused[0].Port, WebSocketRefusals.Host, 403),
+                new("127.0.0.1", "rebind.example", null, refused[1].Port, WebSocketRefusals.Host, 403),
+                new("127.0.0.1", "", null, refused[2].Port, WebSocketRefusals.Host, 403),
+                new("127.0.0.1", null, null, refused[3].Port, WebSocketRefusals.Host, 403),
+                new("127.0.0.1", own, null, refused[4].Port, WebSocketRefusals.Method, 405),
+                new("127.0.0.1", own, null, refused[5].Port, WebSocketRefusals.Upgrade, 426),
+                new("127.0.0.1", own, null, refused[6].Port, WebSocketRefusals.Version, 426),
+                new("127.0.0.1", own, null, refused[7].Port, WebSocketRefusals.Malformed, 400),
+                new("127.0.0.1", own, "http://elsewhere.example", refused[8].Port, WebSocketRefusals.Origin, 403),
+                new TransportServerRefusal("127.0.0.1", own, null, busy.Value.Port, WebSocketRefusals.Busy, 503),
+            ],
+            _refusals);
+    }
+
+    [Fact]
+    public async Task Answers_400_unmarked_a_field_holding_a_control_character_other_than_HTAB_or_an_octet_past_ASCII_and_tells_nothing()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var own = $"127.0.0.1:{_port}";
+        var answers = new List<(string Field, (int, string?) Answer)>();
+
+        // each an upgrade but for one field: the octets as given, each character one octet, or, for
+        // the UTF-8 one, its two
+        foreach (var field in new[]
+        {
+            "Origin: http://a.example\u001b[2J",
+            "X-Other: a\u0007b",
+            "Origin: http://a.example\u007f",
+            "Origin: http://caf\u00e9.example",
+            "X-Other: caf\u00e9",
+            $"X-Other: {Encoding.Latin1.GetString(Encoding.UTF8.GetBytes("caf\u00e9"))}",
+        })
+        {
+            var (status, reason, _) = await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\n{field}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n");
+
+            answers.Add((field, (status, reason)));
+        }
+
+        Assert.All(answers, (answer) =>
+        {
+            Assert.Equal((answer.Field, (400, (string?)null)), answer);
+        });
+
+        // a tab is taken: the origin is refused as it is, and told
+        var (tabbed, tabbedReason, _) = await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\nOrigin: http://a.example\tb\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n");
+
+        Assert.Equal((403, WebSocketRefusals.Origin), (tabbed, tabbedReason));
+        await Until(() =>
+        {
+            return !_refusals.IsEmpty;
+        });
+        Assert.Equal(["http://a.example\tb"], _refusals.Select((refusal) =>
+        {
+            return refusal.Origin;
+        }));
+    }
+
+    [Fact]
+    public async Task Refuses_as_it_would_though_a_refusal_listener_throws_the_throw_reported_with_no_connection()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var thrown = new InvalidOperationException("a refusal listener that throws");
+        var errors = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Refusal += (_) =>
+        {
+            throw thrown;
+        };
+        _server.Error += (reason, connectionHandle) =>
+        {
+            errors.Enqueue((reason, connectionHandle));
+        };
+
+        Assert.Equal(403, (await AnswerOf(("rebind.example", null))).Status);
+        await Until(() =>
+        {
+            return !errors.IsEmpty;
+        });
+
+        // the listener before it told, the throw reported with the empty handle, and the next
+        // upgrade taken as ever
+        Assert.Equal([WebSocketRefusals.Host], _refusals.Select((refusal) =>
+        {
+            return refusal.Reason;
+        }));
+        Assert.Equal([(thrown, "")], errors);
+
+        var (client, _) = await Connect();
+
+        client.Dispose();
     }
 
     [Fact]

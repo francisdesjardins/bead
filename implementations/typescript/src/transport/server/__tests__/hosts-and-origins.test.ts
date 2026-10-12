@@ -3,12 +3,15 @@ import { ProgrammerError } from '../../shared/errors';
 import {
   assertHosts,
   assertOrigins,
+  hasVisibleFields,
   HOST_REFUSAL,
   isIPv4Address,
   isTakenHost,
   isTakenOrigin,
+  isVisibleField,
   isWellFormedHost,
   ORIGIN_REFUSAL,
+  originOf,
 } from '../hosts-and-origins';
 
 // constants
@@ -417,6 +420,43 @@ test.describe('hosts and origins', () => {
         return isTakenOrigin(origin, { host, origins: [] });
       })
     ).toEqual([]);
+  });
+
+  test('isVisibleField takes HTAB, SP and visible ASCII, and refuses each other control character, DEL and 0x80 to 0xFF', () => {
+    const visible = Array.from({ length: 0x7f - 0x20 }, (_, index) => {
+      return String.fromCodePoint(0x20 + index);
+    });
+    const others = [
+      ...Array.from({ length: 0x20 }, (_, code) => {
+        return String.fromCodePoint(code);
+      }).filter((character) => {
+        return character !== '\t';
+      }),
+      ...Array.from({ length: 0x100 - 0x7f }, (_, index) => {
+        return String.fromCodePoint(0x7f + index);
+      }),
+    ];
+
+    expect(isVisibleField(`	${visible.join('')}`)).toBe(true);
+    expect(isVisibleField('')).toBe(true);
+    expect(
+      others.filter((character) => {
+        return isVisibleField(`a${character}b`);
+      })
+    ).toEqual([]);
+    expect(others).toHaveLength(31 + 129);
+    // a request's fields as they came, each name before its value: the values alone are read
+    expect(hasVisibleFields(['Host', 'bead.test', 'Origin', 'http://a.example\tb'])).toBe(true);
+    expect(hasVisibleFields(['Host', 'bead.test', 'x-other', 'café'])).toBe(false);
+    expect(hasVisibleFields(['Host', 'bead.test', 'x-other', 'a\u0007b'])).toBe(false);
+  });
+
+  test('tells a request’s Origin as it came, its field lines joined by a comma and a space, and none when it sends none', () => {
+    expect([originOf([]), originOf(['null']), originOf(['https://a.test', 'null'])]).toEqual([
+      undefined,
+      'null',
+      'https://a.test, null',
+    ]);
   });
 
   test('folds ASCII alone: a host that differs past ASCII is another', () => {

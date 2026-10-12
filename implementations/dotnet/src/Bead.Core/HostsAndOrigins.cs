@@ -284,6 +284,36 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
+    /// Whether a field's value is one a server reads (spec 15.12): HTAB, SP and visible ASCII alone,
+    /// so never a control character but HTAB, DEL among them, which RFC 9110 §5.5 calls invalid, nor
+    /// a character past ASCII, which it keeps out of every field defined since, and which no origin
+    /// holds (RFC 6454 §6.2).
+    /// </summary>
+    public static bool IsVisibleField(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        return value.All((character) =>
+        {
+            return character == '\t' || character is >= ' ' and <= '~';
+        });
+    }
+
+    /// <summary>
+    /// A request's <c>Origin</c> as a refusal tells it (spec 15.1): its field lines as they came,
+    /// joined by <c>", "</c> (RFC 9110 §5.3); none when it sends none.
+    /// </summary>
+    public static string? OriginOf(IReadOnlyList<string?> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        return lines.Count == 0 ? null : string.Join(", ", lines.Select((line) =>
+        {
+            return line ?? "";
+        }));
+    }
+
+    /// <summary>
     /// Whether every server takes a host, whatever its hosts: <c>localhost</c>, a name that ends in
     /// <c>.localhost</c>, in any ASCII case, which a resolver answers with the loopback itself
     /// (RFC 6761 §6.3); an IPv6 address in brackets, and an IPv4 address, which no name a browser

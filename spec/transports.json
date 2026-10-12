@@ -2,11 +2,11 @@
   "$schema": "schemas/transports.schema.json",
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
-    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. close drops that socket.",
-    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
+    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII; body, its octets in hexadecimal. close drops that socket.",
+    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
     "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
-    "Before each send and close, and at the end, the server reported nothing a case does not expect.",
+    "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
     "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
@@ -259,7 +259,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "even"
         }
@@ -318,7 +326,15 @@
             "fields": {
               "bead-refusal": "call-waiting"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 409,
+              "reason": "call-waiting",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "again"
         }
@@ -434,7 +450,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "twice"
         },
@@ -851,7 +875,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "connect"
         }
@@ -877,7 +909,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "none"
         },
@@ -894,7 +934,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "bad"
         }
@@ -920,7 +968,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "gone"
         }
@@ -945,7 +1001,15 @@
             "fields": {
               "bead-refusal": "path-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "elsewhere"
         }
@@ -972,7 +1036,15 @@
               "bead-refusal": "method-refused",
               "allow": "GET, POST, DELETE"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "put"
         }
@@ -1017,7 +1089,15 @@
             "fields": {
               "bead-refusal": "type-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 415,
+              "reason": "type-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "plain"
         },
@@ -1034,7 +1114,15 @@
             "fields": {
               "bead-refusal": "type-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 415,
+              "reason": "type-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "encoded"
         }
@@ -1083,7 +1171,15 @@
             "fields": {
               "bead-refusal": "too-large"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 413,
+              "reason": "too-large",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "large"
         }
@@ -1113,7 +1209,15 @@
             "fields": {
               "bead-refusal": "origin-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "origin"
         },
@@ -1130,7 +1234,15 @@
             "fields": {
               "bead-refusal": "path-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "path"
         },
@@ -1148,7 +1260,15 @@
               "bead-refusal": "method-refused",
               "allow": "GET, POST, DELETE"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "method"
         },
@@ -1165,7 +1285,15 @@
             "fields": {
               "bead-refusal": "type-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 415,
+              "reason": "type-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "typed"
         },
@@ -1182,7 +1310,15 @@
             "fields": {
               "bead-refusal": "type-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 415,
+              "reason": "type-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "untyped"
         },
@@ -1199,7 +1335,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "form"
         },
@@ -1216,7 +1360,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "unknown"
         },
@@ -1252,7 +1404,15 @@
             "fields": {
               "bead-refusal": "type-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 415,
+              "reason": "type-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "both"
         },
@@ -1269,7 +1429,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "large"
         },
@@ -1285,7 +1453,15 @@
             "fields": {
               "bead-refusal": "listen-undeclared"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 409,
+              "reason": "listen-undeclared",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "listen"
         },
@@ -1427,7 +1603,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "connect"
         },
@@ -1513,7 +1697,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example:8080",
+              "origin": "http://rebind.example:8080",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "rebound"
         },
@@ -1529,7 +1721,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "localhost.example",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "suffixed"
         },
@@ -1545,7 +1745,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "localhost.",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "final"
         },
@@ -1561,7 +1769,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "127.1",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "short"
         },
@@ -1577,7 +1793,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "0177.0.0.1",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "octal"
         },
@@ -1593,7 +1817,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "127.0.0.1.example",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "named"
         },
@@ -1609,7 +1841,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "empty"
         },
@@ -1625,7 +1865,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": null,
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "none"
         }
@@ -1716,7 +1964,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "other"
         }
@@ -1756,7 +2012,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "bead.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "other"
         }
@@ -1844,7 +2108,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example:8080",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "rebound"
         },
@@ -2005,6 +2277,120 @@
       ]
     },
     {
+      "name": "a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken",
+      "clauses": [
+        "15.1",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: http://a.example\u001b[2J\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "escape"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "escape"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-other: a\u0007b\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "bell"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "bell"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: http://a.example\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "delete"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: http://café.example\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "latin"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "latin"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-other: café\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "other"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: http://a.example\tb\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "tab"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "http://a.example\tb",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "tab"
+        }
+      ]
+    },
+    {
       "name": "an exchange from an origin the server does not take is refused 403, marked",
       "clauses": [
         "15.6.5",
@@ -2024,7 +2410,15 @@
             "fields": {
               "bead-refusal": "origin-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "connect"
         }
@@ -2193,7 +2587,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "xn--a",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "invalid"
         },
@@ -2209,7 +2611,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "xn--a.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "dotted"
         },
@@ -2225,7 +2635,15 @@
             "fields": {
               "bead-refusal": "host-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "xn---bad-cpa.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "hyphen"
         }
@@ -2251,7 +2669,15 @@
             "fields": {
               "bead-refusal": "origin-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "null",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "null"
         },
@@ -2267,7 +2693,15 @@
             "fields": {
               "bead-refusal": "origin-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "blob:http://{host}/",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "blob"
         },
@@ -2283,7 +2717,15 @@
             "fields": {
               "bead-refusal": "origin-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "ws://{host}",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "ws"
         },
@@ -2299,7 +2741,15 @@
             "fields": {
               "bead-refusal": "origin-refused"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "http://{host}/",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "path"
         },
@@ -2388,7 +2838,15 @@
                 "shape": "delay-seconds"
               }
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "second"
         }
@@ -2434,7 +2892,15 @@
                 "shape": "delay-seconds"
               }
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "192.0.2.1",
+              "port": "{port}"
+            }
           },
           "on": "second"
         },
@@ -2508,7 +2974,15 @@
             "fields": {
               "bead-refusal": "busy"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 429,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "more"
         }
@@ -2568,9 +3042,82 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a listen held is answered the 404 marked connection-unknown as its client closes the connection, and no refusal is told",
+      "clauses": [
+        "15.1",
+        "15.7"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "until": {
+            "gauge": "listens",
+            "is": 1
+          }
+        },
+        {
+          "send": {
+            "head": "DELETE /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": "",
+            "told": null
+          },
+          "on": "listen"
         }
       ]
     },
@@ -2973,7 +3520,15 @@
             "fields": {
               "bead-refusal": "listen-undeclared"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 409,
+              "reason": "listen-undeclared",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "listen"
         }
@@ -3018,7 +3573,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "none"
         },
@@ -3034,7 +3597,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "past"
         }
@@ -3079,7 +3650,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "empty"
         },
@@ -3095,7 +3674,15 @@
             "fields": {
               "bead-refusal": "malformed"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "sixteen"
         },
@@ -3220,7 +3807,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -3518,7 +4113,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -3594,7 +4197,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -3654,7 +4265,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -3748,7 +4367,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -3860,7 +4487,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -3982,7 +4617,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -4547,7 +5190,15 @@
             "fields": {
               "bead-refusal": "connection-unknown"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "connection-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "after"
         }
@@ -4930,6 +5581,123 @@
       ]
     },
     {
+      "name": "a request at a WebSocket's address with a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken",
+      "clauses": [
+        "15.1",
+        "15.2",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://a.example\u001b[2J\r\n\r\n"
+          },
+          "on": "escape"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "escape"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-other: a\u0007b\r\n\r\n"
+          },
+          "on": "bell"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "bell"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://a.example\r\n\r\n"
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "delete"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://café.example\r\n\r\n"
+          },
+          "on": "latin"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "latin"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-other: café\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "other"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://a.example\tb\r\n\r\n"
+          },
+          "on": "tab"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "http://a.example\tb",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "tab"
+        }
+      ]
+    },
+    {
       "name": "a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form",
       "clauses": [
         "15.2",
@@ -4957,7 +5725,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "elsewhere"
         },
@@ -4975,7 +5751,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "post"
         },
@@ -4993,7 +5777,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "plain"
         },
@@ -5011,7 +5803,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "short"
         },
@@ -5029,7 +5829,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "eighth"
         },
@@ -5090,7 +5898,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "elsewhere"
         },
@@ -5424,7 +6240,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "xn--a",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "invalid"
         },
@@ -5442,7 +6266,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "xn--a.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "dotted"
         },
@@ -5460,7 +6292,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "xn---bad-cpa.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "hyphen"
         }
@@ -5553,7 +6393,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example:8080",
+              "origin": "http://rebind.example:8080",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "rebound"
         },
@@ -5571,7 +6419,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "post"
         },
@@ -5589,7 +6445,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "localhost.",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "final"
         },
@@ -5607,7 +6471,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "empty"
         },
@@ -5625,7 +6497,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": null,
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "old"
         }
@@ -5707,7 +6587,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "other"
         }
@@ -5774,7 +6662,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": null,
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "old"
         }
@@ -5819,7 +6715,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example:8080",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "rebound"
         },
@@ -5864,7 +6768,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "null",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "null"
         },
@@ -5882,7 +6794,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "blob:http://{host}/",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "blob"
         },
@@ -5900,7 +6820,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "ws://{host}",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "ws"
         },
@@ -5918,7 +6846,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "http://{host}/",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "path"
         },
@@ -6026,7 +6962,15 @@
               "x-content-type-options": "nosniff",
               "allow": "GET, HEAD"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "post"
         },
@@ -6045,7 +6989,15 @@
               "x-content-type-options": "nosniff",
               "allow": "GET, HEAD"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "put"
         },
@@ -6064,7 +7016,15 @@
               "x-content-type-options": "nosniff",
               "allow": "GET, HEAD"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "options"
         },
@@ -6083,7 +7043,15 @@
               "x-content-type-options": "nosniff",
               "allow": "GET, HEAD"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "delete"
         },
@@ -6102,7 +7070,15 @@
               "x-content-type-options": "nosniff",
               "allow": "GET, HEAD"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "eighth"
         }
@@ -6131,7 +7107,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "plain"
         },
@@ -6150,7 +7134,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "unupgraded"
         },
@@ -6169,7 +7161,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "h2c"
         },
@@ -6188,7 +7188,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "versioned"
         },
@@ -6207,7 +7215,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "unconnected"
         },
@@ -6226,7 +7242,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "kept"
         },
@@ -6245,7 +7269,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "eighth"
         },
@@ -6264,7 +7296,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "head"
         },
@@ -6283,7 +7323,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "plainhead"
         },
@@ -6302,7 +7350,15 @@
               "x-content-type-options": "nosniff",
               "upgrade": "websocket"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "upgrade-required",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "old"
         }
@@ -6332,7 +7388,15 @@
               "upgrade": "websocket",
               "sec-websocket-version": "13"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "version-refused",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "foreign"
         },
@@ -6352,7 +7416,15 @@
               "upgrade": "websocket",
               "sec-websocket-version": "13"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "version-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "none"
         },
@@ -6372,7 +7444,15 @@
               "upgrade": "websocket",
               "sec-websocket-version": "13"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "version-refused",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "seventh"
         },
@@ -6392,7 +7472,15 @@
               "upgrade": "websocket",
               "sec-websocket-version": "13"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "version-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "unversioned"
         },
@@ -6412,7 +7500,15 @@
               "upgrade": "websocket",
               "sec-websocket-version": "13"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "version-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "padded"
         },
@@ -6432,7 +7528,15 @@
               "upgrade": "websocket",
               "sec-websocket-version": "13"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "version-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "listed"
         },
@@ -6452,7 +7556,15 @@
               "upgrade": "websocket",
               "sec-websocket-version": "13"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 426,
+              "reason": "version-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "short"
         }
@@ -6480,7 +7592,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "keyless"
         },
@@ -6498,7 +7618,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "unencoded"
         },
@@ -6516,7 +7644,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "short"
         },
@@ -6534,7 +7670,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "keys"
         },
@@ -6552,7 +7696,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "spaced"
         },
@@ -6570,7 +7722,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "versions"
         },
@@ -6588,7 +7748,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "protocols"
         },
@@ -6607,7 +7775,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "content"
         },
@@ -6626,7 +7802,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "chunked"
         },
@@ -6644,7 +7828,15 @@
               "cache-control": "no-store",
               "x-content-type-options": "nosniff"
             },
-            "body": ""
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "foreign"
         }

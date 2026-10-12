@@ -96,6 +96,7 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
       'CONNECTION_EVENT',
       'ERROR_EVENT',
       'MESSAGE_EVENT',
+      'REFUSAL_EVENT',
       'TRANSPORT_HTTP',
       'TRANSPORT_WS',
     ] as const) {
@@ -476,6 +477,39 @@ test.describe('createTransportServer', () => {
       [thrown, B],
     ]);
     expect(reported[0]?.[0]).toBe(thrown);
+  });
+
+  test('reports a throw of a listener told no connection with the empty handle', () => {
+    const { defineOptions, server } = createStubServer();
+    const thrown = new Error('a refusal listener that throws');
+    const refusal = {
+      address: '127.0.0.1',
+      authority: 'rebind.example',
+      origin: undefined,
+      port: 50_000,
+      reason: 'host-refused',
+      status: 403,
+    };
+    const told: unknown[] = [];
+    const reported: [Error, string][] = [];
+
+    expect(defineOptions.isHeard('refusal')).toBe(false);
+
+    server.on('refusal', () => {
+      throw thrown;
+    });
+    server.on('refusal', (given) => {
+      told.push(given);
+    });
+    server.on('error', (error, connectionHandle) => {
+      reported.push([error, connectionHandle]);
+    });
+
+    expect(defineOptions.isHeard('refusal')).toBe(true);
+    expect(defineOptions.tell('refusal', [refusal])).toBe(true);
+
+    expect(told).toEqual([refusal]);
+    expect(reported).toEqual([[thrown, '']]);
   });
 
   test('counts the connections it holds, and gives their handles, for no one outside the process', () => {

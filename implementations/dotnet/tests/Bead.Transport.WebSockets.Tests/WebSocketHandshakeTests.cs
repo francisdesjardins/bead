@@ -256,6 +256,59 @@ public sealed class WebSocketHandshakeTests
     }
 
     [Fact]
+    public void Refuses_first_unmarked_a_field_holding_a_control_character_but_a_tab_or_an_octet_past_ASCII_whatever_else_the_request_holds()
+    {
+        // in Origin, in a field it never reads, in its Host; from a host it does not take, under
+        // another method, with no upgrade
+        (string Start, string[] Fields)[] requests =
+        [
+            ("GET / HTTP/1.1", ["Origin: http://café.example"]),
+            ("GET / HTTP/1.1", ["X-Other: café"]),
+            ("GET / HTTP/1.1", ["X-Other: a\u0007b"]),
+            ("GET / HTTP/1.1", ["X-Other: a\u007fb"]),
+            ("GET / HTTP/1.1", ["Host: béad.test", "Origin: https://elsewhere.test"]),
+            ("POST / HTTP/1.1", ["X-Other: café", "Upgrade"]),
+        ];
+
+        Assert.All(requests, (request) =>
+        {
+            Assert.Equal((400, (string?)null), AnswerOf(request, Options));
+        });
+
+        // a tab is taken, and the origin judged as any other
+        Assert.Equal((403, WebSocketRefusals.Origin), AnswerOf(("GET / HTTP/1.1", ["Origin: http://a.example\tb"]), Options));
+    }
+
+    [Fact]
+    public void Tells_a_request_s_authority_its_port_included_and_its_Origin_its_lines_joined_by_a_comma_and_a_space_as_the_judgement_reads_them_or_none()
+    {
+        // an empty Host the wire's cases hold, a request no socket carries dropping an empty field
+        (string Start, string[] Fields)[] requests =
+        [
+            ("GET / HTTP/1.1", ["Origin: http://rebind.example:8080", "Origin: null"]),
+            ("GET / HTTP/1.1", ["Host: rebind.example:8080"]),
+            ("GET http://elsewhere.test:81/ HTTP/1.1", []),
+            ("GET / HTTP/1.0", ["Host"]),
+            ("GET / HTTP/1.1", ["Host"]),
+        ];
+        (string?, string?)[] told =
+        [
+            ("bead.test", "http://rebind.example:8080, null"),
+            ("rebind.example:8080", null),
+            ("elsewhere.test:81", null),
+            (null, null),
+
+            // what HTTP refuses of its own, which nothing tells
+            (null, null),
+        ];
+
+        Assert.Equal(told, requests.Select((request) =>
+        {
+            return WebSocketHandshake.ToldOf(RequestOf(request.Start, request.Fields));
+        }));
+    }
+
+    [Fact]
     public void Takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own_and_refuses_403_any_other_host_an_empty_one_and_none_before_its_method_and_its_upgrade()
     {
         WebSocketTransportServerOptions[] every = [new(), new() { Hosts = [] }, new() { Hosts = ["bead.test"] }];

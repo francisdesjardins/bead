@@ -3,6 +3,7 @@ peer of the test's own sends it in exact octets."""
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 
@@ -121,6 +122,12 @@ def listen(on, after, wait):
 
 def expect(on, status, *, fields=None, **body):
     return {'expect': {'status': status, **({'fields': fields} if fields else {}), **body}, 'on': on}
+
+
+def gone(on):
+    """The 404 marked connection-unknown that ends an exchange or a listen already taken as its
+    connection closes (spec 15.7): a close, which the server tells as one, never a refusal."""
+    return expect(on, 404, fields={'bead-refusal': 'connection-unknown'}, body='', told=None)
 
 
 def refused(on, status, refusal, fields=None):
@@ -347,6 +354,16 @@ cases = [
          connect('parameter', host='a;b=c'), unmarked('parameter'),
          connect('future', host='[v1.bead]'), unmarked('future'),
          connect('portless', host='localhost:'), unmarked('portless')]),
+    # 15.12: a field value of visible ASCII, spaces and tabs, as both HTTP servers take it; the
+    # escape, the bell and the delete are the octets themselves, and so is the one past ASCII
+    ('a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
+     ['15.1', '15.12'], None, [
+         connect('escape', fields={'origin': 'http://a.example\x1b[2J'}), unmarked('escape'),
+         connect('bell', fields={'x-other': 'a\x07b'}), unmarked('bell'),
+         connect('delete', fields={'origin': 'http://a.example\x7f'}), unmarked('delete'),
+         connect('latin', fields={'origin': 'http://café.example'}), unmarked('latin'),
+         connect('other', fields={'x-other': 'café'}), unmarked('other'),
+         connect('tab', fields={'origin': 'http://a.example	b'}), refused('tab', 403, 'origin-refused')]),
     ('an exchange from an origin the server does not take is refused 403, marked', ['15.6.5', '15.12'], None, [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
@@ -396,6 +413,11 @@ cases = [
     ('a DELETE ends its connection, and an exchange after it is refused 404', ['15.4', '15.6.3', '15.6.6'], None, [
         *drawn(), send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body=''),
         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
+    ('a listen held is answered the 404 marked connection-unknown as its client closes the connection, and no refusal is told',
+     ['15.1', '15.7'], None, [
+         *drawn(listening=True), listen('listen', 0, 60000), until('listens', 1),
+         send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body=''),
+         gone('listen')]),
     # 15.8 and 15.9: what the server sends of its own, to a client that listens
     ('what the server sends of its own waits, numbered, for a listen, which brings it back in a batch',
      ['15.8', '15.9', '15.6.1'], None, [
@@ -682,6 +704,14 @@ websocket = [
          asked('parameter', host='a;b=c'), unmarked('parameter'),
          asked('future', host='[v1.bead]'), unmarked('future'),
          asked('portless', host='localhost:'), unmarked('portless')]),
+    ('a request at a WebSocket\'s address with a field holding a control character other than HTAB, or an octet past ASCII, is answered 400 unmarked, in Origin and in a field the transport never reads, and no refusal is told; a tab is taken',
+     ['15.1', '15.2', '15.12'], {}, [
+         handshake('escape', {'origin': 'http://a.example\x1b[2J'}), unmarked('escape'),
+         handshake('bell', {'x-other': 'a\x07b'}), unmarked('bell'),
+         handshake('delete', {'origin': 'http://a.example\x7f'}), unmarked('delete'),
+         handshake('latin', {'origin': 'http://café.example'}), unmarked('latin'),
+         handshake('other', {'x-other': 'café'}), unmarked('other'),
+         handshake('tab', {'origin': 'http://a.example	b'}), refused('tab', 403, 'origin-refused', UPGRADE_REFUSED)]),
     # 15.2 and 15.12: a request is taken from the hosts an HTTP exchange is, whatever else it holds,
     # and an upgrade from its origins
     ('a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form',
@@ -876,15 +906,81 @@ responses = [
      204, {'bead-refusal': 'busy'}, ''),
 ]
 
+# ── What a refusal tells ────────────────────────────────────────────────────────────────────────
+
+
+def field_lines(head, name):
+    """The values of a head's field lines of that name, in their order."""
+    return [line.split(': ', 1)[1] for line in head.split('\r\n')[1:] if line.lower().startswith(name + ': ')]
+
+
+def told_of(head, status, reason, options):
+    """What a server's transport tells of a refusal it judges of its own (spec 15.1), from the
+    request it refused: the authority as it came, an absolute-form target's before its Host (spec
+    15.12); the Origin's lines joined by ", "; the client's address, the socket's, 127.0.0.1, where
+    every runner serves and connects, or behind a proxy trusted the last X-Forwarded-For entry when it
+    is an address; and its port, {port}, the local port of the socket the step sent from."""
+    target = head.split('\r\n', 1)[0].split(' ')[1]
+    hosts = field_lines(head, 'host')
+
+    if target.startswith(('http://', 'https://')):
+        authority = target.split('://', 1)[1].split('/', 1)[0]
+    elif len(hosts) > 1:
+        raise ValueError(f'a refusal told of a request with {len(hosts)} Host lines, which HTTP answers itself')
+    else:
+        authority = hosts[0] if hosts else None
+
+    origins = field_lines(head, 'origin')
+    address = '127.0.0.1'
+    forwarded = ', '.join(field_lines(head, 'x-forwarded-for')).split(',')[-1].strip()
+
+    if (options or {}).get('isProxyTrusted') and forwarded:
+        try:
+            address = str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
+
+    return {'status': status, 'reason': reason, 'authority': authority,
+            'origin': ', '.join(origins) if origins else None, 'address': address, 'port': '{port}'}
+
+
+def tell(steps, options):
+    """Gives every expect marked in bead-refusal what its server tells of it, from the request its
+    exchange sent; one that sets its own, null where nothing is told, keeps it."""
+    heads = {}
+
+    for step in steps:
+        if 'send' in step and 'head' in step['send']:
+            heads[step['on']] = step['send']['head']
+            continue
+
+        expectation = step.get('expect', {})
+        reason = expectation.get('fields', {}).get('bead-refusal')
+
+        if not isinstance(reason, str) or 'told' in expectation:
+            continue
+
+        if step['on'] not in heads:
+            raise ValueError(f'a refusal on {step["on"]!r} that no request of its own sent')
+
+        expectation['told'] = told_of(heads[step['on']], expectation['status'], reason, options)
+
+
+for _name, _clauses, _options, _steps in cases:
+    tell(_steps, _options)
+
+for _name, _clauses, _fields, _steps in websocket:
+    tell(_steps, _fields.get('options'))
+
 document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
         "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
-        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. close drops that socket.',
-        'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
+        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII; body, its octets in hexadecimal. close drops that socket.',
+        'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
         'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
-        'Before each send and close, and at the end, the server reported nothing a case does not expect.',
+        'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
         'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',

@@ -14,6 +14,7 @@ import {
   CONNECTION_EVENT,
   ERROR_EVENT,
   MESSAGE_EVENT,
+  REFUSAL_EVENT,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   TRANSPORT_WS,
 } from '../shared/constants';
@@ -40,6 +41,7 @@ import {
   type IHandshakeRefusal,
   MALFORMED_HANDSHAKE,
   refusalOfHandshake,
+  toldOfHandshake,
 } from './ws-handshake';
 
 export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
@@ -143,7 +145,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
   const decoder = new TextDecoder();
 
   return createTransportServer<IServerSocketLike, IIncomingMessageLike>(
-    (server, connections, { tell }) => {
+    (server, connections, { isHeard, tell }) => {
       let httpServer: Server | undefined;
       let webSocketServer: IWebSocketServerLike | undefined;
       // the rank of the last connection taken, across its starts: no handle is given twice
@@ -182,6 +184,33 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         return new Date(server.clock.Date.now()).toUTCString();
       };
 
+      // writes a refusal by `write`, then tells it, when it is marked, the transport's own (spec
+      // 15.1): every refusal at the address is an upgrade's, as it arrives; its record is built
+      // for a listener alone, before the write, which may close its socket
+      const refuse = (
+        request: IIncomingMessageLike,
+        { refusal: given, write }: { refusal: IHandshakeRefusal; write: () => void }
+      ): void => {
+        const { refusal: reason, status } = given;
+        const { remoteAddress, remotePort } = request.socket;
+        const refusal =
+          reason === undefined || !isHeard(REFUSAL_EVENT)
+            ? undefined
+            : {
+                address: remoteAddress === undefined ? undefined : clientAddressOf(remoteAddress),
+                ...toldOfHandshake(request),
+                port: remotePort ?? 0,
+                reason,
+                status,
+              };
+
+        write();
+
+        if (refusal !== undefined) {
+          tell(REFUSAL_EVENT, [refusal]);
+        }
+      };
+
       // a refusal written raw where no response is at hand, a `CONNECT`'s or an upgrade's ws could
       // not read, and its socket ended
       const answer = (socket: IUpgradeSocketLike, { fields, status }: IHandshakeRefusal): void => {
@@ -210,12 +239,17 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         // ! Node raises `request` for no upgrade the callback takes: one the judgement takes here is
         // one the stop refused, busy, or one Node did not read as an upgrade, malformed
         const onRequest = (request: IncomingMessage, response: ServerResponse): void => {
-          const { fields, status } =
+          const refusal =
             refusalOfHandshake(request, judged) ??
             (isStopped() ? BUSY_HANDSHAKE : MALFORMED_HANDSHAKE);
 
-          response.sendDate = false;
-          response.writeHead(status, { date: dateOf(), ...fields }).end();
+          refuse(request, {
+            refusal,
+            write: () => {
+              response.sendDate = false;
+              response.writeHead(refusal.status, { date: dateOf(), ...refusal.fields }).end();
+            },
+          });
         };
 
         // ! what the callback takes, ws takes, but for `Upgrade`: ws compares its whole value with
@@ -236,12 +270,29 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
       // a `CONNECT` keeps an event of its own, where it is refused for its host or its method
       const onConnect = (request: IncomingMessage, socket: IUpgradeSocketLike): void => {
-        answer(socket, refusalOfHandshake(request, judged) ?? MALFORMED_HANDSHAKE);
+        const refusal = refusalOfHandshake(request, judged) ?? MALFORMED_HANDSHAKE;
+
+        refuse(request, {
+          refusal,
+          write: () => {
+            answer(socket, refusal);
+          },
+        });
       };
 
       // a guard: ws reads nothing the judgement has not taken, and would refuse it 400
-      const onClientError = (_error: Error, socket: IUpgradeSocketLike): void => {
-        answer(socket, MALFORMED_HANDSHAKE);
+      const onClientError = (
+        _error: Error,
+        socket: IUpgradeSocketLike,
+        // oxlint-disable-next-line bead/options-last -- ws's own, a `wsClientError` listener's
+        request: IIncomingMessageLike
+      ): void => {
+        refuse(request, {
+          refusal: MALFORMED_HANDSHAKE,
+          write: () => {
+            answer(socket, MALFORMED_HANDSHAKE);
+          },
+        });
       };
 
       const onConnection = (socket: IServerSocketLike, request: IIncomingMessageLike): void => {

@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { refusalOfHandshake, WS_REFUSALS, type IHandshakeRequestLike } from '../ws-handshake';
+import {
+  refusalOfHandshake,
+  toldOfHandshake,
+  WS_REFUSALS,
+  type IHandshakeRequestLike,
+} from '../ws-handshake';
 
 // constants
 
@@ -202,6 +207,33 @@ test.describe('refusalOfHandshake', () => {
         origins: [],
       })?.refusal
     ).toBe(WS_REFUSALS.UPGRADE);
+  });
+
+  test('refuses first, unmarked, a field holding a control character but a tab or an octet past ASCII, whatever else the request holds', () => {
+    // in Origin, in a field it never reads, in its Host; from a host it does not take, under
+    // another method, with no upgrade
+    expect(
+      [
+        requestOf([['Origin', 'http://café.example']]),
+        requestOf([['X-Other', 'café']]),
+        requestOf([['X-Other', 'a\u0007b']]),
+        requestOf([['X-Other', 'a\u007Fb']]),
+        requestOf(
+          [
+            ['Host', 'béad.test'],
+            ['Origin', 'https://elsewhere.test'],
+          ],
+          { without: ['host'] }
+        ),
+        requestOf([['X-Other', 'café']], { method: 'POST', without: ['upgrade'] }),
+      ].map(answerOf)
+    ).toEqual(
+      Array.from({ length: 6 }, () => {
+        return HOST;
+      })
+    );
+    // a tab is taken, and the origin judged as any other
+    expect(answerOf(requestOf([['Origin', 'http://a.example\tb']]))).toEqual(ORIGIN);
   });
 
   test('refuses a host it does not take before anything else of the request is read', () => {
@@ -480,5 +512,31 @@ test.describe('refusalOfHandshake', () => {
         naming('[::1', [], { method: 'POST' }),
       ].map(answerGiven(['*']))
     ).toEqual(['taken', 'taken', UPGRADE, HOST]);
+  });
+});
+
+test.describe('toldOfHandshake', () => {
+  test('tells a request’s authority, its port included, and its Origin, its lines joined by a comma and a space, as the judgement reads them, or none', () => {
+    expect(
+      [
+        requestOf([
+          ['Origin', 'http://rebind.example:8080'],
+          ['Origin', 'null'],
+        ]),
+        requestOf([['Host', 'rebind.example:8080']], { without: ['host'] }),
+        requestOf([], { url: 'http://elsewhere.test:81/' }),
+        requestOf([['Host', '']], { without: ['host'] }),
+        requestOf([], { httpVersion: '1.0', without: ['host'] }),
+        requestOf([], { without: ['host'] }),
+      ].map(toldOfHandshake)
+    ).toEqual([
+      { authority: 'bead.test', origin: 'http://rebind.example:8080, null' },
+      { authority: 'rebind.example:8080', origin: undefined },
+      { authority: 'elsewhere.test:81', origin: undefined },
+      { authority: '', origin: undefined },
+      { authority: undefined, origin: undefined },
+      // what HTTP refuses of its own, which nothing tells
+      { authority: undefined, origin: undefined },
+    ]);
   });
 });

@@ -10,9 +10,9 @@ namespace Bead.Transport.Http.Tests;
 
 /// <summary>
 /// What a request over TLS was answered: over HTTP/2, its status and its mark, or the code its
-/// stream was reset with, nothing written; over HTTP/1.1, its status.
+/// stream was reset with, or its session ended with, nothing written; over HTTP/1.1, its status.
 /// </summary>
-internal sealed record TlsAnswer(int? Status, string? Refusal, uint? Reset);
+internal sealed record TlsAnswer(int? Status, string? Refusal, uint? Reset, uint? Ended = null);
 
 /// <summary>
 /// A socket of the tests' own over TLS, trusting the certificate given alone, which writes by hand
@@ -31,6 +31,7 @@ internal sealed class TlsWire : IAsyncDisposable
     private const byte Headers = 0x1;
     private const byte ResetStream = 0x3;
     private const byte Settings = 0x4;
+    private const byte GoAway = 0x7;
     private const byte EndStream = 0x1;
     private const byte EndHeaders = 0x4;
     private const byte Acknowledged = 0x1;
@@ -86,9 +87,9 @@ internal sealed class TlsWire : IAsyncDisposable
             Assert.True(name.Length < 127 && value.Length < 127, name);
             block.Add(0x10);
             block.Add((byte)name.Length);
-            block.AddRange(Encoding.ASCII.GetBytes(name));
+            block.AddRange(Encoding.Latin1.GetBytes(name));
             block.Add((byte)value.Length);
-            block.AddRange(Encoding.ASCII.GetBytes(value));
+            block.AddRange(Encoding.Latin1.GetBytes(value));
         }
 
         return [.. block];
@@ -148,7 +149,7 @@ internal sealed class TlsWire : IAsyncDisposable
     /// <summary>
     /// One request over HTTP/2, of the fields given after <c>:method</c>, <c>:scheme</c> and
     /// <c>:path</c>, its stream ended with its head: what its stream was answered, its status and
-    /// its mark, or its reset's code.
+    /// its mark, or the code its stream was reset with, or its session ended with before any answer.
     /// </summary>
     public async Task<TlsAnswer> Ask(IReadOnlyList<(string Name, string Value)> fields)
     {
@@ -169,6 +170,12 @@ internal sealed class TlsWire : IAsyncDisposable
             else if (stream == 1 && type == ResetStream)
             {
                 return new TlsAnswer(null, null, BinaryPrimitives.ReadUInt32BigEndian(payload));
+            }
+            else if (type == GoAway)
+            {
+                // the session ended before any answer, the stream with it: its code after the last
+                // stream id
+                return new TlsAnswer(null, null, null, BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(4)));
             }
             else if (stream == 1 && type == Headers)
             {

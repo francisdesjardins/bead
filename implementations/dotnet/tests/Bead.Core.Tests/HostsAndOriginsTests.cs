@@ -403,6 +403,38 @@ public sealed class HostsAndOriginsTests
     }
 
     [Fact]
+    public void IsVisibleField_takes_HTAB_SP_and_visible_ASCII_and_refuses_each_other_control_character_DEL_and_0x80_to_0xFF()
+    {
+        var visible = new string([.. Enumerable.Range(0x20, 0x7F - 0x20).Select((code) =>
+        {
+            return (char)code;
+        })]);
+        var others = Enumerable.Range(0, 0x20).Where((code) =>
+        {
+            return code != '\t';
+        }).Concat(Enumerable.Range(0x7F, 0x100 - 0x7F)).Select((code) =>
+        {
+            return (char)code;
+        }).ToList();
+
+        Assert.True(HostsAndOrigins.IsVisibleField($"\t{visible}"));
+        Assert.True(HostsAndOrigins.IsVisibleField(""));
+        Assert.DoesNotContain(others, (character) =>
+        {
+            return HostsAndOrigins.IsVisibleField($"a{character}b");
+        });
+        Assert.Equal(31 + 129, others.Count);
+    }
+
+    [Fact]
+    public void Tells_a_request_s_Origin_as_it_came_its_field_lines_joined_by_a_comma_and_a_space_and_none_when_it_sends_none()
+    {
+        Assert.Equal(
+            [null, "null", "https://a.test, null"],
+            [HostsAndOrigins.OriginOf([]), HostsAndOrigins.OriginOf(["null"]), HostsAndOrigins.OriginOf(["https://a.test", "null"])]);
+    }
+
+    [Fact]
     public void Takes_a_request_with_no_Origin_one_among_those_given_and_the_server_s_own_http_or_https_followed_by_its_Host_in_any_ASCII_case_nothing_parsed()
     {
         // no page, or one among those given, exactly

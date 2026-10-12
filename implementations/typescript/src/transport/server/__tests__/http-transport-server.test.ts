@@ -37,7 +37,7 @@ import {
   type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
-import type { TransportServerConnectionHandle } from '../types';
+import type { ITransportServerRefusal, TransportServerConnectionHandle } from '../types';
 import { createFakeHTTPServer } from './fake-http-server';
 import { TLS_FIXTURE } from './tls-fixture';
 
@@ -1474,6 +1474,49 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     );
     expect(connections).toEqual([]);
     expect(await answerOverHTTP2(session, { ':authority': 'localhost' })).toEqual([201, undefined]);
+  });
+
+  test('resets over HTTP/2 the stream of a request with a field holding an octet past ASCII, PROTOCOL_ERROR, and tells nothing', async () => {
+    await using started = await startSecure();
+    const { server, session } = started;
+    const told: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+
+    expect(
+      await Promise.all([
+        resetOf(session, { 'x-other': 'café' }),
+        resetOf(session, { origin: 'http://café.example' }),
+      ])
+    ).toEqual([PROTOCOL_ERROR, PROTOCOL_ERROR]);
+    expect(told).toEqual([]);
+    // a tab is taken
+    expect(await answerOverHTTP2(session, { 'x-other': 'a\tb' })).toEqual([201, undefined]);
+  });
+
+  test('takes over HTTP/2 a request with a field holding a control character but a tab, which Node’s parser drops before the transport reads the request', async () => {
+    await using started = await startSecure();
+    const { server, session } = started;
+    const told: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+
+    // ! nghttp2 drops a regular field whose value holds one, and Node gives the request without it:
+    // an Origin judged as none, where the C# side's transport resets the stream
+    expect(
+      await Promise.all([
+        answerOverHTTP2(session, { origin: 'http://a.example\u001B[2J' }),
+        answerOverHTTP2(session, { 'x-other': 'a\u0007b' }),
+      ])
+    ).toEqual([
+      [201, undefined],
+      [201, undefined],
+    ]);
+    expect(told).toEqual([]);
   });
 
   test('serves HTTP/2 and HTTP/1.1 on one port, a call over each, and closes its sessions as it stops', async () => {
@@ -2925,5 +2968,334 @@ test.describe('createHTTPTransportServer, listening', () => {
       REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
+  });
+});
+
+/** What a request written raw as `head` is answered: its status and its mark, and the port it came from. */
+const rawAnswerOf = async (port: number, head: string) => {
+  const socket = connectTcp(port, host);
+  let text = '';
+  let isClosed = false;
+
+  socket.on('data', (chunk: Buffer) => {
+    text += chunk.toString('latin1');
+  });
+  socket.on('error', () => {});
+  socket.on('close', () => {
+    isClosed = true;
+  });
+  await once(socket, 'connect');
+
+  const { localPort } = socket;
+
+  socket.write(Buffer.from(head, 'latin1'));
+  await expect
+    .poll(() => {
+      return text.includes('\r\n\r\n') || isClosed;
+    })
+    .toBe(true);
+  socket.destroy();
+
+  return {
+    answer: [
+      Number(text.split(' ')[1]),
+      new RegExp(`${REFUSAL_HEADER}: (.*)\r\n`, 'iu').exec(text)?.[1] ?? null,
+    ],
+    localPort,
+  };
+};
+
+/** A connect written raw, naming `authority`, with the field lines `fields` before its own. */
+const rawConnectOf = (authority: string, fields = '') => {
+  return (
+    `POST /bead HTTP/1.1\r\nHost: ${authority}\r\n${fields}` +
+    `Content-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
+  );
+};
+
+/** Each refusal `server` tells from now on. */
+const refusalsOf = (server: HTTPTransportServer) => {
+  const refusals: ITransportServerRefusal[] = [];
+
+  server.on('refusal', (refusal) => {
+    refusals.push(refusal);
+  });
+
+  return refusals;
+};
+
+test.describe('createHTTPTransportServer, the refusals it tells', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('tells each refusal it judges of its own, its status, its reason, the request’s authority and origin and the client’s address and port, and nothing of HTTP’s own', async () => {
+    const { connectScripted, exchangeOf, fake, server } = await startScripted({
+      hosts: ['bead.test'],
+      maximumBodyBytes: 16,
+    });
+    const refusals = refusalsOf(server);
+    // an IPv4 client an IPv6 socket carries mapped, read as itself
+    const socket = { remoteAddress: '::ffff:192.0.2.7', remotePort: 40_001 };
+    const told = (refusal: Partial<ITransportServerRefusal>) => {
+      return {
+        address: '192.0.2.7',
+        authority: 'bead.test',
+        origin: undefined,
+        port: 40_001,
+        ...refusal,
+      };
+    };
+
+    try {
+      // a host it does not take, its origin in two field lines; then one named by its target
+      fake.exchange({
+        headers: { host: 'rebind.example:8080', origin: ['http://rebind.example:8080', 'null'] },
+        socket,
+      });
+      fake.exchange({ headers: { host: 'bead.test' }, socket, url: 'http://elsewhere.test:81/' });
+      // an HTTP/1.0 request names none
+      fake.exchange({ headers: {}, httpVersion: '1.0', socket });
+      fake.exchange({ headers: { host: 'bead.test' }, socket, url: '/other' });
+      fake.exchange({ headers: { host: 'bead.test', origin: 'https://elsewhere.test' }, socket });
+      fake.exchange({ headers: { host: 'bead.test' }, method: 'PUT', socket });
+      fake.exchange({ headers: { host: 'bead.test', 'content-type': 'text/plain' }, socket });
+      // a token no connection holds, as it arrives
+      fake.exchange({
+        headers: {
+          host: 'bead.test',
+          'content-type': BEAD_MEDIA_TYPE,
+          [CONNECTION_TOKEN_HEADER]: 'A'.repeat(22),
+        },
+        socket,
+      });
+
+      // a body refused as it comes, past its bound
+      const { connectionToken } = connectScripted();
+      const large = exchangeOf(connectionToken);
+
+      fake.feed(large.request, [new Uint8Array(17)]);
+
+      // what HTTP refuses of its own, told by none: two hosts, an octet past ASCII
+      fake.exchange({ headers: { host: ['bead.test', 'bead.test'] }, socket });
+      fake.exchange({ headers: { host: 'bead.test', 'x-other': 'café' }, socket });
+      // nor what is no refusal: a connect drawn, a DELETE
+      fake.exchange({
+        headers: { [CONNECTION_TOKEN_HEADER]: connectionToken },
+        method: 'DELETE',
+        socket,
+      });
+
+      expect(refusals).toEqual([
+        told({
+          authority: 'rebind.example:8080',
+          origin: 'http://rebind.example:8080, null',
+          reason: REFUSALS.HOST,
+          status: 403,
+        }),
+        told({ authority: 'elsewhere.test:81', reason: REFUSALS.HOST, status: 403 }),
+        told({ authority: undefined, reason: REFUSALS.HOST, status: 403 }),
+        told({ reason: REFUSALS.PATH, status: 404 }),
+        told({ origin: 'https://elsewhere.test', reason: REFUSALS.ORIGIN, status: 403 }),
+        told({ reason: REFUSALS.METHOD, status: 405 }),
+        told({ reason: REFUSALS.TYPE, status: 415 }),
+        told({ reason: REFUSALS.CONNECTION_UNKNOWN, status: 404 }),
+        {
+          address: '10.0.0.1',
+          authority: 'bead.localhost',
+          origin: undefined,
+          port: 40_000,
+          reason: REFUSALS.TOO_LARGE,
+          status: 413,
+        },
+      ]);
+    } finally {
+      await server.stop();
+    }
+
+    // on the wire, the port its client's socket came from, and the address of the loopback
+    await using started = await startTransport({ isProxyTrusted: true });
+    const wire = refusalsOf(started.server);
+    const port = Number(new URL(started.url).port);
+    const { answer, localPort } = await rawAnswerOf(port, rawConnectOf('rebind.example'));
+    // behind a proxy it trusts, the address it forwarded, and the port of the proxy's connection
+    const behind = await rawAnswerOf(
+      port,
+      rawConnectOf('rebind.example', 'X-Forwarded-For: 203.0.113.9\r\n')
+    );
+
+    expect([answer, behind.answer]).toEqual([
+      [403, REFUSALS.HOST],
+      [403, REFUSALS.HOST],
+    ]);
+    expect(wire).toEqual([
+      {
+        address: host,
+        authority: 'rebind.example',
+        origin: undefined,
+        port: localPort,
+        reason: REFUSALS.HOST,
+        status: 403,
+      },
+      {
+        address: '203.0.113.9',
+        authority: 'rebind.example',
+        origin: undefined,
+        port: behind.localPort,
+        reason: REFUSALS.HOST,
+        status: 403,
+      },
+    ]);
+  });
+
+  test('tells no refusal of the 404 that ends an exchange or a listen as its connection closes, by a DELETE, a timeout, an outbox past its bound, a close and a stop', async () => {
+    const clock = createTestClock();
+    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({
+      clock,
+      exchangeTimeout: 1_000,
+      maximumOutboxBytes: 20,
+    });
+    const refusals = refusalsOf(server);
+    const ends: unknown[] = [];
+    // a listen held on a connection that listens, its end read once it ended
+    const holding = () => {
+      const drawn = connectScripted({ isListening: true });
+      const held = listenOf(drawn.connectionToken, 'wait=20000');
+
+      return {
+        ...drawn,
+        read: () => {
+          ends.push([held.response.status, held.response.headers?.[REFUSAL_HEADER]]);
+        },
+      };
+    };
+
+    // its client's DELETE
+    const deleted = holding();
+
+    fake.exchange({
+      headers: { [CONNECTION_TOKEN_HEADER]: deleted.connectionToken },
+      method: 'DELETE',
+    });
+    deleted.read();
+
+    // a request unanswered past its timeout
+    const timed = holding();
+
+    fake.feed(exchangeOf(timed.connectionToken).request, [
+      envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+    ]);
+    clock.tick(1_000);
+    timed.read();
+
+    // an outbox past its bound, by one envelope larger than it
+    const overflowing = holding();
+    const notification = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1, extra: 20 });
+
+    await server.send({ data: notification }, overflowing.connectionHandle);
+    overflowing.read();
+
+    // its application's close
+    const closed = holding();
+
+    await server.close(closed.connectionHandle);
+    closed.read();
+
+    // a body still coming as its connection closes
+    const coming = connectScripted();
+    const body = exchangeOf(coming.connectionToken);
+
+    body.request.emit('data', envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }).subarray(0, 4));
+    await server.close(coming.connectionHandle);
+    body.request.emit('end');
+    ends.push([body.response.status, body.response.headers?.[REFUSAL_HEADER]]);
+
+    // a stop
+    const stopped = holding();
+
+    await server.stop();
+    stopped.read();
+
+    expect(ends).toEqual(
+      Array.from({ length: 6 }, () => {
+        return [404, REFUSALS.CONNECTION_UNKNOWN];
+      })
+    );
+    expect(refusals).toEqual([]);
+  });
+
+  test('answers 400 unmarked a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
+    await using started = await startTransport();
+    const refusals = refusalsOf(started.server);
+    const port = Number(new URL(started.url).port);
+    const authority = `${host}:${String(port)}`;
+    // in Origin and in a field the transport never reads: an escape sequence, BEL, DEL, and an
+    // octet past ASCII, written as the one octet 0xE9; Node's parser answers the first three
+    const fields = [
+      'Origin: http://a.example\u001B[2J\r\n',
+      'X-Other: a\u0007b\r\n',
+      'Origin: http://a.example\u007F\r\n',
+      'Origin: http://café.example\r\n',
+      'X-Other: café\r\n',
+    ];
+    const answers: unknown[] = [];
+
+    for (const field of fields) {
+      answers.push((await rawAnswerOf(port, rawConnectOf(authority, field))).answer);
+    }
+
+    expect(answers).toEqual(
+      fields.map(() => {
+        return [400, null];
+      })
+    );
+    expect(refusals).toEqual([]);
+    expect(namesOf(started.events, 'connection')).toEqual([]);
+
+    // a tab is taken, and the origin judged as any other
+    const tabbed = await rawAnswerOf(
+      port,
+      rawConnectOf(authority, 'Origin: http://a.example\tb\r\n')
+    );
+
+    expect(tabbed.answer).toEqual([403, REFUSALS.ORIGIN]);
+    expect(refusals).toEqual([
+      {
+        address: host,
+        authority,
+        origin: 'http://a.example\tb',
+        port: tabbed.localPort,
+        reason: REFUSALS.ORIGIN,
+        status: 403,
+      },
+    ]);
+  });
+
+  test('refuses as it would though a refusal listener throws, the throw reported with no connection', async () => {
+    await using started = await startTransport();
+    const { events, server, url } = started;
+
+    server.on('refusal', () => {
+      throw new Error('a refusal listener that throws');
+    });
+
+    // a listener after it is told all the same
+    const after = refusalsOf(server);
+
+    expect(await refusalOf(fetch(`${url}/other`, { method: 'POST' }))).toEqual([
+      404,
+      REFUSALS.PATH,
+    ]);
+    expect(await refusalOf(post(url, { connectionToken: 'A'.repeat(22) }))).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
+    expect(after).toHaveLength(2);
+    expect(namesOf(events, 'error')).toEqual([
+      ['error', 'a refusal listener that throws', ''],
+      ['error', 'a refusal listener that throws', ''],
+    ]);
+    // and it draws a connection as before
+    expect((await post(url)).status).toBe(201);
   });
 });

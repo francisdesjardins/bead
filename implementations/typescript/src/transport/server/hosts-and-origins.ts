@@ -50,6 +50,9 @@ const IPV4_MAPPED = /^::ffff:(?<ipv4>\d{1,3}(?:\.\d{1,3}){3})$/iu;
 // a port of one digit at least
 const PORT = /^\d+$/u;
 
+// a field value of visible ASCII, spaces and tabs alone (RFC 9110 §5.5)
+const VISIBLE_FIELD = /^[\t -~]*$/u;
+
 // the two schemes whose target in absolute-form names the request's authority, written as HTTP
 // servers read them, in lower case
 const ABSOLUTE_FORM = /^https?:\/\//u;
@@ -144,6 +147,38 @@ export const clientAddressOf = (socketAddress: string): string => {
  */
 export const isIPv4Address = (value: string): boolean => {
   return IPV4_ADDRESS.test(value);
+};
+
+/**
+ * Whether a field value is one a server reads (spec 15.12): visible ASCII, spaces and tabs alone.
+ * A control character but a tab, `DEL` among them, and an octet past ASCII, which a request
+ * carries as the character of its Latin-1 code, are none (RFC 9110 §5.5).
+ */
+export const isVisibleField = (value: string): boolean => {
+  return VISIBLE_FIELD.test(value);
+};
+
+/**
+ * Whether every field value of a request, as it came — each name before its value — is one
+ * {@link isVisibleField} takes. A request that holds another is answered 400 unmarked, as HTTP
+ * answers a malformed field, before anything else of it is judged.
+ */
+export const hasVisibleFields = (rawHeaders: readonly string[]): boolean => {
+  for (let index = 1; index < rawHeaders.length; index += 2) {
+    if (!isVisibleField(rawHeaders[index] ?? '')) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+/**
+ * A request's `Origin` as a refusal tells it (spec 15.1): its field lines as they came, joined by
+ * `, ` (RFC 9110 §5.3); none when it sends none.
+ */
+export const originOf = (lines: readonly string[]): string | undefined => {
+  return lines.length === 0 ? undefined : lines.join(', ');
 };
 
 /**

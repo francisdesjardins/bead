@@ -1037,20 +1037,29 @@ is no secret, and carries none (section 15.4); its form is its implementation's,
 reader of a trace, and an application compares a handle whole. A transport reads nothing of an
 envelope but what this section says; what it refuses of its own is no envelope, and the router never
 sees it. A side calls each listener of its transport's events — a connection opened, an envelope, a
-listen, a close — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3): what one
-throws is reported, as section 9.0 reports an error, by its transport with the connection it was
-told of; the listeners after it are called all the same, and the transport goes on as if it
-returned. A listener's throw refuses no connection, fails no exchange and closes nothing. A
-connection that closes ends what was under way on it (sections 9.4, 12.10, 13.7). A transport may
-carry a credential beside an envelope, both ways: it hands the router what it carried with an
-envelope it took, and carries what the router gives it with one it sends. That credential is what a
-request presenting `ELSEWHERE` stands for (section 9.2, step 5), and nothing else: a request that
-presents none, `OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried. Over
-HTTP, it is the `Authorization` field of a request's `POST` (section 15.5); over a WebSocket, none
-(section 15.2). A transport says whether it carries a credential beside an envelope it sends, and
-whether it is secure — under TLS, on the loopback, or never leaving the machine — so that a side
-fails before it goes a call whose credential it cannot carry (section 13.4). No failure's detail,
-event, trace or log carries that credential, nor a header's: only its credential scheme.
+listen, a close, a refusal — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3):
+what one throws is reported, as section 9.0 reports an error, by its transport with the connection
+it was told of; the listeners after it are called all the same, and the transport goes on as if it
+returned. A listener's throw refuses no connection, fails no exchange and closes nothing. A server's
+transport tells each refusal it judges of its own: a request it refuses as it arrives, in section
+15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never tells the 404
+that ends an exchange or a listen it had taken as their connection closes (section 15.7), which its
+close tells, nor what HTTP refuses of its own, unmarked. A refusal told carries its status, its
+reason, the request's authority and its `Origin`, each as it came, the field's lines joined by ", "
+([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and the client's
+address and port (section 15.12); nothing else of the request, so neither its target, nor its
+connection's token, nor a credential. It names no connection: a refusal is a request's, and a
+listener's throw is reported with none. A connection that closes ends what was under way on it
+(sections 9.4, 12.10, 13.7). A transport may carry a credential beside an envelope, both ways: it
+hands the router what it carried with an envelope it took, and carries what the router gives it with
+one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2, step
+5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header says,
+whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's `POST`
+(section 15.5); over a WebSocket, none (section 15.2). A transport says whether it carries a
+credential beside an envelope it sends, and whether it is secure — under TLS, on the loopback, or
+never leaving the machine — so that a side fails before it goes a call whose credential it cannot
+carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
+header's: only its credential scheme.
 
 ### WebSocket
 
@@ -1063,32 +1072,32 @@ before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the openin
 carried, its `Authorization` among it, is no credential beside an envelope, and never stands for
 `ELSEWHERE`. A server judges a request at its WebSocket's address in this order, and answers the
 first that applies. What HTTP refuses of its own, a `Host` missing or repeated, a target in
-absolute-form it does not read, or an authority that is no host (section 15.12), its HTTP server
-answers, unmarked. It takes an upgrade from the hosts an HTTP exchange is taken from (section
-15.12): a request whose authority names a host it does not take, or none, is refused 403, its
-`bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
-server's address is its own origin by its authority, and `hosts` is what refuses it. A method
-other than `GET` or `HEAD` is refused 405, its `Allow` naming both
-([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)). A request that asks
-no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming `websocket`
+absolute-form it does not read, an authority that is no host, or a field that holds a control
+character or an octet past US-ASCII (section 15.12), its HTTP server answers, unmarked. It takes an
+upgrade from the hosts an HTTP exchange is taken from (section 15.12): a request whose authority
+names a host it does not take, or none, is refused 403, its `bead-refusal` `host-refused`, whatever
+else it holds, since a page that rebinds its name to the server's address is its own origin by its
+authority, and `hosts` is what refuses it. A method other than `GET` or `HEAD` is refused 405, its
+`Allow` naming both ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)). A
+request that asks no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming `websocket`
 ([RFC 9110 §15.5.22](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.22)): a `HEAD`, which
 cannot switch; an `HTTP/1.0` request, whose `Upgrade` is ignored; one whose `Upgrade` lists no
-`websocket`, or whose `Connection` lists no `upgrade`, each token compared in any ASCII case,
-across the field's lines ([RFC 9110 §7.8](https://www.rfc-editor.org/rfc/rfc9110#section-7.8)).
-An upgrade whose `Sec-WebSocket-Version` comes in more than one field line is malformed; one of
-any other `Sec-WebSocket-Version` but 13, or of none, is answered 426, `version-refused`, its own
+`websocket`, or whose `Connection` lists no `upgrade`, each token compared in any ASCII case, across
+the field's lines ([RFC 9110 §7.8](https://www.rfc-editor.org/rfc/rfc9110#section-7.8)). An upgrade
+whose `Sec-WebSocket-Version` comes in more than one field line is malformed; one of any other
+`Sec-WebSocket-Version` but 13, or of none, is answered 426, `version-refused`, its own
 `Sec-WebSocket-Version` naming 13
 ([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)), before any field its
 version shapes. An upgrade of version 13 is malformed, and refused 400, `malformed`, whose
-`Sec-WebSocket-Key` is not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not
-a list of distinct tokens, or that has content
+`Sec-WebSocket-Key` is not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not a
+list of distinct tokens, or that has content
 ([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)). One that carries an
-`Origin` neither its own nor among those it takes is then refused 403, `origin-refused`, so that
-the `Origin` it judges an upgrade by is the field it judges an exchange by; no same-origin policy
-guards an upgrade, and a page of any origin may ask for one
-([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). Each of these refusals
-but HTTP's own is marked as section 15.6 says, with `cache-control: no-store` and
-`x-content-type-options: nosniff`, its body empty, and closes its connection; a 426 names
+`Origin` neither its own nor among those it takes is then refused 403, `origin-refused`, so that the
+`Origin` it judges an upgrade by is the field it judges an exchange by; no same-origin policy guards
+an upgrade, and a page of any origin may ask for one
+([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). Each of these refusals but
+HTTP's own is marked as section 15.6 says, and told (section 15.1), with `cache-control: no-store`
+and `x-content-type-options: nosniff`, its body empty, and closes its connection; a 426 names
 `upgrade` in its `Connection`. Once its stop began, a server takes no upgrade: one it would take is
 refused 503, `busy`, its `Retry-After` 1
 ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
@@ -1284,12 +1293,17 @@ before it reads anything else of it
 transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
 alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request whose
 authority is no host, `PROTOCOL_ERROR`, no response written
-([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). An empty `Host` is a
-host, and so is a name of invalid punycode. It takes the hosts a request may name besides those
-every server takes, `hosts`, and the origins an exchange may come from besides its own, `origins`,
-none when not given. Its own is its request's authority under `http` or `https`: an `Origin` that
-is `http://` or `https://` followed by that authority, compared ASCII case-insensitively, the field
-read as the serialized origin it carries
+([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). A field value that holds
+a control character other than HTAB, or an octet past US-ASCII, is answered alike, 400 unmarked over
+HTTP/1.1 and its stream reset over HTTP/2, before anything else of the request is judged:
+[RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5) calls the first invalid, and
+keeps the second, historical ISO-8859-1 content, out of every field defined since; an origin is
+ASCII ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), and so is every field
+Bead reads. An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a
+request may name besides those every server takes, `hosts`, and the origins an exchange may come
+from besides its own, `origins`, none when not given. Its own is its request's authority under
+`http` or `https`: an `Origin` that is `http://` or `https://` followed by that authority, compared
+ASCII case-insensitively, the field read as the serialized origin it carries
 ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), never parsed as a URL; a
 browser writes both from one URL alike. Any other `Origin` is none of its own, whatever host it
 names: `null`, which a browser sends for an opaque origin — a sandboxed frame's, a `file:` or a
@@ -1318,7 +1332,8 @@ server takes both alike on an upgrade (section 15.2). A client's address is its 
 address an IPv6 socket carries mapped read as that IPv4 address
 ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)); behind a proxy on
 the same machine, which the server is told to trust, `isProxyTrusted`, it is the last entry of the
-proxy's `X-Forwarded-For`, when that entry is an address.
+proxy's `X-Forwarded-For`, when that entry is an address. Its port is the socket's, the proxy's
+connection's behind a proxy.
 
 ## 16. Services and procedures
 

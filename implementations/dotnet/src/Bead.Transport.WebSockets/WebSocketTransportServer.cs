@@ -67,8 +67,8 @@ public sealed record WebSocketTransportServerOptions
     /// sends. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another
     /// are an <see cref="ArgumentException"/> as the transport is built. A server reached by a name,
     /// a public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in
-    /// a cluster, names it here, or refuses it 403, <c>host-refused</c>, which the server reports
-    /// nowhere and a page's WebSocket cannot read.
+    /// a cluster, names it here, or refuses it 403, <c>host-refused</c>, which a page's WebSocket
+    /// cannot read and the transport tells through <see cref="WebSocketTransportServer.Refusal"/>.
     /// </summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
@@ -163,9 +163,18 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public event Action<bool, string>? Close;
 
     /// <summary>
+    /// Each refusal it judges of its own at its address (spec 15.1), every one an upgrade's as it
+    /// arrives, in the order spec 15.2 states, a stop's 503 among them, each marked; never what HTTP
+    /// refuses of its own, unmarked. Told as the refusal is written, and built only when a listener
+    /// listens.
+    /// </summary>
+    public event Action<TransportServerRefusal>? Refusal;
+
+    /// <summary>
     /// What went wrong on a connection, with its handle: its socket's failure, or what a listener of
-    /// its events threw, the transport going on as if it returned (spec 15.1). Never the server's
-    /// own, with an empty handle, as the TypeScript side's can be: Kestrel tells a failure after it
+    /// its events threw, the transport going on as if it returned (spec 15.1). With an empty handle
+    /// for a throw of a <see cref="Refusal"/> listener alone, which names no connection; never the
+    /// server's own failure, as the TypeScript side's can be: Kestrel tells a failure after it
     /// listens only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
@@ -442,9 +451,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     // a refusal written: its status, its fields, its mark when it has one, its date from the
-    // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be
-    private void Refuse(HttpResponse response, HandshakeRefusal refusal)
+    // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be;
+    // then, marked, told (spec 15.1)
+    private void Refuse(HttpContext context, HandshakeRefusal refusal)
     {
+        var response = context.Response;
+
         response.StatusCode = refusal.Status;
 
         foreach (var (name, value) in refusal.Fields)
@@ -452,15 +464,31 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             response.Headers[name] = value;
         }
 
-        if (refusal.Refusal is { } reason)
+        if (refusal.Refusal is { } mark)
         {
-            response.Headers[HostsAndOrigins.RefusalHeader] = reason;
+            response.Headers[HostsAndOrigins.RefusalHeader] = mark;
         }
 
         // ! Kestrel keeps the date and the length the application writes: without the length it
         // leaves it out of a HEAD's answer
         response.Headers.Date = _clock.GetUtcNow().ToString("r", CultureInfo.InvariantCulture);
         response.ContentLength = 0;
+
+        // * built only when a listener listens
+        if (refusal.Refusal is { } reason && Refusal is { } listeners)
+        {
+            var address = context.Connection.RemoteIpAddress;
+            var (authority, origin) = WebSocketHandshake.ToldOf(context.Request);
+            var told = new TransportServerRefusal(
+                (address is { IsIPv4MappedToIPv6: true } ? address.MapToIPv4() : address)?.ToString(),
+                authority,
+                origin,
+                context.Connection.RemotePort,
+                reason,
+                refusal.Status);
+
+            _listeners.Tell(listeners, told);
+        }
     }
 
     // a request: one that upgrades becomes a connection, until its socket closes; any other is
@@ -470,7 +498,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     {
         if (WebSocketHandshake.RefusalOf(context.Request, _options) is { } refusal)
         {
-            Refuse(context.Response, refusal);
+            Refuse(context, refusal);
 
             return;
         }
@@ -478,14 +506,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         // ! a guard: what the judgement takes Kestrel upgrades, and its accept throws on any other
         if (!context.WebSockets.IsWebSocketRequest)
         {
-            Refuse(context.Response, WebSocketHandshake.Malformed);
+            Refuse(context, WebSocketHandshake.Malformed);
 
             return;
         }
 
         if (_life.IsStopping)
         {
-            Refuse(context.Response, WebSocketHandshake.Busy);
+            Refuse(context, WebSocketHandshake.Busy);
 
             return;
         }

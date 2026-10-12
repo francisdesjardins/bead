@@ -22,6 +22,22 @@ public interface IServerTransport : IRouterServerTransport
         }
     }
 
+    /// <summary>
+    /// Each refusal the transport judges of its own (spec 15.1), within the guard its other events
+    /// are told in, a listener's throw reported with no connection: what to add to its hosts or
+    /// origins. A transport that refuses nothing of its own never raises it, as this default.
+    /// </summary>
+    event Action<TransportServerRefusal>? Refusal
+    {
+        add
+        {
+        }
+
+        remove
+        {
+        }
+    }
+
     /// <summary>Closes a connection; false when the transport held none by that handle.</summary>
     Task<bool> CloseConnection(string connectionHandle);
 

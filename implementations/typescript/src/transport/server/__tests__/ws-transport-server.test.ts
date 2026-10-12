@@ -21,6 +21,7 @@ import {
 } from '../../shared/__tests__/fixtures';
 import {
   ProgrammerError,
+  type ITransportServerRefusal,
   type TRANSPORT_SERVER_EVENTS,
   type TransportServerEventMap,
 } from '../transport-server';
@@ -1497,5 +1498,228 @@ test.describe('WSTransportServer, heartbeat', () => {
       await server.stop();
       await allClosed();
     }
+  });
+});
+
+/** What the server answers `head` on a socket of its own, as `answerOf` reads it, and that socket's port. */
+const answerFromOf = async (port: number, head: string) => {
+  const socket = await openTcp(port);
+  const { localPort } = socket;
+  const answer = { isClosed: false, text: '' };
+
+  socket.on('data', (chunk: Buffer) => {
+    answer.text += chunk.toString('latin1');
+  });
+  socket.on('error', () => {});
+  socket.on('close', () => {
+    answer.isClosed = true;
+  });
+  socket.write(Buffer.from(head, 'latin1'));
+  await expect
+    .poll(() => {
+      return answer.isClosed || answer.text.includes('\r\n\r\n');
+    })
+    .toBe(true);
+  socket.destroy();
+
+  return {
+    answer: [
+      Number(answer.text.split(' ')[1]),
+      /bead-refusal: (?<mark>.*)\r\n/u.exec(answer.text)?.groups?.['mark'] ?? null,
+    ],
+    localPort,
+  };
+};
+
+/** Each refusal `server` tells from now on. */
+const refusalsOf = (server: WSTransportServer) => {
+  const refusals: ITransportServerRefusal[] = [];
+
+  server.on('refusal', (refusal) => {
+    refusals.push(refusal);
+  });
+
+  return refusals;
+};
+
+test.describe('WSTransportServer, the refusals it tells', () => {
+  test('tells each refusal it judges of its own, its status, its reason, the request’s authority and origin and the client’s address and port, and nothing of HTTP’s own, at its address', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const refusals = refusalsOf(server);
+    const told = (
+      localPort: number | undefined,
+      refusal: Pick<ITransportServerRefusal, 'reason' | 'status'> & Partial<ITransportServerRefusal>
+    ) => {
+      return {
+        address: host,
+        authority: 'bead.test',
+        origin: undefined,
+        port: localPort,
+        ...refusal,
+      };
+    };
+    const expected: unknown[] = [];
+
+    // each refusal of its own, in the order of its judgement, a CONNECT's among them
+    for (const [request, refusal] of [
+      [
+        requestOf('GET / HTTP/1.1', [
+          'Host: elsewhere.test:8080',
+          'Origin: http://elsewhere.test:8080',
+          'Origin: null',
+        ]),
+        {
+          authority: 'elsewhere.test:8080',
+          origin: 'http://elsewhere.test:8080, null',
+          reason: 'host-refused',
+          status: 403,
+        },
+      ],
+      [
+        requestOf('GET http://elsewhere.test:81/ HTTP/1.1'),
+        { authority: 'elsewhere.test:81', reason: 'host-refused', status: 403 },
+      ],
+      [requestOf('POST / HTTP/1.1'), { reason: 'method-refused', status: 405 }],
+      [
+        requestOf('CONNECT bead.test:80 HTTP/1.1', ['Host: bead.test:80']),
+        { authority: 'bead.test:80', reason: 'method-refused', status: 405 },
+      ],
+      [requestOf('GET / HTTP/1.1', [...NO_UPGRADE]), { reason: 'upgrade-required', status: 426 }],
+      [
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 8']),
+        { reason: 'version-refused', status: 426 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: dGVzdA==']),
+        { reason: 'malformed', status: 400 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', ['Origin: https://elsewhere.test']),
+        { origin: 'https://elsewhere.test', reason: 'origin-refused', status: 403 },
+      ],
+    ] as const) {
+      const { answer, localPort } = await answerFromOf(port, request);
+
+      expect(answer, request).toEqual([refusal.status, refusal.reason]);
+      expected.push(told(localPort, refusal));
+    }
+
+    // what HTTP refuses of its own, told by none: two hosts, an octet past ASCII
+    for (const request of [
+      requestOf('GET / HTTP/1.1', ['Host: bead.test', 'Host: elsewhere.test']),
+      requestOf('GET / HTTP/1.1', ['X-Other: café']),
+    ]) {
+      expect((await answerFromOf(port, request)).answer, request).toEqual([400, null]);
+    }
+
+    // nor an upgrade it takes
+    expect(await statusLineOf(port, requestOf('GET / HTTP/1.1'))).toBe(
+      'HTTP/1.1 101 Switching Protocols'
+    );
+    expect(refusals).toEqual(expected);
+
+    // the stop's 503, an upgrade's head in two writes, one each side of the stop
+    const socket = await openTcp(port);
+    const { localPort } = socket;
+    const head = requestOf('GET / HTTP/1.1');
+    const cut = head.indexOf('Sec-WebSocket-Version');
+    let isClosed = false;
+
+    socket.on('close', () => {
+      isClosed = true;
+    });
+    socket.on('data', () => {});
+    socket.write(head.slice(0, cut));
+    await sleep(100);
+    refusals.length = 0;
+    await server.stop();
+    socket.write(head.slice(cut));
+    await expect
+      .poll(() => {
+        return isClosed;
+      })
+      .toBe(true);
+
+    expect(refusals).toEqual([told(localPort, { reason: 'busy', status: 503 })]);
+  });
+
+  test('answers 400 unmarked a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const refusals = refusalsOf(server);
+    // in Origin and in a field the transport never reads: an escape sequence, BEL, DEL, and an
+    // octet past ASCII, written as the one octet 0xE9; Node's parser answers the first three
+    const fields = [
+      'Origin: http://a.example\u001B[2J',
+      'X-Other: a\u0007b',
+      'Origin: http://a.example\u007F',
+      'Origin: http://café.example',
+      'X-Other: café',
+    ];
+
+    for (const field of fields) {
+      const request = requestOf('GET / HTTP/1.1', [field]);
+
+      expect((await answerFromOf(port, request)).answer, request).toEqual([400, null]);
+    }
+
+    expect([refusals, server.clients]).toEqual([[], []]);
+
+    // a tab is taken, and the origin judged as any other
+    const tabbed = await answerFromOf(
+      port,
+      requestOf('GET / HTTP/1.1', ['Origin: http://a.example\tb'])
+    );
+
+    expect(tabbed.answer).toEqual([403, 'origin-refused']);
+    expect(refusals).toEqual([
+      {
+        address: host,
+        authority: 'bead.test',
+        origin: 'http://a.example\tb',
+        port: tabbed.localPort,
+        reason: 'origin-refused',
+        status: 403,
+      },
+    ]);
+  });
+
+  test('refuses as it would though a refusal listener throws, the throw reported with no connection', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const errors: ServerEvents['error'][] = [];
+
+    server.on('refusal', () => {
+      throw new Error('a refusal listener that throws');
+    });
+
+    // a listener after it is told all the same
+    const after = refusalsOf(server);
+
+    server.on('error', (...params) => {
+      errors.push(params);
+    });
+
+    expect(
+      (await answerFromOf(port, requestOf('GET / HTTP/1.1', ['Host: elsewhere.test']))).answer
+    ).toEqual([403, 'host-refused']);
+    expect((await answerFromOf(port, requestOf('POST / HTTP/1.1'))).answer).toEqual([
+      405,
+      'method-refused',
+    ]);
+    expect(after).toHaveLength(2);
+    expect(
+      errors.map(([error, connectionHandle]) => {
+        return [error.message, connectionHandle];
+      })
+    ).toEqual([
+      ['a refusal listener that throws', ''],
+      ['a refusal listener that throws', ''],
+    ]);
+    // and it upgrades as before
+    expect(await statusLineOf(port, requestOf('GET / HTTP/1.1'))).toBe(
+      'HTTP/1.1 101 Switching Protocols'
+    );
   });
 });

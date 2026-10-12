@@ -14,6 +14,7 @@ import {
   LISTEN_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
+  REFUSAL_EVENT,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
   TRANSPORT_HTTP,
@@ -28,12 +29,14 @@ import {
   assertOrigins,
   authorityOf,
   clientAddressOf,
+  hasVisibleFields,
   HOST_REFUSAL,
   isAuthority,
   isTakenHost,
   isTakenOrigin,
   type IAuthority,
   ORIGIN_REFUSAL,
+  originOf,
   requestTargetOf,
 } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
@@ -415,6 +418,8 @@ const unref = (timer: TimeoutId): void => {
 };
 
 // writes an exchange's end, once: its status and headers, marked when it is a refusal
+// ! never tells: the 404 of a connection that closes is section 15.7's close, told by `close`, and
+// no refusal; a refusal the transport judges goes through `finish`, which tells it
 const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd): void => {
   if (!response.headersSent) {
     response.writeHead(status, {
@@ -434,6 +439,19 @@ const reset = (response: IHTTPResponseLike): void => {
   } else {
     response.stream.close(PROTOCOL_ERROR);
   }
+};
+
+// what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), as HTTP answers it,
+// unmarked; over HTTP/2, a malformed request, its stream reset
+const refuseMalformed = ({ request, response }: IExchangeIn): void => {
+  if (request.httpVersionMajor !== 1) {
+    return (reset(response), undefined);
+  }
+
+  response.writeHead(400, { 'content-length': '0', connection: 'close' });
+  response.end();
+
+  return undefined;
 };
 
 // a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
@@ -520,7 +538,7 @@ export const createHTTPTransportServer = (
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
 
   const transport = createTransportServer<IDrawnConnection, IDrawingRequest>(
-    (server, connections, { tell }) => {
+    (server, connections, { isHeard, tell }) => {
       let httpServer: IHTTPServerLike | undefined;
       let ordinal = 0;
       // the bytes of body the exchanges under way hold, all together, counted as they come
@@ -554,15 +572,33 @@ export const createHTTPTransportServer = (
           : remoteAddress;
       };
 
-      // ends an exchange the transport answers itself; one whose body it will not read is closed
-      // behind a refusal over HTTP/1, since what follows would read as the next request
+      // ends an exchange the transport answers itself, telling a refusal once written (spec 15.1);
+      // over HTTP/1, a refusal of a body it will not read closes its socket, lest the rest read as
+      // the next request
       const finish = ({ request, response }: IExchangeIn, end: IEnd): void => {
         const isClosing = end.status >= 400 && request.httpVersionMajor === 1 && hasBody(request);
+        const { reason, status } = end;
+        // read before the end is written, which may close its socket
+        const refusal =
+          reason === undefined || !isHeard(REFUSAL_EVENT)
+            ? undefined
+            : {
+                address: addressOf(request),
+                authority: authorityNamedBy(request)?.authority,
+                origin: originOf(linesOf(request, 'origin')),
+                port: request.socket.remotePort ?? 0,
+                reason,
+                status,
+              };
 
         endWith(
           response,
           isClosing ? { ...end, headers: { ...end.headers, connection: 'close' } } : end
         );
+
+        if (refusal !== undefined) {
+          tell(REFUSAL_EVENT, [refusal]);
+        }
       };
 
       // a connection idle — no exchange under way — closes past its timeout
@@ -1109,18 +1145,16 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
+        // * a field of a control character but a tab, or of an octet past ASCII, before anything
+        // else: Node's parser answers the first itself, so this meets the second alone
+        if (!hasVisibleFields(request.rawHeaders)) {
+          return (refuseMalformed(exchange), undefined);
+        }
+
         const named = authorityNamedBy(request);
 
-        // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2), as HTTP answers it, unmarked; over
-        // HTTP/2, a malformed request, its stream reset
         if (named === undefined) {
-          if (request.httpVersionMajor !== 1) {
-            return (reset(response), undefined);
-          }
-
-          response.writeHead(400, { 'content-length': '0', connection: 'close' });
-
-          return (response.end(), undefined);
+          return (refuseMalformed(exchange), undefined);
         }
 
         const { authority } = named;

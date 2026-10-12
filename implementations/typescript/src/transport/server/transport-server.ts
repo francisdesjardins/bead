@@ -36,6 +36,7 @@ export {
   ERROR_EVENT,
   LISTEN_EVENT,
   MESSAGE_EVENT,
+  REFUSAL_EVENT,
   TRANSPORT_HTTP,
   TRANSPORT_WS,
 } from '../shared/constants';
@@ -76,6 +77,7 @@ export type {
   ITransportServerImplementation,
   ITransportServerDefineOptions,
   ITransportServerOptions,
+  ITransportServerRefusal,
   ITransportServerStartOptions,
   TRANSPORT_SERVER_EVENTS,
   TransportServerConnectionHandle,
@@ -85,6 +87,7 @@ export type {
   TransportServerOnConnectionCallback,
   TransportServerOnErrorCallback,
   TransportServerOnMessageCallback,
+  TransportServerOnRefusalCallback,
   TransportServerResolvedStartOptions,
   TransportServerToldEvent,
 } from './types';
@@ -151,12 +154,18 @@ export const createTransportServer = <Socket extends object, Request>(
   // each listener within a guard (spec 15.1): what one throws is reported with the connection it
   // was told of, and the transport goes on as if it returned
   const defineOptions: ITransportServerDefineOptions<Socket, Request> = {
+    isHeard: (event) => {
+      return emitter.listenerCount(event) > 0;
+    },
     tell: <K extends TransportServerToldEvent>(
       event: K,
       params: TransportServerEventMap<Socket, Request>[K]
     ) => {
-      // ! every event but `error` carries its connection's handle last
-      const connectionHandle = params[params.length - 1] as TransportServerConnectionHandle;
+      // ! every event but `error` and `refusal` carries its connection's handle last; a refusal
+      // names none, so what its listener throws is reported with the empty handle
+      const last: unknown = params.at(-1);
+      const connectionHandle =
+        typeof last === 'string' ? (last as TransportServerConnectionHandle) : '';
 
       return emitter.emitEach(event, {
         onError: (error) => {
