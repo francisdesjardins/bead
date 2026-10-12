@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { ProgrammerError } from '../../shared/errors';
 import {
+  assertHosts,
+  assertOrigins,
   HOST_REFUSAL,
+  isIPv4Address,
   isTakenHost,
   isTakenOrigin,
   isWellFormedHost,
@@ -9,48 +13,103 @@ import {
 
 // constants
 
-// the rows the C# side judges alike
-const HOSTS = ['bead.test', '127.0.0.1:8080', 'xn--bad-bma.test'];
-const TAKEN_HOSTS = ['bead.test', 'Bead.Test', 'BEAD.TEST', '127.0.0.1:8080', 'XN--BAD-BMA.test'];
+// the rows the C# side judges alike: what every server takes, by its host on any port
+const EVERY_SERVERS = [
+  'localhost',
+  'LocalHost:8080',
+  'bead.localhost',
+  'a.b.LOCALHOST:80',
+  '127.0.0.1',
+  '127.0.0.1:8080',
+  '192.0.2.1:80',
+  '0.0.0.0',
+  '255.255.255.255',
+  '[::1]',
+  '[::1]:8443',
+  '[2001:db8::7]:80',
+];
+// and what a server takes only where it is listed: an empty host, none, a name that only looks
+// like one of those, a final dot, and what a platform's parser reads as an IPv4 address
+const NO_SERVERS = [
+  undefined,
+  '',
+  ':8080',
+  'elsewhere.test',
+  'localhost.',
+  'localhost.example',
+  'localhost.example:8080',
+  'notlocalhost',
+  '127.1',
+  '0177.0.0.1',
+  '127.0.0.1.example',
+  '256.0.0.1',
+  'xn--a',
+];
+
+// the hosts given, and the rows they take and refuse, in any ASCII case, on any port
+const HOSTS = ['bead.test', 'xn--bad-bma.test', 'Elsewhere.Example'];
+const TAKEN_HOSTS = [
+  'bead.test',
+  'Bead.Test',
+  'BEAD.TEST:8443',
+  'bead.test:80',
+  'XN--BAD-BMA.test',
+  'elsewhere.example:1',
+];
 const OTHER_HOSTS = [
   undefined,
   '',
-  'elsewhere.test',
-  'bead.test:8080',
-  '127.0.0.1',
+  ':80',
+  'sub.bead.test',
+  'bead.test.',
+  'bead.testx',
   'béad.test',
   'xn--a.test',
 ];
 const ORIGINS = ['https://bead.example', 'null'];
 
-// a `Host` value HTTP takes, `uri-host` and an optional port, and one it does not (RFC 9112 §3.2):
-// the rows the C# side judges alike
+// a `Host` value HTTP takes, an authority of spec 15.12's grammar, and one it does not (RFC 9112
+// §3.2): the rows the C# side judges alike
 const WELL_FORMED_HOSTS = [
   'bead.test',
   'bead.test:8080',
   'BEAD.test:8080',
-  'bead.test:',
+  'bead.test:0',
+  'bead.test:080',
+  'bead.test:65536',
   'BEAD.TEST',
   '',
   ':8080',
   '127.0.0.1',
   '127.0.0.1:8080',
+  '127.1',
   '[::1]',
   '[::1]:8080',
   '[2001:db8::7]',
   '[::ffff:127.0.0.1]',
   '[::ffff:192.0.2.1]',
-  '[v1.fe80::a+en1]',
   'xn--a',
   'xn---bad-cpa.test',
-  'bead%2Etest',
-  'b%C3%A9ad.test',
   'bead_test~',
-  "!$&'()*+,;=",
-  "a-._~!$&'()*+,;=b",
+  "!$&'()",
+  "a-._~!$&'()b",
   ' bead.test\t',
 ];
 const MALFORMED_HOSTS = [
+  'bead.test:',
+  'localhost:',
+  '[::1]:',
+  'a%41.test',
+  'bead%2Etest',
+  'b%C3%A9ad.test',
+  'a*b.test',
+  'a+b.test',
+  'a,b.test',
+  'a;b=c',
+  'a=b.test',
+  "!$&'()*+,;=",
+  '[v1.bead]',
+  '[v1.fe80::a+en1]',
   'bad host',
   'user@bead.test',
   'bead/test',
@@ -79,6 +138,79 @@ const MALFORMED_HOSTS = [
   'bead.test%',
   'béad.test',
   '::1',
+];
+
+// a `hosts` that is built, and one that is refused as it is built
+const BUILT_HOSTS = [
+  undefined,
+  [],
+  ['*'],
+  ['bead.test'],
+  ['Bead.Test', '127.0.0.1', '[::1]', 'localhost', 'xn--a', 'bead.localhost'],
+];
+const REFUSED_HOSTS = [
+  ['bead.test:8080'],
+  ['bead.test', '127.0.0.1:8080'],
+  ['[::1]:80'],
+  ['localhost:'],
+  [''],
+  ['bead.test', ''],
+  ['béad.test'],
+  ['bad host'],
+  ['a*b.test'],
+  ['[v1.bead]'],
+  ['bead.test/'],
+  ['http://bead.test'],
+  ['*', 'bead.test'],
+  ['bead.test', '*'],
+  ['*', '*'],
+];
+
+// an `origins` entry that is built, and one that is refused as it is built
+const BUILT_ORIGINS = [
+  'null',
+  'http://bead.test',
+  'https://bead.test',
+  'http://bead.test:8080',
+  'https://bead.test:8443',
+  'https://bead.test:80',
+  'ws://bead.test:443',
+  'http://127.0.0.1:8080',
+  'http://[::1]:8080',
+  'http://localhost:0',
+  'https://xn--bad-bma.test',
+  'chrome-extension://abcdefghijklmnop',
+  'tauri://localhost',
+  'app://Bead.Test',
+];
+const REFUSED_ORIGINS = [
+  '*',
+  'http://*.bead.test',
+  'https://bead.test/',
+  'https://bead.test/path',
+  'http://bead.test?query',
+  'https://user@bead.test',
+  'HTTPS://bead.test',
+  'https://Bead.test',
+  'https://bead.test:443',
+  'http://bead.test:80',
+  'ws://bead.test:80',
+  'wss://bead.test:443',
+  'https://bead.test:',
+  'https://bead.test:0443',
+  'http://bead.test:080',
+  'https://bead.test:65536',
+  'https://',
+  'https://béad.test',
+  'https://a*b.test',
+  'https://[::1',
+  'bead.test',
+  '//bead.test',
+  'http:bead.test',
+  '1http://bead.test',
+  ' http://bead.test',
+  'Null',
+  '',
 ];
 
 // an origin, and the Host of a request that comes from it: the server's own, `http://` or
@@ -140,7 +272,7 @@ const NOT_OWN: [origin: string, host: string | undefined][] = [
 // definition
 
 test.describe('hosts and origins', () => {
-  test('takes a Host HTTP takes: one line, none in a request that needs none, its value uri-host and an optional port without the whitespace around it', () => {
+  test('takes a Host HTTP takes: one line, none in a request that needs none, its value uri-host and an optional port without the whitespace around it, and none of a percent-encoded octet, *+,;= in a name, an IPvFuture literal or a colon with no port', () => {
     expect(
       WELL_FORMED_HOSTS.filter((host) => {
         return isWellFormedHost([host], { isRequired: true });
@@ -161,12 +293,31 @@ test.describe('hosts and origins', () => {
     ]).toEqual([false, true, false, false]);
   });
 
-  test('takes every host when given none, and among those given in any ASCII case', () => {
+  test('takes whatever its hosts localhost, the names under .localhost and IP literals, each by its host on any port, and no other host, nor an empty one, nor none, but under *', () => {
+    for (const hosts of [undefined, [], ['bead.test']]) {
+      expect(
+        EVERY_SERVERS.filter((host) => {
+          return isTakenHost(host, hosts);
+        }),
+        String(hosts)
+      ).toEqual(EVERY_SERVERS);
+      expect(
+        NO_SERVERS.filter((host) => {
+          return isTakenHost(host, hosts);
+        }),
+        String(hosts)
+      ).toEqual([]);
+    }
+
     expect(
-      ['elsewhere.test', 'xn--a', undefined].map((host) => {
-        return isTakenHost(host, undefined);
+      [...EVERY_SERVERS, ...NO_SERVERS].filter((host) => {
+        return isTakenHost(host, ['*']);
       })
-    ).toEqual([true, true, true]);
+    ).toEqual([...EVERY_SERVERS, ...NO_SERVERS]);
+    expect([HOST_REFUSAL, ORIGIN_REFUSAL]).toEqual(['host-refused', 'origin-refused']);
+  });
+
+  test('takes the hosts given besides, each by its host on any port in any ASCII case, and every host and none under *', () => {
     expect(
       TAKEN_HOSTS.filter((host) => {
         return isTakenHost(host, HOSTS);
@@ -177,7 +328,75 @@ test.describe('hosts and origins', () => {
         return isTakenHost(host, HOSTS);
       })
     ).toEqual([]);
-    expect([HOST_REFUSAL, ORIGIN_REFUSAL]).toEqual(['host-refused', 'origin-refused']);
+    expect(
+      OTHER_HOSTS.filter((host) => {
+        return isTakenHost(host, ['*']);
+      })
+    ).toEqual(OTHER_HOSTS);
+  });
+
+  test('refuses a hosts entry with a port, an empty one, one that is no host, and * beside another', () => {
+    for (const hosts of BUILT_HOSTS) {
+      expect(() => {
+        assertHosts(hosts);
+      }, String(hosts)).not.toThrow();
+    }
+
+    for (const hosts of REFUSED_HOSTS) {
+      expect(() => {
+        assertHosts(hosts);
+      }, String(hosts)).toThrow(ProgrammerError);
+    }
+
+    // the message names what to write instead
+    expect(() => {
+      assertHosts(['bead.test:8080']);
+    }).toThrow(/bead\.test, not bead\.test:8080/u);
+  });
+
+  test('refuses an origins entry that is *, or neither null nor an origin as RFC 6454 serializes it', () => {
+    expect(() => {
+      assertOrigins(undefined);
+      assertOrigins([]);
+      assertOrigins(BUILT_ORIGINS);
+    }).not.toThrow();
+
+    for (const origin of REFUSED_ORIGINS) {
+      expect(() => {
+        assertOrigins([origin]);
+      }, origin).toThrow(ProgrammerError);
+    }
+
+    expect(() => {
+      assertOrigins(['*']);
+    }).toThrow(/no wildcard/u);
+  });
+
+  test('reads an IPv4 address by RFC 3986’s grammar, never as the platform’s parser reads one', () => {
+    const addresses = ['0.0.0.0', '127.0.0.1', '10.0.0.10', '192.0.2.1', '255.255.255.255'];
+    // a short form, octal, hexadecimal, one number, an octet past 255, a leading zero, a final
+    // dot, a fifth octet, a space, a port
+    const others = [
+      '127.1',
+      '0177.0.0.1',
+      '0x7f.0.0.1',
+      '2130706433',
+      '256.0.0.1',
+      '127.0.0.01',
+      '127.0.0.1.',
+      '1.2.3.4.5',
+      ' 127.0.0.1',
+      '127.0.0.1:80',
+    ];
+
+    expect(addresses.filter(isIPv4Address)).toEqual(addresses);
+    expect(others.filter(isIPv4Address)).toEqual([]);
+    // and so what every server takes: none of the others but the one with a port, by its host
+    expect(
+      [...addresses, ...others].filter((host) => {
+        return isTakenHost(host, []);
+      })
+    ).toEqual([...addresses, '127.0.0.1:80']);
   });
 
   test('takes a request with no Origin, one among those given, and the server’s own: http:// or https:// followed by its Host, in any ASCII case, nothing parsed', () => {
@@ -208,6 +427,7 @@ test.describe('hosts and origins', () => {
     expect(isTakenHost('bead.ıo', ['bead.io'])).toBe(false);
     expect(isTakenHost('bÉad.test', ['béad.test'])).toBe(false);
     expect(isTakenHost('BéAD.test', ['béad.test'])).toBe(true);
+    expect(isTakenHost('LOCALHOST', [])).toBe(true);
     expect(isTakenOrigin('http://key.test', { host: 'Key.test', origins: [] })).toBe(false);
     expect(isTakenOrigin('http://item.test', { host: 'İtem.test', origins: [] })).toBe(false);
     expect(isTakenOrigin('http://bead.io', { host: 'BEAD.ıO', origins: [] })).toBe(false);

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Primitives;
 
 namespace Bead.Transport.WebSockets;
@@ -205,8 +206,8 @@ internal static class WebSocketHandshake
 
     /// <summary>
     /// What the server answers a request at its WebSocket's address, or none when it upgrades it:
-    /// what HTTP refuses of its own, a <c>Host</c> missing, repeated or no host, 400 unmarked; a
-    /// host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// what HTTP refuses of its own, a <c>Host</c> missing or repeated, or an authority that is no
+    /// host, 400 unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, 400; an origin
     /// not taken, 403.
     /// </summary>
@@ -217,22 +218,25 @@ internal static class WebSocketHandshake
 
         var headers = request.Headers;
 
-        // HTTP's own, which Kestrel answers before the application runs; HTTP/2's authority is its
-        // server's
+        // HTTP's own, which Kestrel answers before the application runs: a Host's lines, and the
+        // authority of an absolute-form target judged in place of a Host's form, which Kestrel
+        // ignores beside one (RFC 9112 §3.2.2); over HTTP/2, Kestrel resets the stream of an
+        // authority that is no host before the application runs
         var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+        var targetAuthority = isHttp1 ? HostsAndOrigins.TargetAuthorityOf(request.HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget) : null;
 
-        if (isHttp1 && !HostsAndOrigins.IsWellFormedHost(headers.Host, HttpProtocol.IsHttp11(request.Protocol)))
+        if (isHttp1 && !HostsAndOrigins.IsWellFormedHost(headers.Host, (HttpProtocol.IsHttp11(request.Protocol), targetAuthority)))
         {
             return BadHost;
         }
 
-        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
+        // ! the authority as it came, which a browser writes as it writes its Origin, an IDN in
         // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
-        var host = headers.Host.Count == 0 ? null : ValueOf(headers.Host[0]);
+        var authority = HostsAndOrigins.AuthorityOf(headers.Host, targetAuthority);
 
         // * the host before anything else is read: a page that rebinds its name reaches the address
         // with any method and no upgrade, and hosts refuses it on every transport alike
-        if (!HostsAndOrigins.IsTakenHost(host, options.Hosts))
+        if (!HostsAndOrigins.IsTakenHost(authority, options.Hosts))
         {
             return HostRefused;
         }
@@ -268,7 +272,7 @@ internal static class WebSocketHandshake
 
         var origin = headers.Origin;
 
-        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (host, options.Origins)))
+        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (authority, options.Origins)))
         {
             return OriginRefused;
         }

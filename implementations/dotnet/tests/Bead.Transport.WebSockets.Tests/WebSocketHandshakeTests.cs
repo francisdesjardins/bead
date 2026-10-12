@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Bead.Transport.WebSockets.Tests;
 
@@ -50,6 +51,17 @@ public sealed class WebSocketHandshakeTests
         (101, null, "GET / HTTP/1.1", ["Origin: https://bead.example"]),
         (101, null, "GET / HTTP/1.1", ["Host: BEAD.TEST"]),
 
+        // a host taken by its host alone, the port aside, and those every server takes
+        (101, null, "GET / HTTP/1.1", ["Host: bead.test:8080"]),
+        (101, null, "GET / HTTP/1.1", ["Host: localhost"]),
+        (101, null, "GET / HTTP/1.1", ["Host: 127.0.0.1:8080"]),
+
+        // an absolute-form target names the authority, the Host beside it ignored, as Kestrel ignores
+        // its form (RFC 9112 §3.2.2), and the page of its own with it
+        (101, null, "GET http://bead.test/ HTTP/1.1", ["Host: elsewhere.test"]),
+        (101, null, "GET http://bead.test/ HTTP/1.1", ["Host: bad host"]),
+        (101, null, "GET https://bead.test:8443/path?query HTTP/1.1", ["Origin: https://bead.test:8443"]),
+
         // 0: HTTP's own, unmarked, before the host is judged
         (400, null, "GET / HTTP/1.1", ["Host"]),
         (400, null, "GET / HTTP/1.1", ["Host: bead.test", "Host: elsewhere.test"]),
@@ -58,11 +70,24 @@ public sealed class WebSocketHandshakeTests
         (400, null, "GET / HTTP/1.1", ["Host: [::1%25eth0]"]),
         (400, null, "POST / HTTP/1.1", ["Host: elsewhere.test", "Host: bead.test"]),
         (400, null, "GET / HTTP/1.0", ["Host: bead.test", "Host: bead.test"]),
+        (400, null, "GET / HTTP/1.1", ["Host: a%41.test"]),
+        (400, null, "GET / HTTP/1.1", ["Host: a*b.test"]),
+        (400, null, "GET / HTTP/1.1", ["Host: a;b=c"]),
+        (400, null, "GET / HTTP/1.1", ["Host: [v1.bead]"]),
+        (400, null, "GET / HTTP/1.1", ["Host: localhost:"]),
+        (400, null, "GET / HTTP/1.1", ["Host: [::1]:"]),
+        (400, null, "GET http://bead.test:/ HTTP/1.1", []),
+        (400, null, "GET http://user@bead.test/ HTTP/1.1", []),
+        (400, null, "GET http://a*b.test/ HTTP/1.1", []),
+        (400, null, "GET http://bead.test/ HTTP/1.1", ["Host"]),
+        (400, null, "POST http://bead.test/ HTTP/1.1", ["Host: bead.test", "Host: bead.test"]),
 
         // 1: a host not taken, whatever else the request holds; none, where HTTP asks none
         (403, WebSocketRefusals.Host, "GET / HTTP/1.1", ["Host: elsewhere.test"]),
         (403, WebSocketRefusals.Host, "GET / HTTP/1.0", ["Host"]),
-        (403, WebSocketRefusals.Host, "GET / HTTP/1.1", ["Host: bead.test:8080"]),
+        (403, WebSocketRefusals.Host, "GET / HTTP/1.1", ["Host: localhost.example"]),
+        (403, WebSocketRefusals.Host, "GET http://elsewhere.test/ HTTP/1.1", []),
+        (403, WebSocketRefusals.Host, "GET http://elsewhere.test/ HTTP/1.0", ["Host"]),
         (403, WebSocketRefusals.Host, "POST / HTTP/1.1", ["Host: elsewhere.test"]),
         (403, WebSocketRefusals.Host, "CONNECT elsewhere.test:80 HTTP/1.1", ["Host: elsewhere.test:80"]),
         (403, WebSocketRefusals.Host, "GET / HTTP/1.1", ["Host: elsewhere.test", "Upgrade", "Connection"]),
@@ -99,6 +124,7 @@ public sealed class WebSocketHandshakeTests
         (426, WebSocketRefusals.Upgrade, "HEAD / HTTP/1.1", ["Upgrade", "Connection", "Sec-WebSocket-Key", "Sec-WebSocket-Version"]),
         (426, WebSocketRefusals.Upgrade, "GET / HTTP/1.0", []),
         (426, WebSocketRefusals.Upgrade, "GET / HTTP/1.0", ["Upgrade: websocket, h2c"]),
+        (426, WebSocketRefusals.Upgrade, "GET http://bead.test/ HTTP/1.0", ["Host"]),
 
         // 4: a version but 13, or none, before the key and the origin are judged; two field lines
         (426, WebSocketRefusals.Version, "GET / HTTP/1.1", ["Sec-WebSocket-Version: 8"]),
@@ -139,6 +165,7 @@ public sealed class WebSocketHandshakeTests
         (403, WebSocketRefusals.Origin, "GET / HTTP/1.1", ["Origin: http://bead.test:80"]),
         (403, WebSocketRefusals.Origin, "GET / HTTP/1.1", ["Origin: null"]),
         (403, WebSocketRefusals.Origin, "GET / HTTP/1.1", ["Origin: http://bead.test", "Origin: http://bead.test"]),
+        (403, WebSocketRefusals.Origin, "GET http://bead.test/ HTTP/1.1", ["Host: elsewhere.test", "Origin: http://elsewhere.test"]),
     ];
 
     // helpers
@@ -154,6 +181,7 @@ public sealed class WebSocketHandshakeTests
 
         request.Method = parts[0];
         request.Protocol = parts[2];
+        request.HttpContext.Features.Get<IHttpRequestFeature>()!.RawTarget = parts[1];
 
         foreach (var line in Handshake.Where((line) =>
         {
@@ -228,19 +256,44 @@ public sealed class WebSocketHandshakeTests
     }
 
     [Fact]
-    public void Takes_every_host_and_any_origin_s_page_of_its_own_when_given_no_hosts_but_never_a_Host_HTTP_refuses()
+    public void Takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own_and_refuses_403_any_other_host_an_empty_one_and_none_before_its_method_and_its_upgrade()
     {
-        var none = new WebSocketTransportServerOptions();
+        WebSocketTransportServerOptions[] every = [new(), new() { Hosts = [] }, new() { Hosts = ["bead.test"] }];
 
-        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test"]), none));
-        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: xn---bad-cpa.test", "Origin: http://xn---bad-cpa.test"]), none));
-        Assert.Equal((403, WebSocketRefusals.Origin), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Origin: https://bead.example"]), none));
-        Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host"]), none));
-        Assert.Equal((426, WebSocketRefusals.Upgrade), AnswerOf(("GET / HTTP/1.0", ["Host"]), none));
-        Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host: [::1"]), none));
+        Assert.All(every, (options) =>
+        {
+            // those every server takes, on any port, and a page of its own on them
+            Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: localhost:8080"]), options));
+            Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: A.LocalHost"]), options));
+            Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: 127.0.0.1:8080"]), options));
+            Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: [::1]"]), options));
+            Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: localhost:8080", "Origin: http://localhost:8080"]), options));
+            Assert.Equal((403, WebSocketRefusals.Origin), AnswerOf(("GET / HTTP/1.1", ["Host: localhost:8080", "Origin: https://bead.example"]), options));
 
-        // HTTP/2's authority is its server's
-        Assert.Equal((405, WebSocketRefusals.Method), AnswerOf(("POST / HTTP/2", ["Host"]), none));
+            // any other, an empty one and none, whatever the method and the upgrade, HTTP/2's among them;
+            // an empty Host the wire's cases hold, a request no socket carries dropping an empty field
+            Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Origin: http://elsewhere.test"]), options));
+            Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("POST / HTTP/1.1", ["Host: elsewhere.test", "Upgrade", "Connection"]), options));
+            Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("GET / HTTP/1.1", ["Host: localhost."]), options));
+            Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("GET / HTTP/1.1", ["Host: :8080"]), options));
+            Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("GET / HTTP/1.0", ["Host"]), options));
+            Assert.Equal((403, WebSocketRefusals.Host), AnswerOf(("POST / HTTP/2", ["Host"]), options));
+
+            // never a Host HTTP refuses
+            Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host"]), options));
+            Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host: [::1"]), options));
+        });
+
+        // * takes every host, an empty one and none, and judges the rest as it would
+        var any = new WebSocketTransportServerOptions { Hosts = ["*"] };
+
+        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Origin: http://elsewhere.test"]), any));
+        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: xn---bad-cpa.test", "Origin: http://xn---bad-cpa.test"]), any));
+        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: :8080"]), any));
+        Assert.Equal((403, WebSocketRefusals.Origin), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Origin: https://bead.example"]), any));
+        Assert.Equal((426, WebSocketRefusals.Upgrade), AnswerOf(("GET / HTTP/1.0", ["Host"]), any));
+        Assert.Equal((405, WebSocketRefusals.Method), AnswerOf(("POST / HTTP/2", ["Host"]), any));
+        Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host"]), any));
     }
 
     [Fact]

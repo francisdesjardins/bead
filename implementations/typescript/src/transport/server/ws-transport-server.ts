@@ -22,6 +22,7 @@ import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
+import { assertHosts, assertOrigins } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   IIncomingMessageLike,
@@ -109,7 +110,7 @@ const closeOpened = (
  *
  * A request at its address is judged in the order of spec 15.2, `hosts` and `origins` among its
  * steps as the HTTP transport's (spec 15.12): 400 as HTTP answers it to a `Host` missing, repeated
- * or no host; 403 to a host not among `hosts`; 405 to a method but `GET` or `HEAD`; 426 to a
+ * or no host, or an absolute-form target that names none; 403 to a host it does not take; 405 to a method but `GET` or `HEAD`; 426 to a
  * request that asks no WebSocket, and to a version but 13; 400 to a malformed upgrade; 403 to an
  * `Origin` neither its own nor among `origins`; each refusal as {@link refusalOfHandshake} writes
  * it. Each message is an envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws`
@@ -135,6 +136,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
   } = options;
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
+  assertHosts(hosts);
+  assertOrigins(origins);
   const judged = { hosts, origins };
 
   const decoder = new TextDecoder();

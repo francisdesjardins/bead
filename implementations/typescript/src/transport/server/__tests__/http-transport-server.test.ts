@@ -1,7 +1,9 @@
 import { EventEmitter, once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import {
+  type ClientHttp2Session,
   connect as connectHTTP2,
+  constants as http2Constants,
   createSecureServer,
   createServer as createHTTP2Server,
 } from 'node:http2';
@@ -42,6 +44,9 @@ import { TLS_FIXTURE } from './tls-fixture';
 // helpers
 
 const host = '127.0.0.1';
+
+/** HTTP/2's error code of a malformed request (RFC 9113 §7). */
+const PROTOCOL_ERROR = http2Constants.NGHTTP2_PROTOCOL_ERROR;
 
 /** A bearer credential, RFC 6750's own example, its auth-scheme included. */
 const BEARER = 'Bearer mF_9.B5f-4.1JqM';
@@ -625,11 +630,11 @@ test.describe('createHTTPTransportServer', () => {
     };
 
     // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-    // and a Host of punycode that decodes to none, taken where no host is named
+    // and a Host of punycode that decodes to none, taken where every host is
     const page = ['xn--bad-bma.test:8080', 'http://xn--bad-bma.test:8080'] as const;
 
     expect(
-      await answersOf(undefined, [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
+      await answersOf(['*'], [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
     ).toEqual([
       [201, null],
       [201, null],
@@ -637,15 +642,16 @@ test.describe('createHTTPTransportServer', () => {
       [201, null],
     ]);
 
-    // hosts name an IDN host as the field carries it, in punycode
+    // hosts name an IDN host as the field carries it, in punycode, and none past them is taken
     expect(
       await answersOf(
-        ['xn--bad-bma.test:8080'],
-        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test']]
+        ['xn--bad-bma.test'],
+        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test'], ['xn--a']]
       )
     ).toEqual([
       [201, null],
       [201, null],
+      [403, REFUSALS.HOST],
       [403, REFUSALS.HOST],
       [403, REFUSALS.HOST],
     ]);
@@ -1210,6 +1216,25 @@ test.describe('createHTTPTransportServer', () => {
 
     expect(EXCHANGE_TIMEOUT).toBe(300_000);
   });
+
+  test('refuses as it is built a hosts entry with a port, and an origins entry that is *', () => {
+    const built = (options: Partial<IHTTPTransportServerOptions>) => {
+      return () => {
+        return createHTTPTransportServer({
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+          ...options,
+        });
+      };
+    };
+
+    expect(built({ hosts: ['bead.test:8080'] })).toThrow(ProgrammerError);
+    expect(built({ hosts: ['bead.test', '*'] })).toThrow(ProgrammerError);
+    expect(built({ origins: ['*'] })).toThrow(ProgrammerError);
+    expect(built({ origins: ['https://bead.test/'] })).toThrow(ProgrammerError);
+    expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).not.toThrow();
+  });
 });
 
 test.describe('createHTTPTransportServer, over HTTP/2', () => {
@@ -1336,7 +1361,121 @@ const postHTTPS = (
   );
 };
 
+/**
+ * How the server ends a `POST` over HTTP/2 of `headers`: its status and its `bead-refusal`, or the
+ * code its stream was reset with, nothing written.
+ */
+const answerOverHTTP2 = (session: ClientHttp2Session, headers: Record<string, string>) => {
+  return new Promise<[number | undefined, unknown] | number>((resolve) => {
+    const stream = session.request({
+      ':method': 'POST',
+      ':path': '/bead',
+      'content-type': BEAD_MEDIA_TYPE,
+      ...headers,
+    });
+    let head: [number | undefined, unknown] | undefined;
+
+    stream.once('response', (response) => {
+      head = [response[':status'], response[REFUSAL_HEADER]];
+    });
+    stream.on('data', () => {});
+    stream.on('error', () => {});
+    stream.once('close', () => {
+      resolve(head ?? stream.rstCode);
+    });
+    stream.end();
+  });
+};
+
+/** The code the server reset a `POST` over HTTP/2 of `headers` with; none when it answered it. */
+const resetOf = async (session: ClientHttp2Session, headers: Record<string, string>) => {
+  const answer = await answerOverHTTP2(session, headers);
+
+  return typeof answer === 'number' ? answer : undefined;
+};
+
+/** A transport server under TLS, HTTP/2 and HTTP/1.1 on one port, and a session to it. */
+const startSecure = async (options: Partial<IHTTPTransportServerOptions> = {}) => {
+  const server = createHTTPTransportServer({
+    createServer: (listener) => {
+      return createSecureServer({ ...TLS_FIXTURE, allowHTTP1: true }, (request, response) => {
+        listener(request, response);
+      });
+    },
+    ...options,
+  });
+  const { port } = await server.start({ address: host, findOpenPort: true });
+  const session = connectHTTP2(`https://${host}:${String(port)}`, { ca: TLS_FIXTURE.cert });
+
+  session.on('error', () => {});
+
+  return {
+    port,
+    server,
+    session,
+    [Symbol.asyncDispose]: async () => {
+      session.close();
+      await server.stop();
+    },
+  };
+};
+
 test.describe('createHTTPTransportServer, over TLS', () => {
+  test('names its host over HTTP/2 by its :authority, a host beside it ignored, for the host and the own origin', async () => {
+    await using started = await startSecure({ hosts: ['bead.test'] });
+    const { session } = started;
+
+    expect(
+      await Promise.all([
+        answerOverHTTP2(session, { ':authority': 'bead.test:8443', host: 'rebind.example' }),
+        answerOverHTTP2(session, { ':authority': 'rebind.example:8443', host: 'bead.test' }),
+        answerOverHTTP2(session, {
+          ':authority': 'bead.test:8443',
+          host: 'rebind.example:8443',
+          origin: 'https://bead.test:8443',
+        }),
+        answerOverHTTP2(session, {
+          ':authority': 'bead.test:8443',
+          host: 'rebind.example:8443',
+          origin: 'https://rebind.example:8443',
+        }),
+      ])
+    ).toEqual([
+      [201, undefined],
+      [403, REFUSALS.HOST],
+      [201, undefined],
+      [403, REFUSALS.ORIGIN],
+    ]);
+  });
+
+  test('resets over HTTP/2 the stream of a request whose :authority is no host, PROTOCOL_ERROR, nothing written', async () => {
+    await using started = await startSecure({ hosts: ['*'] });
+    const { server, session } = started;
+    const connections: unknown[] = [];
+
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // a percent-encoded octet, `*`, `;` and `=`, `+` in a name, an IPvFuture literal, a colon with
+    // no port, after a name and after a literal; then one it takes, on the same session
+    expect(
+      await Promise.all(
+        ['a%41.test', 'a*b.test', 'a;b=c', 'a+b.test', '[v1.bead]', 'localhost:', '[::1]:'].map(
+          (authority) => {
+            return resetOf(session, { ':authority': authority });
+          }
+        )
+      )
+    ).toEqual(
+      Array.from({ length: 7 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(connections).toEqual([]);
+    expect(await answerOverHTTP2(session, { ':authority': 'localhost' })).toEqual([201, undefined]);
+  });
+
   test('serves HTTP/2 and HTTP/1.1 on one port, a call over each, and closes its sessions as it stops', async () => {
     const server = createHTTPTransportServer({
       createServer: (listener) => {
@@ -1415,6 +1554,12 @@ test.describe('createHTTPTransportServer, over TLS', () => {
           return connectionHandle;
         })
       ).toEqual(['type=HTTP;ip=127.0.0.1;ordinal=1', 'type=HTTP;ip=127.0.0.1;ordinal=2']);
+
+      // an authority that is no host: HTTP/2's stream reset, HTTP/1.1's 400
+      expect([
+        await resetOf(session, { ':authority': 'localhost:' }),
+        (await postHTTPS(port, { headers: { host: 'localhost:' } })).status,
+      ]).toEqual([PROTOCOL_ERROR, 400]);
     } finally {
       await server.stop();
     }
@@ -1610,7 +1755,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
   });
 
   test('reads any target without throwing, a header given twice by its first, and HTTP/2’s authority as the host', async () => {
-    const { fake, server } = await startScripted({ hosts: ['bead.example', 'bead.example:8443'] });
+    const { fake, server } = await startScripted({ hosts: ['bead.example'] });
     const statusOf = (
       headers: Record<string, string | string[]>,
       { url, httpVersionMajor }: { httpVersionMajor?: number; url?: string } = {}
@@ -1645,6 +1790,35 @@ test.describe('createHTTPTransportServer, its edges', () => {
         { httpVersionMajor: 2 }
       ),
       statusOf({}),
+      // HTTP/2's authority before a host beside it, one way and the other
+      statusOf(
+        { ':authority': 'bead.example', 'content-type': BEAD_MEDIA_TYPE, host: 'rebound.example' },
+        { httpVersionMajor: 2 }
+      ),
+      statusOf(
+        { ':authority': 'rebound.example', 'content-type': BEAD_MEDIA_TYPE, host: 'bead.example' },
+        { httpVersionMajor: 2 }
+      ),
+      // a target in absolute-form names the authority, its Host ignored but for being one, its
+      // path and its query read after it
+      statusOf(bead, { url: 'http://bead.example:8443/bead' }),
+      statusOf({ ...bead, host: 'rebound.example' }, { url: 'https://bead.example/bead' }),
+      statusOf({ ...bead, host: 'bad host' }, { url: 'http://localhost/bead?after=1' }),
+      statusOf(bead, { url: 'http://rebound.example/bead' }),
+      statusOf(bead, { url: 'http://bead.example' }),
+      statusOf(bead, { url: 'http://bead.example?after=1' }),
+      // and HTTP refuses one that names no host, a colon with no port and a userinfo among them,
+      // another scheme's, or one beside two Host lines
+      statusOf(bead, { url: 'http:///bead' }),
+      statusOf(bead, { url: 'http://a%41.test/bead' }),
+      statusOf(bead, { url: 'http://127.0.0.1:/bead' }),
+      statusOf(bead, { url: 'http://user@bead.example/bead' }),
+      statusOf(bead, { url: 'HTTP://bead.example/bead' }),
+      statusOf(bead, { url: 'ftp://bead.example/bead' }),
+      statusOf(
+        { ...bead, host: ['bead.example', 'bead.example'] },
+        { url: 'http://bead.example/bead' }
+      ),
     ]).toEqual([
       [201, undefined],
       [404, REFUSALS.PATH],
@@ -1655,17 +1829,46 @@ test.describe('createHTTPTransportServer, its edges', () => {
       [400, undefined],
       [201, undefined],
       [415, REFUSALS.TYPE],
+      [201, undefined],
+      [403, REFUSALS.HOST],
+      [201, undefined],
+      [201, undefined],
+      [201, undefined],
+      [403, REFUSALS.HOST],
+      [404, REFUSALS.PATH],
+      [404, REFUSALS.PATH],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
     ]);
 
+    // HTTP/2's authority that is no host resets its stream, nothing written
+    const reset = fake.exchange({
+      headers: { ':authority': 'localhost:', 'content-type': BEAD_MEDIA_TYPE },
+      httpVersionMajor: 2,
+    });
+
+    expect([reset.response.status, reset.response.isDestroyed]).toEqual([undefined, true]);
+
     const { response } = fake.exchange({ headers: bead, httpVersion: '1.0' });
+    const absolute = fake.exchange({
+      headers: bead,
+      httpVersion: '1.0',
+      url: 'http://bead.example/bead',
+    });
     // no target at all: the root, which is not the path
     const untargeted = fake.exchange({
       headers: { ...bead, host: 'bead.example' },
       url: undefined,
     });
 
-    // no host at all, which an HTTP/1.0 request may name, where hosts are listed
-    expect(response.status).toBe(403);
+    // no host at all, which an HTTP/1.0 request may name, where hosts are listed; and none beside
+    // a target in absolute-form, which names it
+    expect([response.status, absolute.response.status]).toEqual([403, 201]);
     expect(untargeted.response.headers?.[REFUSAL_HEADER]).toBe(REFUSALS.PATH);
     await server.stop();
   });

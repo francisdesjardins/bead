@@ -363,11 +363,17 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   heartbeat?: number | undefined;
   /**
-   * The hosts — `Host` — a request at the server's address may name; any other is refused 403,
+   * The hosts a request at the server's address may name besides those every server takes —
+   * `localhost`, a name under `.localhost`, an IP literal — by its authority: its absolute-form
+   * target's, else its `Host` (spec 15.12). Any other, an empty one and none are refused 403,
    * whatever the request, before anything else of it is read, which a page that rebinds its name to
-   * this server's address cannot pass. Compared ASCII case-insensitively, in the form the field
-   * carries, an IDN host in punycode. Every host, when not given. A `Host` missing, repeated or no
-   * host is answered 400 before it, as HTTP answers it (RFC 9112 §3.2).
+   * this server's address cannot pass: a server a browser, a proxy that keeps `Host`, or a service
+   * reaches by a name names it here. Each entry is a host without its port, compared by the
+   * request's host on any port, ASCII case-insensitively, an IDN host in punycode. `[]`, or none, is
+   * those every server takes alone; `['*']` takes every host, and so reopens the rebinding the
+   * check closes. An entry with a port, an empty one, one that is no host, or `*` beside another is
+   * a {@link ProgrammerError} as the server is built. A refusal is told on the wire alone. A `Host`
+   * missing, repeated or no host is answered 400 before it, as HTTP answers it (RFC 9112 §3.2).
    */
   hosts?: readonly string[] | undefined;
   /**
@@ -378,10 +384,12 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
   maxPayload?: number | undefined;
   /**
    * The origins an upgrade that sends an `Origin` may come from, besides the server's own —
-   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly,
+   * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly,
    * checked on the upgrade, after its version and its form; any other is refused 403, since no
    * same-origin policy guards an upgrade. `null` among them takes every upgrade that sends it; one
-   * with no `Origin` comes from anywhere. None, when not given.
+   * with no `Origin` comes from anywhere. None, when not given. Each entry is `null` or an origin as
+   * a browser serializes it (RFC 6454 §6.2): `*`, which no origin is, and any other are a
+   * {@link ProgrammerError} as the server is built.
    */
   origins?: readonly string[] | undefined;
   /**
@@ -453,6 +461,8 @@ export interface IHTTPResponseLike {
   /** Sends the head now; HTTP/2's has it, though its type says nothing of it. */
   flushHeaders?(): void;
   on(event: 'close' | 'finish', listener: () => void): unknown;
+  /** HTTP/2's stream, which a malformed request's reset closes with its error code. */
+  readonly stream?: { close(code?: number): void } | undefined;
   write(chunk: Uint8Array): unknown;
   writeHead(statusCode: number, headers?: Record<string, string>): unknown;
 }
@@ -499,11 +509,18 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   exchangeTimeout?: number | undefined;
   /**
-   * The hosts — `Host`, or HTTP/2's `:authority` — a request may name; any other is refused 403
+   * The hosts a request may name besides those every server takes — `localhost`, a name under
+   * `.localhost`, an IP literal — by its authority: its absolute-form target's, else over HTTP/2 its
+   * `:authority`, else its `Host` (spec 15.12). Any other, an empty one and none are refused 403
    * before anything else is read, which a page that rebinds its name to this server's address
-   * cannot pass. Compared ASCII case-insensitively, in the form the field carries, an IDN host in
-   * punycode. Every host, when not given. An HTTP/1.1 request without a `Host`, with two, or with one
-   * that is no host is answered 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2).
+   * cannot pass: a server a browser, a proxy that keeps `Host`, or a service reaches by a name names
+   * it here. Each entry is a host without its port, compared by the request's host on any port,
+   * ASCII case-insensitively, an IDN host in punycode. `[]`, or none, is those every server takes
+   * alone; `['*']` takes every host, and so reopens the rebinding the check closes. An entry with a
+   * port, an empty one, one that is no host, or `*` beside another is a {@link ProgrammerError} as
+   * the server is built. A refusal is told on the wire and to an HTTP client, never by the server.
+   * An HTTP/1.1 request without a `Host`, with two, or with an authority that is no host is answered
+   * 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2); over HTTP/2, its stream is reset.
    */
   hosts?: readonly string[] | undefined;
   /**
@@ -551,10 +568,12 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   maximumWaitingExchanges?: number | undefined;
   /**
    * The origins an exchange that sends an `Origin` may come from, besides the server's own —
-   * `http://` or `https://` followed by its `Host`, in any ASCII case — each compared exactly; any
-   * other is refused 403. `null` among them takes every exchange that sends it; one with no `Origin`
-   * comes from anywhere. It serves a proxy that rewrites the host: a page of another origin also
-   * needs CORS, which the transport does not answer yet. None, when not given.
+   * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly;
+   * any other is refused 403. `null` among them takes every exchange that sends it; one with no
+   * `Origin` comes from anywhere. It serves a proxy that rewrites the host: a page of another origin
+   * also needs CORS, which the transport does not answer yet. None, when not given. Each entry is
+   * `null` or an origin as a browser serializes it (RFC 6454 §6.2): `*`, which no origin is, and any
+   * other are a {@link ProgrammerError} as the server is built.
    */
   origins?: readonly string[] | undefined;
   /** The path the transport answers on; anything else is 404. Defaults to {@link PATHNAME}. */

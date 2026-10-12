@@ -733,26 +733,40 @@ test.describe('WSTransportServer, its hosts and origins', () => {
     const refused = ['HTTP/1.1 403 Forbidden', 'host-refused'];
 
     // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-    // and a Host of punycode that decodes to none, taken where no host is named
+    // and a Host of punycode that decodes to none, taken where every host is
     const page = ['xn--bad-bma.test:8080', 'http://xn--bad-bma.test:8080'] as const;
 
     expect(
-      await answersOf(undefined, [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
+      await answersOf(['*'], [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
     ).toEqual([taken, taken, taken, taken]);
 
-    // hosts name an IDN host as the field carries it, in punycode
+    // hosts name an IDN host as the field carries it, in punycode, and none past them is taken
     expect(
       await answersOf(
-        ['xn--bad-bma.test:8080'],
-        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test']]
+        ['xn--bad-bma.test'],
+        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test'], ['xn--a']]
       )
-    ).toEqual([taken, taken, refused, refused]);
+    ).toEqual([taken, taken, refused, refused, refused]);
+  });
+
+  test('refuses as it is built a hosts entry with a port, and an origins entry that is *', () => {
+    const built = (options: Partial<IWSTransportServerOptions>) => {
+      return () => {
+        return createWSTransportServer({ ...options, WebSocketServer });
+      };
+    };
+
+    expect(built({ hosts: ['bead.test:8080'] })).toThrow(ProgrammerError);
+    expect(built({ hosts: ['bead.test', '*'] })).toThrow(ProgrammerError);
+    expect(built({ origins: ['*'] })).toThrow(ProgrammerError);
+    expect(built({ origins: ['https://bead.test/'] })).toThrow(ProgrammerError);
+    expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).not.toThrow();
   });
 });
 
 test.describe('WSTransportServer, its handshake', () => {
   test('refuses a method but GET or HEAD 405, after its host and before its upgrade is read, its Allow naming GET and HEAD, marked method-refused', async () => {
-    await using started = await startDated({ hosts: ['bead.test', 'bead.test:80'] });
+    await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;
 
     // a handshake under another method, one of version 8 among them, or none at all; a CONNECT,

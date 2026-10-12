@@ -12,8 +12,8 @@ the client answers; and `countDown`, which fails past 10 with `TOO_FAR`, notifie
 to a client that asks for them at a window of 1, and is admitted by its hook, `greeted`, once the
 connection said hello. Both halves serve and call it over WebSocket.
 
-This example takes every host, the default spec 15.13 holds open: while it runs, a page that
-rebinds its name to 127.0.0.1 reaches it. A server a browser can reach names its hosts.
+Its servers name no hosts: every server takes `127.0.0.1`, which its clients connect to, and
+refuses a page that rebinds its name to it (spec 15.12).
 
 ## Its files
 

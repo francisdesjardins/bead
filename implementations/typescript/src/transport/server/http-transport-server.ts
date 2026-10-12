@@ -24,11 +24,16 @@ import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import type { Data } from '../shared/types';
 import {
+  assertHosts,
+  assertOrigins,
+  authorityOf,
   HOST_REFUSAL,
+  isAuthority,
   isTakenHost,
   isTakenOrigin,
-  isWellFormedHost,
+  type IAuthority,
   ORIGIN_REFUSAL,
+  requestTargetOf,
 } from './hosts-and-origins';
 import { createTransportServer, generateDrawnHandle } from './transport-server';
 import type {
@@ -243,6 +248,9 @@ const RESPONSE_HEADERS = Object.freeze({
   'x-content-type-options': 'nosniff',
 });
 
+// HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
+const PROTOCOL_ERROR = 0x1;
+
 // the addresses of this machine, from which a proxy in front of the transport comes
 const LOOPBACK: ReadonlySet<string> = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
@@ -260,20 +268,16 @@ const headerOf = (request: IHTTPRequestLike, name: string): string | undefined =
   return Array.isArray(value) ? value[0] : value;
 };
 
-// the host a request names: `Host` over HTTP/1, `:authority` over HTTP/2
-const hostOf = (request: IHTTPRequestLike): string | undefined => {
-  return headerOf(request, 'host') ?? headerOf(request, ':authority');
-};
+// the path a request names, an absolute-form target's among them, and its query, which a listen
+// reads; none for a target HTTP refuses
+const targetOf = (
+  request: IHTTPRequestLike
+): { path: string; query: URLSearchParams } | undefined => {
+  const target = requestTargetOf(request.url);
 
-// the path a request names, and its query, which a listen reads: read as a string, so no target
-// throws
-const targetOf = (request: IHTTPRequestLike): { path: string; query: URLSearchParams } => {
-  const target = request.url ?? '/';
-  const index = target.indexOf('?');
-
-  return index === -1
-    ? { path: target, query: new URLSearchParams() }
-    : { path: target.slice(0, index), query: new URLSearchParams(target.slice(index + 1)) };
+  return target === undefined
+    ? undefined
+    : { path: target.path, query: new URLSearchParams(target.query) };
 };
 
 // a count a listen gives: absent is 0, and anything but digits is none
@@ -321,6 +325,21 @@ const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
   }
 
   return values;
+};
+
+// a request's authority (spec 15.12): over HTTP/2, its `:authority`, else its `host`, judged by
+// its form; over HTTP/1, as `authorityOf` reads it. None for what HTTP refuses of its own
+const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefined => {
+  if (request.httpVersionMajor !== 1) {
+    const authority = headerOf(request, ':authority') ?? headerOf(request, 'host');
+
+    return authority === undefined || isAuthority(authority) ? { authority } : undefined;
+  }
+
+  return authorityOf(linesOf(request, 'host'), {
+    isRequired: request.httpVersion === '1.1',
+    target: requestTargetOf(request.url),
+  });
 };
 
 // the credential a field carries: its value whole, without the spaces and tabs around it (RFC 9110
@@ -407,6 +426,15 @@ const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd)
   response.end();
 };
 
+// a malformed HTTP/2 request's end: its stream reset, nothing written (RFC 9113 §8.1.1)
+const reset = (response: IHTTPResponseLike): void => {
+  if (response.stream === undefined) {
+    response.destroy();
+  } else {
+    response.stream.close(PROTOCOL_ERROR);
+  }
+};
+
 // a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
 const sendHead = (response: IHTTPResponseLike): void => {
   if (!response.headersSent) {
@@ -484,6 +512,8 @@ export const createHTTPTransportServer = (
   assertOption('maximumOutboxBytes', { value: maximumOutboxBytes });
   const maximumWait = assertHeldFinite('maximumWait', givenMaximumWait);
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
+  assertHosts(hosts);
+  assertOrigins(origins);
 
   // what the transport keeps of each connection, by handle
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
@@ -518,12 +548,6 @@ export const createHTTPTransportServer = (
           isIP(forwarded) !== 0
           ? forwarded
           : remoteAddress;
-      };
-
-      // an exchange from the server's own origin, or one it was told; one with no `Origin` comes from
-      // anywhere, and any client that sends one is judged by it
-      const isAllowedOrigin = (request: IHTTPRequestLike): boolean => {
-        return isTakenOrigin(headerOf(request, 'origin'), { host: hostOf(request), origins });
       };
 
       // ends an exchange the transport answers itself; one whose body it will not read is closed
@@ -662,7 +686,7 @@ export const createHTTPTransportServer = (
       // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
       const listen = (exchange: IExchangeIn, connection: IDrawn): void => {
         const { request, response } = exchange;
-        const { query } = targetOf(request);
+        const query = targetOf(request)?.query ?? new URLSearchParams();
         const after = countOf(query, 'after');
         const wait = countOf(query, 'wait');
 
@@ -1081,28 +1105,33 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
-        // what HTTP refuses of its own (RFC 9112 §3.2), as HTTP answers it, unmarked; HTTP/2's
-        // authority is its server's to judge
-        if (
-          request.httpVersionMajor === 1 &&
-          !isWellFormedHost(linesOf(request, 'host'), {
-            isRequired: request.httpVersion === '1.1',
-          })
-        ) {
+        const named = authorityNamedBy(request);
+
+        // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2), as HTTP answers it, unmarked; over
+        // HTTP/2, a request malformed
+        if (named === undefined) {
+          if (request.httpVersionMajor !== 1) {
+            return (reset(response), undefined);
+          }
+
           response.writeHead(400, { 'content-length': '0', connection: 'close' });
 
           return (response.end(), undefined);
         }
 
-        if (!isTakenHost(hostOf(request), hosts)) {
+        const { authority } = named;
+
+        if (!isTakenHost(authority, hosts)) {
           return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
         }
 
-        if (targetOf(request).path !== pathname) {
+        if (targetOf(request)?.path !== pathname) {
           return (finish(exchange, { reason: REFUSALS.PATH, status: 404 }), undefined);
         }
 
-        if (!isAllowedOrigin(request)) {
+        // an exchange from the server's own origin, or one it was told; one with no `Origin` comes
+        // from anywhere, and any client that sends one is judged by it
+        if (!isTakenOrigin(headerOf(request, 'origin'), { host: authority, origins })) {
           return (finish(exchange, { reason: REFUSALS.ORIGIN, status: 403 }), undefined);
         }
 

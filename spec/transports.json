@@ -2,14 +2,14 @@
   "$schema": "schemas/transports.schema.json",
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
-    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, and {token}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. close drops that socket.",
+    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. close drops that socket.",
     "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
     "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
     "Before each send and close, and at the end, the server reported nothing a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
-    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
+    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
@@ -1446,6 +1446,423 @@
       ]
     },
     {
+      "name": "a server given no hosts takes localhost, a name under .localhost and an IP literal, on any port or none, and refuses any other host 403, marked, a page that rebinds its name among them",
+      "clauses": [
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: localhost:8080\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "localhost"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "localhost"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: Bead.LocalHost\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "under"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "under"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: 192.0.2.1:80\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "ipv4"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "ipv4"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: [::1]:8443\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "ipv6"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "ipv6"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example:8080\r\ncontent-type: application/prs.bead\r\norigin: http://rebind.example:8080\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: localhost.example\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "suffixed"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "suffixed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: localhost.\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "final"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "final"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: 127.1\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "short"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "short"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: 0177.0.0.1\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "octal"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "octal"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: 127.0.0.1.example\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "named"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "named"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: \r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.0\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "none"
+        }
+      ]
+    },
+    {
+      "name": "hosts given takes the hosts it lists besides those every server takes, each by its host on any port, in any ASCII case",
+      "clauses": [
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: bead.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "bare"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "bare"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: Bead.Test:8443\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "port"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "port"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: bead.test:80\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "default"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "default"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "loopback"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "loopback"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "literal"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "literal"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "hosts empty takes the hosts every server takes, and no other",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": []
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "literal"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "literal"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: bead.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "hosts * takes every host, an empty one and none among them",
+      "clauses": [
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "*"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example:8080\r\ncontent-type: application/prs.bead\r\norigin: http://rebind.example:8080\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: \r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.0\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "none"
+        }
+      ]
+    },
+    {
+      "name": "a request whose target is in absolute-form names its host by the target, its Host ignored, a differing one that no client should send among them, and its own origin with it",
+      "clauses": [
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST http://{host}/bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "own"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "own"
+        },
+        {
+          "send": {
+            "head": "POST http://rebind.example:8080/bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": ""
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "POST http://{host}/bead HTTP/1.1\r\nhost: rebind.example:8080\r\ncontent-type: application/prs.bead\r\norigin: http://{host}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "hosted"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "hosted"
+        }
+      ]
+    },
+    {
       "name": "an HTTP/1.1 request without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked, before its host is judged",
       "clauses": [
         "15.12"
@@ -1504,6 +1921,86 @@
             "body": ""
           },
           "on": "bad"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: a%41.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "encoded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "encoded"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: a*b.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "starred"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "starred"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: a;b=c\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "parameter"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "parameter"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: [v1.bead]\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "future"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "future"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: localhost:\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "portless"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "portless"
         }
       ]
     },
@@ -1586,11 +2083,16 @@
       ]
     },
     {
-      "name": "a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken",
+      "name": "a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken, under hosts *",
       "clauses": [
         "15.12"
       ],
       "transport": "http",
+      "options": {
+        "hosts": [
+          "*"
+        ]
+      },
       "steps": [
         {
           "send": {
@@ -4344,6 +4846,86 @@
             "body": ""
           },
           "on": "bad"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: a%41.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "encoded"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "encoded"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: a*b.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "starred"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "starred"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: a;b=c\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "parameter"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "parameter"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: [v1.bead]\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "future"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "future"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: localhost:\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "portless"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "portless"
         }
       ]
     },
@@ -4672,12 +5254,17 @@
       ]
     },
     {
-      "name": "an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken",
+      "name": "an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken, under hosts *",
       "clauses": [
         "15.2",
         "15.12"
       ],
       "transport": "websocket",
+      "options": {
+        "hosts": [
+          "*"
+        ]
+      },
       "steps": [
         {
           "send": {
@@ -4876,6 +5463,381 @@
             "body": ""
           },
           "on": "hyphen"
+        }
+      ]
+    },
+    {
+      "name": "a WebSocket server given no hosts takes localhost, a name under .localhost and an IP literal, and refuses any other host 403, marked, whatever its method, its upgrade or its form",
+      "clauses": [
+        "15.2",
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: localhost:8080\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "localhost"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "localhost"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "localhost"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "localhost"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: a.localhost\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "under"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "under"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: [::1]\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "ipv6"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "ipv6"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example:8080\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://rebind.example:8080\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "POST / HTTP/1.1\r\nhost: rebind.example\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "post"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "post"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: localhost.\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "final"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "final"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: \r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.0\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "old"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "old"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade is taken from the hosts listed besides those every server takes, each by its host on any port",
+      "clauses": [
+        "15.2",
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: bead.test:8443\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "port"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "port"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "port"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "port"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: localhost\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "loopback"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "loopback"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "a WebSocket server whose hosts is * takes an upgrade naming any host, and judges one naming none by its version",
+      "clauses": [
+        "15.2",
+        "15.6.11",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "*"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example:8080\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://rebind.example:8080\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: \r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.0\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "old"
+        },
+        {
+          "expect": {
+            "status": 426,
+            "fields": {
+              "bead-refusal": "upgrade-required",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "upgrade": "websocket"
+            },
+            "body": ""
+          },
+          "on": "old"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade whose target is in absolute-form names its host by the target, its Host ignored",
+      "clauses": [
+        "15.2",
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET http://{host}/ HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "own"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "own"
+        },
+        {
+          "send": {
+            "head": "GET http://rebind.example:8080/ HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": ""
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "GET http://{host}/ HTTP/1.1\r\nhost: rebind.example:8080\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "hosted"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "hosted"
         }
       ]
     },

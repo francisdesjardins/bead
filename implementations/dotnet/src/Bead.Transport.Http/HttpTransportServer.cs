@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -30,9 +31,19 @@ public sealed record HttpTransportServerOptions
     public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// The hosts a request may name, in any ASCII case, in the form the field carries, an IDN host in
-    /// punycode; any when none. The server judges its own origin by the request's <c>Host</c>, so
-    /// this is what refuses a page that rebinds its name to the server's address.
+    /// The hosts a request may name besides those every server takes — <c>localhost</c>, a name
+    /// under <c>.localhost</c>, an IPv6 address in brackets and an IPv4 address — each a host
+    /// without its port, taken on any port, in any ASCII case, in the form the field carries, an IDN
+    /// host in punycode: none besides when none or empty. A request names its host by its
+    /// authority: an absolute-form target's, else its <c>Host</c>, which carries HTTP/2's
+    /// <c>:authority</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one and none,
+    /// and so takes a page that rebinds its name to the server's address again: the server judges
+    /// its own origin by the request's authority, so this is what refuses one. An entry with a
+    /// port, an empty one, one that is no host, and <c>*</c> beside another are an
+    /// <see cref="ArgumentException"/> as the transport is built. A server reached by a name, a
+    /// public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in a
+    /// cluster, names it here, or refuses it 403, <c>host-refused</c>, which the server reports
+    /// nowhere.
     /// </summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
@@ -73,8 +84,10 @@ public sealed record HttpTransportServerOptions
 
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
-    /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly: none by
-    /// default. <c>null</c> among them takes every exchange that sends it. No CORS is answered.
+    /// <c>http://</c> or <c>https://</c> followed by its request's authority, each compared exactly:
+    /// none by default. <c>null</c> among them takes every exchange that sends it. No CORS is
+    /// answered. Each is <c>null</c> or an origin as RFC 6454 §6.2 serializes it; <c>*</c>, which no
+    /// origin is, and any other entry are an <see cref="ArgumentException"/> as the transport is built.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 
@@ -188,12 +201,15 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// <summary>
     /// A transport server, not yet listening, its durations held. A bound not above 0, or a timeout
     /// that is not from 1 to <see cref="Clocks.LongestTimer"/> milliseconds — infinite aside, but for
-    /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it.
+    /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it; an entry of its
+    /// hosts or origins neither takes, an <see cref="ArgumentException"/> naming it.
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
         var given = options ?? new HttpTransportServerOptions();
 
+        HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
+        HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));
         AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), given.BodyBytesBudget));
 
         var exchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), given.ExchangeTimeout);
@@ -389,6 +405,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             builder.WebHost.ConfigureKestrel((kestrel) =>
             {
                 kestrel.AddServerHeader = false;
+
+                // * an origin server MUST take an absolute-form target's authority over its Host (RFC
+                // 9112 §3.2.2), where Kestrel refuses 400 a Host that differs from it by default
+                kestrel.AllowHostHeaderOverride = true;
 
                 // the transport counts each body against its own limit and budget
                 kestrel.Limits.MaxRequestBodySize = null;
@@ -755,11 +775,11 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return _options.IsProxyTrusted && Loopback.Contains(address) && isAddress ? forwarded : address;
     }
 
-    // an exchange from the server's own origin, or one it was told; one with no Origin comes from
-    // anywhere, and any client that sends one is judged by it
-    private bool IsAllowedOrigin(HttpRequest request)
+    // an exchange from the server's own origin, its request's authority under http or https, or one
+    // it was told; one with no Origin comes from anywhere, and any client that sends one is judged by it
+    private bool IsAllowedOrigin((HttpRequest Request, string? Authority) exchange)
     {
-        return HostsAndOrigins.IsTakenOrigin(HeaderOf(request, HeaderNames.Origin), (request.Headers.Host.ToString(), _options.Origins));
+        return HostsAndOrigins.IsTakenOrigin(HeaderOf(exchange.Request, HeaderNames.Origin), (exchange.Authority, _options.Origins));
     }
 
     // an exchange: what it is, as its method, its path, its host, its origin and its token say
@@ -790,11 +810,24 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     {
         var request = context.Request;
 
-        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
-        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
-        var host = request.Headers.Host.ToString();
+        // ! the authority as it came, which a browser writes as it writes its Origin, an IDN in
+        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none.
+        // Kestrel has put HTTP/2's :authority in the Host; an absolute-form target's it reads
+        // through a Uri, which lowers its case and drops a default or an empty port and a userinfo,
+        // so it is read from the target as it came, and judged as HTTP judges a Host
+        var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+        var targetAuthority = isHttp1 ? HostsAndOrigins.TargetAuthorityOf(context.Features.Get<IHttpRequestFeature>()?.RawTarget) : null;
 
-        if (!HostsAndOrigins.IsTakenHost(host, _options.Hosts))
+        if (targetAuthority is not null && !HostsAndOrigins.IsAuthority(targetAuthority))
+        {
+            await Finish(context, new End(StatusCodes.Status400BadRequest, null, new Dictionary<string, string> { ["connection"] = "close" }));
+
+            return;
+        }
+
+        var authority = HostsAndOrigins.AuthorityOf(request.Headers.Host, targetAuthority);
+
+        if (!HostsAndOrigins.IsTakenHost(authority, _options.Hosts))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Host));
 
@@ -808,7 +841,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        if (!IsAllowedOrigin(request))
+        if (!IsAllowedOrigin((request, authority)))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Origin));
 

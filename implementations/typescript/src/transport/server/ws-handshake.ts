@@ -3,11 +3,12 @@
 // dependencies
 
 import {
+  authorityOf,
   HOST_REFUSAL,
   isTakenHost,
   isTakenOrigin,
-  isWellFormedHost,
   ORIGIN_REFUSAL,
+  requestTargetOf,
 } from './hosts-and-origins';
 
 // types
@@ -18,6 +19,8 @@ export interface IHandshakeRequestLike {
   readonly method?: string | undefined;
   /** Its fields as they came, each name before its value: what counts a field given twice. */
   readonly rawHeaders: readonly string[];
+  /** Its target, which names its authority when it is in absolute-form. */
+  readonly url?: string | undefined;
 }
 
 /** What a server answers a request it does not upgrade. */
@@ -144,7 +147,7 @@ export const BUSY_HANDSHAKE = refused(503, {
   refusal: WS_REFUSALS.BUSY,
 });
 
-// what HTTP refuses of its own (RFC 9112 §3.2), unmarked
+// what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2), unmarked
 const HOST_MALFORMED: IHandshakeRefusal = Object.freeze({
   fields: Object.freeze({ 'content-length': '0', connection: 'close' }),
   refusal: undefined,
@@ -184,9 +187,10 @@ const isWellFormed = (request: IHandshakeRequestLike): boolean => {
  * What a server answers a request at its WebSocket's address that it does not upgrade, judged in
  * the order of spec 15.2, the first that applies answering; none for an upgrade it takes:
  *
- * 1. what HTTP refuses of its own, a `Host` missing, repeated or no host (RFC 9112 §3.2), 400
- *    unmarked;
- * 2. a host not among `hosts`, whatever else the request holds, 403 `host-refused`;
+ * 1. what HTTP refuses of its own, a `Host` missing, repeated or no host, or a target in
+ *    absolute-form that names none or another scheme (RFC 9112 §3.2, §3.2.2), 400 unmarked;
+ * 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
+ *    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
  * 3. a method but `GET` or `HEAD`, 405 `method-refused`, its `Allow` naming both;
  * 4. a request that asks no WebSocket — a `HEAD`, an `HTTP/1.0` request, an `Upgrade` listing no
  *    `websocket` or a `Connection` listing no `upgrade`, in any ASCII case — 426 `upgrade-required`;
@@ -194,7 +198,8 @@ const isWellFormed = (request: IHandshakeRequestLike): boolean => {
  *    `version-refused`, naming 13;
  * 6. a key not one line of 16 bytes in base64, subprotocols no list of distinct tokens, or content,
  *    400 `malformed`;
- * 7. an `Origin` neither the server's own nor among `origins`, 403 `origin-refused`.
+ * 7. an `Origin` neither the server's own, by the request's authority, nor among `origins`, 403
+ *    `origin-refused`.
  *
  * Each refusal but HTTP's own is marked, never stored nor sniffed, its body empty, and closes its
  * connection; a 426 names `websocket` in its `Upgrade`, and `upgrade` in its `Connection`.
@@ -204,15 +209,18 @@ export const refusalOfHandshake = (
   { hosts, origins }: { hosts: readonly string[] | undefined; origins: readonly string[] }
 ): IHandshakeRefusal | undefined => {
   const { httpVersion, method } = request;
-  const hostLines = linesOf(request, 'host');
+  const named = authorityOf(linesOf(request, 'host'), {
+    isRequired: httpVersion === '1.1',
+    target: requestTargetOf(request.url),
+  });
 
-  if (!isWellFormedHost(hostLines, { isRequired: httpVersion === '1.1' })) {
+  if (named === undefined) {
     return HOST_MALFORMED;
   }
 
-  const [host] = hostLines;
+  const { authority } = named;
 
-  if (!isTakenHost(host, hosts)) {
+  if (!isTakenHost(authority, hosts)) {
     return HOST_REFUSED;
   }
 
@@ -247,7 +255,7 @@ export const refusalOfHandshake = (
   const originLines = linesOf(request, 'origin');
   const origin = originLines.length === 0 ? undefined : originLines.join(', ');
 
-  if (!isTakenOrigin(origin, { host, origins })) {
+  if (!isTakenOrigin(origin, { host: authority, origins })) {
     return ORIGIN_REFUSED;
   }
 

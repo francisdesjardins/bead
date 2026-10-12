@@ -1547,6 +1547,15 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             calls);
         Assert.Equal(["type=HTTP;ip=127.0.0.1;ordinal=1", "type=HTTP;ip=127.0.0.1;ordinal=2"], _connections);
 
+        // an authority that is no host, a colon with no port: its stream reset over HTTP/2, 400 over
+        // HTTP/1.1
+        Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of((":authority", "localhost:"), ("content-type", HttpTransport.MediaType)));
+
+        await using (var http1 = await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http11)))
+        {
+            Assert.Equal(400, await http1.AskHead($"POST /bead HTTP/1.1\r\nHost: localhost:\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n"));
+        }
+
         // the HTTP/2 session the client keeps open holds no stop back, and is closed with it
         var watch = Stopwatch.StartNew();
 
@@ -1557,6 +1566,74 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         {
             return Fetch(http, Over(PostOf(SecureUrl, (null, null)), HttpVersion.Version20));
         });
+    }
+
+    [Fact]
+    public async Task Names_its_host_over_HTTP_2_by_its_authority_a_host_beside_it_ignored_for_the_host_and_the_own_origin()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        var own = $"{Host}:{_port}";
+        var bead = ("content-type", HttpTransport.MediaType);
+
+        // :authority names the host and the own origin, a host beside it ignored; a host alone names
+        // it where :authority is absent; neither names none, which the server refuses as it refuses
+        // a request over HTTP/1.0 that names none
+        Assert.Equal(
+            [
+                new TlsAnswer(201, null, null),
+                new TlsAnswer(201, null, null),
+                new TlsAnswer(403, HttpRefusals.Host, null),
+                new TlsAnswer(201, null, null),
+                new TlsAnswer(403, HttpRefusals.Origin, null),
+                new TlsAnswer(201, null, null),
+                new TlsAnswer(201, null, null),
+                new TlsAnswer(403, HttpRefusals.Host, null),
+                new TlsAnswer(403, HttpRefusals.Host, null),
+            ],
+            [
+                await Http2Of((":authority", own), bead),
+                await Http2Of((":authority", own), ("host", "rebind.example:8080"), bead),
+                await Http2Of((":authority", "rebind.example:8080"), ("host", own), bead),
+                await Http2Of((":authority", own), ("host", "rebind.example:8080"), bead, ("origin", $"https://{own}")),
+                await Http2Of((":authority", own), ("host", "rebind.example:8080"), bead, ("origin", "https://rebind.example:8080")),
+                await Http2Of((":authority", "Bead.LocalHost:443"), bead, ("origin", "https://bead.localhost:443")),
+                await Http2Of(("host", own), bead, ("origin", $"https://{own}")),
+                await Http2Of(("host", "rebind.example:8080"), bead),
+                await Http2Of(bead),
+            ]);
+    }
+
+    [Fact]
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_whose_authority_is_no_host_PROTOCOL_ERROR_nothing_written()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, Hosts = ["*"] });
+
+        var bead = ("content-type", HttpTransport.MediaType);
+        var answers = new List<(string Authority, TlsAnswer Answer)>();
+
+        foreach (var authority in new[] { "a*b.test", "a%41.test", "a;b=c", "a+b.test", "[v1.bead]", "localhost:", "[::1]:", "bad host" })
+        {
+            answers.Add((authority, await Http2Of((":authority", authority), bead)));
+        }
+
+        // a host alone, where :authority is absent, judged as it would be
+        answers.Add(("host a*b.test", await Http2Of(("host", "a*b.test"), bead)));
+
+        // PROTOCOL_ERROR (RFC 9113 §7)
+        Assert.All(answers, (answer) =>
+        {
+            Assert.Equal((answer.Authority, new TlsAnswer(null, null, 0x1)), answer);
+        });
+        Assert.Empty(_connections);
+    }
+
+    // one request over HTTP/2, written by hand on a socket of its own: its answer, or its reset
+    private async Task<TlsAnswer> Http2Of(params (string Name, string Value)[] fields)
+    {
+        await using var wire = await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2));
+
+        return await wire.Ask(fields);
     }
 
     [Fact]
@@ -1659,7 +1736,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Reads_any_target_without_throwing_a_header_given_twice_by_its_first_and_HTTP_2_s_authority_as_the_host()
     {
-        var options = new HttpTransportServerOptions { Hosts = ["bead.example", "bead.example:8443"] };
+        var options = new HttpTransportServerOptions { Hosts = ["bead.example"] };
 
         await Start(options);
 
@@ -1689,6 +1766,21 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             await StatusOf("/bead HTTP/1.0", $"Content-Type: {HttpTransport.MediaType}\r\n"),
             // the root, which is not the path: Kestrel takes no request without a target
             await StatusOf("/ HTTP/1.1", bead),
+            // a target in absolute-form names the host, its Host ignored but for being one, or none
+            // over HTTP/1.0
+            await StatusOf("http://bead.example/bead HTTP/1.1", $"Host: rebound.example\r\nContent-Type: {HttpTransport.MediaType}\r\n"),
+            await StatusOf("http://localhost/bead?after=1 HTTP/1.1", $"Host: bad host\r\nContent-Type: {HttpTransport.MediaType}\r\n"),
+            await StatusOf("http://bead.example/bead HTTP/1.0", $"Content-Type: {HttpTransport.MediaType}\r\n"),
+            // and HTTP refuses one that names no host, its authority read as it came, a colon with no
+            // port and a userinfo among them, which Kestrel's Uri drops; another scheme's, or one
+            // beside two Host lines
+            await StatusOf("http:///bead HTTP/1.1", bead),
+            await StatusOf("http://a%41.test/bead HTTP/1.1", bead),
+            await StatusOf("http://127.0.0.1:/bead HTTP/1.1", bead),
+            await StatusOf("http://user@bead.example/bead HTTP/1.1", bead),
+            await StatusOf("HTTP://bead.example/bead HTTP/1.1", bead),
+            await StatusOf("ftp://bead.example/bead HTTP/1.1", bead),
+            await StatusOf("http://bead.example/bead HTTP/1.1", $"Host: bead.example\r\n{bead}"),
         };
 
         Assert.Equal(
@@ -1703,6 +1795,16 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
                 (415, HttpRefusals.Type),
                 (403, HttpRefusals.Host),
                 (404, HttpRefusals.Path),
+                (201, null),
+                (201, null),
+                (201, null),
+                (400, null),
+                (400, null),
+                (400, null),
+                (400, null),
+                (400, null),
+                (400, null),
+                (400, null),
             ],
             statuses);
 
@@ -1735,21 +1837,38 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         }
 
         // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-        // and a Host of punycode that decodes to none, taken where no host is named
+        // and a Host of punycode that decodes to none, taken where every host is
         var page = ("xn--bad-bma.test:8080", "http://xn--bad-bma.test:8080");
 
-        await Start();
+        await Start(new HttpTransportServerOptions { Hosts = ["*"] });
 
         Assert.Equal(
             [(201, null), (201, null), (201, null), (201, null)],
             [await StatusOf(page), await StatusOf(("xn--a", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null))]);
 
         // hosts name an IDN host as the field carries it, in punycode
-        await Start(new HttpTransportServerOptions { Hosts = ["xn--bad-bma.test:8080"] });
+        await Start(new HttpTransportServerOptions { Hosts = ["xn--bad-bma.test"] });
 
         Assert.Equal(
             [(201, null), (201, null), (403, HttpRefusals.Host), (403, HttpRefusals.Host)],
             [await StatusOf(page), await StatusOf(("XN--BAD-BMA.test:8080", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null))]);
+    }
+
+    [Fact]
+    public void Refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star()
+    {
+        var port = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["bead.test", "bead.test:8080"] });
+        });
+        var star = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpTransportServer(new HttpTransportServerOptions { Origins = ["*"] });
+        });
+
+        Assert.Equal(("Hosts", "Origins"), (port.ParamName, star.ParamName));
+        Assert.Contains("\"bead.test:8080\"", port.Message, StringComparison.Ordinal);
+        Assert.Contains("no wildcard of origins", star.Message, StringComparison.Ordinal);
     }
 
     [Fact]

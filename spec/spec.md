@@ -36,7 +36,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 
 **Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
-written; three points are open, section 8.3 and the two of section 15.13.**
+written; one point is open, section 8.3.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
@@ -1048,12 +1048,13 @@ credential beside an envelope, either way: a request that presents `ELSEWHERE` o
 before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake
 carried, its `Authorization` among it, is no credential beside an envelope, and never stands for
 `ELSEWHERE`. A server judges a request at its WebSocket's address in this order, and answers the
-first that applies. What HTTP refuses of its own, a `Host` missing, repeated or no host, its HTTP
-server answers, unmarked (section 15.12). It takes an upgrade from the hosts an HTTP exchange is
-taken from (section 15.12): a request naming a host it does not take is refused 403, its
+first that applies. What HTTP refuses of its own, a `Host` missing or repeated, a target in
+absolute-form it does not read, or an authority that is no host (section 15.12), its HTTP server
+answers, unmarked. It takes an upgrade from the hosts an HTTP exchange is taken from (section
+15.12): a request whose authority names a host it does not take, or none, is refused 403, its
 `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
-server's address is its own origin by its `Host`, and `hosts` is what refuses it. A method other
-than `GET` or `HEAD` is refused 405, its `Allow` naming both
+server's address is its own origin by its authority, and `hosts` is what refuses it. A method
+other than `GET` or `HEAD` is refused 405, its `Allow` naming both
 ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)). A request that asks
 no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming `websocket`
 ([RFC 9110 §15.5.22](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.22)): a `HEAD`, which
@@ -1241,45 +1242,67 @@ alike (section 15.10):
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
 `maximumWait` may not.
 
-Past the first four it answers 429 or 503, as section 15.6's table says. A server answers 400, as
-HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host` field line or a
-`Host` that is no host, `uri-host` and an optional port, before it reads anything else of it
+Past the first four it answers 429 or 503, as section 15.6's table says.
+
+A request names its authority by its target when the target is in absolute-form, the `Host`
+beside it ignored ([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)); over
+HTTP/2, by its `:authority`, a `host` beside it ignored
+([RFC 9113 §8.3.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)); otherwise by its
+`Host`. A request with none names no host. An authority is a host and an optional port, of this
+grammar, a restriction of [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2)
+([RFC 5234](https://www.rfc-editor.org/rfc/rfc5234)):
+
+```abnf
+authority = host [ ":" port ]
+host      = "[" IPv6address "]" / IPv4address / name
+name      = *( unreserved / "!" / "$" / "&" / "'" / "(" / ")" )
+port      = 1*DIGIT
+```
+
+`IPv6address`, `IPv4address` and `unreserved` are RFC 3986's. An authority that is not of it is
+no host, a userinfo and a colon with no port among them. A target in absolute-form is read when it
+is `http://` or `https://`, its scheme in lower case as HTTP servers read it, then an authority
+that is not empty ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A
+server answers 400, as HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one
+`Host` field line, a target in absolute-form it does not read, or an authority that is no host,
+before it reads anything else of it
 ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
-transport's own, unmarked. An empty `Host` is a host, and so is a name of invalid punycode. It
-takes the hosts a request may name, `hosts`, every host when not given, and the origins an exchange
-may come from besides its own, `origins`, none when not given. Its own is its request's `Host` under
-`http` or `https`: an `Origin` that is `http://` or `https://` followed by that `Host`, compared
-ASCII case-insensitively, the field read as the serialized origin it carries
+transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
+alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request whose
+authority is no host, `PROTOCOL_ERROR`, no response written
+([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). An empty `Host` is a
+host, and so is a name of invalid punycode. It takes the hosts a request may name besides those
+every server takes, `hosts`, and the origins an exchange may come from besides its own, `origins`,
+none when not given. Its own is its request's authority under `http` or `https`: an `Origin` that
+is `http://` or `https://` followed by that authority, compared ASCII case-insensitively, the field
+read as the serialized origin it carries
 ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), never parsed as a URL; a
 browser writes both from one URL alike. Any other `Origin` is none of its own, whatever host it
 names: `null`, which a browser sends for an opaque origin — a sandboxed frame's, a `file:` or a
 `data:` page's — and in place of one it withholds, after a cross-origin redirect or under a referrer
 policy; and any other scheme, an extension's or a `blob:` URL's among them. A server takes `null`,
 as any other, only when `origins` names it, and then from every page that sends it. A request
-without an `Origin` comes from no page, and is taken. A host among `hosts` is compared ASCII
-case-insensitively ([RFC 9110 §4.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.3)), in
-the form the `Host` field carries it, an IDN host in its punycode. Since a page that rebinds
-its name to the server's address names its own `Host`, `hosts` is what refuses it, never the
-origin's test. A WebSocket server takes both alike on an upgrade (section 15.2). A client's address
-is its socket's; behind a proxy on the same machine, which the server is told to trust,
-`isProxyTrusted`, it is the last entry of the proxy's `X-Forwarded-For`, when that entry is an
-address.
+without an `Origin` comes from no page, and is taken.
 
-15.13. Open in this version, each closed by a decision of its own:
-
-1. A server takes every host when `hosts` is not given (section 15.12). A page that rebinds its
-   name to the address of a server on the loopback names its own `Host` and sends its own
-   `Origin`, so it reaches the server, HTTP or WebSocket, and calls what admits `none`; on the
-   loopback, which is secure (section 13.4), it is presented what the server presents. A server a
-   browser can reach names the hosts it takes as its clients' `Host` field names them, a port only
-   where a request names one. A default that takes only `localhost`, the names under `.localhost`
-   and IP literals, `hosts` compared by its `uri-host` alone, comes by a decision of its own.
-2. No two connections a transport holds are one, yet a WebSocket server can take two sockets as
-   one: two sockets from one address and port, to two of the server's addresses, are told apart
-   by nothing it reads of them, so the second takes the first's place, its session among it, and
-   the first is held by none, outside the server's bounds, its gauges and its stop, which may leave
-   it open or abort it with no close. How a transport keeps every connection it holds apart comes
-   by a decision of its own.
+A request's host is its authority's `host`, its port aside, since a browser leaves a scheme's
+default port out ([RFC 9110 §4.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.3)), in the
+form the field carries it, an IDN host in its punycode, compared ASCII case-insensitively. Every
+server takes `localhost`, a name that ends in `.localhost`, an IPv6 address in brackets and an
+`IPv4address`: a page cannot rebind its name to an IP literal, since no name a browser fetches is
+written as one, nor to a localhost name where its resolver answers it with the loopback itself, as
+[RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) asks of resolvers and caching
+servers; a user agent that sends one on to a resolver that does not is the residual. `hosts` takes
+those it lists besides, each a host without its port, none when it lists none or is not given, and
+`*`, alone in it, takes every host, an empty one and none. Any other host, an empty one and none
+are refused 403, `host-refused` (section 15.6). A server is refused as it is built a `hosts` entry
+with a port, an empty one, one that is no host, or `*` beside another; and an `origins` entry that
+is `*`, or neither `null` nor an origin as
+[RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2) serializes it. Since a page
+that rebinds its name to the server's address names its own `Host`, `hosts` is what refuses it,
+never the origin's test: a server a browser reaches by a name names it in `hosts`. A WebSocket
+server takes both alike on an upgrade (section 15.2). A client's address is its socket's; behind a
+proxy on the same machine, which the server is told to trust, `isProxyTrusted`, it is the last entry of the
+proxy's `X-Forwarded-For`, when that entry is an address.
 
 ## 16. Services and procedures
 

@@ -525,8 +525,10 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
 
         // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-        // and a Host of punycode that decodes to none, taken where no host is named
+        // and a Host of punycode that decodes to none, taken where every host is
         var page = ("xn--bad-bma.test:8080", "http://xn--bad-bma.test:8080");
+
+        await Start(new WebSocketTransportServerOptions { Hosts = ["*"] });
 
         foreach (var from in new (string Host, string? Origin)[] { page, ("xn--a", null), ("xn--a.test", null), ("xn---bad-cpa.test", null) })
         {
@@ -534,7 +536,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
 
         // hosts name an IDN host as the field carries it, in punycode
-        await Start(new WebSocketTransportServerOptions { Hosts = ["xn--bad-bma.test:8080"] });
+        await Start(new WebSocketTransportServerOptions { Hosts = ["xn--bad-bma.test"] });
         await Upgraded(page);
         await Upgraded(("XN--BAD-BMA.test:8080", null));
 
@@ -547,9 +549,26 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star()
+    {
+        var port = Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketTransportServer(new WebSocketTransportServerOptions { Hosts = ["bead.test", "bead.test:8080"] });
+        });
+        var star = Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketTransportServer(new WebSocketTransportServerOptions { Origins = ["*"] });
+        });
+
+        Assert.Equal(("Hosts", "Origins"), (port.ParamName, star.ParamName));
+        Assert.Contains("\"bead.test:8080\"", port.Message, StringComparison.Ordinal);
+        Assert.Contains("no wildcard of origins", star.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Refuses_a_method_but_GET_or_HEAD_405_after_its_host_and_before_its_upgrade_is_read_its_Allow_naming_GET_and_HEAD_marked_method_refused()
     {
-        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test", "bead.test:80"] });
+        await StartDated(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
 
         // a handshake under another method, one of version 8 among them, or none at all; a CONNECT,
         // whose Host Kestrel holds to its target
@@ -985,7 +1004,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         // the stop under way, its connection's close told: an upgrade comes, Kestrel still serving
         _server.Close += (_, _) =>
         {
-            refused = AnswerOf(UpgradeRequest(("bead.test", null))).GetAwaiter().GetResult();
+            refused = AnswerOf(UpgradeRequest(("127.0.0.1", null))).GetAwaiter().GetResult();
         };
 
         using (client)

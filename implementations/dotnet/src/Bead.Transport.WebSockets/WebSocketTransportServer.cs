@@ -56,19 +56,30 @@ public sealed record WebSocketTransportServerOptions
     public bool? Secure { get; init; }
 
     /// <summary>
-    /// The hosts a request may name, in any ASCII case, in the form the field carries, an IDN host
-    /// in punycode, checked before anything else of the request but its <c>Host</c>'s form; any when
-    /// none. The server judges its own origin by the request's <c>Host</c>, so this is what refuses a
-    /// page that rebinds its name to the server's address, whatever it sends.
+    /// The hosts a request may name besides those every server takes — <c>localhost</c>, a name
+    /// under <c>.localhost</c>, an IPv6 address in brackets and an IPv4 address — each a host
+    /// without its port, taken on any port, in any ASCII case, in the form the field carries, an IDN
+    /// host in punycode, checked before anything else of the request but its authority's form: none
+    /// besides when none or empty. A request names its host by its authority: an absolute-form
+    /// target's, else its <c>Host</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one
+    /// and none, and so takes a page that rebinds its name to the server's address again: the server
+    /// judges its own origin by the request's authority, so this is what refuses one, whatever it
+    /// sends. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another
+    /// are an <see cref="ArgumentException"/> as the transport is built. A server reached by a name,
+    /// a public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in
+    /// a cluster, names it here, or refuses it 403, <c>host-refused</c>, which the server reports
+    /// nowhere and a page's WebSocket cannot read.
     /// </summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
     /// <summary>
     /// The origins an upgrade that sends an <c>Origin</c> may come from besides the server's own,
-    /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly, checked
-    /// once its version and its form are a handshake's: none by default. <c>null</c> among them
-    /// takes every upgrade that sends it. No same-origin policy guards an upgrade, so a page of an
-    /// origin named here is served outright.
+    /// <c>http://</c> or <c>https://</c> followed by its request's authority, each compared exactly,
+    /// checked once its version and its form are a handshake's: none by default. <c>null</c> among
+    /// them takes every upgrade that sends it. No same-origin policy guards an upgrade, so a page of
+    /// an origin named here is served outright. Each is <c>null</c> or an origin as RFC 6454 §6.2
+    /// serializes it; <c>*</c>, which no origin is, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 }
@@ -118,12 +129,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
     /// <summary>
     /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
-    /// holds is an <see cref="ArgumentOutOfRangeException"/>.
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>; an entry of its hosts or origins
+    /// neither takes, an <see cref="ArgumentException"/> naming it.
     /// </summary>
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
         var given = options ?? new WebSocketTransportServerOptions();
 
+        HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
+        HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
         _options = given with
         {
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
@@ -283,6 +297,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             {
                 kestrel.Listen(IPAddress.Parse(start.Address), start.FindOpenPort ? 0 : start.Port);
                 kestrel.AddServerHeader = false;
+
+                // * an origin server MUST take an absolute-form target's authority over its Host (RFC
+                // 9112 §3.2.2), where Kestrel refuses 400 a Host that differs from it by default
+                kestrel.AllowHostHeaderOverride = true;
             });
             application = builder.Build();
             Built?.Invoke(application);

@@ -87,11 +87,12 @@ def lines_of(name, value):
     return [f'{name}: {each}' for each in values]
 
 
-def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', length=None):
-    """A request of HTTP/1.1, rendered to its octets: its line, its fields in their order — its host,
-    or none, or several, those given, its body's length when it has one or posts, or the length
-    given, written as it is — and a socket closed once answered."""
-    lines = [f'{method} {target} HTTP/1.1', *lines_of('host', host)]
+def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', length=None, http='HTTP/1.1'):
+    """A request, of HTTP/1.1 unless told otherwise, rendered to its octets: its line, its target as
+    given, in absolute-form among them, its fields in their order — its host, or none, or several,
+    those given, its body's length when it has one or posts, or the length given, written as it is —
+    and a socket closed once answered."""
+    lines = [f'{method} {target} {http}', *lines_of('host', host)]
     lines += [f'{name}: {value}' for name, value in pairs(fields)]
 
     # ! a length given takes the place of the one counted: two would be refused by HTTP itself
@@ -293,12 +294,59 @@ cases = [
     ('a host the server does not take is refused 403, marked', ['15.6.5', '15.12'], {'hosts': ['bead.test']}, [
         connect(host='elsewhere.test'), refused('connect', 403, 'host-refused'),
         connect('taken', host='bead.test'), expect('taken', 201)]),
-    # RFC 9112 §3.2: what HTTP refuses of its own, answered as HTTP answers it, before hosts is read
+    # 15.12: the hosts every server takes, each by its host on any port, and no other
+    ('a server given no hosts takes localhost, a name under .localhost and an IP literal, on any port or none, and refuses any other host 403, marked, a page that rebinds its name among them',
+     ['15.6.5', '15.12'], None, [
+         connect('localhost', host='localhost:8080'), expect('localhost', 201),
+         connect('under', host='Bead.LocalHost'), expect('under', 201),
+         connect('ipv4', host='192.0.2.1:80'), expect('ipv4', 201),
+         connect('ipv6', host='[::1]:8443'), expect('ipv6', 201),
+         connect('rebound', host='rebind.example:8080', fields={'origin': 'http://rebind.example:8080'}),
+         refused('rebound', 403, 'host-refused'),
+         connect('suffixed', host='localhost.example'), refused('suffixed', 403, 'host-refused'),
+         connect('final', host='localhost.'), refused('final', 403, 'host-refused'),
+         connect('short', host='127.1'), refused('short', 403, 'host-refused'),
+         connect('octal', host='0177.0.0.1'), refused('octal', 403, 'host-refused'),
+         connect('named', host='127.0.0.1.example'), refused('named', 403, 'host-refused'),
+         connect('empty', host=''), refused('empty', 403, 'host-refused'),
+         send('none', 'POST', http='HTTP/1.0', host=None, fields={'content-type': BEAD}),
+         refused('none', 403, 'host-refused')]),
+    ('hosts given takes the hosts it lists besides those every server takes, each by its host on any port, in any ASCII case',
+     ['15.6.5', '15.12'], {'hosts': ['bead.test']}, [
+         connect('bare', host='bead.test'), expect('bare', 201),
+         connect('port', host='Bead.Test:8443'), expect('port', 201),
+         connect('default', host='bead.test:80'), expect('default', 201),
+         connect('loopback', host='localhost'), expect('loopback', 201),
+         connect('literal'), expect('literal', 201),
+         connect('other', host='rebind.example'), refused('other', 403, 'host-refused')]),
+    ('hosts empty takes the hosts every server takes, and no other', ['15.12'], {'hosts': []}, [
+        connect('literal'), expect('literal', 201),
+        connect('other', host='bead.test'), refused('other', 403, 'host-refused')]),
+    ('hosts * takes every host, an empty one and none among them', ['15.12'], {'hosts': ['*']}, [
+        connect('rebound', host='rebind.example:8080', fields={'origin': 'http://rebind.example:8080'}),
+        expect('rebound', 201),
+        connect('empty', host=''), expect('empty', 201),
+        send('none', 'POST', http='HTTP/1.0', host=None, fields={'content-type': BEAD}), expect('none', 201)]),
+    # 15.12: a request's authority, an absolute-form target's before its Host (RFC 9112 §3.2.2)
+    ('a request whose target is in absolute-form names its host by the target, its Host ignored, a differing one that no client should send among them, and its own origin with it',
+     ['15.6.5', '15.12'], None, [
+         send('own', 'POST', 'http://{host}/bead', fields={'content-type': BEAD}), expect('own', 201),
+         send('rebound', 'POST', 'http://rebind.example:8080/bead', fields={'content-type': BEAD}),
+         refused('rebound', 403, 'host-refused'),
+         send('hosted', 'POST', 'http://{host}/bead', host='rebind.example:8080',
+              fields={'content-type': BEAD, 'origin': 'http://{host}'}), expect('hosted', 201)]),
+    # RFC 9112 §3.2: what HTTP refuses of its own, answered as HTTP answers it, before hosts is read;
+    # a host is of 15.12's grammar, narrower than RFC 3986's
     ('an HTTP/1.1 request without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked, before its host is judged',
      ['15.12'], {'hosts': ['bead.test']}, [
          connect('none', host=None), unmarked('none'),
          connect('two', host=['bead.test', 'elsewhere.test']), unmarked('two'),
-         connect('bad', host='bad host'), unmarked('bad')]),
+         connect('bad', host='bad host'), unmarked('bad'),
+         connect('encoded', host='a%41.test'), unmarked('encoded'),
+         connect('starred', host='a*b.test'), unmarked('starred'),
+         connect('parameter', host='a;b=c'), unmarked('parameter'),
+         connect('future', host='[v1.bead]'), unmarked('future'),
+         connect('portless', host='localhost:'), unmarked('portless')]),
     ('an exchange from an origin the server does not take is refused 403, marked', ['15.6.5', '15.12'], None, [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
@@ -307,8 +355,8 @@ cases = [
         connect(host='Bead.Test', fields={'origin': 'http://bead.test'}), expect('connect', 201)]),
     # 15.12: the field read as it came, a serialized origin, never parsed: a browser on an IDN host
     # sends its Host and its Origin in punycode, and a Host of invalid punycode is a host as any other
-    ('a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken',
-     ['15.12'], None, [
+    ('a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken, under hosts *',
+     ['15.12'], {'hosts': ['*']}, [
          connect('idn', host='xn--bad-bma.test', fields={'origin': 'http://xn--bad-bma.test'}), expect('idn', 201),
          connect('port', host='xn--bad-bma.test:8443', fields={'origin': 'https://xn--bad-bma.test:8443'}),
          expect('port', 201),
@@ -553,12 +601,13 @@ CONTINUATION, BINARY = 0x0, 0x2
 NORMAL, GOING_AWAY, TOO_BIG = 1000, 1001, 1009
 
 
-def asked(on='socket', fields=None, *, method='GET', http='HTTP/1.1', host='{host}', upgrade='websocket',
-          connection='Upgrade', key=KEY, version=13, body=None):
+def asked(on='socket', fields=None, *, method='GET', target='/', http='HTTP/1.1', host='{host}',
+          upgrade='websocket', connection='Upgrade', key=KEY, version=13, body=None):
     """A request at a WebSocket's address, on a socket of its own: an opening handshake unless told
-    otherwise. Its host and each field of a handshake are left out when None, and written a line a
-    value when a list; the fields given come after them, and the body's octets after its head."""
-    lines = [f'{method} / {http}', *lines_of('host', host), *lines_of('upgrade', upgrade),
+    otherwise, at the target given, in absolute-form among them. Its host and each field of a
+    handshake are left out when None, and written a line a value when a list; the fields given come
+    after them, and the body's octets after its head."""
+    lines = [f'{method} {target} {http}', *lines_of('host', host), *lines_of('upgrade', upgrade),
              *lines_of('connection', connection), *lines_of('sec-websocket-key', key),
              *lines_of('sec-websocket-version', version), *(f'{name}: {value}' for name, value in pairs(fields))]
     return {'send': {'head': '\r\n'.join(lines) + '\r\n\r\n', **({'body': body} if body else {})}, 'on': on}
@@ -568,19 +617,19 @@ def asked(on='socket', fields=None, *, method='GET', http='HTTP/1.1', host='{hos
 PLAIN = {'upgrade': None, 'connection': None, 'key': None, 'version': None}
 
 
-def handshake(on='socket', fields=None, host='{host}', version=13):
-    """An opening handshake, on a socket of its own, naming the host given, of the version given, or
-    of none when None, with the fields given besides."""
-    return asked(on, fields, host=host, version=version)
+def handshake(on='socket', fields=None, host='{host}', version=13, target='/'):
+    """An opening handshake, on a socket of its own, at the target given, naming the host given, of
+    the version given, or of none when None, with the fields given besides."""
+    return asked(on, fields, target=target, host=host, version=version)
 
 
 def taken(on='socket'):
     return expect(on, 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT})
 
 
-def upgrade(on='socket', fields=None, host='{host}'):
+def upgrade(on='socket', fields=None, host='{host}', target='/'):
     """A handshake the server takes, its socket kept as its WebSocket once answered 101."""
-    return [handshake(on, fields, host), taken(on)]
+    return [handshake(on, fields, host, target=target), taken(on)]
 
 
 # what a WebSocket server's refusal of an upgrade carries besides its mark, as an HTTP exchange's
@@ -621,12 +670,18 @@ websocket = [
      ['15.2'], {}, [
          *upgrade(fields={'authorization': 'Interop sub=ada'}), message('socket', binary=elsewhere(1)),
          heard('socket', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL))]),
-    # 15.2 and 15.12: what HTTP refuses of its own, answered as HTTP answers it, before hosts is read
+    # 15.2 and 15.12: what HTTP refuses of its own, answered as HTTP answers it, before hosts is read;
+    # a host is of 15.12's grammar, narrower than RFC 3986's
     ('a request at a WebSocket\'s address without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked',
      ['15.2', '15.12'], {'options': {'hosts': ['bead.test']}}, [
          asked('none', host=None), unmarked('none'),
          asked('two', host=['bead.test', 'elsewhere.test']), unmarked('two'),
-         asked('bad', host='bad host'), unmarked('bad')]),
+         asked('bad', host='bad host'), unmarked('bad'),
+         asked('encoded', host='a%41.test'), unmarked('encoded'),
+         asked('starred', host='a*b.test'), unmarked('starred'),
+         asked('parameter', host='a;b=c'), unmarked('parameter'),
+         asked('future', host='[v1.bead]'), unmarked('future'),
+         asked('portless', host='localhost:'), unmarked('portless')]),
     # 15.2 and 15.12: a request is taken from the hosts an HTTP exchange is, whatever else it holds,
     # and an upgrade from its origins
     ('a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form',
@@ -650,8 +705,8 @@ websocket = [
     ('an upgrade\'s host and origin are compared in any ASCII case', ['15.2', '15.12'], {'options': {'hosts': ['bead.test']}}, [
         *upgrade(host='Bead.Test', fields={'origin': 'http://bead.test'}), message('socket', binary=ECHO),
         heard('socket', envelope=result(1, '"x"'))]),
-    ('an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken',
-     ['15.2', '15.12'], {}, [
+    ('an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken, under hosts *',
+     ['15.2', '15.12'], {'options': {'hosts': ['*']}}, [
          *upgrade('idn', {'origin': 'http://xn--bad-bma.test'}, host='xn--bad-bma.test'),
          message('idn', binary=ECHO), heard('idn', envelope=result(1, '"x"')),
          *upgrade('port', {'origin': 'https://xn--bad-bma.test:8443'}, host='xn--bad-bma.test:8443'),
@@ -665,6 +720,35 @@ websocket = [
          handshake('invalid', host='xn--a'), refused('invalid', 403, 'host-refused', UPGRADE_REFUSED),
          handshake('dotted', host='xn--a.test'), refused('dotted', 403, 'host-refused', UPGRADE_REFUSED),
          handshake('hyphen', host='xn---bad-cpa.test'), refused('hyphen', 403, 'host-refused', UPGRADE_REFUSED)]),
+    # 15.12: the hosts every server takes, judged before the method and the upgrade
+    ('a WebSocket server given no hosts takes localhost, a name under .localhost and an IP literal, and refuses any other host 403, marked, whatever its method, its upgrade or its form',
+     ['15.2', '15.6.5', '15.12'], {}, [
+         *upgrade('localhost', host='localhost:8080'), message('localhost', binary=ECHO),
+         heard('localhost', envelope=result(1, '"x"')),
+         *upgrade('under', host='a.localhost'), *upgrade('ipv6', host='[::1]'),
+         handshake('rebound', {'origin': 'http://rebind.example:8080'}, host='rebind.example:8080'),
+         refused('rebound', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('post', method='POST', host='rebind.example'), refused('post', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('final', host='localhost.'), refused('final', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('empty', host=''), refused('empty', 403, 'host-refused', UPGRADE_REFUSED),
+         asked('old', http='HTTP/1.0', host=None), refused('old', 403, 'host-refused', UPGRADE_REFUSED)]),
+    ('an upgrade is taken from the hosts listed besides those every server takes, each by its host on any port',
+     ['15.2', '15.6.5', '15.12'], {'options': {'hosts': ['bead.test']}}, [
+         *upgrade('port', host='bead.test:8443'), message('port', binary=ECHO), heard('port', envelope=result(1, '"x"')),
+         *upgrade('loopback', host='localhost'),
+         handshake('other', host='rebind.example'), refused('other', 403, 'host-refused', UPGRADE_REFUSED)]),
+    ('a WebSocket server whose hosts is * takes an upgrade naming any host, and judges one naming none by its version',
+     ['15.2', '15.6.11', '15.12'], {'options': {'hosts': ['*']}}, [
+         *upgrade('rebound', {'origin': 'http://rebind.example:8080'}, host='rebind.example:8080'),
+         *upgrade('empty', host=''),
+         asked('old', http='HTTP/1.0', host=None), refused('old', 426, 'upgrade-required', UPGRADE_REQUIRED)]),
+    # 15.12: an upgrade's authority, an absolute-form target's before its Host (RFC 9112 §3.2.2)
+    ('an upgrade whose target is in absolute-form names its host by the target, its Host ignored',
+     ['15.2', '15.6.5', '15.12'], {}, [
+         *upgrade('own', target='http://{host}/'),
+         asked('rebound', target='http://rebind.example:8080/'),
+         refused('rebound', 403, 'host-refused', UPGRADE_REFUSED),
+         *upgrade('hosted', target='http://{host}/', host='rebind.example:8080')]),
     ('an upgrade with an Origin of null, of a blob: URL, of ws: or with a path, naming the server\'s host, is refused 403, marked; one from https:// and its Host is taken',
      ['15.2', '15.6.5', '15.12'], {}, [
          handshake('null', {'origin': 'null'}), refused('null', 403, 'origin-refused', UPGRADE_REFUSED),
@@ -796,14 +880,14 @@ document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
         "Bead's transports' cases: what a server of the interop service (interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
-        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, and {token}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. close drops that socket.',
+        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. close drops that socket.',
         'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
         'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
         'Before each send and close, and at the end, the server reported nothing a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
-        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
+        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],

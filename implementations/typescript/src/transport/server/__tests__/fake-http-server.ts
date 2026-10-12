@@ -124,7 +124,8 @@ export const createFakeHTTPServer = (options?: {
   /**
    * Hands the transport one exchange: its request, which the test goes on to feed, and its response.
    * A `url` given as `undefined` stays so, as a request with no target. An HTTP/1.1 request names
-   * the host `bead.test` unless its headers name one, as `[]` names none.
+   * the host `bead.localhost`, which every server takes, unless its headers name one, as `[]` names
+   * none.
    */
   const exchange = (
     options: {
@@ -144,7 +145,7 @@ export const createFakeHTTPServer = (options?: {
     } = options;
     const given = options.headers ?? {};
     const headers =
-      'host' in given || httpVersion !== '1.1' ? given : { host: 'bead.test', ...given };
+      'host' in given || httpVersion !== '1.1' ? given : { host: 'bead.localhost', ...given };
     const url = 'url' in options ? options.url : '/bead';
     // each field as it came, a field given twice twice: its name, then its value
     const rawHeaders = Object.entries(headers).flatMap(([name, value]) => {
