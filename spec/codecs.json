@@ -13,7 +13,7 @@
     "nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th.",
     "probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; or child, set to the empty message, {}.",
     "A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message and nested past 100 of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side's.",
-    "differs names the row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
+    "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
     "clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7."
   ],
   "specVersion": "0.3.0",
@@ -922,6 +922,199 @@
       ],
       "bytes": "10 80 80 80 80 80 80 80 80 80 80 01",
       "refused": "not its message"
+    },
+    {
+      "name": "an unknown varint of 10 bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "48 80 80 80 80 80 80 80 80 80 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "an unknown varint of 11 bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "48 80 80 80 80 80 80 80 80 80 80 00",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "An unknown proto varint of more than 10 bytes",
+          "language": "TypeScript"
+        }
+      ]
+    },
+    {
+      "name": "an unknown record past the end of its message",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A 01 61 1A 02 25 00 0A 01 62",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto record past the end of its message",
+          "language": "TypeScript"
+        }
+      ]
+    },
+    {
+      "name": "a string past the end of its message",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "1A 02 0A 03 61 62 63",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto record past the end of its message",
+          "language": "TypeScript"
+        }
+      ]
+    },
+    {
+      "name": "a tag of 5 bytes within 32 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "C8 80 80 80 00 01 0A 01 62",
+      "read": {
+        "text": "0062",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a tag of 6 bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "90 80 80 80 80 00 07",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto tag of more than 5 bytes, or past 32 bits",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "a tag of 9 bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "90 80 80 80 80 80 80 80 00 07",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto tag of more than 5 bytes, or past 32 bits",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "a tag of 5 bytes past 32 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "90 80 80 80 40 07",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto tag of more than 5 bytes, or past 32 bits",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "a tag of 7 bytes past 32 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "90 80 80 80 80 80 0F 07",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto tag of more than 5 bytes, or past 32 bits",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "a tag past 32 bits, of an unknown field",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "F8 FF FF FF 7F 01",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto tag of more than 5 bytes, or past 32 bits",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "a tag of more than 10 bytes",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "90 80 80 80 80 80 80 80 80 80 80 80 00 07",
+      "refused": "not its message"
+    },
+    {
+      "name": "a length past 32 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A 80 80 80 80 10",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto length past 32 bits",
+          "language": "TypeScript"
+        },
+        {
+          "row": "A proto length past 32 bits",
+          "language": "C#"
+        }
+      ]
+    },
+    {
+      "name": "a length past 32 bits, a field after",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "0A 80 80 80 80 10 10 07",
+      "refused": "not its message",
+      "differs": [
+        {
+          "row": "A proto length past 32 bits",
+          "language": "TypeScript"
+        },
+        {
+          "row": "A proto length past 32 bits",
+          "language": "C#"
+        }
+      ]
     },
     {
       "name": "an end group no group opened",

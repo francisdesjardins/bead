@@ -81,6 +81,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds to `PROTOBUF_FLOOR`.
 - `spec/conversations.json`: a name that holds an escape is read as its escapes say, whatever a
   payload of its shape read on another connection held.
+- `spec/codecs.json`: protobuf's own refusals of a tag past 32 bits or of more than 5 bytes, of a
+  length past 32 bits, of an unknown varint of 11 bytes and of a record past the end of its
+  message; the support matrix states where protobuf-es, and where Google.Protobuf, reads what
+  protobuf refuses.
 
 ### Changed
 

@@ -218,6 +218,17 @@ TextDecoder("utf-8", { fatal: true })`, whose `ignoreBOM` is false (WHATWG Encod
 lever is `configureTextEncoding`, global to the library's copy and deprecated. The TypeScript side's
 row is a `differs`, crossing an open row of the matrix.
 
+Each stock library also reads bytes that are no encoding of the message, against protobuf's own
+rules, and each is an open row of the matrix, its entries of `spec/codecs.json` excused for the side
+that reads them, until its library's fix or a guard that reads a payload's records against its
+descriptor before the library does, by a decision of its own. protobuf-es reads a record that runs
+past the end of its message, which its reader never checks, and a varint of more than 10 bytes where
+its field is unknown. Google.Protobuf reads a tag of more than 5 bytes or past 32 bits, keeping its
+low 32 bits, where the Encoding guide gives a tag as a uint32 varint and protobuf's conformance suite
+refuses it in its REQUIRED `BadTag_*` tests. Both read a length whose varint sets bits past 32,
+which the guide gives as an int32 varint and the suite's REQUIRED `BadLength_Varint32BitOverflow`
+refuses.
+
 Where Bead has no reason of its own, it states no rule, and the matrix holds what each library does,
 each side's test pinning its own:
 
