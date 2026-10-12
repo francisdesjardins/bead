@@ -1,0 +1,4 @@
+# The earlier of this case: a blueprint alone, which gives buf no .proto.
+version: 1
+source:
+  blueprint: shop.blueprint.json

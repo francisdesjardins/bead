@@ -1,0 +1,22 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/procedureKind",
+      "value": "notifies"
+    },
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/notification",
+      "value": {
+        "encoding": "json"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": []
+}

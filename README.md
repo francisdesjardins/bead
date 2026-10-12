@@ -179,8 +179,9 @@ nothing it generates is committed.
 ## The builder
 
 In `builder/`, `beadc`: it compiles a `.proto` with buf, resolves it into a blueprint, refuses a
-`.proto` or a blueprint by rule name, writes a blueprint in its form, and generates a typed server
-and client, in TypeScript and in C#: each side's interop is its output
+`.proto` or a blueprint by rule name, writes a blueprint in its form, holds a project to its last
+release, `beadc breaking`, and generates a typed server and client, in TypeScript and in C#: each
+side's interop is its output
 ([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 Node 24.9 or later, and a toolchain of its own, as the TypeScript side's: Yarn 4 vendored under
 `.yarn/releases/`, buf from its lockfile, and protoc, which writes the C# messages, by its pin,
@@ -362,6 +363,10 @@ git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :relea
 Before `prepare`, the release moves by hand the three digests beadc's image and its lint pin: the
 Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
 image in `ci.yml`, each to its tag's current digest; CI then builds and tests the image on them.
+`prepare` lists what else the release owes by hand: each `--except` of CI's `beadc breaking` step,
+which the release makes moot and develop drops once its tag is pushed, and each of
+[0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule
+moves to that record's table.
 
 A document whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
 change to keep passing, `patch` when a conforming one passes unchanged, and `minor` at least when a
@@ -382,15 +387,17 @@ ways with `BEAD_INTEROP_REQUIRED=1`), `builder` (install, protoc by its pin's sh
 `BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
 a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
 `beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
-Windows and on 24.9 on Linux; its types, the goldens' among them, lint and format, buf's among them,
-on Linux; and on the image's legs, Linux on Node 26, amd64 and arm64, each natively: beadc's image
-built, its test stage run on the image itself, each wrapper run against it with
-`BEADC_IMAGE_REQUIRED=1`, over the repository and `examples/hello`, and the wrappers' lint, each
-linter at its pin), `examples` on Node 26 and on 24.9, the floor the TypeScript half declares (what
-each example copies, or takes from beadc's wrapper and init, held to its source; beadc on Node
-holding `examples/hello`'s generated files; buf's lint and layout over its `.proto`; each half's
-gates and both its builds; then each client against each server, both modes of each half, sixteen
-pairs), and `commits` (the subjects, the links, the versions, then the root's tools' own tests).
+Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
+`examples/hello`, against the last release that carries one, from 0.3.0, on Linux; its types, the
+goldens' among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on
+Node 26, amd64 and arm64, each natively: beadc's image built, its test stage run on the image
+itself, each wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repository and
+`examples/hello`, and the wrappers' lint, each linter at its pin), `examples` on Node 26 and on
+24.9, the floor the TypeScript half declares (what each example copies, or takes from beadc's
+wrapper and init, held to its source; beadc on Node holding `examples/hello`'s generated files;
+buf's lint and layout over its `.proto`; each half's gates and both its builds; then each client
+against each server, both modes of each half, sixteen pairs), and `commits` (the subjects, the
+links, the versions, then the root's tools' own tests).
 `ci-ok` needs them all, so one check stands for every job; branch protection, which would make it
 the one check a branch requires, waits on GitHub Pro or a public repository.
 

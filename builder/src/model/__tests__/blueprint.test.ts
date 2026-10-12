@@ -179,3 +179,32 @@ test('the order: a stage that finds an error ends the reading', () => {
   expect(rulesOf(feature)).toEqual(['FEATURE_UNKNOWN']);
   expect(rulesOf(schema)).toEqual(['SERVICE_REVISION_RANGE']);
 });
+
+test('with rules off, a reading ends after the schema', () => {
+  // two names one as 16.6 folds them, which the rules that span entries refuse, and a newer spec
+  const value = applyPatch(interop(), [
+    { op: 'replace', path: '/services/0/procedures/1/procedureName', value: 'eCho' },
+    { op: 'replace', path: '/specVersion', value: '99.0.0' },
+  ]);
+  const off = readBlueprint(new TextEncoder().encode(formOf(value)), {
+    file: 'case.json',
+    rules: false,
+  });
+
+  expect(verdictsOf(read(value).diagnostics)).toEqual([
+    { rule: 'NAME_UNIQUE', pointer: '/services/0/procedures/1/procedureName' },
+    { rule: 'SPEC_VERSION_NEWER', pointer: '/specVersion' },
+  ]);
+  expect(off.diagnostics).toEqual([]);
+  expect(off.blueprint?.services[0]?.procedures[1]?.procedureName).toBe('eCho');
+  expect(
+    verdictsOf(
+      checkValue(applyPatch(value, [{ op: 'replace', path: '/services/0/serviceId', value: 0 }]), {
+        placeOf: (pointer) => {
+          return { file: 'case.json', pointer };
+        },
+        rules: false,
+      }).diagnostics
+    )
+  ).toEqual([{ rule: 'SERVICE_ID_RANGE', pointer: '/services/0/serviceId' }]);
+});

@@ -1,0 +1,17 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureNames/-",
+      "value": "oldName"
+    }
+  ],
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureNames/-",
+      "value": "oldname"
+    }
+  ],
+  "findings": []
+}

@@ -13,7 +13,10 @@
 // generated, the image each committed wrapper of beadc's names and the spec's version in each
 // blueprint beadc wrote outside spec/, every text changed before any is written; runs the
 // generators; dates [Unreleased] as the version, under a new empty one, and links it; then runs the
-// gate as a release, spec/check.py and the root's format check, naming one whose tool is absent.
+// gate as a release, spec/check.py and the root's format check, naming one whose tool is absent;
+// and lists what it owes by hand: the CHANGELOG's line on a document's new tag, each waiver of CI's
+// `beadc breaking` step, moot once the release is tagged, and each of decision 0006's gates owed
+// that names the release.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
 // tags spec-v… and debugging-v… at the commit v<version> tags, for each document whose version no
@@ -257,6 +260,56 @@ export const versionOf = (document, { stated, move, facts }) => {
     );
   }
   return version;
+};
+
+// ── Owed ──────────────────────────────────────────────────────────────────────
+
+// what a release reads for the work it owes by hand (decision 0022): the waivers of CI's `beadc
+// breaking` step, each moot once the release is the last one, and decision 0006's gates owed, one
+// that names the release moving to its table
+export const CI = '.github/workflows/ci.yml';
+export const GATES = 'docs/decisions/0006-a-rule-has-its-gate.md';
+
+// each `--except` of the lines that run `beadc breaking`, as written, its quotes dropped; a line
+// continued by a backslash is read whole, and a comment is no line that runs
+export const breakingWaivers = (text) => {
+  return text
+    .replace(/\\\n/g, ' ')
+    .split('\n')
+    .filter((line) => {
+      return (
+        !line.trimStart().startsWith('#') &&
+        /\b(?:cli\.ts|beadc(?:\.sh|\.ps1)?) breaking\b/.test(line)
+      );
+    })
+    .flatMap((line) => {
+      return [...line.matchAll(/--except[= ](?:'([^']*)'|"([^"]*)"|(\S+))/g)].map((match) => {
+        return match[1] ?? match[2] ?? match[3];
+      });
+    });
+};
+
+// the bullets of 0006's gates owed that name `version`, each by its words before its first
+// reference or its colon
+export const gatesOwedAt = (text, version) => {
+  const list = /^\*\*Gates owed\*\*[^\n]*\n\n((?:- [^\n]*\n(?: {2}[^\n]*\n)*)+)/m.exec(text)?.[1];
+  if (list === undefined) {
+    return [];
+  }
+  return list
+    .split(/\n(?=- )/)
+    .map((bullet) => {
+      return bullet
+        .replace(/^- /, '')
+        .replace(/\s*\n\s*/g, ' ')
+        .trim();
+    })
+    .filter((bullet) => {
+      return (bullet.match(/\d+\.\d+\.\d+/g) ?? []).includes(version);
+    })
+    .map((bullet) => {
+      return bullet.split(/ \(\[|: /)[0].replace(/[,;.]$/, '');
+    });
 };
 
 // ── Prepare ───────────────────────────────────────────────────────────────────
@@ -521,6 +574,14 @@ export const prepare = (root, options = {}) => {
   });
   if (owed.length > 0) {
     log(`owed by hand: the [${product}] line on ${owed.join(' and ')}`);
+  }
+  for (const waiver of breakingWaivers(readText(join(root, CI)) ?? '')) {
+    log(
+      `owed by hand: --except ${waiver}, a waiver of CI's beadc breaking step, which v${product} makes moot: take it out of ${CI} on develop once v${product} is pushed`
+    );
+  }
+  for (const gate of gatesOwedAt(readText(join(root, GATES)) ?? '', product)) {
+    log(`owed by hand: decision 0006's gate owed until ${product} moves to its table: ${gate}`);
   }
   if (first) {
     log(`next: git add -A && git commit -m "chore(release): ${product}"`);

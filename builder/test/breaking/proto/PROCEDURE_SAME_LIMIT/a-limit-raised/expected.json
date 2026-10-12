@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_SAME_LIMIT",
+      "line": 36,
+      "column": 7
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROCEDURE_SAME_LIMIT",
+      "line": 36,
+      "column": 7
+    }
+  ]
+}

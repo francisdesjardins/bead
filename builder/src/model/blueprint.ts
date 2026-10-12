@@ -4,7 +4,8 @@
 // its JSON and I-JSON (BLUEPRINT_JSON), its format (FORMAT_UNKNOWN), its features (FEATURE_UNKNOWN),
 // the format's schema, each refusal mapped to its rule by its place, then the rules that span
 // entries and SPEC_VERSION_NEWER. A stage that finds an error ends the reading: what follows reads
-// the blueprint as the earlier stages left it.
+// the blueprint as the earlier stages left it. `beadc breaking` reads an earlier release's blueprint
+// up to its schema alone: the rules a later beadc added never judge it.
 
 // dependencies
 
@@ -110,14 +111,16 @@ export interface IBlueprint {
   readonly services: readonly IServiceEntry[];
 }
 
+/** Where a finding at a blueprint's pointer is printed. */
+export type PlaceOf = (pointer: string) => IPlace;
+
 /** What reading a blueprint gives: its findings, and the blueprint when no stage refused it. */
 export interface IReading {
   readonly diagnostics: readonly IDiagnostic[];
   readonly blueprint?: IBlueprint;
+  /** Where each pointer is in the text it was read from, for a blueprint read as bytes. */
+  readonly placeOf?: PlaceOf;
 }
-
-/** Where a finding at a blueprint's pointer is printed. */
-export type PlaceOf = (pointer: string) => IPlace;
 
 // constants
 
@@ -496,9 +499,13 @@ const compareVersions = (one: string, other: string): number => {
 /**
  * Checks `value`, a blueprint's parsed value, past its JSON: its format, its features, the format's
  * schema, then the rules that span entries and its `specVersion`, a stage that finds an error ending
- * the check. Each finding at the place `placeOf` gives its pointer.
+ * the check; with `rules: false`, the check ends after the schema. Each finding at the place
+ * `placeOf` gives its pointer.
  */
-export const checkValue = (value: unknown, options: { readonly placeOf: PlaceOf }): IReading => {
+export const checkValue = (
+  value: unknown,
+  options: { readonly placeOf: PlaceOf; readonly rules?: boolean }
+): IReading => {
   const { placeOf } = options;
   const format = isRecord(value) ? value['format'] : undefined;
 
@@ -536,6 +543,11 @@ export const checkValue = (value: unknown, options: { readonly placeOf: PlaceOf 
   }
 
   const blueprint = value as IBlueprint;
+
+  if (options.rules === false) {
+    return { diagnostics: [], blueprint };
+  }
+
   const diagnostics = sortFindings(checkBlueprint(blueprint, { placeOf }));
   const spec = specVersion();
 
@@ -554,9 +566,13 @@ export const checkValue = (value: unknown, options: { readonly placeOf: PlaceOf 
 /**
  * Reads a blueprint given as `bytes`, from `file`: UTF-8, after a byte order mark if one leads; a
  * member twice, a number with a fraction or an exponent, a surrogate alone (BLUEPRINT_JSON); then
- * {@link checkValue}. Throws an {@link InputError} for a text that is no JSON.
+ * {@link checkValue}, its `rules` passed on. Throws an {@link InputError} for a text that is no
+ * JSON.
  */
-export const readBlueprint = (bytes: Uint8Array, options: { readonly file: string }): IReading => {
+export const readBlueprint = (
+  bytes: Uint8Array,
+  options: { readonly file: string; readonly rules?: boolean }
+): IReading => {
   const { file } = options;
   const invalid = invalidUtf8At(bytes);
 
@@ -615,8 +631,14 @@ export const readBlueprint = (bytes: Uint8Array, options: { readonly file: strin
   }
 
   if (json.length > 0) {
-    return { diagnostics: sortFindings(json) };
+    return { diagnostics: sortFindings(json), placeOf };
   }
 
-  return checkValue(value, { placeOf });
+  return {
+    ...checkValue(value, {
+      placeOf,
+      ...(options.rules === undefined ? {} : { rules: options.rules }),
+    }),
+    placeOf,
+  };
 };

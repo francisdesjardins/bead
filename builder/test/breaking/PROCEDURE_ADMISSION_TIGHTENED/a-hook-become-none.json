@@ -1,0 +1,16 @@
+{
+  "category": "WIRE",
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/4/admission",
+      "value": "none"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": []
+}

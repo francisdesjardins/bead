@@ -1,9 +1,9 @@
 // ── beadc ─────────────────────────────────────────────────────────────────────
 
-// beadc's command line: `check`, `blueprint`, `generate`, `init`, `wrapper` and `version` (decision
-// 0022). It parses the call, runs the command, prints each finding a line, and exits 0, 1 on an
-// error — a warning too under `--fail-on-warning`, a difference under `blueprint --check` or
-// `generate --check` — or 2 when the input or the call is one beadc cannot take. `generate` and
+// beadc's command line: `check`, `blueprint`, `generate`, `breaking`, `init`, `wrapper` and `version`
+// (decision 0022). It parses the call, runs the command, prints each finding a line, and exits 0, 1
+// on an error — a warning too under `--fail-on-warning`, a difference under `blueprint --check` or
+// `generate --check`, a breaking finding — or 2 when the input or the call is one beadc cannot take. `generate` and
 // `init` alone load the targets, by a dynamic import: they load a TypeScript compiler, which the
 // other commands never need.
 //
@@ -11,6 +11,8 @@
 //   node src/cli.ts blueprint [<root or blueprint>] -o <file> [--descriptor-set-out <file>]
 //   node src/cli.ts blueprint --check [<root or blueprint>] [-o <file>]
 //   node src/cli.ts generate [--check]
+//   node src/cli.ts breaking [<root or blueprint>] --against <folder, - or blueprint>
+//     [--category WIRE|API]
 //   node src/cli.ts init <name> [--language typescript|csharp]...
 //   node src/cli.ts wrapper beadc.sh|beadc.ps1
 //   node src/cli.ts version
@@ -21,6 +23,8 @@ import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'n
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { readStandardInput, STANDARD_INPUT } from './breaking/against.ts';
+import { breaking } from './breaking/breaking.ts';
 import { checkBlueprintFile, checkRoots, type IChecked } from './check.ts';
 import { findConfig, type IConfig, parseConfig, type Source } from './config.ts';
 import {
@@ -32,7 +36,7 @@ import {
 } from './diagnostics.ts';
 import { formDifferencesOf, formOf, type IFormDifference } from './model/form.ts';
 import { displayOf } from './roots.ts';
-import { isRuleName, RULES, Severity } from './rules.ts';
+import { Category, isRuleName, RULES, Severity } from './rules.ts';
 import { beadcVersion, versionLines } from './version.ts';
 import { isWrapperName, WRAPPERS, wrapperText } from './wrappers.ts';
 
@@ -58,6 +62,9 @@ interface ICall {
   readonly except: ReadonlySet<string>;
   readonly check: boolean;
   readonly descriptorSetOut?: string;
+  /** `breaking`'s: the earlier, and the category its rules run under. */
+  readonly against?: string;
+  readonly category: Category;
 }
 
 // constants
@@ -69,11 +76,15 @@ const USAGE = [
   '  blueprint --check [-o <file>] holds a blueprint to its form, writing nothing',
   "  generate                      writes beadc.yaml's outputs",
   '  generate --check              holds them to what generate writes, writing nothing',
+  '  breaking --against <folder, - or blueprint>',
+  '                                holds the input to an earlier release, writing nothing',
   '  init <name>                   writes a project here, its .proto, its beadc.yaml and its wrappers',
   "  wrapper beadc.sh|beadc.ps1    prints a wrapper that runs beadc's image",
   '  version                       beadc, its tools, the format, the spec and the options',
   'flags: --error-format text|json|github, --fail-on-warning, --except <RULE> (a warning),',
   '       --descriptor-set-out <file> (blueprint, from a .proto),',
+  '       --category WIRE|API (breaking, API by default), --except <RULE>[@<pointer>] or',
+  '       buf:<RULE>[@<path>] (breaking, any finding)',
   '       --language typescript|csharp (init, repeated; both when none is named)',
 ].join('\n');
 
@@ -287,6 +298,23 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
   return differences.length === 0 ? Exit.DONE : Exit.FINDINGS;
 };
 
+const runBreaking = async (call: ICall): Promise<Exit> => {
+  if (call.against === undefined) {
+    throw new InputError('breaking names the earlier, with --against <folder, - or blueprint>');
+  }
+
+  const archive = call.against === STANDARD_INPUT ? await readStandardInput() : undefined;
+  const run = breaking(call.source, {
+    against: call.against,
+    category: call.category,
+    except: [...call.except],
+    ...(call.config === undefined ? {} : { config: call.config }),
+    ...(archive === undefined ? {} : { archive }),
+  });
+
+  return report(run.diagnostics, call) ? Exit.FINDINGS : Exit.DONE;
+};
+
 const runInit = async (name: string | undefined, languages: readonly string[]): Promise<Exit> => {
   // * the editor's copy is written as generate writes it, which loads the targets
   const { initLines, initProject } = await import('./init.ts');
@@ -313,19 +341,27 @@ const runWrapper = (name: string | undefined): Exit => {
   return Exit.DONE;
 };
 
-// the call, its flags checked: a format beadc prints, and a rule it knows that is a warning
+// the call, its flags checked: a format beadc prints, and a rule it knows that is a warning; on
+// `breaking`, its category, its waivers checked by breaking itself
 const callOf = (
   values: Readonly<Record<string, string | boolean | string[] | undefined>>,
-  input: string | undefined
+  details: { readonly input: string | undefined; readonly command: string }
 ): ICall => {
+  const { input, command } = details;
   const format = values['error-format'] ?? ErrorFormat.TEXT;
   const except = (values['except'] ?? []) as string[];
+  const category = values['category'] ?? Category.API;
+  const against = values['against'];
 
   if (!(Object.values(ErrorFormat) as unknown[]).includes(format)) {
     throw new InputError(`--error-format is text, json or github, not ${String(format)}`);
   }
 
-  for (const rule of except) {
+  if (!(Object.values(Category) as unknown[]).includes(category)) {
+    throw new InputError(`--category is WIRE or API, not ${String(category)}`);
+  }
+
+  for (const rule of command === 'breaking' ? [] : except) {
     if (!isRuleName(rule)) {
       throw new InputError(`--except ${rule}: no rule beadc knows`);
     }
@@ -354,6 +390,8 @@ const callOf = (
     ...(typeof descriptorSetOut === 'string'
       ? { descriptorSetOut: resolve(descriptorSetOut) }
       : {}),
+    ...(typeof against === 'string' ? { against } : {}),
+    category: category as Category,
   };
 };
 
@@ -374,6 +412,8 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
         check: { type: 'boolean' },
         'descriptor-set-out': { type: 'string' },
         language: { type: 'string', multiple: true },
+        against: { type: 'string' },
+        category: { type: 'string' },
       },
     });
     const [command, input, ...rest] = positionals;
@@ -390,6 +430,12 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
       throw new InputError(`--language is init's, not ${command}'s`);
     }
 
+    for (const flag of ['against', 'category'] as const) {
+      if (values[flag] !== undefined && command !== 'breaking') {
+        throw new InputError(`--${flag} is breaking's, not ${command}'s`);
+      }
+    }
+
     switch (command) {
       case 'version': {
         for (const line of versionLines()) {
@@ -398,13 +444,16 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
         return Exit.DONE;
       }
       case 'check': {
-        return runCheck(callOf(values, input));
+        return runCheck(callOf(values, { input, command }));
       }
       case 'blueprint': {
-        return runBlueprint(callOf(values, input));
+        return runBlueprint(callOf(values, { input, command }));
       }
       case 'generate': {
-        return await runGenerate(callOf(values, input));
+        return await runGenerate(callOf(values, { input, command }));
+      }
+      case 'breaking': {
+        return await runBreaking(callOf(values, { input, command }));
       }
       case 'init': {
         return await runInit(input, values.language ?? []);

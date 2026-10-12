@@ -108,7 +108,9 @@ vector cannot.
 - a check of the C# side's parameters, which no analyzer of .NET's recommended set counts
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
 - `beadc breaking`, which holds a blueprint to the last release's
-  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
+  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)): its step stands
+  in the `builder` job, owed until 0.3.0, the first release that carries a blueprint, and fails
+  from then on a release without one;
 - tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
   root's tools' tests, in Node's runner, would hold.
 

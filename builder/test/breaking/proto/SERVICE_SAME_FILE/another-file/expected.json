@@ -1,0 +1,15 @@
+{
+  "WIRE": [],
+  "API": [
+    {
+      "rule": "SERVICE_SAME_FILE",
+      "line": 18,
+      "column": 9
+    },
+    {
+      "rule": "SERVICE_SAME_FILE",
+      "line": 74,
+      "column": 9
+    }
+  ]
+}

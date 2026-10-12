@@ -71,13 +71,13 @@ export const foldOf = (name: string): string => {
 };
 
 /**
- * Where `rule` stands in 16.10's order: a range's rule first, a name's form next, every other rule
- * after them.
+ * Where `rule` stands in 16.10's order: a range's rule first, a name's form next, every other rule,
+ * buf's among them, after them.
  */
-export const reasonRankOf = (rule: RuleName): number => {
+export const reasonRankOf = (rule: string): number => {
   const reasons = Object.values(IdentityReason);
   const rank = reasons.findIndex((reason) => {
-    return RULES_OF_REASON[reason].includes(rule);
+    return (RULES_OF_REASON[reason] as readonly string[]).includes(rule);
   });
 
   return rank === -1 ? reasons.length : rank;

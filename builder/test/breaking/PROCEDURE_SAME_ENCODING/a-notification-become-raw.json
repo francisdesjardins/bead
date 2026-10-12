@@ -1,0 +1,22 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/9/notification",
+      "value": {
+        "encoding": "raw"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_SAME_ENCODING",
+      "pointer": "/services/0/procedures/9/notification"
+    }
+  ]
+}

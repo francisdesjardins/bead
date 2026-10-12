@@ -1,0 +1,28 @@
+{
+  "current": [
+    {
+      "op": "remove",
+      "path": "/services/0/failures/1"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/14/failures",
+      "value": []
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_NO_DELETE",
+      "pointer": "/services/0/failures"
+    },
+    {
+      "rule": "FAILURE_NO_DELETE",
+      "pointer": "/services/0/reserved/failureCodes"
+    }
+  ]
+}

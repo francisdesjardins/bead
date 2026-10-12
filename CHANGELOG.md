@@ -61,6 +61,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A release moves an example's versions: its C# lock file's project range, held by
   `tools/check-versions.mjs`, the image its wrappers name and its blueprint's `specVersion`, which
   CI's `examples` job holds to beadc (decision 0008).
+- `beadc breaking`: a project held to its last release by id, in two categories, `WIRE` within
+  `API`, the default: 20 rules of Bead's over the two blueprints, `SERVICE_SAME_HOOKS`,
+  `NAME_NO_DELETE` and `SERVICE_REVISION` among them, and buf's over the messages of two buf
+  images, each finding `buf:`-prefixed, its rules keyed by a service's or an rpc's name excepted;
+  `--against` a folder, its committed blueprint read for Bead's rules, `-` for a tar on standard
+  input, or a blueprint, `PROTO_SKIPPED` where a `.proto` side goes uncompared; `--except` waives a
+  finding by its rule, scoped to its pointer or file. The wrappers' `--against-ref <ref>` pipes the
+  project's `git archive` at that ref into the run. CI holds the interop's blueprint and
+  `examples/hello` against the last release that carries a blueprint, from 0.3.0 (decisions 0017
+  and 0022).
 
 ### Changed
 
@@ -96,6 +106,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `InteropHandlers.cs` and its credentials in `InteropCredentials.cs`, and `InteropService.cs` is
   gone. The banned-API analyzer refuses the service manager there, and `dotnet format` leaves the
   generated folders out.
+- Spec 16.8 and 16.9: `beadc breaking` holds ids and names for life against the last release,
+  and refuses a revision lowered, or left where the contract moved.
+- `tools/release.mjs prepare` lists, among what it owes by hand, each `--except` of CI's
+  `beadc breaking` step and each of decision 0006's gates owed that names the version it prepares.
 
 ### Removed
 

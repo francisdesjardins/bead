@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "RESERVED_NO_DELETE",
+      "line": 23,
+      "column": 5
+    }
+  ],
+  "API": [
+    {
+      "rule": "RESERVED_NO_DELETE",
+      "line": 23,
+      "column": 5
+    }
+  ]
+}

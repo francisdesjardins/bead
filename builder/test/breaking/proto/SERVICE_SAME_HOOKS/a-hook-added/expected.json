@@ -1,0 +1,21 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_ADMISSION_TIGHTENED",
+      "line": 37,
+      "column": 19
+    }
+  ],
+  "API": [
+    {
+      "rule": "SERVICE_SAME_HOOKS",
+      "line": 19,
+      "column": 10
+    },
+    {
+      "rule": "PROCEDURE_ADMISSION_TIGHTENED",
+      "line": 37,
+      "column": 19
+    }
+  ]
+}

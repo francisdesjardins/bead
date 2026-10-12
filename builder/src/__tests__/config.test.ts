@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
 
-import { type IConfig, isInside, parseConfig } from '../config.ts';
+import { againstOfText, type IConfig, isInside, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
 import { DEFAULT_RUNTIME } from '../targets/typescript/options.ts';
 
@@ -171,5 +171,47 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
     expect(() => {
       return read(outputs);
     }, outputs).toThrow(reason);
+  }
+});
+
+test('an earlier beadc.yaml gives its source and blueprint, its outputs unread', () => {
+  const folder = '/earlier';
+  const posix = path.posix;
+  const later = [
+    'version: 1',
+    'source:',
+    '  proto: [proto]',
+    'blueprint: gen/a.blueprint.json',
+    'lint: strict',
+    'outputs:',
+    '  - language: typescript',
+    '    out: gen/typescript',
+    '    dropped: true',
+    '',
+  ].join('\n');
+
+  expect(() => {
+    return parseConfig(later, { folder, path: posix });
+  }).toThrow(InputError);
+  expect(againstOfText(later, { folder, path: posix })).toEqual({
+    folder,
+    source: { proto: ['/earlier/proto'] },
+    blueprint: '/earlier/gen/a.blueprint.json',
+  });
+  expect(
+    againstOfText('version: 1\nsource:\n  blueprint: spec/a.json\noutputs: []\n', {
+      folder,
+      path: posix,
+    })
+  ).toEqual({ folder, source: { blueprint: '/earlier/spec/a.json' } });
+
+  for (const refused of [
+    'version: 2\nsource:\n  proto: [proto]\n',
+    'version: 1\nsource:\n  proto: [../proto]\n',
+    'version: 1\nsource:\n  blueprint: a.json\nblueprint: b.json\n',
+  ]) {
+    expect(() => {
+      return againstOfText(refused, { folder, path: posix });
+    }, refused).toThrow(InputError);
   }
 });

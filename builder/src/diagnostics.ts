@@ -3,6 +3,8 @@
 // A finding of beadc's, and how it prints: one line a finding, `file:line:column: severity RULE:
 // message` at a .proto's place, or at a blueprint's JSON Pointer (RFC 6901) as a URI fragment names
 // one, `file#/services/0/serviceId`; in text, in JSON a line each, or as GitHub's workflow commands.
+// A breaking finding at a .proto's place carries its pointer besides, which its line ends with. A
+// finding of buf's breaking rules is named `buf:` and buf's rule.
 
 // dependencies
 
@@ -10,9 +12,12 @@ import { RULES, type RuleName, Severity } from './rules.ts';
 
 // types
 
+/** A rule of buf's breaking rules, as a finding names it: `buf:FIELD_SAME_TYPE`. */
+export type BufRuleName = `buf:${string}`;
+
 /** A finding: its rule, its severity, its place, and what it says. */
 export interface IDiagnostic {
-  readonly rule: RuleName;
+  readonly rule: RuleName | BufRuleName;
   readonly severity: Severity;
   readonly message: string;
   /** The file it is about, as the command line or `beadc.yaml` named it. */
@@ -41,6 +46,11 @@ export const ErrorFormat = Object.freeze({
 
 export type ErrorFormat = (typeof ErrorFormat)[keyof typeof ErrorFormat];
 
+// constants
+
+// a .proto's file, whose place is its line and column, a pointer besides
+const PROTO_FILE = /\.proto$/u;
+
 // definition
 
 /**
@@ -58,6 +68,19 @@ export const diagnosticOf = (
   details: { readonly message: string; readonly place: IPlace }
 ): IDiagnostic => {
   return { rule, severity: RULES[rule].severity, message: details.message, ...details.place };
+};
+
+/** A finding of buf's breaking rule `type`, at `place`: an error, its message buf's. */
+export const bufDiagnosticOf = (
+  type: string,
+  details: { readonly message: string; readonly place: IPlace }
+): IDiagnostic => {
+  return {
+    rule: `buf:${type}`,
+    severity: Severity.ERROR,
+    message: details.message,
+    ...details.place,
+  };
 };
 
 /** One reference token of a JSON Pointer, `~` and `/` escaped (RFC 6901 §3). */
@@ -83,10 +106,15 @@ const escapeProperty = (text: string): string => {
   return escapeData(text).replaceAll(':', '%3A').replaceAll(',', '%2C');
 };
 
+// whether a finding's place is its pointer, a blueprint's, rather than a .proto's line
+const isAtPointer = (diagnostic: IDiagnostic): boolean => {
+  return diagnostic.pointer !== undefined && !PROTO_FILE.test(diagnostic.file);
+};
+
 // where a finding is, as its text line opens
 const whereOf = (diagnostic: IDiagnostic): string => {
-  if (diagnostic.pointer !== undefined) {
-    return `${diagnostic.file}#${diagnostic.pointer}`;
+  if (isAtPointer(diagnostic)) {
+    return `${diagnostic.file}#${diagnostic.pointer ?? ''}`;
   }
 
   if (diagnostic.line === undefined) {
@@ -100,7 +128,12 @@ const whereOf = (diagnostic: IDiagnostic): string => {
 export const formatDiagnostic = (diagnostic: IDiagnostic, format: ErrorFormat): string => {
   switch (format) {
     case ErrorFormat.TEXT: {
-      return `${whereOf(diagnostic)}: ${diagnostic.severity} ${diagnostic.rule}: ${diagnostic.message}`;
+      const at =
+        diagnostic.pointer === undefined || isAtPointer(diagnostic)
+          ? ''
+          : ` (at ${diagnostic.pointer})`;
+
+      return `${whereOf(diagnostic)}: ${diagnostic.severity} ${diagnostic.rule}: ${diagnostic.message}${at}`;
     }
     case ErrorFormat.JSON: {
       return JSON.stringify({
