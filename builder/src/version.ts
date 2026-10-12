@@ -26,7 +26,10 @@ export const FORMAT = 'bead-blueprint/1';
 // Bead/Messages/V1/Messages.cs, its descriptor (decisions 0008 and 0022)
 export const OPTIONS_NUMBER = 58500;
 
-/** The oldest `@bufbuild/protobuf` protoc-gen-es's output runs on, with `erasable_syntax`. */
+/**
+ * The oldest `@bufbuild/protobuf` protoc-gen-es's output runs on, with `erasable_syntax`: the
+ * goldens are type-checked against it, `@bufbuild/protobuf-floor` (`tsconfig.floor.json`).
+ */
 export const PROTOBUF_FLOOR = '2.13.0';
 
 // the spec's line that states its version, as spec/generators/spec_version.py reads it

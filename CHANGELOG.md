@@ -61,6 +61,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A release moves an example's versions: its C# lock file's project range, held by
   `tools/check-versions.mjs`, the image its wrappers name and its blueprint's `specVersion`, which
   CI's `examples` job holds to beadc (decision 0008).
+- The builder's `type-check` compiles the TypeScript goldens against `@bufbuild/protobuf` 2.13.0,
+  the floor their header names, installed beside the pin as an npm alias that `version.test.ts`
+  holds to `PROTOBUF_FLOOR`.
 
 ### Changed
 

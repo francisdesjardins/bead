@@ -1,0 +1,19 @@
+{
+  // The goldens against the oldest @bufbuild/protobuf their header names, `PROTOBUF_FLOOR`
+  // (src/version.ts): its package, installed beside the pin as `@bufbuild/protobuf-floor`, which
+  // version.test.ts holds to the floor, read for every import of `@bufbuild/protobuf`.
+  // `yarn type-check` runs it after the goldens against the pin.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // ! `paths` replaces the one it extends: the runtime's entry is repeated here
+    "paths": {
+      "@francisdesjardins/bead/service": [
+        "../../../../implementations/typescript/src/service/service.ts"
+      ],
+      "@bufbuild/protobuf": ["../../../node_modules/@bufbuild/protobuf-floor/dist/esm/index.d.ts"],
+      "@bufbuild/protobuf/*": [
+        "../../../node_modules/@bufbuild/protobuf-floor/dist/esm/*/index.d.ts"
+      ]
+    }
+  }
+}

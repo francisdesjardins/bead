@@ -7,6 +7,7 @@ import { protocPin } from '../protoc.ts';
 import {
   beadcVersion,
   OPTIONS_NUMBER,
+  PROTOBUF_FLOOR,
   protocLine,
   specUrlOf,
   specVersion,
@@ -53,6 +54,19 @@ test('names protoc at its pin, one of another version beside the pin, or none', 
       return protocLine();
     })
   ).toBe(`protoc none, pinned ${pinned}`);
+});
+
+test("the goldens' floor type-check reads @bufbuild/protobuf at PROTOBUF_FLOOR", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+  ) as {
+    devDependencies: Record<string, string>;
+  };
+
+  expect(PROTOBUF_FLOOR).toMatch(SEMANTIC_VERSION);
+  expect(manifest.devDependencies['@bufbuild/protobuf-floor']).toBe(
+    `npm:@bufbuild/protobuf@${PROTOBUF_FLOOR}`
+  );
 });
 
 test("beadc's version is an x.y.z", () => {
