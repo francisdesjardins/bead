@@ -23,6 +23,8 @@ const COMMITTED = new URL(
 const GOLDEN = fileURLToPath(new URL('../../../../test/golden/typescript/', import.meta.url));
 const FIXTURES = fileURLToPath(new URL('../../../../test/fixtures/', import.meta.url));
 const MESSAGES = fileURLToPath(new URL('../../../../test/messages/', import.meta.url));
+// the goldens' type-checks, against @bufbuild/protobuf's pin and its floor: no output of beadc's
+const GOLDEN_CONFIGS = new Set(['tsconfig.floor.json', 'tsconfig.json']);
 const COMMENTS_PROTO = 'bead/comments/v1/comments.proto';
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
 
@@ -143,7 +145,7 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   ).toEqual(
     filesUnder(GOLDEN)
       .filter((name) => {
-        return name !== 'tsconfig.json';
+        return !GOLDEN_CONFIGS.has(name);
       })
       .sort()
   );

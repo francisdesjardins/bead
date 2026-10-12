@@ -104,7 +104,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
 
     // a drop closes as a network does, and the open socket's `onclose` reports it
     const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
-      if (!('ping' in socket) || !('on' in socket) || !('terminate' in socket)) {
+      if (socket.ping === undefined || socket.on === undefined || socket.terminate === undefined) {
         return undefined;
       }
 

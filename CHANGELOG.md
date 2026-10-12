@@ -71,6 +71,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   project's `git archive` at that ref into the run. CI holds the interop's blueprint and
   `examples/hello` against the last release that carries a blueprint, from 0.3.0 (decisions 0017
   and 0022).
+- The builder's `type-check` compiles the TypeScript goldens against `@bufbuild/protobuf` 2.13.0,
+  the floor their header names, installed beside the pin as an npm alias that `version.test.ts`
+  holds to `PROTOBUF_FLOOR`.
 
 ### Changed
 
@@ -120,6 +123,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript side compiles under a consumer's `strict` without `exactOptionalPropertyTypes`:
+  the WebSocket client's heartbeat guards the methods it calls by their value, which narrows them
+  under either setting, where TS2722 refused its call.
+- A catalogue's `is` narrows to `IListedFailureError<Name>`, the failure of that name, so a false
+  answer leaves a `FailureError` one, to be asked of another name, where it narrowed it to `never`.
+- beadc's refusal of a protoc missing or off its pin names the fix to whoever runs it, in a clone
+  or not: protoc's release at the pin and `BEADC_PROTOC`, or beadc's image, and no path of the
+  repository's.
 - A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
   deletes it, so nothing reaches origin before that push.
 

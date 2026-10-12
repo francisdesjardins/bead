@@ -34,7 +34,7 @@ node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 
 | Script               | What it runs                                                                                                                                                                                                                                                                                        |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `yarn type-check`    | TypeScript 7 over `src/`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them                                                                                                                                  |
+| `yarn type-check`    | TypeScript 7 over `src/`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them, against `@bufbuild/protobuf`'s pin and its floor                                                                                |
 | `yarn lint`          | oxlint, type-aware, the TypeScript side's lint surface by reference                                                                                                                                                                                                                                 |
 | `yarn format:check`  | oxfmt, the TypeScript side's options, copied                                                                                                                                                                                                                                                        |
 | `yarn buf:lint`      | `buf lint` over [`buf.yaml`](buf.yaml)'s modules: `proto/`, `test/fixtures/` and `test/messages/`                                                                                                                                                                                                   |
@@ -354,8 +354,11 @@ importing the runtime by the package's name. A test writes them again and compar
 byte, their header's versions written as today's first, since a release moves the versions and
 never a golden; `BEADC_WRITE_GOLDEN=1 yarn test` writes them. `yarn type-check` compiles them as a
 consumer does, under their own [`tsconfig.json`](test/golden/typescript/tsconfig.json): the
-TypeScript side's strictness and its `Bundler` resolution, the runtime's name mapped to its source.
-Their lint is the TypeScript side's, over the code it generates.
+TypeScript side's strictness and its `Bundler` resolution, the runtime's name mapped to its source;
+then under [`tsconfig.floor.json`](test/golden/typescript/tsconfig.floor.json), against the
+header's floor, `@bufbuild/protobuf` 2.13.0, installed beside the pin as `@bufbuild/protobuf-floor`,
+an npm alias that `version.test.ts` holds to `PROTOBUF_FLOOR`. Their lint is the TypeScript side's,
+over the code it generates.
 
 ## The C# target
 

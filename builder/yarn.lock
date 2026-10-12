@@ -95,6 +95,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@bufbuild/protobuf-floor@npm:@bufbuild/protobuf@2.13.0":
+  version: 2.13.0
+  resolution: "@bufbuild/protobuf@npm:2.13.0"
+  checksum: 10c0/bb4d39512302887399355ac2ba1228e562c1cae818ff88b4b85b3060758aba5fec94786fe80f69de8878f98e730911c0bd145741adb582d0abf6b42de921e50c
+  languageName: node
+  linkType: hard
+
 "@bufbuild/protobuf@npm:2.16.0":
   version: 2.16.0
   resolution: "@bufbuild/protobuf@npm:2.16.0"
@@ -136,6 +143,7 @@ __metadata:
   dependencies:
     "@bufbuild/buf": "npm:1.73.0"
     "@bufbuild/protobuf": "npm:2.16.0"
+    "@bufbuild/protobuf-floor": "npm:@bufbuild/protobuf@2.13.0"
     "@bufbuild/protoc-gen-es": "npm:2.16.0"
     "@bufbuild/protoplugin": "npm:2.16.0"
     "@playwright/test": "npm:1.63.0"
