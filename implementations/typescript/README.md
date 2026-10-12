@@ -44,13 +44,40 @@ a connection is alive is its transport's to know.
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
 its `maxPayload` says otherwise, and closes a larger one with 1009; over the global `WebSocket`, its
 platform's bound applies. A WebSocket server judges a request at its address in the order of spec
-15.2: 400 as HTTP answers it to a `Host` missing, repeated or no host, or to a target in
-absolute-form that names none; 403 to a host it does not take, whatever the request; 405 to a method
-but `GET` or `HEAD`; 426 to a request that asks no
-WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but 13, the one it
-speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among `origins`. Each
-refusal but HTTP's own is marked, its body empty, and closes its connection; an `Upgrade` listing
-`websocket` among other protocols is taken — see [HTTP](#http).
+15.2: 400 as HTTP answers it to a field holding a control character but a tab or an octet past
+ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
+403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
+request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
+13, the one it speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among
+`origins`. Each refusal but HTTP's own is marked, its body empty, closes its connection, and is
+told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
+[HTTP](#http).
+
+A server listens on `127.0.0.1` unless `start` is given an `address`, an IP address written bare, as
+RFC 3986 writes one: a container, or any server another machine reaches, says `0.0.0.0` or `::`, and
+names its hosts. A name, `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
+loopback it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
+clear, it says `secure: false`. A client that connects by `localhost` reaches it whichever family it
+tries first, Node's and the browsers' racing them (RFC 8305); another process that listens on `::1`,
+on the same port, answers a client that tries that family first. A server meant for other machines
+and given no address is refused there by the network, its connection reset or refused, never by a
+Bead refusal: no socket opens, so nothing is told.
+
+Each refusal a server judges of its own it tells, `refusal`, once written: its status, its reason,
+the request's authority and its `Origin` as they came, and the client's address and port — never
+the target, a token or a credential: what to add to `hosts` or `origins`, or who is refused. The 404
+that ends a listen or an exchange as its connection closes is told by `close`; what HTTP refuses of
+its own, unmarked, by nothing. A client names the status and the reason it was refused with, but
+over the global `WebSocket`, a page's, which reads nothing past its close, 1006. Each string a
+refusal carries is the client's, visible ASCII, spaces and tabs: a log quotes it.
+
+```ts
+server.on('refusal', ({ address, authority, origin, port, reason, status }) => {
+  console.warn(
+    `refused ${String(status)} ${reason}: authority ${JSON.stringify(authority)}, origin ${JSON.stringify(origin)}, from ${String(address)}:${String(port)}`
+  );
+});
+```
 
 ```ts
 import { WebSocketServer } from 'ws';
@@ -81,8 +108,8 @@ it goes a call whose credential it cannot: `carriesCredential`, and `isSecure`, 
 end was given, never by what a name resolves to — a client by the URL of its connect, under TLS
 (`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`, the
 host as the WHATWG URL Standard's host parser reads it: `127.0.0.1.` is on the loopback, a host
-followed by a space is not); a server, per connection, by what it listens on — a loopback host, or,
-over HTTP, a server under TLS — unless its application tells it what stands in front of it,
+followed by a space is not); a server, per connection, by what it listens on — an address in
+127.0.0.0/8 or `::1`, or, over HTTP, a server under TLS — unless its application tells it what stands in front of it,
 `secure`: `true` for TLS terminated before it, which makes each connection secure, `false` for a
 proxy that serves the network in the clear, which leaves each in the clear; a worker always, since
 it never leaves the machine.
@@ -708,7 +735,7 @@ before it goes. A relay that calls a destination through an HTTP client writes i
 request presenting `ELSEWHERE`, the `Authorization` leg A carried, as it came; what came beside any
 other request stays at the relay. The client is secure under `https` or to a loopback host, by the
 URL of its connect; the server under TLS — built on `node:https`'s server, or `node:http2`'s
-`createSecureServer` — or on a loopback host it listens on.
+`createSecureServer` — or on a loopback address it listens on.
 
 A client's `send` settles on the head of its answer, so a caller — a relay, say — knows whether the
 server had the envelope: a 2xx resolves, the server sending its head as it hands the request on.
@@ -751,7 +778,9 @@ of spec 15.12's grammar, RFC 3986's narrowed: no userinfo, no percent-encoded oc
 and one with two `Host` fields or an authority that is none, is answered 400 as HTTP answers it,
 unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its stream is reset,
 `PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and so is a name of
-invalid punycode.
+invalid punycode. So is a request answered whose field holds a control character but a tab, or an
+octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of every field
+defined since, and Node's parser answers the first itself.
 
 Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
 address, by the request's host, its port aside: no name a browser fetches is written as an IP
@@ -769,9 +798,11 @@ address is then its own origin. An entry with a port, an empty one, one that is 
 beside another throws a `ProgrammerError` as the transport is built; so does an `origins` entry that
 is `*`, since no origin wildcard exists, or that is neither `null` nor an origin as a browser
 serializes it. A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which
-`curl -i` and a browser's network panel show, and by the HTTP client, whose error names it; a
-WebSocket client over `ws` carries the status in its `ConnectError`'s cause, and a page's WebSocket
-sees its close alone, 1006. The server itself reports no refusal.
+`curl -i` and a browser's network panel show; by the HTTP client, "the server drew no connection:
+403 host-refused", and the WebSocket client over `ws`, "the server refused the upgrade: 403
+host-refused", each in its `ConnectError`; and by the
+server's `refusal`, which names the authority to add to `hosts`. A page's WebSocket sees its close
+alone, 1006.
 
 `origins` names the origins a request may come from besides the server's own, none when not given,
 compared exactly; a WebSocket server takes both alike,

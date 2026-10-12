@@ -9,6 +9,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Every server transport tells each refusal it judges of its own, the event `refusal`, `Refusal`, on
+  both sides: its status, its reason, the request's authority and origin as they came, and the
+  client's address and port, never its target, a token or a credential; the 404 that ends a listen
+  or an exchange as its connection closes is told by `close` alone (spec 15.1; decision 0026). Its
+  record is `ITransportServerRefusal` on the TypeScript side and `TransportServerRefusal` on the C#
+  side, `IServerTransport` gaining `Refusal`; a throw of its listener is reported through `error`
+  with the empty handle. `spec/transports.json` checks it at every marked refusal.
 - On the TypeScript side, `IHTTPResponseLike.stream`, through which an HTTP/2 stream is reset, and
   `IHandshakeRequestLike.url`, the target an upgrade's authority is read from, both optional.
 - `.claude/workflows/bead-release-documents.js`: a release brings to itself every document that
@@ -51,6 +58,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   address, in its handle and its address, as the C# side does.
 - A record's number names one decision within a release: between two releases, records may be
   renumbered, and the release's CHANGELOG section maps the old numbers to the new.
+- A server listens on `127.0.0.1` unless `start` is given an address, on both transports and both
+  sides, where it listened on `0.0.0.0`; a container, or any server another machine reaches, says
+  `0.0.0.0` or `::`. On its defaults a server is secure (spec 13.4). An address is an IP address
+  written bare, by RFC 3986's grammar: a name, `[::1]`, `127.1` or `0` fails the start on both sides
+  (spec 15.12; decision 0024).
+- A request whose field holds a control character other than HTAB, or an octet past ASCII, is
+  answered 400 unmarked on both sides, at both transports, before anything else of it is judged: the
+  C# side took the first, the TypeScript side the second (spec 15.12; decision 0026). Over HTTP/2
+  its stream is reset, but where Node's HTTP/2 parser drops a field holding a control character
+  before the TypeScript side's transport reads it, and where Kestrel ends the session of an octet
+  that is no UTF-8, both in one platform row of `docs/support.md`.
+- A WebSocket client names the status and the reason of an upgrade refused, over `ws` and on the C#
+  side; an HTTP client's connect names its reason. The global `WebSocket` reads nothing of a refused
+  upgrade. On the TypeScript side, `IWebSocketLike.on` takes `unexpected-response`, `ws`'s, its
+  response an `IUpgradeResponseLike`.
+- The C# clients race the address families of a name, as RFC 8305 asks: a connect by `localhost` to
+  a server on one family no longer waits two seconds on Windows.
+- `spec.md` 15.1 states the refusal a server tells, 15.6 what a client names of one, 15.12 the octets
+  a field holds, the address a server listens on and a client's port, and 13.4 judges a server by
+  the address it listens on alone. `transports.json` gives every marked refusal what its server
+  tells of it, `told`, its port `{port}`, which each runner fills with the port its step sent from,
+  reads a head's characters as one octet each, and adds three cases: a listen held, answered the 404
+  of its connection's close and told by none, and a field past visible ASCII, over HTTP and at a
+  WebSocket's address.
 
 ### Security
 
@@ -58,8 +89,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   literals, over HTTP and at a WebSocket's address, on both sides. A page that rebinds its name to a
   server's address is refused 403 `host-refused`, as is a request that names no host. A server
   reached by a name, a public one, one behind a proxy that keeps the `Host`, or a service reached by
-  its in-cluster name, now names it in `hosts`, or refuses it. The refusal is told on the wire and by
-  the HTTP clients; the server reports nothing, and a page's WebSocket sees only its close.
+  its in-cluster name, now names it in `hosts`, or refuses it. The refusal is told on the wire, by
+  every client that can read it, and by the server's `refusal` event; a page's WebSocket sees only
+  its close.
+- A server is no longer reachable from the network by default: it listens on the loopback.
 - A WebSocket server no longer takes two sockets from one address and port, to two of its addresses,
   as one connection: each is its own, in its own session, and a stop closes both, 1001.
 
