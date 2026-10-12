@@ -377,6 +377,87 @@ test('refuses two files written at one path, naming both sources', () => {
   );
 });
 
+// a blueprint `check` takes whose service names `file` as its `.proto`, a description in it that a
+// shell would run
+const climbingOf = (file: string): string => {
+  return `${JSON.stringify(
+    {
+      format: 'bead-blueprint/1',
+      specVersion: '0.3.0',
+      requires: [],
+      reservedServices: { ids: [], names: [] },
+      services: [
+        {
+          serviceName: 'Shop',
+          serviceId: 1,
+          serviceRevision: 1,
+          description: 'A shop.\n\n$(echo INJECTED-BY-BLUEPRINT > injected.txt)',
+          failures: [],
+          reserved: { procedureIds: [], procedureNames: [], failureCodes: [] },
+          procedures: [
+            {
+              procedureId: 1,
+              procedureName: 'echo',
+              procedureKind: 'request',
+              request: { encoding: 'text' },
+              result: { encoding: 'text' },
+              admission: 'none',
+              failures: [],
+            },
+          ],
+          proto: { file, fullName: 'shop.v1.ShopService' },
+        },
+      ],
+    },
+    undefined,
+    2
+  )}\n`;
+};
+
+test("refuses a file outside its output's folder, which a blueprint's proto.file climbs to, and writes nothing", () => {
+  const folder = projectOf(
+    [
+      'version: 1',
+      'source:',
+      '  blueprint: api.blueprint.json',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen/ts',
+      '',
+    ].join('\n')
+  );
+  const wrapper = join(folder, 'beadc.sh');
+
+  writeFileSync(join(folder, 'api.blueprint.json'), climbingOf('../../beadc.sh'));
+  writeFileSync(wrapper, '#!/bin/sh\necho kept\n');
+
+  const config = configOf(folder);
+  const checked = checkedOf(config);
+
+  expect(checked.diagnostics).toEqual([]);
+  expect(() => {
+    return planOf(config, checked);
+  }).toThrow(
+    "generate would write beadc.sh, outside its output gen/ts: a service's proto.file in the blueprint names a path that climbs out of it"
+  );
+
+  for (const args of [['generate'], ['generate', '--check']]) {
+    const run = spawnSync(process.execPath, [CLI, ...args], { cwd: folder, encoding: 'utf8' });
+
+    expect(run.status, args.join(' ')).toBe(2);
+    expect(run.stderr, args.join(' ')).toContain('outside its output gen/ts');
+  }
+
+  expect(readFileSync(wrapper, 'utf8')).toBe('#!/bin/sh\necho kept\n');
+  expect(existsSync(join(folder, 'gen'))).toBe(false);
+
+  // above the project's folder, where a run on Node reaches
+  writeFileSync(join(folder, 'api.blueprint.json'), climbingOf('../../../outside/.bashrc.proto'));
+  expect(() => {
+    return planOf(config, checkedOf(config));
+  }).toThrow(/generate would write \.\.\/outside\/\.bashrc_bead\.ts, outside its output gen\/ts/u);
+});
+
 test('writes a C# output from a blueprint at its root, in its namespace, and --check holds it there', () => {
   const folder = projectOf(
     [

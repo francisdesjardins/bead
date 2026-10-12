@@ -3,17 +3,17 @@
 // `beadc generate`, once `check` passed over `beadc.yaml`'s source (decision 0022): for a `.proto`
 // source, the blueprint `beadc.yaml` names and the editor's copy of Bead's options; then each
 // output, its messages first, then its target's files. Every file is encoded whole and moved over
-// the one it replaces, as `beadc blueprint` writes; two files at one path, compared as a system that
-// folds case compares them, are refused before anything is written. A file of an output's folder
-// that beadc writes the kind of, which it would not write now, is taken out: in TypeScript, by its
-// suffix, `_bead.ts`, and `_pb.ts` where messages are generated; in C#, by its first lines, beadc's
-// header, or protoc's where messages are generated, its path then the one protoc gives its source,
-// since protoc's file names carry no mark and gRPC's C# plugin opens its files with the same lines.
-// The walk of an output's folder never enters a build's or a package manager's folders, `bin/`,
-// `obj/` and `node_modules/`. With `--check`, beadc writes nothing and names each difference, each
-// file missing and each such file left over, as `buf format --exit-code` holds a file to its form;
-// CRLF is read as LF, as git may check a file out. The editor's copy is git's to ignore, and never
-// compared.
+// the one it replaces, as `beadc blueprint` writes; a file outside its output's folder, and two
+// files at one path, compared as a system that folds case compares them, are refused before
+// anything is written. A file of an output's folder that beadc writes the kind of, which it would
+// not write now, is taken out: in TypeScript, by its suffix, `_bead.ts`, and `_pb.ts` where
+// messages are generated; in C#, by its first lines, beadc's header, or protoc's where messages are
+// generated, its path then the one protoc gives its source, since protoc's file names carry no mark
+// and gRPC's C# plugin opens its files with the same lines. The walk of an output's folder never
+// enters a build's or a package manager's folders, `bin/`, `obj/` and `node_modules/`. With
+// `--check`, beadc writes nothing and names each difference, each file missing and each such file
+// left over, as `buf format --exit-code` holds a file to its form; CRLF is read as LF, as git may
+// check a file out. The editor's copy is git's to ignore, and never compared.
 //
 // `cli.ts` loads this module only for `generate`: the targets load protoplugin, which loads a
 // TypeScript compiler, which `check`, `blueprint` and `version` never need.
@@ -33,7 +33,7 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import type { IChecked } from './check.ts';
 import { OPTIONS_ROOT } from './compile.ts';
-import type { IConfig, Output } from './config.ts';
+import { type IConfig, isInside, type Output } from './config.ts';
 import { InputError } from './diagnostics.ts';
 import { generateMessages } from './messages.ts';
 import { formOf } from './model/form.ts';
@@ -274,7 +274,8 @@ const writeWhole = (path: string, content: string): void => {
  * What `generate` writes for `config`, from `checked`, its source checked without an error: the
  * blueprint for a `.proto` source that names one, then each output's files; and the files of its
  * kinds the outputs' folders hold that it would not write. Throws an {@link InputError} for a source
- * it cannot generate from, for two files it would write at one path, and for protoc's refusal.
+ * it cannot generate from, for a file it would write outside its output's folder, for two files it
+ * would write at one path, and for protoc's refusal.
  */
 export const planOf = (config: IConfig, checked: IChecked): IPlan => {
   const { blueprint } = checked;
@@ -318,6 +319,14 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
     const written = outputFilesOf(output, input).map((file) => {
       const path = join(output.out, ...file.name.split('/'));
       const source = sourceOf(file.content);
+
+      // ! a name a blueprint gives, its `proto.file`, may climb out of the output: refused, as
+      // protoc refuses a plugin's relative name, since nothing else holds a file under its folder
+      if (!isInside(output.out, { target: path })) {
+        throw new InputError(
+          `generate would write ${slashed(config.folder, path)}, outside its output ${slashed(config.folder, output.out)}: a service's proto.file in the blueprint names a path that climbs out of it; name one under it, without ..`
+        );
+      }
 
       return {
         path,
