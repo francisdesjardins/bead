@@ -34,7 +34,12 @@ import type {
   IWSTransportServerOptions,
   WSTransportServer,
 } from './types';
-import { type IHandshakeRefusal, MALFORMED_HANDSHAKE, refusalOfHandshake } from './ws-handshake';
+import {
+  BUSY_HANDSHAKE,
+  type IHandshakeRefusal,
+  MALFORMED_HANDSHAKE,
+  refusalOfHandshake,
+} from './ws-handshake';
 
 export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
@@ -194,31 +199,39 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         );
       };
 
-      // ! Node raises `request` for no upgrade the callback takes: one the judgement takes here is
-      // one Node did not read as an upgrade, refused as malformed
-      const onRequest = (request: IncomingMessage, response: ServerResponse): void => {
-        const { fields, status } = refusalOfHandshake(request, judged) ?? MALFORMED_HANDSHAKE;
+      // what one HTTP server answers of its own, made as it starts: `isStopped` says whether that
+      // server's stop began, so a head that ends after it is judged by its own server, not a later one
+      const answersOf = (isStopped: () => boolean) => {
+        // ! Node raises `request` for no upgrade the callback takes: one the judgement takes here is
+        // one the stop refused, busy, or one Node did not read as an upgrade, malformed
+        const onRequest = (request: IncomingMessage, response: ServerResponse): void => {
+          const { fields, status } =
+            refusalOfHandshake(request, judged) ??
+            (isStopped() ? BUSY_HANDSHAKE : MALFORMED_HANDSHAKE);
 
-        response.sendDate = false;
-        response.writeHead(status, { date: dateOf(), ...fields }).end();
+          response.sendDate = false;
+          response.writeHead(status, { date: dateOf(), ...fields }).end();
+        };
+
+        // ! what the callback takes, ws takes, but for `Upgrade`: ws compares its whole value with
+        // `websocket`, where RFC 9110 §7.8 makes it a list, so it is set to the token the judgement
+        // found; once the stop began, ws listens no more, and Node would drop the upgrade unanswered
+        const shouldUpgradeCallback = (request: IncomingMessage): boolean => {
+          if (isStopped() || refusalOfHandshake(request, judged) !== undefined) {
+            return false;
+          }
+
+          request.headers.upgrade = 'websocket';
+
+          return true;
+        };
+
+        return { onRequest, shouldUpgradeCallback };
       };
 
       // a `CONNECT` keeps an event of its own, where it is refused for its host or its method
       const onConnect = (request: IncomingMessage, socket: IUpgradeSocketLike): void => {
         answer(socket, refusalOfHandshake(request, judged) ?? MALFORMED_HANDSHAKE);
-      };
-
-      // ! what the callback takes, ws takes, but for `Upgrade`: ws compares its whole value with
-      // `websocket`, where RFC 9110 §7.8 makes it a list, so it is set to the token the judgement
-      // found
-      const shouldUpgradeCallback = (request: IncomingMessage): boolean => {
-        if (refusalOfHandshake(request, judged) !== undefined) {
-          return false;
-        }
-
-        request.headers.upgrade = 'websocket';
-
-        return true;
       };
 
       // a guard: ws reads nothing the judgement has not taken, and would refuse it 400
@@ -298,6 +311,13 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           );
         });
 
+        // ! a stop that began as this registered closes it with its own, going away: its snapshot of
+        // the connections was taken already, or its registry cleared; reached only by an injected
+        // `WebSocketServer` that delivers a connection after its `close()`, since ws takes none then
+        if (server.isClosing() || server.isClosed()) {
+          void closeSocket(socket, 1001); // going away
+        }
+
         // last and synchronous: a listener meets a connection already registered and wired, and before
         // any frame that arrived with the upgrade request is read
         tell(CONNECTION_EVENT, [socket, request, connectionHandle]);
@@ -316,6 +336,9 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           try {
             return await createPromise<ITransportServerAddress>(
               (resolve, reject) => {
+                const { onRequest, shouldUpgradeCallback } = answersOf(() => {
+                  return httpServer !== http;
+                });
                 const http = createServer({ shouldUpgradeCallback }, onRequest);
                 const instance = new WebSocketServer({ maxPayload, server: http });
 

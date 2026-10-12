@@ -1137,6 +1137,62 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Refuses_a_connect_that_comes_as_it_stops_busy_told_when_to_come_back_drawing_nothing()
+    {
+        await Start();
+
+        var (_, connectionHandle) = await Connect();
+        (int Status, string? RetryAfter, string? Reason) refused = default;
+
+        // the stop under way, its connection's close told: a connect comes, Kestrel still serving
+        _server.Close += (_, _) =>
+        {
+            using var response = Fetch(PostOf(null, null)).GetAwaiter().GetResult();
+
+            refused = ((int)response.StatusCode, HeaderOf(response, "retry-after"), HeaderOf(response, HttpTransport.RefusalHeader));
+        };
+
+        await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal((503, "1", HttpRefusals.Busy), refused);
+        Assert.Equal([connectionHandle], _connections);
+        Assert.Equal([(false, connectionHandle)], _closes);
+        Assert.Empty(_server.ConnectionHandles);
+    }
+
+    [Fact]
+    public async Task Answers_the_404_marked_connection_unknown_an_exchange_that_comes_as_it_stops_its_connection_not_yet_closed_nothing_handed_on()
+    {
+        await Start();
+
+        var first = await Connect();
+        var second = await Connect();
+        var others = new Dictionary<string, string> { [first.ConnectionHandle] = second.ConnectionToken, [second.ConnectionHandle] = first.ConnectionToken };
+        (int Status, string? Reason)? refused = null;
+        var held = 0;
+
+        // the stop under way, one connection's close told: an exchange comes on the other, which
+        // the stop has not closed yet
+        _server.Close += (_, connectionHandle) =>
+        {
+            if (refused is not null)
+            {
+                return;
+            }
+
+            held = _server.ConnectionHandles.Count;
+            refused = RefusalOf(PostOf(others[connectionHandle], EnvelopeOf(EnvelopeKind.Request, 1))).GetAwaiter().GetResult();
+        };
+
+        await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(1, held);
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), refused);
+        Assert.Empty(_messages);
+        Assert.Equal(2, _closes.Count);
+    }
+
+    [Fact]
     public async Task Closes_a_connection_the_server_closes_cutting_the_exchange_of_a_request_it_handed_on()
     {
         await Start();

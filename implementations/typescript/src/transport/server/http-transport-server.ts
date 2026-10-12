@@ -758,7 +758,13 @@ export const createHTTPTransportServer = (
           return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
-        if (drawn.size >= maximumConnections || heldBy(address) >= maximumConnectionsPerAddress) {
+        // none is drawn once a stop began, as none past the bounds: busy, told when to come back
+        if (
+          server.isClosing() ||
+          server.isClosed() ||
+          drawn.size >= maximumConnections ||
+          heldBy(address) >= maximumConnectionsPerAddress
+        ) {
           const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
 
           return (finish(exchange, busy), undefined);
@@ -1123,7 +1129,10 @@ export const createHTTPTransportServer = (
           return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
-        const connection = byToken.get(connectionToken);
+        // none is held once a stop began: an exchange learns its connection is gone, as the stop's
+        // close would tell it, nothing of it handed on
+        const connection =
+          server.isClosing() || server.isClosed() ? undefined : byToken.get(connectionToken);
 
         if (connection === undefined) {
           return (finish(exchange, UNKNOWN_CONNECTION), undefined);

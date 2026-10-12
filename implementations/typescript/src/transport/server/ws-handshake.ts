@@ -33,6 +33,7 @@ export interface IHandshakeRefusal {
 
 /** The refusals of a WebSocket server's own, each its `bead-refusal` (spec 15.6). */
 export const WS_REFUSALS = Object.freeze({
+  BUSY: 'busy',
   HOST: HOST_REFUSAL,
   MALFORMED: 'malformed',
   METHOD: 'method-refused',
@@ -133,6 +134,15 @@ const VERSION_REFUSED = refused(426, {
 
 /** A handshake the server cannot take, refused 400 `malformed`. */
 export const MALFORMED_HANDSHAKE = refused(400, { refusal: WS_REFUSALS.MALFORMED });
+
+/**
+ * An upgrade the server would take once its stop began, refused 503 `busy`, told when to come back
+ * (RFC 9110 §15.6.4, §10.2.3; spec 15.2).
+ */
+export const BUSY_HANDSHAKE = refused(503, {
+  fields: { 'retry-after': '1' },
+  refusal: WS_REFUSALS.BUSY,
+});
 
 // what HTTP refuses of its own (RFC 9112 §3.2), unmarked
 const HOST_MALFORMED: IHandshakeRefusal = Object.freeze({

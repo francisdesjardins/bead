@@ -73,6 +73,19 @@ internal sealed class WebSocketConnection
         }
     }
 
+    // a close sent on its own, nothing waiting on it: what its socket meets going says nothing
+    public async Task CloseQuietly(WebSocketCloseStatus status)
+    {
+        try
+        {
+            await Close(status);
+        }
+        catch (Exception reason) when (reason is WebSocketException or ObjectDisposedException or InvalidOperationException or IOException)
+        {
+            // a socket already gone takes no close
+        }
+    }
+
     // sends a close behind what was sent before it: the peer's close answered, or this side's own
     public async Task Answer(WebSocketCloseStatus status)
     {

@@ -95,7 +95,8 @@ public sealed record WebSocketTransportStartOptions
 /// and starts again once Closed. A request it does not upgrade it refuses in the order spec 15.2
 /// states, each refusal of its own marked as <see cref="WebSocketRefusals"/> names it: a host not
 /// taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, or a version but
-/// 13, 426; a malformed upgrade, 400; an origin not taken, 403.
+/// 13, 426; a malformed upgrade, 400; an origin not taken, 403; and, once its stop began, one it
+/// would take, 503, busy.
 /// </summary>
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -442,18 +443,11 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         response.ContentLength = 0;
     }
 
-    // a request: one that upgrades becomes a connection, until its socket closes; none is taken once
-    // a stop began, and any other is refused in the order spec 15.2 states, the connection going
-    // with the refusal, as the TypeScript side's does
+    // a request: one that upgrades becomes a connection, until its socket closes; any other is
+    // refused in the order spec 15.2 states, the connection going with the refusal, as the
+    // TypeScript side's does, and one it would take once a stop began is refused busy
     private async Task Accept(HttpContext context)
     {
-        if (_life.IsStopping)
-        {
-            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-
-            return;
-        }
-
         if (WebSocketHandshake.RefusalOf(context.Request, _options) is { } refusal)
         {
             Refuse(context.Response, refusal);
@@ -465,6 +459,13 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         if (!context.WebSockets.IsWebSocketRequest)
         {
             Refuse(context.Response, WebSocketHandshake.Malformed);
+
+            return;
+        }
+
+        if (_life.IsStopping)
+        {
+            Refuse(context.Response, WebSocketHandshake.Busy);
 
             return;
         }
@@ -486,6 +487,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         };
 
         _connections[connectionHandle] = held;
+
+        // ! a stop that began as this registered, past its snapshot, closes it with its own, going
+        // away: its close is sent on its own, the read below driving the handshake to its end, and
+        // the host's stop waits on this request until it ends, within its shutdown timeout
+        if (_life.IsStopping)
+        {
+            _ = connection.CloseQuietly(WebSocketCloseStatus.EndpointUnavailable);
+        }
 
         try
         {

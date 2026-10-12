@@ -1049,6 +1049,54 @@ test.describe('createHTTPTransportServer', () => {
     }
   });
 
+  test('refuses a connect that comes as it stops, busy, told when to come back, drawing nothing', async () => {
+    const { connectScripted, fake, server } = await startScripted();
+    const answers: unknown[][] = [];
+
+    connectScripted();
+
+    // the stop calls it as it closes the connection it held, its own stop under way
+    server.on('close', () => {
+      const { response } = fake.exchange({ headers: { 'content-type': BEAD_MEDIA_TYPE } });
+
+      answers.push([
+        response.status,
+        response.headers?.[REFUSAL_HEADER],
+        response.headers?.['retry-after'],
+        server.gauges().counts['connections'],
+      ]);
+    });
+
+    await server.stop();
+
+    expect(answers).toEqual([[503, REFUSALS.BUSY, '1', 0]]);
+  });
+
+  test('answers the 404 marked connection-unknown an exchange that comes as it stops, its connection not yet closed, nothing handed on', async () => {
+    const { connectScripted, events, exchangeOf, fake, server } = await startScripted();
+    const answers: unknown[][] = [];
+
+    connectScripted();
+
+    const second = connectScripted();
+
+    // the stop calls it as it closes the first connection, the second still held
+    server.once('close', () => {
+      const isHeld = server.clients.some(({ connectionHandle }) => {
+        return connectionHandle === second.connectionHandle;
+      });
+      const asking = exchangeOf(second.connectionToken);
+
+      fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+      answers.push([isHeld, asking.response.status, asking.response.headers?.[REFUSAL_HEADER]]);
+    });
+
+    await server.stop();
+
+    expect(answers).toEqual([[true, 404, REFUSALS.CONNECTION_UNKNOWN]]);
+    expect(namesOf(events, 'message')).toEqual([]);
+  });
+
   test('answers each listen it holds the marked 404 as it stops, however many', async () => {
     const { server, url } = await startTransport();
     const held: Promise<Response>[] = [];

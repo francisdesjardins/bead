@@ -364,7 +364,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
     /// <summary>
     /// Closes every connection, each exchange still waiting learning its connection is gone, then
-    /// stops listening; it ends Closed. It settles at once when Uninitialized or Closed; a second
+    /// stops listening; it ends Closed. From its start it draws no connection and holds none: a
+    /// connect is refused 503, busy, and an exchange that presents a token is answered the 404 marked
+    /// connection-unknown (spec 15.7). It settles at once when Uninitialized or Closed; a second
     /// stop shares the stop under way; one while starting is an <see cref="InvalidOperationException"/>.
     /// </summary>
     public Task Stop()
@@ -792,13 +794,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
         var host = request.Headers.Host.ToString();
 
-        if (_life.IsStopping)
-        {
-            await Finish(context, Busy);
-
-            return;
-        }
-
         if (!HostsAndOrigins.IsTakenHost(host, _options.Hosts))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Host));
@@ -839,6 +834,15 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         if (connectionToken is null || !IsToken(connectionToken))
         {
             await Finish(context, Malformed);
+
+            return;
+        }
+
+        // once its stop began it holds no connection: the token is not looked up, and nothing of the
+        // exchange is handed on, as the stop answers each listen it holds
+        if (_life.IsStopping)
+        {
+            await Finish(context, Unknown);
 
             return;
         }
@@ -893,7 +897,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         lock (_gate)
         {
-            if (_drawn.Count < _options.MaximumConnections && _perAddress.GetValueOrDefault(address) < _options.MaximumConnectionsPerAddress)
+            // ! judged under the lock, as a stop's snapshot of what it closes is taken under it: one
+            // drawn as a stop began is refused, busy, never left registered and never closed
+            if (!_life.IsStopping && _drawn.Count < _options.MaximumConnections && _perAddress.GetValueOrDefault(address) < _options.MaximumConnectionsPerAddress)
             {
                 _ordinal += 1;
                 connection = new Drawn(

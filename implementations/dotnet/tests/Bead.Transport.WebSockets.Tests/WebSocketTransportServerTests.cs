@@ -975,6 +975,80 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Refuses_an_upgrade_that_comes_as_it_stops_503_busy_told_when_to_come_back()
+    {
+        await StartDated(new WebSocketTransportServerOptions());
+
+        var (client, connectionHandle) = await Connect();
+        (int Status, Dictionary<string, string> Fields, string Body)? refused = null;
+
+        // the stop under way, its connection's close told: an upgrade comes, Kestrel still serving
+        _server.Close += (_, _) =>
+        {
+            refused = AnswerOf(UpgradeRequest(("bead.test", null))).GetAwaiter().GetResult();
+        };
+
+        using (client)
+        {
+            var answering = AnswerClose(client);
+
+            await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await answering.WaitAsync(Patience, Cancelled));
+        }
+
+        static string FieldsOf(Dictionary<string, string> fields)
+        {
+            return string.Join("; ", fields.OrderBy((field) =>
+            {
+                return field.Key;
+            }, StringComparer.Ordinal).Select((field) =>
+            {
+                return $"{field.Key}: {field.Value}";
+            }));
+        }
+
+        var (status, fields, body) = refused!.Value;
+
+        // marked, never stored nor sniffed, its connection closed, and told when to come back
+        Assert.Equal(
+            (503, FieldsOf(RefusedWith(WebSocketRefusals.Busy, ("retry-after", "1"))), ""),
+            (status, FieldsOf(fields), body));
+        Assert.Equal((false, connectionHandle), await Next(_closes));
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Closes_going_away_a_connection_whose_accept_a_stop_crossed()
+    {
+        WebSocketTransportServer server = null!;
+
+        server = new WebSocketTransportServer
+        {
+            Accepted = (socket, peerHandle) =>
+            {
+                // the stop begins as the accept registers: the connection is closed with its own
+                _ = server.Stop();
+
+                return (socket, peerHandle);
+            },
+        };
+
+        await Start(server);
+
+        using var client = new ClientWebSocket();
+
+        await client.ConnectAsync(UriOf(_port), Cancelled);
+
+        var connectionHandle = await Next(_connections);
+
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await AnswerClose(client));
+        Assert.Equal((false, connectionHandle), await Next(_closes));
+        await server.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Empty(_server.ConnectionHandles);
+    }
+
+    [Fact]
     public async Task Carries_no_credential_either_way()
     {
         var (client, connectionHandle) = await Connect();
