@@ -1022,14 +1022,19 @@ none between a client's exchanges, so that a CANCEL may come before its REQUEST 
 transport that keeps no order states what may overtake, and one that may hand an envelope on twice
 states what a copy is, each with what the side that receives it does of it. It reads nothing of an
 envelope but what this section says; what it refuses of its own is no envelope, and the router never
-sees it. A connection that closes ends what was under way on it (sections 9.4, 12.10, 13.7). A
-transport may carry a credential beside an envelope, both ways: it hands the router what it carried
-with an envelope it took, and carries what the router gives it with one it sends. That credential is
-what a request presenting `ELSEWHERE` stands for (section 9.2, step 5), and nothing else: a request
-that presents none, `OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried.
-Over HTTP, it is the `Authorization` field of a request's `POST` (section 15.5); over a WebSocket,
-none (section 15.2). A transport says whether it carries a credential beside an envelope it sends,
-and whether it is secure — under TLS, on the loopback, or never leaving the machine — so that a side
+sees it. A side calls each listener of its transport's events — a connection opened, an envelope, a
+listen, a close — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3): what one
+throws is reported, as section 9.0 reports an error, by its transport with the connection it was
+told of; the listeners after it are called all the same, and the transport goes on as if it
+returned. A listener's throw refuses no connection, fails no exchange and closes nothing. A
+connection that closes ends what was under way on it (sections 9.4, 12.10, 13.7). A transport may
+carry a credential beside an envelope, both ways: it hands the router what it carried with an
+envelope it took, and carries what the router gives it with one it sends. That credential is what a
+request presenting `ELSEWHERE` stands for (section 9.2, step 5), and nothing else: a request that
+presents none, `OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried. Over
+HTTP, it is the `Authorization` field of a request's `POST` (section 15.5); over a WebSocket, none
+(section 15.2). A transport says whether it carries a credential beside an envelope it sends, and
+whether it is secure — under TLS, on the loopback, or never leaving the machine — so that a side
 fails before it goes a call whose credential it cannot carry (section 13.4). No failure's detail,
 event, trace or log carries that credential, nor a header's: only its credential scheme.
 
@@ -1069,13 +1074,17 @@ guards an upgrade, and a page of any origin may ask for one
 ([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). Each of these refusals
 but HTTP's own is marked as section 15.6 says, with `cache-control: no-store` and
 `x-content-type-options: nosniff`, its body empty, and closes its connection; a 426 names
-`upgrade` in its `Connection`.
+`upgrade` in its `Connection`. Once its stop began, a server takes no upgrade: one it would take is
+refused 503, `busy`, its `Retry-After` 1
+([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
+[§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), marked as section 15.6 says.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
 side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
 connection that left a ping unanswered, so a peer gone without a word ends in a close. A side that
-closes says 1000; a server that stops, 1001. A close with 1000 is the clean one.
+closes says 1000; a server that stops, 1001, to each connection it holds, one that registers as its
+stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1123,14 +1132,14 @@ lost.
 | 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                              |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
 | 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                        |
-| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                               |
+| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                              |
 | 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                   |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                    |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                   |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                             |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                |
 | 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                |
-| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                          |
+| 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                         |
 
 Every response on the path carries `cache-control: no-store` and `x-content-type-options: nosniff`,
 and so does every refusal of a WebSocket server's own.
@@ -1143,6 +1152,13 @@ that drops does; the exchanges it handed on are cut, never answered. So does the
 gets its 200 head and is cut, and a cut that overtakes the head on its way leaves the exchange
 lost, which its client counts so. A connection with no exchange under way for its inactivity
 timeout, 5 minutes by default, closes.
+
+A server that stops closes every connection it holds, as lost: what was under way on each learns it
+is gone as this section says. Once its stop began it draws no connection and holds none: a connect
+it would take is refused 503, `busy`, its `Retry-After` 1
+([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
+[§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), and an exchange that presents a
+token is answered the 404 marked `connection-unknown`, nothing of it handed on.
 
 15.8. What the server sends of its own — a notification, a request of its own, a cancel, the failure
 that ends a subscription — reaches a client that listens. The client says so at connect,

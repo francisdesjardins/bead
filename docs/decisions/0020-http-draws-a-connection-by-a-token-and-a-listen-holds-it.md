@@ -62,6 +62,11 @@ for 0.2.0).
 **A connection lives as long as its client listens or speaks**: silence is counted between listens,
 never while one is held ([0012](0012-a-listen-held-is-not-silence.md)).
 
+**A stop draws no connection and holds none**: once its stop began, a server refuses a connect 503
+`busy`, its `Retry-After` 1, and answers an exchange that presents a token the 404 marked
+`connection-unknown`, as it answers each listen it holds (spec 15.7;
+[0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)).
+
 **A transport that keeps no connection states, in a record of its own, what stands for one there**:
 what it reads of an envelope, and what it gives of order and copies.
 
@@ -79,3 +84,6 @@ met it with the transport's security, whose round
 Section 15.6's rows at a WebSocket's address, and RFC 9112 §3.2 on both transports, met it with a
 WebSocket's handshake, whose round [0010](0010-a-request-presents-a-credential-of-a-scheme.md)
 keeps, On a WebSocket server's answer to a malformed handshake.
+A stop crossed by an arrival, over HTTP and at a WebSocket's address, met it with a transport's
+listener that throws, whose round
+[0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) keeps.

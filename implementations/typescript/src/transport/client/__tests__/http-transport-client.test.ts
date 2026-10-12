@@ -478,38 +478,39 @@ test.describe('createHTTPTransportClient', () => {
     expect(heard).toEqual([]);
   });
 
-  test('tells a listener that throws on an answer uncaught, and stays open', async () => {
+  test('reports a listener that throws on an answer, and stays open', async () => {
     const { client, fake } = await connectFake();
     const thrown = new Error('a listener that throws');
-    const queued: (() => void)[] = [];
-    const { queueMicrotask: queue } = globalThis;
+    const reported: Error[] = [];
+    const told: unknown[] = [];
 
     client.on('message', () => {
       throw thrown;
     });
-    globalThis.queueMicrotask = (callback) => {
-      queued.push(callback);
-    };
+    client.on('message', ({ data }) => {
+      told.push(data);
+    });
+    client.on('error', (error) => {
+      reported.push(error);
+    });
 
-    try {
-      const sent = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+    const sent = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
 
-      fake.calls[1]?.answer({
-        body: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }),
-        headers: { 'content-type': BEAD_MEDIA_TYPE },
-        status: 200,
-      });
-      await sent;
-      await expect
-        .poll(() => {
-          return queued.length;
-        })
-        .toBe(1);
-    } finally {
-      globalThis.queueMicrotask = queue;
-    }
+    fake.calls[1]?.answer({
+      body: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }),
+      headers: { 'content-type': BEAD_MEDIA_TYPE },
+      status: 200,
+    });
+    await sent;
+    await expect
+      .poll(() => {
+        return told.length;
+      })
+      .toBe(1);
 
-    expect(queued[0]).toThrow(thrown);
+    // the listener after it told all the same, the throw reported as it was thrown
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toBe(thrown);
     expect(client.isOpen()).toBe(true);
     await client.disconnect({ isQuick: true });
   });
@@ -1281,11 +1282,11 @@ test.describe('createHTTPTransportClient, listening', () => {
     ).toEqual(['POST', 'GET', 'GET', 'POST', 'DELETE']);
   });
 
-  test('hears the rest of a batch when a listener throws, the throw told uncaught, as a socket’s would be', async () => {
+  test('hears the rest of a batch when a listener throws, the throw reported', async () => {
     const { callOf, client, heard } = await connectListening();
     const thrown = new Error('a listener that throws');
-    const queued: (() => void)[] = [];
-    const { queueMicrotask: queue } = globalThis;
+    const reported: Error[] = [];
+    const told: unknown[] = [];
     let isFirst = true;
 
     client.on('message', () => {
@@ -1295,25 +1296,26 @@ test.describe('createHTTPTransportClient, listening', () => {
         throw thrown;
       }
     });
-    globalThis.queueMicrotask = (callback) => {
-      queued.push(callback);
-    };
+    client.on('message', ({ data }) => {
+      told.push(data);
+    });
+    client.on('error', (error) => {
+      reported.push(error);
+    });
 
-    try {
-      (await callOf(1))?.answer(
-        batch(1, envelopeOf(0x13, { callId: 1 }), envelopeOf(0x13, { callId: 3 }))
-      );
-      await expect
-        .poll(() => {
-          return heard.length;
-        })
-        .toBe(2);
-    } finally {
-      globalThis.queueMicrotask = queue;
-    }
+    (await callOf(1))?.answer(
+      batch(1, envelopeOf(0x13, { callId: 1 }), envelopeOf(0x13, { callId: 3 }))
+    );
+    await expect
+      .poll(() => {
+        return heard.length;
+      })
+      .toBe(2);
 
-    expect(queued).toHaveLength(1);
-    expect(queued[0]).toThrow(thrown);
+    // the listener after it told of both, the throw reported once, as it was thrown
+    expect(told).toHaveLength(2);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toBe(thrown);
     await client.disconnect({ isQuick: true });
   });
 

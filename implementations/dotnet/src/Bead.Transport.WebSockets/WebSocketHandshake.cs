@@ -9,6 +9,9 @@ namespace Bead.Transport.WebSockets;
 /// </summary>
 public static class WebSocketRefusals
 {
+    /// <summary>An upgrade the server would take once its stop began: 503, with its <c>Retry-After</c>.</summary>
+    public const string Busy = "busy";
+
     /// <summary>A host the server does not take, whatever the request: 403.</summary>
     public const string Host = HostsAndOrigins.HostRefusal;
 
@@ -65,6 +68,15 @@ internal static class WebSocketHandshake
     /// version 13 upgrade the judgement refuses for its form: 400, malformed.
     /// </summary>
     public static readonly HandshakeRefusal Malformed = new(StatusCodes.Status400BadRequest, WebSocketRefusals.Malformed, Refused);
+
+    /// <summary>
+    /// What the transport answers an upgrade it would take once its stop began: 503, busy, to come
+    /// back in a second (RFC 9110 §15.6.4, §10.2.3).
+    /// </summary>
+    public static readonly HandshakeRefusal Busy = new(StatusCodes.Status503ServiceUnavailable, WebSocketRefusals.Busy, new Dictionary<string, string>(Refused)
+    {
+        ["retry-after"] = "1",
+    });
 
     // a refusal HTTP makes of its own, unmarked (RFC 9112 §3.2)
     private static readonly HandshakeRefusal BadHost = new(StatusCodes.Status400BadRequest, null, new Dictionary<string, string> { ["connection"] = "close" });

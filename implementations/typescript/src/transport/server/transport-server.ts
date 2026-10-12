@@ -4,7 +4,8 @@
 
 import { PLATFORM_CLOCK } from '../shared/clock';
 import { createEmitter } from '../shared/emitter';
-import { ProgrammerError } from '../shared/errors';
+import { ERROR_EVENT } from '../shared/constants';
+import { ProgrammerError, toError } from '../shared/errors';
 import { gaugesOf, mergeGauges } from '../shared/gauges';
 import { createEventMethods, createReadyStateMethods } from '../shared/lifecycle';
 import {
@@ -20,10 +21,12 @@ import type {
   ITransportServerClientHandleInfo,
   ITransportServerDrawnHandleInfo,
   ITransportServerImplementation,
+  ITransportServerDefineOptions,
   TransportServerConnectionHandle,
   TransportServerConnections,
   TransportServerEventMap,
   TransportServerResolvedStartOptions,
+  TransportServerToldEvent,
 } from './types';
 
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
@@ -73,6 +76,7 @@ export type {
   ITransportServerClientHandleInfo,
   ITransportServerDrawnHandleInfo,
   ITransportServerImplementation,
+  ITransportServerDefineOptions,
   ITransportServerOptions,
   ITransportServerStartOptions,
   TRANSPORT_SERVER_EVENTS,
@@ -84,6 +88,7 @@ export type {
   TransportServerOnErrorCallback,
   TransportServerOnMessageCallback,
   TransportServerResolvedStartOptions,
+  TransportServerToldEvent,
 } from './types';
 
 // helpers
@@ -111,9 +116,9 @@ export const generateDrawnHandle = (
  * The shared half of every transport server: the events, the ready state, the connection registry,
  * `clients`, `closeAll`, and the guards around `start` and `stop`.
  *
- * `define` receives the server being built and the registry its transport fills, and returns what
- * only that transport knows — the clock it runs on, how to listen, stop, close one connection and
- * send to one.
+ * `define` receives the server being built, the registry its transport fills, and the `tell` its
+ * transport calls its listeners by, and returns what only that transport knows — the clock it
+ * runs on, how to listen, stop, close one connection and send to one.
  *
  * @example
  * const server = createTransportServer((server, connections) => {
@@ -130,7 +135,8 @@ export const generateDrawnHandle = (
 export const createTransportServer = <Socket extends object, Request>(
   define: (
     server: ITransportServer<Socket, Request>,
-    connections: TransportServerConnections<Socket>
+    connections: TransportServerConnections<Socket>,
+    options: ITransportServerDefineOptions<Socket, Request>
   ) => ITransportServerImplementation<Socket>
 ): ITransportServer<Socket, Request> => {
   const emitter = createEmitter<TransportServerEventMap<Socket, Request>>();
@@ -144,6 +150,25 @@ export const createTransportServer = <Socket extends object, Request>(
     port: 0,
   };
   let stopping: Promise<void> | undefined;
+
+  // each listener within a guard (spec 15.1): what one throws is reported with the connection it
+  // was told of, and the transport goes on as if it returned
+  const defineOptions: ITransportServerDefineOptions<Socket, Request> = {
+    tell: <K extends TransportServerToldEvent>(
+      event: K,
+      params: TransportServerEventMap<Socket, Request>[K]
+    ) => {
+      // ! every event but `error` carries its connection's handle last
+      const connectionHandle = params[params.length - 1] as TransportServerConnectionHandle;
+
+      return emitter.emitEach(event, {
+        onError: (error) => {
+          emitter.emit(ERROR_EVENT, toError(error), connectionHandle);
+        },
+        params,
+      });
+    },
+  };
 
   const server: ITransportServer<Socket, Request> = {
     ...createEventMethods(emitter, () => {
@@ -288,7 +313,7 @@ export const createTransportServer = <Socket extends object, Request>(
   };
 
   // after `server` exists, since `define` closes over it; the methods above only read this when called
-  const implementation = define(server, connections);
+  const implementation = define(server, connections, defineOptions);
 
   startOptions = implementation.defaults;
 

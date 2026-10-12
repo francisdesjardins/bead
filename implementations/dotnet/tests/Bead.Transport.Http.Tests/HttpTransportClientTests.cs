@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Threading.Channels;
@@ -1069,10 +1070,11 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public async Task Tells_a_listener_that_throws_on_an_answer_uncaught_and_stays_open()
+    public async Task Reports_a_listener_that_throws_on_an_answer_and_stays_open()
     {
         await using var faked = await ConnectFake(NotListening);
         var thrown = new InvalidOperationException("a listener that throws");
+        var errors = new ConcurrentQueue<Exception>();
         var told = 0;
 
         faked.Client.Message += (_) =>
@@ -1080,40 +1082,26 @@ public sealed class HttpTransportClientTests
             throw thrown;
         };
 
-        // a throw nothing waits on is told as a task's left unobserved
-        void Unobserved(object? sender, UnobservedTaskExceptionEventArgs unobserved)
+        // a listener after it is told all the same
+        faked.Client.Message += (_) =>
         {
-            if (unobserved.Exception.InnerExceptions.Contains(thrown))
-            {
-                Interlocked.Increment(ref told);
-            }
-        }
+            Interlocked.Increment(ref told);
+        };
+        faked.Client.Error += errors.Enqueue;
 
-        TaskScheduler.UnobservedTaskException += Unobserved;
+        var sent = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
 
-        try
+        (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 200, Headers = Bead, Body = EnvelopeOf(EnvelopeKind.Result, (1, 0)) });
+        await sent.WaitAsync(Patience, Cancelled);
+
+        // heard once its body came whole, after the send settled on its head
+        await Eventually(() =>
         {
-            var sent = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+            return Volatile.Read(ref told) == 1;
+        });
 
-            (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 200, Headers = Bead, Body = EnvelopeOf(EnvelopeKind.Result, (1, 0)) });
-            await sent.WaitAsync(Patience, Cancelled);
-
-            // heard once its body came whole, after the send settled on its head
-            await Eventually(() =>
-            {
-                return faked.Heard.Count == 1;
-            });
-
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-        }
-        finally
-        {
-            TaskScheduler.UnobservedTaskException -= Unobserved;
-        }
-
-        Assert.Equal(1, told);
+        Assert.Single(faked.Heard);
+        Assert.Equal([thrown], errors);
         Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
@@ -1837,10 +1825,11 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
-    public async Task Hears_the_rest_of_a_batch_when_a_listener_throws_the_throw_told_uncaught_as_a_socket_s_would_be()
+    public async Task Hears_the_rest_of_a_batch_when_a_listener_throws_the_throw_reported()
     {
         await using var faked = await ConnectFake(ListeningOn(new FakeTimeProvider()));
         var thrown = new InvalidOperationException("a listener that throws");
+        var errors = new ConcurrentQueue<Exception>();
         var throws = 1;
         var told = 0;
 
@@ -1852,34 +1841,17 @@ public sealed class HttpTransportClientTests
             }
         };
 
-        // a throw nothing waits on is told as a task's left unobserved
-        void Unobserved(object? sender, UnobservedTaskExceptionEventArgs unobserved)
+        // a listener after it is told all the same
+        faked.Client.Message += (_) =>
         {
-            if (unobserved.Exception.InnerExceptions.Contains(thrown))
-            {
-                Interlocked.Increment(ref told);
-            }
-        }
+            Interlocked.Increment(ref told);
+        };
+        faked.Client.Error += errors.Enqueue;
+        (await faked.Fetch.CallOf(1)).Answer(Batch(1, EnvelopeOf(EnvelopeKind.Notification, (1, 0)), EnvelopeOf(EnvelopeKind.Notification, (3, 0))));
 
-        TaskScheduler.UnobservedTaskException += Unobserved;
-
-        try
-        {
-            (await faked.Fetch.CallOf(1)).Answer(Batch(1, EnvelopeOf(EnvelopeKind.Notification, (1, 0)), EnvelopeOf(EnvelopeKind.Notification, (3, 0))));
-
-            Assert.Contains("?after=2&", (await faked.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
-            Assert.Equal(2, faked.Heard.Count);
-
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-        }
-        finally
-        {
-            TaskScheduler.UnobservedTaskException -= Unobserved;
-        }
-
-        Assert.Equal(1, told);
+        Assert.Contains("?after=2&", (await faked.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
+        Assert.Equal((2, 2), (faked.Heard.Count, Volatile.Read(ref told)));
+        Assert.Equal([thrown], errors);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
 

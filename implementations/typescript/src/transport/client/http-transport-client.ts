@@ -180,13 +180,6 @@ const envelopesOf = (
   return envelopes;
 };
 
-// a listener that throws is told as a socket's is — uncaught — and the listening goes on
-const rethrow = (reason: unknown): void => {
-  queueMicrotask(() => {
-    throw reason;
-  });
-};
-
 // how long to wait before listening again after `losses` listens lost in a row, drawn apart so the
 // clients one restart dropped together come back apart, as EventSource's do; in whole
 // milliseconds, as every wait of Bead's
@@ -255,7 +248,7 @@ export const createHTTPTransportClient = (
   const wait = assertHeldDelay('wait', givenWait);
 
   return createTransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>(
-    (client) => {
+    (client, { tell }) => {
       let drawn: IDrawn | undefined;
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
@@ -288,22 +281,21 @@ export const createHTTPTransportClient = (
 
         if (!client.isReconnecting()) {
           setReadyStateClosed(client);
-          client.emit(CLOSE_EVENT, false, false);
+          tell(CLOSE_EVENT, [false, false]);
         }
       };
 
       // an envelope an answer or a listen brought back, which carry no credential, what a listen
-      // brought marked as what may overtake an answer; a listener that throws stops nothing
+      // brought marked as what may overtake an answer; a listener that throws is reported, and
+      // stops nothing
       const hear = (envelope: ArrayBuffer, { mayOvertake }: { mayOvertake: boolean }): void => {
-        try {
-          client.emit(MESSAGE_EVENT, {
+        tell(MESSAGE_EVENT, [
+          {
             credential: undefined,
             data: envelope,
             ...(mayOvertake ? { mayOvertake: true } : {}),
-          });
-        } catch (reason) {
-          rethrow(reason);
-        }
+          },
+        ]);
       };
 
       // the answer a 200 carries, read up to an envelope's limit; anything else loses the connection
@@ -647,7 +639,7 @@ export const createHTTPTransportClient = (
 
           client.socket = null;
           setReadyStateClosed(client);
-          client.emit(CLOSE_EVENT, isClean, isQuick);
+          tell(CLOSE_EVENT, [isClean, isQuick]);
         },
 
         send: ({ credential, data }) => {

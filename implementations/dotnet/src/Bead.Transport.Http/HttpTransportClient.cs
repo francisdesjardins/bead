@@ -129,6 +129,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private Drawn? _drawn;
     private Action? _reconnect;
 
+    // how its events are told: what a listener throws is reported through Error
+    private readonly ListenerGuard _listeners;
+
     /// <summary>
     /// A transport client, not yet connected, its durations held. An inactivity timeout neither
     /// infinite nor from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, or a wait or a pause
@@ -148,6 +151,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         };
         _clock = _options.Clock ?? TimeProvider.System;
         _maximumBodyBytes = _options.MaximumBodyBytes ?? LimitDefaults.MaximumEnvelopeBytes;
+        _listeners = new ListenerGuard((reason, _) =>
+        {
+            Error?.Invoke(reason);
+        });
     }
 
     /// <inheritdoc/>
@@ -159,6 +166,12 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// reconnection replaces, tells none.
     /// </summary>
     public event Action<bool, bool>? Close;
+
+    /// <summary>
+    /// What a listener of its messages or its close threw: the client went on as if it returned
+    /// (spec 15.1), as the WebSocket transport client's own <c>Error</c> tells what broke its socket.
+    /// </summary>
+    public event Action<Exception>? Error;
 
     /// <summary>
     /// A reconnection starts: what was sent on the connection it replaces will not be answered there.
@@ -334,7 +347,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             _readyState = ReadyState.Closed;
         }
 
-        Close?.Invoke(isClean, isQuick);
+        _listeners.Tell(Close, (isClean, isQuick));
     }
 
     /// <summary>
@@ -631,7 +644,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         if (isClosing)
         {
-            Close?.Invoke(false, false);
+            _listeners.Tell(Close, (false, false));
         }
     }
 
@@ -952,18 +965,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // an envelope an answer or a listen brought back, which carry no credential, what a listen
     // brought back marked as what may overtake an answer (spec 15.9); a listener that throws stops
-    // nothing: its throw is left to a task nobody waits on, told as an exception unobserved, and the
-    // client goes on
+    // nothing: its throw is reported through Error, and the client goes on
     private void Hear(byte[] envelope, bool mayOvertake)
     {
-        try
-        {
-            Message?.Invoke(new TransportMessage(envelope, false) { MayOvertake = mayOvertake });
-        }
-        catch (Exception reason)
-        {
-            _ = Task.FromException(reason);
-        }
+        _listeners.Tell(Message, new TransportMessage(envelope, false) { MayOvertake = mayOvertake });
     }
 
     // a wait between two listens, which the connection's end cuts short, and so does the end of the

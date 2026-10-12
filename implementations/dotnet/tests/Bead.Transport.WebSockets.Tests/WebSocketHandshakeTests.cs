@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Http;
 
 namespace Bead.Transport.WebSockets.Tests;
@@ -187,6 +188,31 @@ public sealed class WebSocketHandshakeTests
     }
 
     // definition
+
+    [Fact]
+    public void Names_each_refusal_of_its_own_as_spec_15_6_marks_it()
+    {
+        var named = typeof(WebSocketRefusals)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .ToDictionary((field) =>
+            {
+                return field.Name;
+            }, (field) =>
+            {
+                return (string?)field.GetValue(null);
+            });
+
+        Assert.Equal(new Dictionary<string, string?>
+        {
+            ["Busy"] = "busy",
+            ["Host"] = "host-refused",
+            ["Malformed"] = "malformed",
+            ["Method"] = "method-refused",
+            ["Origin"] = "origin-refused",
+            ["Upgrade"] = "upgrade-required",
+            ["Version"] = "version-refused",
+        }, named);
+    }
 
     [Fact]
     public void Answers_each_request_by_the_first_step_that_applies_in_the_order_spec_15_2_states()

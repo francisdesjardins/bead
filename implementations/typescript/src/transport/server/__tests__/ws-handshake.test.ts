@@ -61,6 +61,7 @@ const ORIGIN = [403, WS_REFUSALS.ORIGIN];
 test.describe('refusalOfHandshake', () => {
   test('names each refusal of its own as spec 15.6 marks it', () => {
     expect(WS_REFUSALS).toEqual({
+      BUSY: 'busy',
       HOST: 'host-refused',
       MALFORMED: 'malformed',
       METHOD: 'method-refused',

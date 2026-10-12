@@ -7,8 +7,9 @@ import type { EmitterEventMap, IEmitter, IEventIteratorOptions } from './types';
 /**
  * Every `event` from now on, as an async iterator of its arguments: what `for await` reads.
  *
- * Events that arrive faster than the loop reads them are buffered, in order. The listener goes when
- * the loop ends — by `break`, a throw, or the signal aborting — and not before.
+ * Events that arrive faster than the loop reads them are buffered, in order, without bound, as Node's
+ * `events.on` does by default. The loop ends by `break`, `return()`, a throw, or the signal aborting,
+ * and its listener goes then, not before: an iterator left unread keeps what comes until one of them.
  */
 export const createEventIterator = <E extends EmitterEventMap<E>, K extends keyof E>(
   emitter: IEmitter<E>,
