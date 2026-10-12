@@ -1,0 +1,24 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/9/procedureKind",
+      "value": "request"
+    },
+    {
+      "op": "remove",
+      "path": "/services/0/procedures/9/notification"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_STILL_NOTIFIES",
+      "pointer": "/services/0/procedures/9/procedureKind"
+    }
+  ]
+}

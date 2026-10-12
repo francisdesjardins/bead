@@ -1,0 +1,14 @@
+{
+  "patch": [
+    {
+      "op": "remove",
+      "path": "/services/0/serviceId"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_ID_RANGE",
+      "pointer": "/services/0/serviceId"
+    }
+  ]
+}

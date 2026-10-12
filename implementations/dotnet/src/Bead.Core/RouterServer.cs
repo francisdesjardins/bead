@@ -636,16 +636,24 @@ public sealed class RouterServer : IRouterLike, IDisposable
         Transport.Connection -= OnConnection;
         Transport.Message -= OnMessage;
         Transport.Close -= OnClose;
-        _core.Post(() =>
+        WhenDisposed = _core.Loop.Run(() =>
         {
             DropEstablished(null);
             _connections.Clear();
             _places.Clear();
             _notifications.CleanAll();
             Forget(null);
+
+            return Task.CompletedTask;
         });
         _core.Dispose();
     }
+
+    /// <summary>
+    /// Settles once what <see cref="Dispose"/> ran on the core's scheduler: the sessions kept, the
+    /// subscriptions and the notifications forgotten — their timers stopped — not merely posted.
+    /// </summary>
+    internal Task WhenDisposed { get; private set; } = Task.CompletedTask;
 
     // the end a credential's session gives, in milliseconds since the epoch; none for one no timer
     // ends

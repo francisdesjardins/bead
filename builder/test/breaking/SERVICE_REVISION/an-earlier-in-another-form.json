@@ -1,0 +1,43 @@
+{
+  "earlier": [
+    {
+      "op": "remove",
+      "path": "/services/0/procedures/0"
+    },
+    {
+      "op": "add",
+      "path": "/services/0/procedures/-",
+      "value": {
+        "result": {
+          "encoding": "json"
+        },
+        "request": {
+          "encoding": "json"
+        },
+        "procedureName": "echo",
+        "procedureKind": "request",
+        "procedureId": 1,
+        "failures": [],
+        "admission": "none"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/failures",
+      "value": [
+        {
+          "code": 8,
+          "description": "That destination is registered already.",
+          "failureName": "REGISTERED_ALREADY"
+        },
+        {
+          "code": 7,
+          "description": "This procedure fails, on purpose.",
+          "failureName": "ON_PURPOSE"
+        }
+      ]
+    }
+  ],
+  "current": [],
+  "findings": []
+}

@@ -34,9 +34,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0021](../docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md): a broker,
   section 15.
 
-**Version: 0.2.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
-written; one point is open, section 8.3.**
+written; three points are open, section 8.3 and the two of section 15.13.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
@@ -1022,14 +1022,19 @@ none between a client's exchanges, so that a CANCEL may come before its REQUEST 
 transport that keeps no order states what may overtake, and one that may hand an envelope on twice
 states what a copy is, each with what the side that receives it does of it. It reads nothing of an
 envelope but what this section says; what it refuses of its own is no envelope, and the router never
-sees it. A connection that closes ends what was under way on it (sections 9.4, 12.10, 13.7). A
-transport may carry a credential beside an envelope, both ways: it hands the router what it carried
-with an envelope it took, and carries what the router gives it with one it sends. That credential is
-what a request presenting `ELSEWHERE` stands for (section 9.2, step 5), and nothing else: a request
-that presents none, `OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried.
-Over HTTP, it is the `Authorization` field of a request's `POST` (section 15.5); over a WebSocket,
-none (section 15.2). A transport says whether it carries a credential beside an envelope it sends,
-and whether it is secure — under TLS, on the loopback, or never leaving the machine — so that a side
+sees it. A side calls each listener of its transport's events — a connection opened, an envelope, a
+listen, a close — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3): what one
+throws is reported, as section 9.0 reports an error, by its transport with the connection it was
+told of; the listeners after it are called all the same, and the transport goes on as if it
+returned. A listener's throw refuses no connection, fails no exchange and closes nothing. A
+connection that closes ends what was under way on it (sections 9.4, 12.10, 13.7). A transport may
+carry a credential beside an envelope, both ways: it hands the router what it carried with an
+envelope it took, and carries what the router gives it with one it sends. That credential is what a
+request presenting `ELSEWHERE` stands for (section 9.2, step 5), and nothing else: a request that
+presents none, `OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried. Over
+HTTP, it is the `Authorization` field of a request's `POST` (section 15.5); over a WebSocket, none
+(section 15.2). A transport says whether it carries a credential beside an envelope it sends, and
+whether it is secure — under TLS, on the loopback, or never leaving the machine — so that a side
 fails before it goes a call whose credential it cannot carry (section 13.4). No failure's detail,
 event, trace or log carries that credential, nor a header's: only its credential scheme.
 
@@ -1069,17 +1074,23 @@ guards an upgrade, and a page of any origin may ask for one
 ([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). Each of these refusals
 but HTTP's own is marked as section 15.6 says, with `cache-control: no-store` and
 `x-content-type-options: nosniff`, its body empty, and closes its connection; a 426 names
-`upgrade` in its `Connection`.
+`upgrade` in its `Connection`. Once its stop began, a server takes no upgrade: one it would take is
+refused 503, `busy`, its `Retry-After` 1
+([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
+[§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), marked as section 15.6 says.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
 side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
 connection that left a ping unanswered, so a peer gone without a word ends in a close. A side that
-closes says 1000; a server that stops, 1001. A close with 1000 is the clean one.
+closes says 1000; a server that stops, 1001, to each connection it holds, one that registers as its
+stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
-15.4. HTTP's exchanges keep no connection, so the transport draws one. A `POST /bead` with no body,
+15.4. HTTP's exchanges keep no connection, so the transport draws one. A `POST /bead` with no body —
+no `Transfer-Encoding`, and no `Content-Length` or one whose number is 0, its digits read as a number
+([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)) —,
 of type `application/prs.bead` as every `POST /bead` is, and no token, connects: the server draws 16
 bytes from a cryptographic source and answers 201, the token in
 `bead-connection-token`, in base64url without padding. Each exchange after presents that token in
@@ -1108,8 +1119,10 @@ tabs. The server reads that field on a `POST` that carries a REQUEST, and no oth
 hands the router the field's value with the request, as it came, whole — its auth-scheme included —
 its surrounding whitespace removed, and none when the field is empty or absent. Two calls of one
 connection may so present two credentials, and a token is renewed without connecting again. A
-`POST /bead` with more than one `Authorization` field is refused, 400, before its body is read: the
-field is no list to combine ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)).
+`POST /bead` that presents a token with more than one `Authorization` field is refused, 400, before
+its body is read: the field is no list to combine
+([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)). A connect's is read by no
+one.
 
 15.6. A refusal of the transport's own has an empty body, and is marked in `bead-refusal`. A client
 rejects a send on a marked refusal: nothing was tried. Any other status that is not 2xx — a
@@ -1123,17 +1136,31 @@ lost.
 | 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                              |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
 | 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                        |
-| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                               |
+| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                              |
 | 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                   |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                    |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                   |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                             |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                |
 | 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                |
-| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                          |
+| 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                         |
 
 Every response on the path carries `cache-control: no-store` and `x-content-type-options: nosniff`,
 and so does every refusal of a WebSocket server's own.
+
+A server judges a request at its path in this order, and answers the first that applies. What HTTP
+refuses of its own, its HTTP server answers, unmarked (section 15.12); then a host the server does
+not take, 403; a path not its own, 404; an origin it does not take, 403; a method but `GET`, `POST`
+or `DELETE`, 405. A `POST` that presents no token connects: no type, or another than
+`application/prs.bead`, or a body encoded, 415; the connect's own 400; then, once its stop began,
+or past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any other request is judged
+by its token: none, or one of another form, 400; once the server's stop began, the 404 marked
+`connection-unknown`, the token not looked up; a token it does not hold, the same 404. A `DELETE`
+then ends its connection. A listen is refused 409 when its client did not say it listens, then
+400 for a body or its counts (section 15.9). A `POST` is refused 415 for its type or its
+encoding, then 400 for two `Authorization` fields, 413 for a length it declares past
+`maximumBodyBytes`, and 429 past what its connection has under way, each before its body is read;
+what its body brings is judged as it comes (section 15.5).
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
 exchange lost — a network that failed, an answer that could not be written, a request unanswered
@@ -1143,6 +1170,14 @@ that drops does; the exchanges it handed on are cut, never answered. So does the
 gets its 200 head and is cut, and a cut that overtakes the head on its way leaves the exchange
 lost, which its client counts so. A connection with no exchange under way for its inactivity
 timeout, 5 minutes by default, closes.
+
+A server that stops closes every connection it holds, as lost: what was under way on each learns it
+is gone as this section says. Once its stop began it draws no connection and holds none: a connect
+it would take is refused 503, `busy`, its `Retry-After` 1
+([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
+[§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), and an exchange it would look up
+by a well-formed token is answered the 404 marked `connection-unknown`, nothing of it handed on, in
+section 15.6's order.
 
 15.8. What the server sends of its own — a notification, a request of its own, a cancel, the failure
 that ends a subscription — reaches a client that listens. The client says so at connect,
@@ -1230,6 +1265,22 @@ is its socket's; behind a proxy on the same machine, which the server is told to
 `isProxyTrusted`, it is the last entry of the proxy's `X-Forwarded-For`, when that entry is an
 address.
 
+15.13. Open in this version, each closed by a decision of its own:
+
+1. A server takes every host when `hosts` is not given (section 15.12). A page that rebinds its
+   name to the address of a server on the loopback names its own `Host` and sends its own
+   `Origin`, so it reaches the server, HTTP or WebSocket, and calls what admits `none`; on the
+   loopback, which is secure (section 13.4), it is presented what the server presents. A server a
+   browser can reach names the hosts it takes as its clients' `Host` field names them, a port only
+   where a request names one. A default that takes only `localhost`, the names under `.localhost`
+   and IP literals, `hosts` compared by its `uri-host` alone, comes by a decision of its own.
+2. No two connections a transport holds are one, yet a WebSocket server can take two sockets as
+   one: two sockets from one address and port, to two of the server's addresses, are told apart
+   by nothing it reads of them, so the second takes the first's place, its session among it, and
+   the first is held by none, outside the server's bounds, its gauges and its stop, which may leave
+   it open or abort it with no close. How a transport keeps every connection it holds apart comes
+   by a decision of its own.
+
 ## 16. Services and procedures
 
 _Identities: `spec/identities.json`._
@@ -1284,13 +1335,14 @@ long as it runs. A side that counts its calls MUST refuse a declaration that doe
 later release, or be reserved, and never be declared for another: so a peer built against an earlier
 release never calls an id that now means another procedure, and within a service a name never comes
 to count another procedure. Between two releases of the definitions a builder generates a side from,
-the builder's `beadc breaking` is to hold it, a gate decision 0006 owes; nothing holds it across
-definitions, nor on a side written by hand.
+the builder's `beadc breaking` holds it, against the last release that carries them; nothing holds
+it across definitions, nor on a side written by hand.
 
 16.9. A service's revision counts the releases of its contract, from 1, and does not travel. It
 SHOULD move once in a release whose contract differs from the release before, however much moved,
-and never back, as `beadc breaking` is to hold it (section 16.8). A side holds 0 for a procedure it
-knows no revision of, a relay's leg B (section 14.2), and declares none at 0.
+and never back; `beadc breaking` refuses one lowered, or left where the contract moved
+(section 16.8). A side holds 0 for a procedure it knows no revision of, a relay's leg B
+(section 14.2), and declares none at 0.
 
 16.10. A side MUST refuse a declaration as it is made, never on a call, for the first of these
 reasons that applies, before any reason of its own; a declaration refused declares nothing:

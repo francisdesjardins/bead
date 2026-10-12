@@ -1,0 +1,36 @@
+{
+  "earlier": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/12/admission",
+      "value": {
+        "hook": "nobody"
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/12/admission",
+      "value": {
+        "hook": "nobody"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/4/admission",
+      "value": "session"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_ADMISSION_TIGHTENED",
+      "pointer": "/services/0/procedures/4/admission"
+    }
+  ]
+}

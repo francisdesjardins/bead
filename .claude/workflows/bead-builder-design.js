@@ -54,7 +54,7 @@ const ANGLES = [
   {
     key: 'model-conformance',
     angle: `THE INTERMEDIATE MODEL AND CONFORMANCE:
-- bead-manifest/1 as the neutral model the front end produces and every template reads, descending from interop-service.json.
+- bead-blueprint/1 as the neutral model the front end produces and every template reads, descending from interop-service.json.
 - Its schema, and its identity rules in the spec.
 - How the interop service is written in .proto and regenerated, accepted only if all of these hold: the conversations (142 today) and the interop, both ways, pass unchanged; make_conversations.py reproduces conversations.json byte for byte; offer.ts and InteropService.cs are replaced by generated code.
 - How a third language plugs in its templates.`,

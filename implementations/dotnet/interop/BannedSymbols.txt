@@ -1,0 +1,5 @@
+// The interop's code written by hand calls the server and the client generated from its blueprint,
+// never a service manager's accessor (decision 0022): the banned-API analyzer (RS0030) refuses the
+// service manager's type whole, so every member it has or gains, as the TypeScript side's lint
+// refuses `services` and its accessors in interop/*.ts.
+T:Bead.ServiceManager;the interop calls through its generated server and client: InteropServer, InteropClient

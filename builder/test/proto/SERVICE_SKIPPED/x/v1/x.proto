@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A service without (bead.service): beadc reads nothing of it, and warns.
+service AdminService {
+  rpc Echo(bead.Json) returns (bead.Json);
+}
+
+// A Bead service beside it, which beadc reads.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Echo(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 1};
+  }
+}

@@ -24,15 +24,6 @@ transport, never a network of its own
 the conformance files and the interop. The records bind, in the present, parts the repository does
 not hold:
 
-- **the builder, `beadc`**, which generates a typed server and client in each language from a
-  `.proto`: its name and its C#
-  ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)), the clock its code runs
-  on ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), the call's session it
-  binds to ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), the names it generates and
-  the manifests it checks
-  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)), over the layer
-  [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)
-  gives it;
 - **HTTP/JSON transcoding**, which takes a call from HTTP and JSON as gRPC's transcoding does: the
   credential it carries ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)) and the routes
   a service's name scopes
@@ -72,15 +63,17 @@ lands leaves this list, and its gates leave that one for 0006's table.
 | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------- |
 | [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                     | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made | accepted |
 | [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md) | A service's procedures are typed descriptors, served and called through one layer in each runtime                      | accepted |
+| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)    | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone            | accepted |
 
 ### Transports and relays
 
-| #                                                                        | Decision                                                                                             | Status   |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                             | A listen held is not silence, and a connection without a session is its server's                     | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)   | A relay terminates each leg between two transports, and routes nothing past it                       | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md) | HTTP draws a connection by a token, and a listen holds it                                            | accepted |
-| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)      | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own | accepted |
+| #                                                                                                 | Decision                                                                                             | Status   |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                                                      | A listen held is not silence, and a connection without a session is its server's                     | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                            | A relay terminates each leg between two transports, and routes nothing past it                       | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                          | HTTP draws a connection by a token, and a listen holds it                                            | accepted |
+| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own | accepted |
+| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) | A transport goes on through its listener's throw, and takes nothing new once its stop began          | accepted |
 
 ### Time
 
@@ -115,7 +108,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ## Writing one
 
-The next decision is 0022. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0024. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

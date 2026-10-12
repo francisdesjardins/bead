@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package parcel.v1;
+
+import "bead/options.proto";
+import "google/protobuf/timestamp.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Tracks parcels.
+service ParcelService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+    reserved_names: ["trace"]
+  };
+
+  // Gives where a parcel is.
+  rpc Locate(LocateRequest) returns (LocateResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}
+
+// The parcel to locate.
+message LocateRequest {
+  string parcel = 1;
+}
+
+// Where the parcel is, and when it was seen there.
+message LocateResponse {
+  int32 depot = 1;
+  google.protobuf.Timestamp seen = 2;
+}

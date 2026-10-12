@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/format",
+      "value": "bead-blueprint/2"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "FORMAT_UNKNOWN",
+      "pointer": "/format"
+    }
+  ]
+}

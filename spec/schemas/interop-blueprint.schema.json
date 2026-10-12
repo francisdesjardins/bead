@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bead's interop service's API, spec/interop-blueprint.json: a blueprint of the builder's (decision 0022)",
+  "$ref": "bead-blueprint.schema.json",
+  "properties": {
+    "requires": { "maxItems": 0 },
+    "services": { "minItems": 1, "maxItems": 1 }
+  }
+}

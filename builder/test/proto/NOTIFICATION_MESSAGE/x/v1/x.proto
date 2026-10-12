@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A procedure that notifies a message the set does not hold.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Ticks(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 1
+      notifies: {message: "NoSuchMessage"}
+    };
+  }
+}

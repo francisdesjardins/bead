@@ -7,6 +7,7 @@ import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  BUILDER,
   MODES,
   PACKAGE,
   PROPS,
@@ -332,6 +333,18 @@ describe('every ref: each version agrees with itself, and a released section sta
     assert.deepEqual(problems(), []);
   });
 
+  test("the builder's package apart from the TypeScript package fails", () => {
+    const { write, problems } = repository(released());
+    write({ [BUILDER]: json({ name: 'beadc', version: '0.2.0', private: true }) });
+    assert.match(problems().join('\n'), /builder\/package\.json: version 0\.2\.0, where/);
+  });
+
+  test("the builder's package at the product's version passes", () => {
+    const { write, problems } = repository(released());
+    write({ [BUILDER]: json({ name: 'beadc', version: '0.1.0', private: true }) });
+    assert.deepEqual(problems(), []);
+  });
+
   test('the props apart from the package fail', () => {
     const { write, problems } = repository(released());
     write({ [PROPS]: '<Project><Version>0.2.0</Version></Project>\n' });
@@ -344,6 +357,31 @@ describe('every ref: each version agrees with itself, and a released section sta
     const found = problems();
     assert.equal(found.length, 2);
     assert.match(found[0], /bead\.http takes Bead\.Core at \[1\.0\.0, \), where <Version> 0\.1\.0/);
+  });
+
+  test("an example's lock file's project range apart from <Version> fails", () => {
+    const { write, problems } = repository(released());
+    // as NuGet writes it beside the example's project: one project of the side's takes another
+    const example = (range) => {
+      return json({
+        version: 1,
+        dependencies: {
+          'net10.0': {
+            'bead.core': { type: 'Project' },
+            'bead.transport.websockets': {
+              type: 'Project',
+              dependencies: { 'Bead.Core': `[${range}, )` },
+            },
+          },
+        },
+      });
+    };
+    write({ 'examples/hello/dotnet/packages.lock.json': example('1.0.0') });
+    assert.deepEqual(problems(), [
+      'examples/hello/dotnet/packages.lock.json: bead.transport.websockets takes Bead.Core at [1.0.0, ), where <Version> 0.1.0 owes [0.1.0, )',
+    ]);
+    write({ 'examples/hello/dotnet/packages.lock.json': example('0.1.0') });
+    assert.deepEqual(problems(), []);
   });
 
   test("a conformance file's specVersion apart from spec.md's fails", () => {

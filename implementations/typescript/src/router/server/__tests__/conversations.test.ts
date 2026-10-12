@@ -13,16 +13,16 @@ import {
   INTEROP_SERVICE,
   interopCredentialsOf,
   interopVerifierOf,
-  type InteropServer,
-  issuerOf,
-  JSON_SERIALIZER,
-  offerInterop,
-  offerInteropClient,
-  procedureOf,
-} from '../../../../interop/offer';
+} from '../../../../interop/credentials';
+import { InteropClient, InteropProcedures } from '../../../../interop/generated/interop_bead';
+import { issuerOf, offerInterop, offerInteropClient } from '../../../../interop/handlers';
+import type { IClient } from '../../../client/types';
+import type { IServer, IServerTransportLike } from '../../../server/types';
 import { createTestClock, duesOn } from '../../../transport/shared/__tests__/fixtures';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createRouterClient } from '../../client/router-client';
+import { ProcedureKind } from '../../shared/constants';
+import { PAYLOAD_CODECS } from '../../shared/payloads';
 import { createServiceManager } from '../../shared/service-manager';
 import { createPipedTransports } from '../../shared/__tests__/fixtures';
 import type {
@@ -62,7 +62,13 @@ const createRegistrations = <Handle extends string>() => {
       };
     },
     getCommandResolver: record,
+    getNotification: () => {
+      return undefined;
+    },
     getNotificationResolver: record,
+    getRequest: () => {
+      return undefined;
+    },
     getRequestResolver: record,
   } as unknown as IServiceManager<Handle>;
 
@@ -71,21 +77,21 @@ const createRegistrations = <Handle extends string>() => {
 
 // definition
 
-test('every procedure of the interop manifest is offered, on the side it names', () => {
+test("every procedure of the interop service's API is offered, on the side its kind names", () => {
   const server = createRegistrations<TransportServerConnectionHandle>();
   const client = createRegistrations<ServerConnectionHandle>();
-  const namesOf = (isOfferedByClient: boolean): string[] => {
-    return INTEROP_SERVICE.procedures
-      .filter(({ offeredBy }) => {
-        return (offeredBy === 'client') === isOfferedByClient;
+  const namesOf = (isCommand: boolean): string[] => {
+    return Object.values(InteropProcedures)
+      .filter(({ procedure }) => {
+        return (procedure.procedureKind === ProcedureKind.COMMAND) === isCommand;
       })
-      .map(({ procedureName }) => {
-        return procedureName;
+      .map(({ procedure }) => {
+        return procedure.procedureName;
       })
       .toSorted();
   };
 
-  offerInterop({
+  const interop = offerInterop({
     requireSession: Object.assign(
       () => {
         return true;
@@ -95,9 +101,10 @@ test('every procedure of the interop manifest is offered, on the side it names',
     router: { failures: SERVER_FAILURES },
     services: server.services,
     sessions: {},
-  } as unknown as InteropServer);
-  offerInteropClient(client.services);
+  } as unknown as IServer<IServerTransportLike, string>);
+  offerInteropClient(new InteropClient({ services: client.services } as unknown as IClient));
 
+  expect(interop.proceduresWithoutResolver()).toEqual([]);
   expect(server.names.toSorted()).toEqual(namesOf(false));
   expect(client.names.toSorted()).toEqual(namesOf(true));
 });
@@ -120,11 +127,13 @@ test("slow waits on its server's clock, which its router runs on, and answers on
     router,
     services: createServiceManager(router),
     sessions,
-  } as unknown as InteropServer);
+  } as unknown as IServer<IServerTransportLike, string>);
   pipe.open();
 
   const slow = createServiceManager(caller)
-    .getRequest(procedureOf('slow'), { serializer: JSON_SERIALIZER })({ milliseconds: 1_000 })()
+    .getRequest(InteropProcedures.slow.procedure, { serializer: PAYLOAD_CODECS.json })({
+      milliseconds: 1_000,
+    })()
     .then((payload) => {
       answered = payload;
     });

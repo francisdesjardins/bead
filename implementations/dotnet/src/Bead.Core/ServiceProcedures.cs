@@ -78,7 +78,7 @@ public interface IServiceProcedure<TService>
     AdmissionRule Admission { get; }
 }
 
-/// <summary>A procedure's admission and its payloads' codecs: the manifest's bindings.</summary>
+/// <summary>A procedure's admission and its payloads' codecs.</summary>
 /// <typeparam name="TRequest">What a request carries.</typeparam>
 /// <typeparam name="TResult">What a result carries.</typeparam>
 public sealed record ProcedureBindings<TRequest, TResult>
@@ -101,7 +101,7 @@ public sealed record ProcedureBindings<TRequest, TResult>
     public Action<TRequest>? Validate { get; init; }
 }
 
-/// <summary>A notifying procedure's admission and its payloads' codecs: the manifest's bindings.</summary>
+/// <summary>A notifying procedure's admission and its payloads' codecs.</summary>
 /// <typeparam name="TRequest">What a request carries.</typeparam>
 /// <typeparam name="TResult">What a result carries.</typeparam>
 /// <typeparam name="TNotification">What a notification carries.</typeparam>

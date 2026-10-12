@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/failures/1/code",
+      "value": 7
+    }
+  ],
+  "findings": [
+    {
+      "rule": "FAILURE_CODE",
+      "pointer": "/services/0/failures/1/code"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/serviceName",
+      "value": "Interplay"
+    },
+    {
+      "op": "add",
+      "path": "/reservedServices/names/-",
+      "value": "Interop"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_SAME_NAME",
+      "pointer": "/services/0/serviceName"
+    }
+  ]
+}

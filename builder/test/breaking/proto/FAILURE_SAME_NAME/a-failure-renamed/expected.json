@@ -1,0 +1,10 @@
+{
+  "WIRE": [],
+  "API": [
+    {
+      "rule": "FAILURE_SAME_NAME",
+      "line": 146,
+      "column": 3
+    }
+  ]
+}

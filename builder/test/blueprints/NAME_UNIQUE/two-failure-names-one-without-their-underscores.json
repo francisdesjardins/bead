@@ -1,0 +1,19 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/failures/1/failureName",
+      "value": "ONPURPOSE"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_UNIQUE",
+      "pointer": "/services/0/failures/1/failureName"
+    },
+    {
+      "rule": "FAILURE_UNKNOWN",
+      "pointer": "/services/0/procedures/14/failures/0"
+    }
+  ]
+}

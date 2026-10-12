@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A failures naming no enum of the set.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+    failures: "NoSuchFailure"
+  };
+
+  rpc Echo(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {id: 1};
+  }
+}

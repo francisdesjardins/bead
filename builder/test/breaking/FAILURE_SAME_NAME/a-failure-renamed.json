@@ -1,0 +1,30 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/failures/0/failureName",
+      "value": "DELIBERATE"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/1/failures/0",
+      "value": "DELIBERATE"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/9/failures/0",
+      "value": "DELIBERATE"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "FAILURE_SAME_NAME",
+      "pointer": "/services/0/failures/0/failureName"
+    }
+  ]
+}

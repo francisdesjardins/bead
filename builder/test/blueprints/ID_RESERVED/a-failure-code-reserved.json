@@ -1,0 +1,18 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/services/0/reserved/failureCodes/-",
+      "value": {
+        "first": 8,
+        "last": 8
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "ID_RESERVED",
+      "pointer": "/services/0/failures/1/code"
+    }
+  ]
+}

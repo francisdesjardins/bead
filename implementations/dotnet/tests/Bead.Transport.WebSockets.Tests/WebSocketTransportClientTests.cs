@@ -838,6 +838,49 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Hears_the_next_message_after_a_message_listener_throws_the_throw_reported()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var thrown = new InvalidOperationException("a message listener that throws");
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        var errors = Channel.CreateUnbounded<Exception>();
+        var throws = 1;
+
+        _client.Message += (_) =>
+        {
+            if (Interlocked.Exchange(ref throws, 0) == 1)
+            {
+                throw thrown;
+            }
+        };
+        _client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+        _client.Error += (reason) =>
+        {
+            errors.Writer.TryWrite(reason);
+        };
+
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            await server.SendAsync(new byte[] { 1 }, WebSocketMessageType.Binary, true, Cancelled);
+            await server.SendAsync(new byte[] { 2 }, WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Equal(new byte[] { 1 }, (await Next(messages)).Bytes.ToArray());
+            Assert.Equal(new byte[] { 2 }, (await Next(messages)).Bytes.ToArray());
+            Assert.Same(thrown, await Next(errors));
+            Assert.True(errors.Reader.Count == 0);
+            Assert.Equal(ReadyState.Open, _client.ReadyState);
+        }
+    }
+
+    [Fact]
     public async Task Closes_when_its_server_leaves_its_pings_unanswered()
     {
         using var listener = new Listener(IPAddress.Loopback);

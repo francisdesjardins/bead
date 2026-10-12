@@ -95,7 +95,8 @@ public sealed record WebSocketTransportStartOptions
 /// and starts again once Closed. A request it does not upgrade it refuses in the order spec 15.2
 /// states, each refusal of its own marked as <see cref="WebSocketRefusals"/> names it: a host not
 /// taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, or a version but
-/// 13, 426; a malformed upgrade, 400; an origin not taken, 403.
+/// 13, 426; a malformed upgrade, 400; an origin not taken, 403; and, once its stop began, one it
+/// would take, 503, busy.
 /// </summary>
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -112,6 +113,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     private volatile bool _isSecure;
     // how many connections came, which ranks each: the dictionary keeps no order
     private long _arrivals;
+    // how its events are told: what a listener throws is reported through Error, with its connection
+    private readonly ListenerGuard _listeners;
 
     /// <summary>
     /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
@@ -128,6 +131,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         };
         _clock = _options.Clock ?? TimeProvider.System;
         _isSecure = _options.Secure ?? false;
+        _listeners = new ListenerGuard((reason, connectionHandle) =>
+        {
+            Error?.Invoke(reason, connectionHandle ?? "");
+        });
     }
 
     /// <inheritdoc/>
@@ -140,9 +147,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public event Action<bool, string>? Close;
 
     /// <summary>
-    /// What went wrong on a connection, with its handle. Never the server's own, with an empty
-    /// handle, as the TypeScript side's can be: Kestrel tells a failure after it listens only to its
-    /// logs.
+    /// What went wrong on a connection, with its handle: its socket's failure, or what a listener of
+    /// its events threw, the transport going on as if it returned (spec 15.1). Never the server's
+    /// own, with an empty handle, as the TypeScript side's can be: Kestrel tells a failure after it
+    /// listens only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
 
@@ -435,18 +443,11 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         response.ContentLength = 0;
     }
 
-    // a request: one that upgrades becomes a connection, until its socket closes; none is taken once
-    // a stop began, and any other is refused in the order spec 15.2 states, the connection going
-    // with the refusal, as the TypeScript side's does
+    // a request: one that upgrades becomes a connection, until its socket closes; any other is
+    // refused in the order spec 15.2 states, the connection going with the refusal, as the
+    // TypeScript side's does, and one it would take once a stop began is refused busy
     private async Task Accept(HttpContext context)
     {
-        if (_life.IsStopping)
-        {
-            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-
-            return;
-        }
-
         if (WebSocketHandshake.RefusalOf(context.Request, _options) is { } refusal)
         {
             Refuse(context.Response, refusal);
@@ -458,6 +459,13 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         if (!context.WebSockets.IsWebSocketRequest)
         {
             Refuse(context.Response, WebSocketHandshake.Malformed);
+
+            return;
+        }
+
+        if (_life.IsStopping)
+        {
+            Refuse(context.Response, WebSocketHandshake.Busy);
 
             return;
         }
@@ -480,14 +488,21 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         _connections[connectionHandle] = held;
 
-        // a listener that throws still leaves the connection's end told, so nothing waits on it forever
+        // ! a stop that began as this registered, past its snapshot, closes it with its own, going
+        // away: its close is sent on its own, the read below driving the handshake to its end, and
+        // the host's stop waits on this request until it ends, within its shutdown timeout
+        if (_life.IsStopping)
+        {
+            _ = connection.CloseQuietly(WebSocketCloseStatus.EndpointUnavailable);
+        }
+
         try
         {
-            Connection?.Invoke(connectionHandle);
+            _listeners.Tell(Connection, connectionHandle);
             await connection.Read((message) =>
             {
                 held.Client = held.Client with { LastActivity = _clock.GetUtcNow() };
-                Message?.Invoke(message, connectionHandle);
+                _listeners.Tell(Message, (message, connectionHandle));
             });
         }
         catch (Exception reason) when (reason is WebSocketException or OperationCanceledException or IOException)
@@ -496,12 +511,16 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
         finally
         {
+            // its end told however its read went: nothing it holds, the write pump or a close, waits
+            // on it forever
+            connection.End();
+
             try
             {
                 // a socket whose handle a newer one took closes no connection: the handle names the newer one
                 if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
                 {
-                    Close?.Invoke(socket.CloseStatus == WebSocketCloseStatus.NormalClosure, connectionHandle);
+                    _listeners.Tell(Close, (socket.CloseStatus == WebSocketCloseStatus.NormalClosure, connectionHandle));
                 }
             }
             finally

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A field whose type is a payload type.
+message Holder {
+  bead.Json value = 1;
+}

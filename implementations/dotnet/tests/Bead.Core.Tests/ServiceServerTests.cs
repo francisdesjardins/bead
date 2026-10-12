@@ -36,12 +36,12 @@ public sealed class ServiceServerTests
     {
         return new ServiceServer<GreeterProcedures, string>(
             GreeterProcedures.All,
-            new ServiceServerOptions { Admissions = new Dictionary<string, AdmissionHook> { ["loud"] = hook ?? Loud } });
+            new ServiceServerOptions<GreeterProcedures> { Admissions = new GreeterAdmissions { Loud = hook ?? Loud } });
     }
 
     private static ServiceClient<GreeterProcedures> ClientOf(ServiceLink link)
     {
-        return new ServiceClient<GreeterProcedures>(GreeterProcedures.All, new ServiceClientOptions { Client = link.Client });
+        return new ServiceClient<GreeterProcedures>(GreeterProcedures.All, link.Client);
     }
 
     // what a call fails with, by its code
@@ -168,18 +168,40 @@ public sealed class ServiceServerTests
     }
 
     [Fact]
-    public void Refuses_a_hook_the_options_lack_and_one_no_procedure_names()
+    public void Refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hook()
     {
         Assert.Throws<ArgumentException>(() =>
         {
-            return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All, new ServiceServerOptions());
+            return new ServiceServer<GreeterProcedures, string>(
+                GreeterProcedures.All,
+                new ServiceServerOptions<GreeterProcedures> { Admissions = new GreeterAdmissions { Loud = null! } });
         });
         Assert.Throws<ArgumentException>(() =>
         {
             return new ServiceServer<GreeterProcedures, string>(
                 GreeterProcedures.All,
-                new ServiceServerOptions { Admissions = new Dictionary<string, AdmissionHook> { ["loud"] = Loud, ["quiet"] = Loud } });
+                new ServiceServerOptions<GreeterProcedures> { Admissions = new GreeterAdmissions { Loud = new AdmissionHook { Admits = null! } } });
         });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All, new ServiceServerOptions<GreeterProcedures> { Admissions = new AnyNames() });
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new ServiceServer<GreeterProcedures, string>(
+                GreeterProcedures.All,
+                new ServiceServerOptions<GreeterProcedures> { Admissions = new AnyNames(new Dictionary<string, AdmissionHook> { ["loud"] = Loud, ["quiet"] = Loud }) });
+        });
+
+        // each hook given is checked in turn, as the TypeScript side checks it
+        var first = Assert.Throws<ArgumentException>(() =>
+        {
+            return new ServiceServer<GreeterProcedures, string>(
+                GreeterProcedures.All,
+                new ServiceServerOptions<GreeterProcedures> { Admissions = new AnyNames(new Dictionary<string, AdmissionHook> { ["loud"] = null!, ["quiet"] = Loud }) });
+        });
+
+        Assert.StartsWith("the hook loud admits by a function", first.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -425,7 +447,7 @@ public sealed class ServiceServerTests
                 },
             });
         var server = new ServiceServer<EchoService, string>([echo]);
-        var client = new ServiceClient<EchoService>([echo], new ServiceClientOptions { Client = link.Client });
+        var client = new ServiceClient<EchoService>([echo], link.Client);
         var seen = new List<string>();
 
         server.On(echo, (request, response) =>

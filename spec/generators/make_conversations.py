@@ -12,8 +12,10 @@ from spec_version import spec_version
 # the conformance files sit one folder up from their generators
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '')
 SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
-SERVICE_ID = SERVICE['serviceId']
-PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in SERVICE['procedures']}
+# the interop service's API, its one service in its blueprint (decision 0022)
+API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
+SERVICE_ID = API['serviceId']
+PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
 
 MALFORMED, LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED, TOO_LARGE = 1, 2, 3, 4
 DESTINATION_UNKNOWN, SERVICE_UNKNOWN, PROCEDURE_UNKNOWN, CALL_UNKNOWN = 16, 18, 19, 20
@@ -28,6 +30,11 @@ SLOW = '{"milliseconds":3600000}'
 # a backslash, which opens a JSON escape, and a JSON string outside ASCII with what a lenient writer escapes
 BACKSLASH = chr(92)
 OUTSIDE_ASCII = '"Jos' + chr(0xE9) + ' a+b <x>"'
+
+# a name that holds an escape, read on two connections, and the first name of its shape, which no other
+# entry of a conformance file holds
+ESCAPED_NAME = 'a name that holds an escape is read as its escapes say, whatever a payload of its shape read on another connection held'
+SILL = 'onTheSill'
 
 
 def hexadecimal(data):
@@ -714,6 +721,14 @@ conversations = [
     ('a payload is answered in its canonical form, whatever form it came in', ['17.8'], None, [
         json_request(1, 'echo', '{ "b" : "Jos' + BACKSLASH + 'u00e9", "a" : 1.0 }'),
         result(1, '{"a":1,"b":"Jos' + chr(0xE9) + '"}')]),
+    # ! a shape no other entry reads, which the check below holds: V8's JSON.parse reads the second
+    # name as the first, both of two characters once read, the first holding a backslash
+    (ESCAPED_NAME, ['17.6', '17.8'], None, [
+        opened('first'), opened('second'),
+        on(json_request(1, 'echo', '{"' + SILL + '":1,"x' + BACKSLASH * 2 + '":1}'), 'first'),
+        on(result(1, '{"' + SILL + '":1,"x' + BACKSLASH * 2 + '":1}'), 'first'),
+        on(json_request(1, 'echo', '{"' + SILL + '":2,"x' + BACKSLASH + '"":2}'), 'second'),
+        on(result(1, '{"' + SILL + '":2,"x' + BACKSLASH + '"":2}'), 'second')]),
     ('a payload that starts with a byte order mark is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.2'], None, [
         request(1, 'echo', 'EF BB BF 31'), failure(1, PAYLOAD_UNDECODABLE)]),
     ('a payload that names a member twice is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.4'], None, [
@@ -1352,5 +1367,35 @@ if __name__ == '__main__':
     with open(ROOT + 'conversations.json', 'w', encoding='utf-8', newline='\n') as file:
         json.dump(document, file, ensure_ascii=False, indent=2)
         file.write('\n')
+
+    # * the conversation of an escaped name proves a reader only while no other payload a side's process
+    # reads holds its shape: no entry of any conformance file but it names SILL, as text or as bytes
+    def holders(value, where):
+        if isinstance(value, dict):
+            return {holder for key, each in value.items() for holder in holders(each, where)}
+
+        if isinstance(value, list):
+            return {holder for each in value for holder in holders(each, where)}
+
+        if not isinstance(value, str):
+            return set()
+
+        digits = value.replace('|', ' ').replace(' ', '')
+        decoded = bytes.fromhex(digits) if re.fullmatch(r'(?:[0-9A-Fa-f]{2})+', digits) else b''
+        return {where} if SILL in value or SILL.encode('ascii') in decoded else set()
+
+    found = set()
+
+    for listed in sorted(os.listdir(ROOT)):
+        if listed.endswith('.json'):
+            with open(ROOT + listed, encoding='utf-8') as file:
+                whole = json.load(file)
+
+            for key, entries in whole.items():
+                for index, entry in enumerate(entries if isinstance(entries, list) else [entries]):
+                    found |= holders(entry, (listed, entry.get('name', f'{key}[{index}]')
+                                             if isinstance(entry, dict) else f'{key}[{index}]'))
+
+    assert found == {('conversations.json', ESCAPED_NAME)}, found
 
     print(len(conversations), 'conversations')

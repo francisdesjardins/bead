@@ -942,6 +942,204 @@ test.describe('createHTTPTransportServer', () => {
     expect(server.isClosed()).toBe(true);
   });
 
+  test('draws a connection whose connection listener throws, the next listener told, the throw reported with it', async () => {
+    const { events, fake, server } = await startScripted();
+    const thrown = new Error('a connection listener that throws');
+    const told: TransportServerConnectionHandle[] = [];
+
+    server.on('connection', () => {
+      throw thrown;
+    });
+    server.on('connection', (...[, , connectionHandle]) => {
+      told.push(connectionHandle);
+    });
+
+    const { response } = fake.exchange({ headers: { 'content-type': BEAD_MEDIA_TYPE } });
+    const connectionHandle = server.clients.at(-1)?.connectionHandle;
+
+    // drawn and given out: its 201 and its token, the connection among those it holds
+    expect(response.status).toBe(201);
+    expect(response.headers?.[CONNECTION_TOKEN_HEADER]).toMatch(/^[\w-]{22}$/u);
+    expect(connectionHandle).toBeDefined();
+    expect(told).toEqual([connectionHandle]);
+    expect(namesOf(events, 'error')).toEqual([['error', thrown.message, connectionHandle]]);
+    expect(namesOf(events, 'close')).toEqual([]);
+  });
+
+  test('hands on a request whose message listener throws, its answer still written, the throw reported with its connection', async () => {
+    const { connectScripted, events, exchangeOf, fake, server } = await startScripted();
+    const { connectionHandle, connectionToken } = connectScripted();
+    const thrown = new Error('a message listener that throws');
+    const heard: TransportServerConnectionHandle[] = [];
+
+    server.on('message', () => {
+      throw thrown;
+    });
+    server.on('message', (_, handle) => {
+      heard.push(handle);
+    });
+
+    const asking = exchangeOf(connectionToken);
+
+    fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+
+    // the listener after it heard it, and its exchange still waits for its answer
+    expect(heard).toEqual([connectionHandle]);
+    expect(server.gauges().counts['waitingExchanges']).toBe(1);
+
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 1 }) },
+      connectionHandle
+    );
+
+    expect(asking.response.status).toBe(200);
+    expect([...(asking.response.body ?? [])]).toEqual([
+      ...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 1 }),
+    ]);
+    expect(namesOf(events, 'error')).toEqual([['error', thrown.message, connectionHandle]]);
+    expect(server.clients).toHaveLength(1);
+  });
+
+  test('stops though a close listener throws: each connection still ends, its close told, the throw reported', async () => {
+    const { connectScripted, events, server } = await startScripted();
+    const first = connectScripted();
+    const second = connectScripted();
+    const thrown = new Error('a close listener that throws');
+    const told: TransportServerConnectionHandle[] = [];
+
+    server.on('close', () => {
+      throw thrown;
+    });
+    server.on('close', (_, connectionHandle) => {
+      told.push(connectionHandle);
+    });
+
+    await server.stop();
+
+    expect(told).toEqual([first.connectionHandle, second.connectionHandle]);
+    expect(namesOf(events, 'error')).toEqual([
+      ['error', thrown.message, first.connectionHandle],
+      ['error', thrown.message, second.connectionHandle],
+    ]);
+    expect(server.isClosed()).toBe(true);
+  });
+
+  test('closes a connection idle past its timeout though a close listener throws, the throw reported', async () => {
+    const clock = createTestClock();
+    const { connectScripted, events, server } = await startScripted({
+      clock,
+      inactivityTimeout: 2_000,
+    });
+    const thrown = new Error('a close listener that throws');
+
+    try {
+      const { connectionHandle } = connectScripted();
+
+      server.on('close', () => {
+        throw thrown;
+      });
+
+      clock.tick(2_000);
+
+      expect(server.clients).toEqual([]);
+      expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
+      expect(namesOf(events, 'error')).toEqual([['error', thrown.message, connectionHandle]]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('refuses a connect that comes as it stops, busy, told when to come back, drawing nothing', async () => {
+    const { connectScripted, fake, server } = await startScripted();
+    const answers: unknown[][] = [];
+
+    connectScripted();
+
+    // the stop calls it as it closes the connection it held, its own stop under way
+    server.on('close', () => {
+      const { response } = fake.exchange({ headers: { 'content-type': BEAD_MEDIA_TYPE } });
+
+      answers.push([
+        response.status,
+        response.headers?.[REFUSAL_HEADER],
+        response.headers?.['retry-after'],
+        server.gauges().counts['connections'],
+      ]);
+
+      // what a connect is comes before when it came: another type, then a body
+      for (const headers of [
+        { 'content-type': 'text/plain' },
+        { 'content-length': '5', 'content-type': BEAD_MEDIA_TYPE },
+      ]) {
+        const refused = fake.exchange({ headers }).response;
+
+        answers.push([refused.status, refused.headers?.[REFUSAL_HEADER]]);
+      }
+    });
+
+    await server.stop();
+
+    expect(answers).toEqual([
+      [503, REFUSALS.BUSY, '1', 0],
+      [415, REFUSALS.TYPE],
+      [400, REFUSALS.MALFORMED],
+    ]);
+  });
+
+  test('answers the 404 marked connection-unknown an exchange that comes as it stops, its connection not yet closed, nothing handed on', async () => {
+    const { connectScripted, events, exchangeOf, fake, listenOf, server } = await startScripted({
+      origins: ['https://app.example'],
+    });
+    const answers: unknown[][] = [];
+
+    connectScripted();
+
+    const second = connectScripted();
+
+    // the stop calls it as it closes the first connection, the second still held
+    server.once('close', () => {
+      const isHeld = server.clients.some(({ connectionHandle }) => {
+        return connectionHandle === second.connectionHandle;
+      });
+      const asking = exchangeOf(second.connectionToken);
+
+      fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+      answers.push([isHeld, asking.response.status, asking.response.headers?.[REFUSAL_HEADER]]);
+
+      // what a request is comes before when it came; what is judged of an exchange against its
+      // connection comes after the lookup a stopping server answers, in spec 15.6's order
+      for (const { response } of [
+        exchangeOf('not-a-token'),
+        exchangeOf(second.connectionToken, { origin: 'https://elsewhere.example' }),
+        exchangeOf(second.connectionToken, { 'content-type': 'text/plain' }),
+        fake.exchange({
+          headers: {
+            authorization: ['Bearer a', 'Bearer b'],
+            'content-type': BEAD_MEDIA_TYPE,
+            [CONNECTION_TOKEN_HEADER]: second.connectionToken,
+          },
+        }),
+        exchangeOf(second.connectionToken, { 'content-length': String(2 ** 31) }),
+        listenOf(second.connectionToken, 'after=x'),
+      ]) {
+        answers.push([response.status, response.headers?.[REFUSAL_HEADER]]);
+      }
+    });
+
+    await server.stop();
+
+    expect(answers).toEqual([
+      [true, 404, REFUSALS.CONNECTION_UNKNOWN],
+      [400, REFUSALS.MALFORMED],
+      [403, REFUSALS.ORIGIN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+    ]);
+    expect(namesOf(events, 'message')).toEqual([]);
+  });
+
   test('answers each listen it holds the marked 404 as it stops, however many', async () => {
     const { server, url } = await startTransport();
     const held: Promise<Response>[] = [];

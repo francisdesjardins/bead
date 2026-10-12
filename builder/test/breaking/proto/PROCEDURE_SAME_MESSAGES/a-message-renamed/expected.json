@@ -1,0 +1,21 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_MESSAGE_SWITCHED",
+      "line": 33,
+      "column": 42
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROCEDURE_MESSAGE_SWITCHED",
+      "line": 33,
+      "column": 42
+    },
+    {
+      "rule": "PROCEDURE_SAME_MESSAGES",
+      "line": 33,
+      "column": 42
+    }
+  ]
+}

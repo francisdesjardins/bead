@@ -1,0 +1,34 @@
+{
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/-",
+      "value": {
+        "admission": {
+          "hook": "greeted"
+        },
+        "failures": [],
+        "procedureId": 19,
+        "procedureKind": "request",
+        "procedureName": "greet",
+        "request": {
+          "encoding": "json"
+        },
+        "result": {
+          "encoding": "json"
+        }
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_SAME_HOOKS",
+      "pointer": "/services/0"
+    }
+  ]
+}

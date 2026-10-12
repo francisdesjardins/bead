@@ -65,6 +65,54 @@ public sealed class GreeterProcedures
     }
 }
 
+/// <summary>The greeter's hooks, as generated code writes them: <c>loud</c>, required.</summary>
+public sealed class GreeterAdmissions : IServiceAdmissions<GreeterProcedures>
+{
+    /// <summary>The hook <c>loud</c>, which admits a call to <c>shout</c>.</summary>
+    public required AdmissionHook Loud { get; init; }
+
+    IReadOnlyDictionary<string, AdmissionHook> IServiceAdmissions<GreeterProcedures>.ToDictionary()
+    {
+        return new Dictionary<string, AdmissionHook>
+        {
+            ["loud"] = Loud,
+        };
+    }
+}
+
+/// <summary>The greeter's windows, as generated code writes them: <c>news</c>'s.</summary>
+public sealed class GreeterWindows : IServiceWindows<GreeterProcedures>
+{
+    /// <summary>The window of <c>news</c>.</summary>
+    public int? News { get; init; }
+
+    IReadOnlyDictionary<string, int?> IServiceWindows<GreeterProcedures>.ToDictionary()
+    {
+        return new Dictionary<string, int?>
+        {
+            ["news"] = News,
+        };
+    }
+}
+
+/// <summary>
+/// Hooks and windows by any name, which no generated record gives: what reaches the layer's own
+/// refusals, as a cast reaches them on the TypeScript side.
+/// </summary>
+public sealed class AnyNames(IReadOnlyDictionary<string, AdmissionHook>? hooks = null, IReadOnlyDictionary<string, int?>? windows = null)
+    : IServiceAdmissions<GreeterProcedures>, IServiceWindows<GreeterProcedures>
+{
+    IReadOnlyDictionary<string, AdmissionHook> IServiceAdmissions<GreeterProcedures>.ToDictionary()
+    {
+        return hooks ?? new Dictionary<string, AdmissionHook>();
+    }
+
+    IReadOnlyDictionary<string, int?> IServiceWindows<GreeterProcedures>.ToDictionary()
+    {
+        return windows ?? new Dictionary<string, int?>();
+    }
+}
+
 /// <summary>The failures <c>sayHello</c> may answer, and no other, as generated code writes them.</summary>
 public sealed class SayHelloFailure : IApplicationFailure
 {

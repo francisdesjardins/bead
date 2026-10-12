@@ -47,6 +47,13 @@ NOT_HELD = "A value a side's type cannot hold"
 # the row of docs/support.md a proto string's leading U+FEFF crosses, which a stock library strips
 LEADING_FEFF = "A string's leading U+FEFF in a proto payload"
 
+# the rows of docs/support.md a stock library crosses where it reads bytes that are no encoding of the
+# message, against protobuf's own rules
+PAST_ITS_MESSAGE = 'A proto record past the end of its message'
+LONG_UNKNOWN_VARINT = 'An unknown proto varint of more than 10 bytes'
+LONG_TAG = 'A proto tag of more than 5 bytes, or past 32 bits'
+LONG_LENGTH = 'A proto length past 32 bits'
+
 
 class Members(list):
     """An object's members as the bytes name them, in their order, a name given twice kept twice."""
@@ -333,6 +340,21 @@ def proto_varint(data, at):
     raise NotItsMessage('a varint of more than ten bytes')
 
 
+def proto_tag(data, at):
+    """The tag at `at` and where it ends: a varint of five bytes at most and 32 bits at most, as the
+    Encoding guide's reference card has it, "encoded as uint32 varint", and as protobuf's conformance
+    suite refuses one in its REQUIRED BadTag_ tests."""
+    tag, end = proto_varint(data, at)
+
+    if end - at > 5:
+        raise NotItsMessage('a tag of more than five bytes')
+
+    if tag > UINT32:
+        raise NotItsMessage('a tag past 32 bits')
+
+    return tag, end
+
+
 def proto_skip(data, at, number, wire):
     """Where an unknown field of `number` and `wire` ends, its value skipped (Encoding, "Message
     Structure"), a group to the end group of its number."""
@@ -341,7 +363,7 @@ def proto_skip(data, at, number, wire):
 
     if wire == SGROUP:
         while True:
-            tag, at = proto_varint(data, at)
+            tag, at = proto_tag(data, at)
 
             if tag >> 3 == 0:
                 raise NotItsMessage('field number 0')
@@ -379,7 +401,7 @@ def proto_read_into(probe, data, depth):
     at = 0
 
     while at < len(data):
-        tag, at = proto_varint(data, at)
+        tag, at = proto_tag(data, at)
         number, wire = tag >> 3, tag & 7
 
         if number == 0:
@@ -645,6 +667,28 @@ PAYLOADS = [
     ('field number 0', 'proto', ['17.9.1'], bytes.fromhex('00 01')),
     ('a varint of 10 bytes', 'proto', ['17.9'], bytes.fromhex('10' + ' FF' * 9 + ' 01')),
     ('a varint of 11 bytes', 'proto', ['17.9.1'], bytes.fromhex('10' + ' 80' * 10 + ' 01')),
+    ('an unknown varint of 10 bytes', 'proto', ['17.9'], bytes.fromhex('48' + ' 80' * 9 + ' 00')),
+    ('an unknown varint of 11 bytes', 'proto', ['17.9.1'], bytes.fromhex('48' + ' 80' * 10 + ' 00')),
+    # * a message's records end where its length ends: one that runs on reads its parent's bytes
+    ('an unknown record past the end of its message', 'proto', ['17.9.1'],
+     bytes.fromhex('0A 01 61 1A 02 25 00 0A 01 62')),
+    ('a string past the end of its message', 'proto', ['17.9.1'], bytes.fromhex('1A 02 0A 03 61 62 63')),
+    # a tag is a uint32 varint: protobuf's BadTag_ tests, each on field 2, Probe's varint, so that none
+    # crosses the row of a field at a wire type not its own as well
+    ('a tag of 5 bytes within 32 bits', 'proto', ['17.9'], bytes.fromhex('C8 80 80 80 00 01 0A 01 62')),
+    ('a tag of 6 bytes', 'proto', ['17.9.1'], bytes.fromhex('90 80 80 80 80 00 07')),
+    # BadTag_OverlongVarint
+    ('a tag of 9 bytes', 'proto', ['17.9.1'], bytes.fromhex('90 80 80 80 80 80 80 80 00 07')),
+    # BadTag_FieldNumberSlightlyTooHigh
+    ('a tag of 5 bytes past 32 bits', 'proto', ['17.9.1'], bytes.fromhex('90 80 80 80 40 07')),
+    # BadTag_FieldNumberTooHigh
+    ('a tag of 7 bytes past 32 bits', 'proto', ['17.9.1'], bytes.fromhex('90 80 80 80 80 80 0F 07')),
+    ('a tag past 32 bits, of an unknown field', 'proto', ['17.9.1'], bytes.fromhex('F8 FF FF FF 7F 01')),
+    # BadTag_VarintMoreThanTenBytes
+    ('a tag of more than 10 bytes', 'proto', ['17.9.1'], bytes.fromhex('90' + ' 80' * 11 + ' 00 07')),
+    # a length is an int32 varint: protobuf's BadLength_Varint32BitOverflow
+    ('a length past 32 bits', 'proto', ['17.9.1'], bytes.fromhex('0A 80 80 80 80 10')),
+    ('a length past 32 bits, a field after', 'proto', ['17.9.1'], bytes.fromhex('0A 80 80 80 80 10 10 07')),
     ('an end group no group opened', 'proto', ['17.9.1'], bytes.fromhex('24')),
     ('an unknown group, closed', 'proto', ['17.9'], bytes.fromhex('23 24')),
     ('an unknown group never closed', 'proto', ['17.9.1'], bytes.fromhex('23')),
@@ -653,8 +697,21 @@ PAYLOADS = [
     ('101 messages below the top', 'proto', ['17.9.3'], proto_write(chain(PROTO_DEPTH + 1))),
 ]
 
-# the payloads a stock library reads otherwise than 17.9 says, each by the row it crosses and its language
-PROTO_DIFFERS = {"a string's leading U+FEFF": (LEADING_FEFF, 'TypeScript')}
+# the payloads a stock library reads otherwise than 17.9 says, each by the rows it crosses and the
+# languages they excuse
+PROTO_DIFFERS = {
+    "a string's leading U+FEFF": [(LEADING_FEFF, 'TypeScript')],
+    'an unknown varint of 11 bytes': [(LONG_UNKNOWN_VARINT, 'TypeScript')],
+    'an unknown record past the end of its message': [(PAST_ITS_MESSAGE, 'TypeScript')],
+    'a string past the end of its message': [(PAST_ITS_MESSAGE, 'TypeScript')],
+    'a tag of 6 bytes': [(LONG_TAG, 'C#')],
+    'a tag of 9 bytes': [(LONG_TAG, 'C#')],
+    'a tag of 5 bytes past 32 bits': [(LONG_TAG, 'C#')],
+    'a tag of 7 bytes past 32 bits': [(LONG_TAG, 'C#')],
+    'a tag past 32 bits, of an unknown field': [(LONG_TAG, 'C#')],
+    'a length past 32 bits': [(LONG_LENGTH, 'TypeScript'), (LONG_LENGTH, 'C#')],
+    'a length past 32 bits, a field after': [(LONG_LENGTH, 'TypeScript'), (LONG_LENGTH, 'C#')],
+}
 
 
 def hexadecimal(data):
@@ -687,11 +744,11 @@ def payload_outcome(encoding, data):
 
 
 def payload_entry(name, encoding, clauses, data):
-    differs = PROTO_DIFFERS.get(name) if encoding == 'proto' else None
+    differs = PROTO_DIFFERS.get(name, []) if encoding == 'proto' else []
 
     return {'name': name, 'encoding': encoding, 'clauses': clauses, 'bytes': hexadecimal(data),
             **payload_outcome(encoding, data),
-            **({'differs': [{'row': differs[0], 'language': differs[1]}]} if differs else {})}
+            **({'differs': [{'row': row, 'language': language} for row, language in differs]} if differs else {})}
 
 
 # ── The values ──────────────────────────────────────────────────────────────────────────────────
@@ -856,7 +913,7 @@ assert declared_fields() == {number: (name, kind) for number, (name, kind, _) in
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 99 and len(values) == 44
+assert len(payloads) == 112 and len(values) == 44
 
 # the proto rows as 0018 states them, each taken with its text, its number and how many nest below the
 # top, or refused for its reason; and the deep rows' bytes as protobuf's writers write them
@@ -872,7 +929,14 @@ PROTO_RECORD = {
     'a number given at its default': ('', 0, 0), 'a scalar given twice': ('', 2, 0),
     'a message given twice': ('', 0, 2), 'a message field set to the empty message': ('', 0, 1),
     'field number 0': NOT_ITS_MESSAGE, 'a varint of 10 bytes': ('', 4_294_967_295, 0),
-    'a varint of 11 bytes': NOT_ITS_MESSAGE, 'an end group no group opened': NOT_ITS_MESSAGE,
+    'a varint of 11 bytes': NOT_ITS_MESSAGE, 'an unknown varint of 10 bytes': ('', 0, 0),
+    'an unknown varint of 11 bytes': NOT_ITS_MESSAGE, 'an unknown record past the end of its message': NOT_ITS_MESSAGE,
+    'a string past the end of its message': NOT_ITS_MESSAGE, 'a tag of 5 bytes within 32 bits': ('0062', 0, 0),
+    'a tag of 6 bytes': NOT_ITS_MESSAGE, 'a tag of 9 bytes': NOT_ITS_MESSAGE,
+    'a tag of 5 bytes past 32 bits': NOT_ITS_MESSAGE, 'a tag of 7 bytes past 32 bits': NOT_ITS_MESSAGE,
+    'a tag past 32 bits, of an unknown field': NOT_ITS_MESSAGE, 'a tag of more than 10 bytes': NOT_ITS_MESSAGE,
+    'a length past 32 bits': NOT_ITS_MESSAGE, 'a length past 32 bits, a field after': NOT_ITS_MESSAGE,
+    'an end group no group opened': NOT_ITS_MESSAGE,
     'an unknown group, closed': ('', 0, 0), 'an unknown group never closed': NOT_ITS_MESSAGE,
     '99 messages below the top': ('', 0, 99), '100 messages below the top': ('', 0, 100),
     '101 messages below the top': PROTO_NESTED_PAST,
@@ -902,7 +966,7 @@ document = {
         'nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th.',
         'probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; or child, set to the empty message, {}.',
         'A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message and nested past 100 of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side\'s.',
-        "differs names the row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
+        "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
         'clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7.',
     ],
     'specVersion': spec_version(),

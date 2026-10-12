@@ -1,0 +1,33 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/failures/0/failureName",
+      "value": "on_purpose"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/1/failures/0",
+      "value": "on_purpose"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/9/failures/0",
+      "value": "on_purpose"
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NAME_FORM",
+      "pointer": "/services/0/failures/0/failureName"
+    },
+    {
+      "rule": "NAME_FORM",
+      "pointer": "/services/0/procedures/1/failures/0"
+    },
+    {
+      "rule": "NAME_FORM",
+      "pointer": "/services/0/procedures/9/failures/0"
+    }
+  ]
+}

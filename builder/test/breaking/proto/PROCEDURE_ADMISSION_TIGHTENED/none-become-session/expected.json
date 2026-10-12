@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_ADMISSION_TIGHTENED",
+      "line": 34,
+      "column": 12
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROCEDURE_ADMISSION_TIGHTENED",
+      "line": 34,
+      "column": 12
+    }
+  ]
+}

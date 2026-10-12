@@ -22,4 +22,9 @@
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- JSON as a service manager's accessor takes it, for the calls no generated client makes -->
+    <Compile Include="../Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
+  </ItemGroup>
 </Project>

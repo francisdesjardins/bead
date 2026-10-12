@@ -67,9 +67,31 @@ internal sealed class WebSocketConnection
     {
         await Answer(status);
 
-        if (await Task.WhenAny(_ended.Task, Task.Delay(_bounds.CloseTimeout, TimeProvider.System)) != _ended.Task)
+        // the wait is cancelled once the connection's end wins it: nothing lingers until the
+        // timeout fires, and an endless timeout lingers nowhere
+        using var elapsed = new CancellationTokenSource();
+        var waiting = Task.Delay(_bounds.CloseTimeout, TimeProvider.System, elapsed.Token);
+
+        if (await Task.WhenAny(_ended.Task, waiting) == waiting)
         {
             Socket.Abort();
+        }
+        else
+        {
+            elapsed.Cancel();
+        }
+    }
+
+    // a close sent on its own, nothing waiting on it: what its socket meets going says nothing
+    public async Task CloseQuietly(WebSocketCloseStatus status)
+    {
+        try
+        {
+            await Close(status);
+        }
+        catch (Exception reason) when (reason is WebSocketException or ObjectDisposedException or InvalidOperationException or IOException)
+        {
+            // a socket already gone takes no close
         }
     }
 
@@ -121,7 +143,7 @@ internal sealed class WebSocketConnection
                 {
                     isClosing = true;
                     message.ResetWrittenCount();
-                    _ = Close(WebSocketCloseStatus.MessageTooBig);
+                    _ = CloseQuietly(WebSocketCloseStatus.MessageTooBig);
 
                     continue;
                 }
@@ -141,9 +163,16 @@ internal sealed class WebSocketConnection
         }
         finally
         {
-            _outgoing.Writer.TryComplete();
-            _ended.TrySetResult();
+            End();
         }
+    }
+
+    // its end, told once, however it went: what still waits on the connection settles — the write
+    // pump ends, and a close waiting on the peer's answer waits no timeout
+    public void End()
+    {
+        _outgoing.Writer.TryComplete();
+        _ended.TrySetResult();
     }
 
     private async Task Write()

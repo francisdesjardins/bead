@@ -1,0 +1,33 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/proto",
+      "value": {
+        "file": "x/v1/x.proto",
+        "fullName": "x.v1.InteropService"
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/proto",
+      "value": {
+        "file": "x/v1/interop.proto",
+        "fullName": "x.v1.InteropService"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_SAME_FILE",
+      "pointer": "/services/0/proto/file"
+    }
+  ]
+}

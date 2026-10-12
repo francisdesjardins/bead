@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Bead.Interop;
+using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.WebSockets.Tests;
@@ -23,7 +24,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     public WebSocketClientTests()
     {
         _server = new Server<string>(_transport);
-        InteropService.Offer(_server);
+        InteropHandlers.Offer(_server);
     }
 
     // helpers
@@ -46,8 +47,11 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     private Func<JsonElement, BoundCall<JsonElement>> RequesterOf(string procedureName)
     {
         return _client.Services.GetRequest(
-            InteropService.ProcedureOf(procedureName),
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked });
+            InteropProcedures.All.Single((procedure) =>
+            {
+                return procedure.Procedure.ProcedureName == procedureName;
+            }).Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
     }
 
     // definition
@@ -95,8 +99,8 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         };
 
         var slow = client.Services.GetRequest(
-            InteropService.ProcedureOf("slow"),
-            new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked })(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { Timeout = TimeSpan.FromSeconds(1) });
+            InteropProcedures.Slow.Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() })(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { Timeout = TimeSpan.FromSeconds(1) });
 
         await sent.Task.WaitAsync(Patience, Cancelled);
         time.Advance(TimeSpan.FromSeconds(1));
@@ -124,7 +128,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     [Fact]
     public async Task Answers_the_server_s_command_over_the_socket()
     {
-        InteropService.OfferClient(_client.Services);
+        InteropHandlers.OfferClient(new InteropClient(_client));
 
         Assert.Equal("\"noon\"", (await RequesterOf("ask")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetRawText());
     }
@@ -311,8 +315,8 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
             return unconnected.Services.GetRequest(
-                InteropService.ProcedureOf("echo"),
-                new RequestDependencies<JsonElement, JsonElement> { Serializer = InteropService.JsonAsked })(JsonOf("null"))()
+                InteropProcedures.Echo.Procedure,
+                new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() })(JsonOf("null"))()
                 .WaitAsync(Patience, Cancelled);
         });
     }

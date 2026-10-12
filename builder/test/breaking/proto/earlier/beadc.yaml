@@ -1,0 +1,5 @@
+# The earlier of beadc breaking's .proto cases: one file, a service with a hook, a notifier, a
+# command, a catalogue, reservations and a limit, and a second service a case deletes.
+version: 1
+source:
+  proto: [proto]

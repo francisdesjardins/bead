@@ -1,0 +1,18 @@
+{
+  // The TypeScript side's strictness, by reference: its base holds what every project here compiles
+  // alike. What is the builder's own is how Node resolves what it runs: beadc is run by Node as
+  // written, `node src/cli.ts`, with no bundle, so imports are Node's, `nodenext`, each naming its
+  // `.ts` file, and every construct is one Node's type stripping erases. Its JSON files are read
+  // through the file system, never imported.
+  "extends": "../implementations/typescript/tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "playwright.config.ts"],
+  "exclude": ["node_modules"]
+}

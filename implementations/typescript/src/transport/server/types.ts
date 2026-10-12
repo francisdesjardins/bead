@@ -196,6 +196,19 @@ export interface ITransportServerImplementation<Socket = unknown> {
   stop(): Promise<void>;
 }
 
+/** What {@link createTransportServer} gives its transport beside the server and its registry. */
+export interface ITransportServerDefineOptions<Socket = unknown, Request = unknown> {
+  /**
+   * Calls each listener of `event` but `error` within a guard (spec 15.1): what one throws is
+   * reported through `error`, with the connection `params` ends with, and the listeners after it
+   * are called all the same. Returns whether `event` had any.
+   */
+  readonly tell: <K extends TransportServerToldEvent>(
+    event: K,
+    params: TransportServerEventMap<Socket, Request>[K]
+  ) => boolean;
+}
+
 // types
 
 /**
@@ -228,8 +241,9 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
   /** The connection's socket, the request that opened it, and its handle, once it is registered. */
   connection: [socket: Socket, request: Request, connectionHandle: TransportServerConnectionHandle];
   /**
-   * What went wrong on a connection; when it ends the connection, its `close` follows. An empty
-   * handle is the server's own error.
+   * What went wrong on a connection, or what a listener of its events threw, which changes nothing
+   * the server does; when it ends the connection, its `close` follows. An empty handle is the
+   * server's own error.
    */
   error: [error: Error, connectionHandle: TransportServerConnectionHandle | ''];
   /**
@@ -244,6 +258,9 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
 
 /** The events a server emits, named by the table that types them. */
 export type TRANSPORT_SERVER_EVENTS = keyof TransportServerEventMap;
+
+/** The events a server tells its listeners of within a guard: every one but `error`. */
+export type TransportServerToldEvent = Exclude<TRANSPORT_SERVER_EVENTS, ERROR_EVENT>;
 
 export type TransportServerOnCloseCallback = EmitterListener<TransportServerEventMap[CLOSE_EVENT]>;
 export type TransportServerOnConnectionCallback<

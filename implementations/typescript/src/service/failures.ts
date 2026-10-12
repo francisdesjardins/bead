@@ -6,9 +6,14 @@
 
 // dependencies
 
+import type { FailureScope } from '../router/shared/constants';
 import { FailureError } from '../router/shared/errors';
-import type { IApplicationFailure, ServiceId } from '../router/shared/types';
+import type { IApplicationFailure, IProcedureAddress, ServiceId } from '../router/shared/types';
 import { ProgrammerError } from '../transport/shared/errors';
+
+// declarations
+
+declare const failureNameBrand: unique symbol;
 
 // interfaces
 
@@ -16,6 +21,16 @@ import { ProgrammerError } from '../transport/shared/errors';
 export interface IListedFailure<Name extends string = string> extends IApplicationFailure {
   readonly detail: string;
   readonly failureName: Name;
+}
+
+/**
+ * A failure of a catalogue, received and told by its name: a {@link FailureError} of the
+ * application, from a procedure of the catalogue's service, its name a type's alone.
+ */
+export interface IListedFailureError<Name extends string = string> extends FailureError {
+  readonly procedureAddress: IProcedureAddress;
+  readonly scope: typeof FailureScope.APPLICATION;
+  readonly [failureNameBrand]: Name;
 }
 
 /**
@@ -28,9 +43,10 @@ export interface IFailureCatalogue<Name extends string> {
 
   /**
    * Whether `error` is the application failure `name`, received from a procedure of its service: a
-   * {@link FailureError} of its code, whose procedure's service is the catalogue's.
+   * {@link FailureError} of its code, whose procedure's service is the catalogue's. A false answer
+   * leaves a FailureError one, to be asked of another name.
    */
-  is: (error: unknown, name: Name) => error is FailureError;
+  is: <Given extends Name>(error: unknown, name: Given) => error is IListedFailureError<Given>;
   /** The failure `name`, with `detail`, '' when not given; a name it lacks is a ProgrammerError. */
   of: <Given extends Name>(name: Given, detail?: string) => IListedFailure<Given>;
 }
@@ -92,7 +108,7 @@ export const failuresOf = <const Name extends string>(catalogue: {
     codes,
     serviceId,
 
-    is: (error: unknown, name: Name): error is FailureError => {
+    is: <Given extends Name>(error: unknown, name: Given): error is IListedFailureError<Given> => {
       return (
         error instanceof FailureError &&
         error.isApplication(codeOf(name)) &&

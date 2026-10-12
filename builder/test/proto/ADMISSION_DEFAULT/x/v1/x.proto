@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+// A Bead service whose file and service state no admission.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Echo(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 1
+      admission: {
+        none: {}
+      }
+    };
+  }
+}

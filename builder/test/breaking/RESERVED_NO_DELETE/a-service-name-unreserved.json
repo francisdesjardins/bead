@@ -1,0 +1,16 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/reservedServices/names/-",
+      "value": "Retired"
+    }
+  ],
+  "current": [],
+  "findings": [
+    {
+      "rule": "RESERVED_NO_DELETE",
+      "pointer": "/reservedServices/names"
+    }
+  ]
+}

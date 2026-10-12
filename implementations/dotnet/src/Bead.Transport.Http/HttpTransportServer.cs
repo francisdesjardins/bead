@@ -135,7 +135,8 @@ public sealed record HttpTransportStartOptions
 /// until a <c>GET</c> listen brings it back in a batch; each listen held, once past its refusals,
 /// raises <see cref="Listen"/> with true, and its end, while its connection stands, with false. Each
 /// exchange waits in its own request, on Kestrel's thread, for what ends it; what the transport holds
-/// is kept under one lock, and its events are raised outside it.
+/// is kept under one lock, and its events are raised outside it, each listener within a guard: what
+/// one throws is reported through <see cref="Error"/>, and changes nothing the transport does.
 /// </remarks>
 public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -177,6 +178,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private readonly TransportServerLife _life = new();
     private WebApplication? _application;
 
+    // how its events are told: what a listener throws is reported through Error, with its connection
+    private readonly ListenerGuard _listeners;
+
     // whether its connections are secure: as its application says what stands in front of it, or,
     // when it says nothing, under TLS, wherever it listens, or bound to the loopback as it starts
     private volatile bool _isSecure;
@@ -206,6 +210,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         _options = given with { ExchangeTimeout = exchangeTimeout, InactivityTimeout = inactivityTimeout, MaximumWait = maximumWait };
         _isSecure = _options.Secure ?? _options.Certificate is not null;
         _clock = _options.Clock ?? TimeProvider.System;
+        _listeners = new ListenerGuard((reason, connectionHandle) =>
+        {
+            Error?.Invoke(reason, connectionHandle ?? "");
+        });
     }
 
     /// <inheritdoc/>
@@ -219,6 +227,13 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
     /// <inheritdoc/>
     public event Action<bool, string>? Listen;
+
+    /// <summary>
+    /// What a listener of its events threw, with the handle of the connection it was told of: the
+    /// transport went on as if it returned (spec 15.1). Never the server's own, as the TypeScript
+    /// side's can be: Kestrel tells a failure of its own only to its logs.
+    /// </summary>
+    public event Action<Exception, string>? Error;
 
     /// <summary>
     /// Each listen, its connection found by its token, before it is held: the tests' way to close
@@ -349,7 +364,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
     /// <summary>
     /// Closes every connection, each exchange still waiting learning its connection is gone, then
-    /// stops listening; it ends Closed. It settles at once when Uninitialized or Closed; a second
+    /// stops listening; it ends Closed. From its start it draws no connection and holds none: a
+    /// connect is refused 503, busy, and an exchange that presents a token is answered the 404 marked
+    /// connection-unknown (spec 15.7). It settles at once when Uninitialized or Closed; a second
     /// stop shares the stop under way; one while starting is an <see cref="InvalidOperationException"/>.
     /// </summary>
     public Task Stop()
@@ -777,13 +794,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
         var host = request.Headers.Host.ToString();
 
-        if (_life.IsStopping)
-        {
-            await Finish(context, Busy);
-
-            return;
-        }
-
         if (!HostsAndOrigins.IsTakenHost(host, _options.Hosts))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Host));
@@ -824,6 +834,15 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         if (connectionToken is null || !IsToken(connectionToken))
         {
             await Finish(context, Malformed);
+
+            return;
+        }
+
+        // once its stop began it holds no connection: the token is not looked up, and nothing of the
+        // exchange is handed on, as the stop answers each listen it holds
+        if (_life.IsStopping)
+        {
+            await Finish(context, Unknown);
 
             return;
         }
@@ -878,7 +897,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         lock (_gate)
         {
-            if (_drawn.Count < _options.MaximumConnections && _perAddress.GetValueOrDefault(address) < _options.MaximumConnectionsPerAddress)
+            // ! judged under the lock, as a stop's snapshot of what it closes is taken under it: one
+            // drawn as a stop began is refused, busy, never left registered and never closed
+            if (!_life.IsStopping && _drawn.Count < _options.MaximumConnections && _perAddress.GetValueOrDefault(address) < _options.MaximumConnectionsPerAddress)
             {
                 _ordinal += 1;
                 connection = new Drawn(
@@ -902,7 +923,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        Connection?.Invoke(connection.ConnectionHandle);
+        _listeners.Tell(Connection, connection.ConnectionHandle);
 
         // the listen taken, said back, so a client whose header something on the way dropped never
         // listens where it would be refused
@@ -1192,7 +1213,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         if (kind != EnvelopeKind.Request)
         {
-            Message?.Invoke(new TransportMessage(envelope, false), connection.ConnectionHandle);
+            _listeners.Tell(Message, (new TransportMessage(envelope, false), connection.ConnectionHandle));
 
             if (kind == EnvelopeKind.Cancel)
             {
@@ -1216,7 +1237,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
 
         // a request is handed on with the credential its exchange carried; no other envelope is
-        Message?.Invoke(new TransportMessage(envelope, false) { Credential = CredentialOf(context.Request) }, connection.ConnectionHandle);
+        _listeners.Tell(Message, (new TransportMessage(envelope, false) { Credential = CredentialOf(context.Request) }, connection.ConnectionHandle));
 
         bool isWaiting;
 
@@ -1487,7 +1508,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         try
         {
-            Listen?.Invoke(true, connection.ConnectionHandle);
+            _listeners.Tell(Listen, (true, connection.ConnectionHandle));
 
             var ending = await listening.Ended.Task.WaitAsync(context.RequestAborted);
 
@@ -1536,7 +1557,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
             if (isDrawn)
             {
-                Listen?.Invoke(false, connection.ConnectionHandle);
+                _listeners.Tell(Listen, (false, connection.ConnectionHandle));
             }
         }
     }
@@ -1692,7 +1713,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             reading.CancelPendingRead();
         }
 
-        Close?.Invoke(isClean, connection.ConnectionHandle);
+        _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
     }
 
     // how the transport ends an exchange of its own: its status, the refusal it is marked with, and

@@ -93,6 +93,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // the close handshake under way on the open connection, told whether a dispose dropped it
     private (WebSocketConnection Connection, TaskCompletionSource<bool> Closed)? _disconnecting;
     private Action? _reconnect;
+    // how its events are told: what a listener throws is reported through Error
+    private readonly ListenerGuard _listeners;
 
     /// <summary>
     /// A transport client, not yet connected, its heartbeat and close timeout held: one no timer
@@ -108,6 +110,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportClientOptions.CloseTimeout)),
         };
         _clock = _options.Clock ?? TimeProvider.System;
+        _listeners = new ListenerGuard((reason, _) =>
+        {
+            Error?.Invoke(reason);
+        });
     }
 
     /// <inheritdoc/>
@@ -121,7 +127,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// </summary>
     public event Action<bool, bool>? Close;
 
-    /// <summary>What broke the connection, before its close.</summary>
+    /// <summary>
+    /// What broke the connection, before its close; or what a listener of its messages or its close
+    /// threw, the client going on as if it returned (spec 15.1).
+    /// </summary>
     public event Action<Exception>? Error;
 
     /// <summary>
@@ -307,7 +316,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         // dispose never does
         if (!isDropped)
         {
-            Close?.Invoke(isClean, isQuick);
+            _listeners.Tell(Close, (isClean, isQuick));
         }
     }
 
@@ -599,7 +608,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 // nothing more is heard once a close began, nor from a connection dropped
                 if (_connection == connection && _readyState != ReadyState.Closing)
                 {
-                    Message?.Invoke(message);
+                    _listeners.Tell(Message, message);
                 }
             });
         }
@@ -644,6 +653,6 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             Error?.Invoke(broken);
         }
 
-        Close?.Invoke(false, false);
+        _listeners.Tell(Close, (false, false));
     }
 }

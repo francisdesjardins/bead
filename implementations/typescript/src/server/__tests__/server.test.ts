@@ -1147,6 +1147,29 @@ test.describe('createServer', () => {
     expect(closed).toEqual([]);
   });
 
+  test('counts no close under way once disposed', async () => {
+    const { closed, control, open, transport } = createScriptedTransport();
+    const release = Promise.withResolvers<void>();
+    const server = createServer({ transport }, { connectionInactivityTimeout: 20 });
+
+    // its timeout closes the connection, a close the transport holds under way
+    control.closeHold = release.promise;
+    open(first);
+    await expect
+      .poll(() => {
+        return closed;
+      })
+      .toEqual([first]);
+
+    expect(server.gauges().server.counts['closing']).toBe(1);
+
+    await server[Symbol.asyncDispose]();
+
+    expect(server.gauges().server.counts['closing']).toBe(0);
+
+    release.resolve();
+  });
+
   test('dispose lets go of the transport, rejects what waits, forgets the sessions, and stops', async () => {
     const { ask, control, emitter, server } = createSessionServer(forever);
 

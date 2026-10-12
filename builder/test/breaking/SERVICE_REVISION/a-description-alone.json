@@ -1,0 +1,10 @@
+{
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/description",
+      "value": "The interop, described anew."
+    }
+  ],
+  "findings": []
+}

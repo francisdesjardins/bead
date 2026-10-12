@@ -1,0 +1,45 @@
+{
+  "earlier": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/admission",
+      "value": {
+        "hook": "somebody"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/1/admission",
+      "value": {
+        "hook": "somebody"
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/admission",
+      "value": {
+        "hook": "nobody"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/1/admission",
+      "value": {
+        "hook": "somebody"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_SAME_HOOK",
+      "pointer": "/services/0/procedures/0/admission/hook"
+    }
+  ]
+}

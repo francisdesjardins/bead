@@ -1,0 +1,136 @@
+{
+  "format": "bead-blueprint/1",
+  "proto": {
+    "files": [
+      {
+        "package": "hello.v1",
+        "path": "hello/v1/hello.proto"
+      }
+    ],
+    "messages": [
+      {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.AskNameRequest"
+      },
+      {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.AskNameResponse"
+      },
+      {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.CountDownRequest"
+      },
+      {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.CountDownResponse"
+      },
+      {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.SayHelloRequest"
+      },
+      {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.SayHelloResponse"
+      },
+      {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.Tick"
+      }
+    ]
+  },
+  "requires": [],
+  "reservedServices": {
+    "ids": [],
+    "names": []
+  },
+  "services": [
+    {
+      "description": "Greets its callers, asks a nameless one its name, and counts down for one it greeted.",
+      "failures": [
+        {
+          "code": 1,
+          "description": "Nobody to greet: no name given, and none the caller gave when asked.",
+          "failureName": "NAMELESS"
+        },
+        {
+          "code": 2,
+          "description": "A count past 10.",
+          "failureName": "TOO_FAR"
+        }
+      ],
+      "procedures": [
+        {
+          "admission": "none",
+          "description": "Greets a name; given none, asks its caller's first, by AskName.",
+          "failures": [
+            "NAMELESS"
+          ],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "sayHello",
+          "request": {
+            "encoding": "proto",
+            "message": "hello.v1.SayHelloRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "hello.v1.SayHelloResponse"
+          }
+        },
+        {
+          "admission": {
+            "hook": "greeted"
+          },
+          "description": "Counts down from a number to 0, a Tick a step, for a caller its connection greeted.",
+          "failures": [
+            "TOO_FAR"
+          ],
+          "notification": {
+            "encoding": "proto",
+            "message": "hello.v1.Tick"
+          },
+          "procedureId": 2,
+          "procedureKind": "notifies",
+          "procedureName": "countDown",
+          "request": {
+            "encoding": "proto",
+            "message": "hello.v1.CountDownRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "hello.v1.CountDownResponse"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Asks the client its name: a command the client answers.",
+          "failures": [],
+          "procedureId": 3,
+          "procedureKind": "command",
+          "procedureName": "askName",
+          "request": {
+            "encoding": "proto",
+            "message": "hello.v1.AskNameRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "hello.v1.AskNameResponse"
+          }
+        }
+      ],
+      "proto": {
+        "file": "hello/v1/hello.proto",
+        "fullName": "hello.v1.HelloService"
+      },
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 1,
+      "serviceName": "Hello",
+      "serviceRevision": 1
+    }
+  ],
+  "specVersion": "0.3.0"
+}

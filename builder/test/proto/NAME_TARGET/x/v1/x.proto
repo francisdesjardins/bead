@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A failures enum named as the class of failures its service gives, in one C# namespace.
+service GreeterService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+    failures: "GreeterFailures"
+  };
+
+  rpc Greet(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 1
+      failures: ["GREETER_FAILURES_NOBODY"]
+    };
+  }
+}
+
+enum GreeterFailures {
+  GREETER_FAILURES_UNSPECIFIED = 0;
+  GREETER_FAILURES_NOBODY = 1;
+}

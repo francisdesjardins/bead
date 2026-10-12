@@ -1,0 +1,6 @@
+countDown before sayHello: ACCESS_DENIED, say hello first
+sayHello Bead: Hello, Bead!
+sayHello, nameless: Hello, Ada!
+countDown from 11: TOO_FAR, a count starts at 10 at most
+countDown from 3: 3 2 1 0, one at a time
+sayHello, nameless again: NAMELESS, nobody to greet

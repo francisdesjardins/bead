@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/17/procedureId",
+      "value": 65536
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_ID_RANGE",
+      "pointer": "/services/0/procedures/17/procedureId"
+    }
+  ]
+}

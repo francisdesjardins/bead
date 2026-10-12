@@ -1,0 +1,10 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": []
+}

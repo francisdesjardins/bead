@@ -3,6 +3,7 @@ import { FailureScope } from '../../router/shared/constants';
 import { FailureError } from '../../router/shared/errors';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { failuresOf } from '../failures';
+import type { IListedFailureError } from '../failures';
 
 // helpers
 
@@ -71,5 +72,29 @@ test.describe('failuresOf', () => {
       )
     ).toBe(false);
     expect(catalogue.is(new Error('code 1'), 'NOBODY_TO_GREET')).toBe(false);
+  });
+
+  test('narrows to the failure of its name, and leaves a FailureError it is not one', () => {
+    const catalogue = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 7 });
+    // a FailureError asked of one name, then of another, and read on each branch
+    const told = (error: FailureError): string => {
+      if (catalogue.is(error, 'NOBODY_TO_GREET')) {
+        const named: IListedFailureError<'NOBODY_TO_GREET'> = error;
+        // @ts-expect-error a failure of one name is none of another
+        const other: IListedFailureError<'TOO_LOUD'> = error;
+
+        return `NOBODY_TO_GREET of ${String(named.procedureAddress.serviceId)}, ${String(other.code)}`;
+      }
+
+      if (catalogue.is(error, 'TOO_LOUD')) {
+        return `TOO_LOUD, ${error.scope}`;
+      }
+
+      return `${String(error.code)}, ${error.scope}`;
+    };
+
+    expect(told(receivedOf(1, 7))).toBe('NOBODY_TO_GREET of 7, 1');
+    expect(told(receivedOf(2, 7))).toBe(`TOO_LOUD, ${FailureScope.APPLICATION}`);
+    expect(told(receivedOf(2, 8))).toBe(`2, ${FailureScope.APPLICATION}`);
   });
 });

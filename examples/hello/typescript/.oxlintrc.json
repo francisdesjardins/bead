@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+
+  // The lint surface is the TypeScript side's, by reference, as the builder's is; the example adds
+  // the shape its functions take, and runs on Node.
+  "extends": ["../../../implementations/typescript/.oxlintrc.base.json"],
+  "rules": {
+    "func-style": ["error", "expression"],
+    "prefer-arrow-callback": "error"
+  },
+  "env": { "browser": false, "node": true },
+  // **Not inherited through `extends`**, so written out here in full
+  "ignorePatterns": ["**/node_modules/**", "dist/**", "gen/**", ".yarn/**"]
+}

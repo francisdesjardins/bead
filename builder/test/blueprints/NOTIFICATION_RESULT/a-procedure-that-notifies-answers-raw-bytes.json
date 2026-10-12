@@ -1,0 +1,17 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/9/result",
+      "value": {
+        "encoding": "raw"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "NOTIFICATION_RESULT",
+      "pointer": "/services/0/procedures/9/result"
+    }
+  ]
+}

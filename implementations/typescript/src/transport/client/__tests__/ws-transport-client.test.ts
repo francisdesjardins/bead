@@ -413,6 +413,40 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(await echoed).toEqual([{ credential: undefined, data: 'ping' }]);
       });
 
+      test('hears the next message after a message listener throws, the throw reported', async () => {
+        const thrown = new Error('a message listener that throws');
+        const reported: Error[] = [];
+        const messages: unknown[] = [];
+
+        server.once('connection', (socket) => {
+          socket.send('first');
+          socket.send('second');
+        });
+        client.once('message', () => {
+          throw thrown;
+        });
+        client.on('error', (error) => {
+          reported.push(error);
+        });
+
+        const both = new Promise<void>((resolve) => {
+          client.on('message', ({ data }) => {
+            messages.push(data);
+            if (messages.length === 2) {
+              resolve();
+            }
+          });
+        });
+
+        await client.connect({ host, port });
+        await both;
+
+        expect(messages).toEqual(['first', 'second']);
+        expect(reported).toHaveLength(1);
+        expect(reported[0]).toBe(thrown);
+        expect(client.isOpen()).toBe(true);
+      });
+
       test('emits no message once a disconnect has begun', async () => {
         const messages: unknown[] = [];
         client.on('message', ({ data }) => {

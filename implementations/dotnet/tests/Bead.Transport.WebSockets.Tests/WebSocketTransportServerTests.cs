@@ -901,6 +901,154 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Keeps_a_connection_whose_connection_listener_throws_its_messages_heard_the_throw_reported_with_it()
+    {
+        var server = new WebSocketTransportServer();
+        var thrown = new InvalidOperationException("a connection listener that throws");
+        var errors = Channel.CreateUnbounded<(Exception Reason, string ConnectionHandle)>();
+
+        // before the tests' own listeners, which are told all the same
+        server.Connection += (_) =>
+        {
+            throw thrown;
+        };
+        server.Error += (reason, connectionHandle) =>
+        {
+            errors.Writer.TryWrite((reason, connectionHandle));
+        };
+        await Start(server);
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            Assert.Equal((thrown, connectionHandle), await Next(errors));
+
+            await client.SendAsync(new byte[] { 1 }, WebSocketMessageType.Binary, true, Cancelled);
+
+            var (message, heardOn) = await Next(_messages);
+
+            Assert.Equal(new byte[] { 1 }, message.Bytes.ToArray());
+            Assert.Equal(connectionHandle, heardOn);
+            Assert.Equal([connectionHandle], _server.ConnectionHandles);
+            Assert.True(_closes.Reader.Count == 0);
+            Assert.Equal(WebSocketState.Open, client.State);
+        }
+    }
+
+    [Fact]
+    public async Task Hears_the_next_message_after_a_message_listener_throws_the_throw_reported_with_its_connection()
+    {
+        var server = new WebSocketTransportServer();
+        var thrown = new InvalidOperationException("a message listener that throws");
+        var errors = Channel.CreateUnbounded<(Exception Reason, string ConnectionHandle)>();
+        var throws = 1;
+
+        // before the tests' own listeners, which are told all the same
+        server.Message += (_, _) =>
+        {
+            if (Interlocked.Exchange(ref throws, 0) == 1)
+            {
+                throw thrown;
+            }
+        };
+        server.Error += (reason, connectionHandle) =>
+        {
+            errors.Writer.TryWrite((reason, connectionHandle));
+        };
+        await Start(server);
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            await client.SendAsync(new byte[] { 1 }, WebSocketMessageType.Binary, true, Cancelled);
+            await client.SendAsync(new byte[] { 2 }, WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Equal(new byte[] { 1 }, (await Next(_messages)).Message.Bytes.ToArray());
+            Assert.Equal(new byte[] { 2 }, (await Next(_messages)).Message.Bytes.ToArray());
+            Assert.Equal((thrown, connectionHandle), await Next(errors));
+            Assert.True(errors.Reader.Count == 0);
+            Assert.Equal([connectionHandle], _server.ConnectionHandles);
+            Assert.True(_closes.Reader.Count == 0);
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_an_upgrade_that_comes_as_it_stops_503_busy_told_when_to_come_back()
+    {
+        await StartDated(new WebSocketTransportServerOptions());
+
+        var (client, connectionHandle) = await Connect();
+        (int Status, Dictionary<string, string> Fields, string Body)? refused = null;
+
+        // the stop under way, its connection's close told: an upgrade comes, Kestrel still serving
+        _server.Close += (_, _) =>
+        {
+            refused = AnswerOf(UpgradeRequest(("bead.test", null))).GetAwaiter().GetResult();
+        };
+
+        using (client)
+        {
+            var answering = AnswerClose(client);
+
+            await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await answering.WaitAsync(Patience, Cancelled));
+        }
+
+        static string FieldsOf(Dictionary<string, string> fields)
+        {
+            return string.Join("; ", fields.OrderBy((field) =>
+            {
+                return field.Key;
+            }, StringComparer.Ordinal).Select((field) =>
+            {
+                return $"{field.Key}: {field.Value}";
+            }));
+        }
+
+        var (status, fields, body) = refused!.Value;
+
+        // marked, never stored nor sniffed, its connection closed, and told when to come back
+        Assert.Equal(
+            (503, FieldsOf(RefusedWith(WebSocketRefusals.Busy, ("retry-after", "1"))), ""),
+            (status, FieldsOf(fields), body));
+        Assert.Equal((false, connectionHandle), await Next(_closes));
+        Assert.True(_connections.Reader.Count == 0);
+    }
+
+    [Fact]
+    public async Task Closes_going_away_a_connection_whose_accept_a_stop_crossed()
+    {
+        WebSocketTransportServer server = null!;
+
+        server = new WebSocketTransportServer
+        {
+            Accepted = (socket, peerHandle) =>
+            {
+                // the stop begins as the accept registers: the connection is closed with its own
+                _ = server.Stop();
+
+                return (socket, peerHandle);
+            },
+        };
+
+        await Start(server);
+
+        using var client = new ClientWebSocket();
+
+        await client.ConnectAsync(UriOf(_port), Cancelled);
+
+        var connectionHandle = await Next(_connections);
+
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await AnswerClose(client));
+        Assert.Equal((false, connectionHandle), await Next(_closes));
+        await server.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Empty(_server.ConnectionHandles);
+    }
+
+    [Fact]
     public async Task Carries_no_credential_either_way()
     {
         var (client, connectionHandle) = await Connect();

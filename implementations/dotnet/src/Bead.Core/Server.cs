@@ -330,12 +330,23 @@ public sealed class Server<TData> : IBeadServer<TData>
             _idle.Clear();
             _listens.Clear();
             _connections.Clear();
+            _closing.Clear();
         }
 
-        // the reverse of the order they were built in
+        // the reverse of the order they were built in; the router's teardown, posted to its
+        // scheduler, has run before the transport stops: what it forgot keeps no timer past it. The
+        // transport stops whatever that teardown does
         Router.Dispose();
         Sessions.Dispose();
-        await Transport.Shutdown();
+
+        try
+        {
+            await Router.WhenDisposed;
+        }
+        finally
+        {
+            await Transport.Shutdown();
+        }
     }
 
     private void StopWaiting(string connectionHandle)

@@ -22,10 +22,10 @@ export type {
   ValueOf,
 } from './descriptors';
 export { failuresOf } from './failures';
-export type { IFailureCatalogue, IListedFailure } from './failures';
-export { GENERATED_CODE_SUPPORTS_VERSION_1 } from './generated-code';
+export type { IFailureCatalogue, IListedFailure, IListedFailureError } from './failures';
+export { GENERATED_CODE_SUPPORTS_VERSION_2 } from './generated-code';
 export { createServiceClient } from './service-client';
-export type { IServiceClient } from './service-client';
+export type { IServiceClient, IServiceClientOptions } from './service-client';
 export { createServiceServer } from './service-server';
 export type {
   IServiceResponse,

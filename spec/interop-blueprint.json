@@ -1,0 +1,299 @@
+{
+  "format": "bead-blueprint/1",
+  "requires": [],
+  "reservedServices": {
+    "ids": [],
+    "names": []
+  },
+  "services": [
+    {
+      "description": "Bead's interop service: the procedures every implementation's interop server offers alike, what each takes, answers and admits stated in interop-service.json.",
+      "failures": [
+        {
+          "code": 7,
+          "description": "This procedure fails, on purpose.",
+          "failureName": "ON_PURPOSE"
+        },
+        {
+          "code": 8,
+          "description": "That destination is registered already.",
+          "failureName": "REGISTERED_ALREADY"
+        }
+      ],
+      "procedures": [
+        {
+          "admission": "none",
+          "description": "Answers its request's payload.",
+          "failures": [],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "echo",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Answers an application failure, on purpose.",
+          "failures": [
+            "ON_PURPOSE"
+          ],
+          "procedureId": 2,
+          "procedureKind": "request",
+          "procedureName": "fail",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Answers once a delay passed, and counts the calls cancelled first.",
+          "failures": [],
+          "procedureId": 3,
+          "procedureKind": "request",
+          "procedureName": "slow",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Answers how many calls to slow its connection cancelled.",
+          "failures": [],
+          "procedureId": 4,
+          "procedureKind": "request",
+          "procedureName": "cancellations",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": {
+            "hook": "nobody"
+          },
+          "description": "Admits nobody.",
+          "failures": [],
+          "procedureId": 5,
+          "procedureKind": "request",
+          "procedureName": "denied",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Throws before it answers.",
+          "failures": [],
+          "procedureId": 6,
+          "procedureKind": "request",
+          "procedureName": "broken",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Answers a string of the length asked for.",
+          "failures": [],
+          "procedureId": 7,
+          "procedureKind": "request",
+          "procedureName": "bytes",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Answers what its client's clock answers.",
+          "failures": [],
+          "procedureId": 8,
+          "procedureKind": "request",
+          "procedureName": "ask",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Answers the time where its client is.",
+          "failures": [],
+          "procedureId": 9,
+          "procedureKind": "command",
+          "procedureName": "clock",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Notifies what tick notifies, to its call's session's subscription.",
+          "failures": [
+            "ON_PURPOSE"
+          ],
+          "notification": {
+            "encoding": "json"
+          },
+          "procedureId": 10,
+          "procedureKind": "notifies",
+          "procedureName": "ticks",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Notifies a value to the subscription to ticks.",
+          "failures": [],
+          "procedureId": 11,
+          "procedureKind": "request",
+          "procedureName": "tick",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Opens a new session for its connection.",
+          "failures": [],
+          "procedureId": 12,
+          "procedureKind": "request",
+          "procedureName": "login",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "session",
+          "description": "Ends its connection's session.",
+          "failures": [],
+          "procedureId": 13,
+          "procedureKind": "request",
+          "procedureName": "logout",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "session",
+          "description": "Answers the name its call's session holds.",
+          "failures": [],
+          "procedureId": 14,
+          "procedureKind": "request",
+          "procedureName": "whoami",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Registers its caller's connection as a destination of the relay.",
+          "failures": [
+            "REGISTERED_ALREADY"
+          ],
+          "procedureId": 15,
+          "procedureKind": "request",
+          "procedureName": "register",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Takes out the destination its caller's connection registered last.",
+          "failures": [],
+          "procedureId": 16,
+          "procedureKind": "request",
+          "procedureName": "unregister",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Ends a credential's session on every connection that keeps it.",
+          "failures": [],
+          "procedureId": 17,
+          "procedureKind": "request",
+          "procedureName": "endSession",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Ends every credential's session of an issuer.",
+          "failures": [],
+          "procedureId": 18,
+          "procedureKind": "request",
+          "procedureName": "endSessionsOf",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        }
+      ],
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 1,
+      "serviceName": "Interop",
+      "serviceRevision": 1
+    }
+  ],
+  "specVersion": "0.3.0"
+}

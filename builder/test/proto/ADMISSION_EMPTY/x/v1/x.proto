@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// An admission that states no rule.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Echo(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 1
+      admission: {}
+    };
+  }
+}

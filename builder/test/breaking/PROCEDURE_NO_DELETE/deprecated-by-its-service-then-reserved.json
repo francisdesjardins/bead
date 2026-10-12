@@ -1,0 +1,44 @@
+{
+  "category": "WIRE",
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/deprecation",
+      "value": {
+        "message": "Use Interplay."
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/deprecation",
+      "value": {
+        "message": "Use Interplay."
+      }
+    },
+    {
+      "op": "remove",
+      "path": "/services/0/procedures/7"
+    },
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureIds/-",
+      "value": {
+        "first": 8,
+        "last": 8
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/0/reserved/procedureNames/-",
+      "value": "ask"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": []
+}

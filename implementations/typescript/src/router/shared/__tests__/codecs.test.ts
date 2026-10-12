@@ -236,7 +236,15 @@ test.describe('the codecs', () => {
         .map(({ name }) => {
           return name;
         })
-    ).toEqual(["a string's leading U+FEFF", 'an object naming a member twice']);
+    ).toEqual([
+      "a string's leading U+FEFF",
+      'an unknown varint of 11 bytes',
+      'an unknown record past the end of its message',
+      'a string past the end of its message',
+      'a length past 32 bits',
+      'a length past 32 bits, a field after',
+      'an object naming a member twice',
+    ]);
   });
 
   test('plays every encoding of the file through a codec of its own, and no other', () => {
@@ -310,7 +318,8 @@ test.describe('the codecs', () => {
     });
   }
 
-  // * the matrix's rows of protobuf-es: where it parts from 17.9.4, and where Bead states no rule
+  // * the matrix's rows of protobuf-es: where it parts from 17.9.1 and 17.9.4, and where Bead states
+  // no rule
 
   test("a string's leading U+FEFF in a proto payload, as protobuf-es strips it", () => {
     expect(readOf(PROBE_CODEC.decode(bytesOf('0A 04 EF BB BF 61')))).toEqual({
@@ -338,6 +347,35 @@ test.describe('the codecs', () => {
         return PROBE_CODEC.decode(bytesOf('15 01 02 03 04'));
       })
     ).toBeInstanceOf(Error);
+  });
+
+  test('a proto record past the end of its message, and an unknown varint of more than 10 bytes, as protobuf-es reads them', () => {
+    // the child's unknown fixed32 takes the parent's last four bytes, and its text the parent's three
+    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 01 61 1A 02 25 00 0A 01 62')))).toEqual({
+      nested: 1,
+      number: 0,
+      text: '0061',
+    });
+    expect(PROBE_CODEC.decode(bytesOf('1A 02 0A 03 61 62 63')).child?.text).toBe('abc');
+    expect(readOf(PROBE_CODEC.decode(bytesOf(`48${' 80'.repeat(10)} 00`)))).toEqual({
+      nested: 0,
+      number: 0,
+      text: '',
+    });
+  });
+
+  test('a proto length past 32 bits, as protobuf-es reads it', () => {
+    // a length's fifth byte keeps 4 bits, so 0x80 0x80 0x80 0x80 0x10 is read as a length of 0
+    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 80 80 80 80 10')))).toEqual({
+      nested: 0,
+      number: 0,
+      text: '',
+    });
+    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 80 80 80 80 10 10 07')))).toEqual({
+      nested: 0,
+      number: 7,
+      text: '',
+    });
   });
 
   test('a proto string holding a surrogate alone, as protobuf-es writes it', () => {

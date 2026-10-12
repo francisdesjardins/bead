@@ -1,0 +1,12 @@
+{
+  // The TypeScript side's strictness, by reference, as the builder's is. What is the example's own:
+  // its relative imports name their `.ts`, as beadc writes them, and esbuild bundles them; and the
+  // runtime, reached from its source, compiles here with the libraries it needs.
+  "extends": "../../../implementations/typescript/tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"]
+}

@@ -65,9 +65,10 @@ jobs:
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
-  # examples, the generated `Probe` held to its generator, then its tests. The interop against the C#
-  # server runs in the .NET job, the only one with both runtimes. On the current line and on the
-  # floor `engines.node` declares, so the floor holds by a run.
+  # examples, the generated `Probe` held to its generator, the generated interop's types and lint,
+  # then its tests. The interop against the C# server runs in the .NET job, the only one with both
+  # runtimes. On the current line and on the floor `engines.node` declares, so the floor holds by a
+  # run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
@@ -106,22 +107,20 @@ jobs:
         run: $YARN playwright install --with-deps chromium
       - if: matrix.node == '26'
         run: $YARN test:devtools
-      # The root's own files, from the README to this CI, under the TypeScript side's formatter. The
-      # conformance files are left to their generators.
+      # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
+      # tool holds their list. The conformance files are left to their generators.
       - name: Format of the root's files
         working-directory: .
-        run: >-
-          implementations/typescript/node_modules/.bin/oxfmt
-          -c implementations/typescript/.oxfmtrc.json --check
-          README.md CHANGELOG.md CLAUDE.md docs spec/spec.md spec/debugging.md spec/interop-service.json
-          spec/schemas tools .github
+        run: node tools/check-format.mjs
 
   # ── .NET ─────────────────────────────────────────────────────────────────────
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
-  # the analyzers; `dotnet test` builds with every warning an error, then runs the tests — and the
-  # interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts with
-  # Node, then the TypeScript client against the C# server. Only the TypeScript side is installed,
-  # for its interop server.
+  # the analyzers, the generated folders left to their generator; `dotnet build` builds every
+  # project with every warning an error, the builder's C# goldens among them, which `Bead.Goldens`
+  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests — and
+  # the interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts
+  # with Node, then the TypeScript client against the C# server. Only the TypeScript side is
+  # installed, for its interop server.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -150,10 +149,227 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: $YARN install --immutable
         working-directory: implementations/typescript
-      - run: dotnet format Bead.slnx --verify-no-changes
+      - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
+      # every project, which `dotnet test` does not: it builds the test projects alone
+      - run: dotnet build Bead.slnx
       - run: dotnet test --solution Bead.slnx
       - run: $YARN test:interop
         working-directory: implementations/typescript
+
+  # ── Builder ──────────────────────────────────────────────────────────────────
+  # beadc's own gate, from builder/, its toolchain its own. On Linux: types, the goldens' types,
+  # lint, format, buf's lint and format over its options and its fixtures, and the options'
+  # generated code held to its generator, none of which a platform moves. On every leg: protoc, the
+  # one `protoc.json` pins, fetched and checked by its sha256, then its tests, the interop's .proto
+  # among them, whose blueprint is the spec's byte for byte in either line ending, and the goldens of
+  # both targets, protoc's C# messages among them; then beadc itself over the interop's blueprint,
+  # its rules and its form, then each side's interop to what beadc generates from the root's
+  # `beadc.yaml`, then, on Linux, `beadc breaking`, the interop's blueprint and `examples/hello`
+  # against the last release that carries one, from 0.3.0. On Windows, where buf and protoc are
+  # other binaries, on the current line; on Linux, on the floor `engines.node` declares too. The C#
+  # goldens build in the .NET job, which has the SDK. The wrappers, `beadc.sh` and `beadc.ps1`, are
+  # held to one contract on every leg, against a stand-in engine. On the image's legs, Linux on
+  # Node 26, amd64 and arm64, each natively: beadc's image built from `builder/Dockerfile`, its test
+  # stage built on the image itself, so beadc's tests run once on the image's Node, protoc and
+  # environment, then once more from `builder/`, where each wrapper runs the image it built, over
+  # the repository's projects and `examples/hello`; and the wrappers' lint, each linter at its pin.
+  #
+  # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails: here a
+  # skip could only be a fetch gone wrong.
+  builder:
+    name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      BEADC_PROTOC_REQUIRED: 1
+      # a wrapper's test that would skip without bash, pwsh 7.6 or, on Windows, the right to make a
+      # symbolic link fails: every runner has them
+      BEADC_WRAPPERS_REQUIRED: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-2025]
+        node: ['26']
+        include:
+          - os: ubuntu-26.04
+            node: '24.9'
+          # the image, on each architecture natively: the first include marks the Linux Node 26
+          # leg, which GitHub merges, adding no leg
+          - os: ubuntu-26.04
+            node: '26'
+            image: true
+          # ! arm64 natively, on every push: its own leg, counted against the account's minutes in a
+          # private repository; taken out, the image is amd64's alone until a release builds arm64
+          - os: ubuntu-26.04-arm
+            node: '26'
+            image: true
+    defaults:
+      run:
+        working-directory: builder
+        # Git Bash on Windows, so `$YARN` and every step read alike on both
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      # The download cache, not `node_modules`: cache what was downloaded, always install.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: builder-yarn-cache-${{ runner.os }}-${{ runner.arch }}-node${{ matrix.node }}-${{ hashFiles('builder/yarn.lock') }}
+          restore-keys: builder-yarn-cache-${{ runner.os }}-${{ runner.arch }}-node${{ matrix.node }}-
+      # `--immutable` fails if `yarn.lock` would change.
+      - run: $YARN install --immutable
+      # protoc's archive, extracted, by the pin it was checked against
+      - uses: actions/cache@v6
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      # assigned first: a failed fetch fails the step, which a substitution inside echo's arguments
+      # would not
+      - name: protoc, by its pin's sha256
+        run: |
+          protoc="$(node tools/fetch-protoc.mjs)"
+          echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      - if: runner.os == 'Linux'
+        run: $YARN check
+      # the image's test stage first, then the image, which reuses every stage but the last; the
+      # tests after it run each wrapper against it
+      - if: matrix.image
+        name: The image, its test stage first
+        working-directory: .
+        run: |
+          docker build -f builder/Dockerfile --target test .
+          docker build -f builder/Dockerfile -t beadc:ci .
+          echo "BEADC_IMAGE=beadc:ci" >> "$GITHUB_ENV"
+          echo "BEADC_IMAGE_REQUIRED=1" >> "$GITHUB_ENV"
+      # shellcheck from its image by digest, PSScriptAnalyzer at its version: a new default rule
+      # reaches the wrappers by a change of a pin, never by a runner's update
+      - if: matrix.image
+        name: The wrappers' lint, each linter at its pin
+        run: |
+          docker run --rm -v "$PWD/wrappers:/mnt:ro" koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d -S style /mnt/beadc.sh
+          pwsh -NoProfile -Command '
+            if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq ([version] "1.25.0"))) {
+              Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+            }
+            Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+            Invoke-ScriptAnalyzer -Path wrappers/beadc.ps1 -EnableExit'
+      - run: $YARN test
+      - name: The interop's blueprint, to beadc's rules
+        run: node src/cli.ts check ../spec/interop-blueprint.json
+      - name: The interop's blueprint, in its form
+        run: node src/cli.ts blueprint --check ../spec/interop-blueprint.json
+      - name: Each side's interop, what beadc generates from its blueprint
+        working-directory: .
+        run: node builder/src/cli.ts generate --check
+      # ! beadc breaking, against the last release that carries a blueprint, the interop's and
+      # examples/hello's: 0.3.0 is the first, and a later tag without one fails, so the step never
+      # passes by comparing nothing once a release carries it
+      - if: runner.os == 'Linux'
+        name: The interop's blueprint and examples/hello, against the last release
+        working-directory: .
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
+          tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "$tag" ] || ! git cat-file -e "$tag:spec/interop-blueprint.json" 2> /dev/null; then
+            if [ "$(printf '%s\n' v0.3.0 "$tag" | sort -V | head -n 1)" = v0.3.0 ]; then
+              echo "::error title=beadc breaking::$tag carries no spec/interop-blueprint.json"
+              exit 1
+            fi
+            echo "::notice title=beadc breaking::${tag:-no v* tag} carries no blueprint: nothing to hold against before 0.3.0"
+            exit 0
+          fi
+          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github
+          cd examples/hello
+          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github
+
+  # ── Examples ─────────────────────────────────────────────────────────────────
+  # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
+  # Yarn portal and a ProjectReference. First what the examples copy or take from beadc, held to
+  # their source; then examples/hello: beadc on Node from builder/ holds its generated files and
+  # writes the copy of Bead's options its external builds read; buf's lint and layout over its
+  # .proto; each half's gates and both its builds; then each client against each server, both
+  # modes of each half, sixteen pairs, every one writing transcript.txt, every server ending clean.
+  # On the current line and on the floor the TypeScript half's engines.node declares. The wrappers
+  # run over it on the builder job's image legs, where the image is.
+  examples:
+    name: Examples (Node ${{ matrix.node }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['26', '24.9']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: examples/hello/dotnet/global.json
+          cache: true
+          cache-dependency-path: |
+            examples/*/dotnet/packages.lock.json
+            implementations/dotnet/src/**/packages.lock.json
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: builder
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      # The download cache, not `node_modules`: cache what was downloaded, always install.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: examples-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('builder/yarn.lock', 'examples/*/typescript/yarn.lock') }}
+          restore-keys: examples-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
+      - uses: actions/cache@v6
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      # `--immutable` fails if `yarn.lock` would change.
+      - run: $YARN install --immutable
+        working-directory: builder
+      # assigned first: a failed fetch fails the step
+      - name: protoc, by its pin's sha256
+        working-directory: builder
+        run: |
+          protoc="$(node tools/fetch-protoc.mjs)"
+          echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      - name: What each example copies, or takes from beadc's wrapper and init
+        run: node tools/check-examples.mjs
+      # held first, then written: generate writes the same files again, and the copy of Bead's
+      # options, git's to ignore, which buf and Grpc.Tools read
+      - name: hello's generated files, what beadc writes
+        working-directory: examples/hello
+        run: |
+          node ../../builder/src/cli.ts generate --check
+          node ../../builder/src/cli.ts generate
+          git diff --exit-code
+      - run: $YARN install --immutable
+        working-directory: examples/hello/typescript
+      - name: hello's .proto, buf's lint and layout
+        working-directory: examples/hello
+        run: |
+          typescript/node_modules/.bin/buf lint
+          typescript/node_modules/.bin/buf format --diff --exit-code
+      - run: $YARN check
+        working-directory: examples/hello/typescript
+      - run: $YARN build && $YARN build:external
+        working-directory: examples/hello/typescript
+      - run: dotnet format Hello.csproj --verify-no-changes --exclude gen
+        working-directory: examples/hello/dotnet
+      - run: dotnet build && dotnet build -p:HelloMessages=external
+        working-directory: examples/hello/dotnet
+        env:
+          CI: true
+      - name: Each client against each server
+        run: node examples/hello/pairs.mjs
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
@@ -215,7 +431,7 @@ jobs:
   ci-ok:
     name: CI ok
     if: always()
-    needs: [spec, typescript, dotnet, commits]
+    needs: [spec, typescript, dotnet, builder, examples, commits]
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:

@@ -3,7 +3,7 @@
 // dependencies
 
 import { assertHeld, assertHeldDelay, type IClock, PLATFORM_CLOCK } from '../shared/clock';
-import { RECONNECT_EVENT } from '../shared/constants';
+import { ERROR_EVENT, RECONNECT_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
 import {
@@ -27,6 +27,7 @@ import type {
   ITransportClientDisconnectOptions,
   ITransportClientImplementation,
   ITransportClientInternal,
+  ITransportClientDefineOptions,
   ITransportClientOptions,
   ITransportClientReconnectOptions,
   TransportClientEventMap,
@@ -70,6 +71,7 @@ export type {
   ITransportClientDisconnectOptions,
   ITransportClientImplementation,
   ITransportClientInternal,
+  ITransportClientDefineOptions,
   ITransportClientOptions,
   ITransportClientReconnectOptions,
   TRANSPORT_CLIENT_EVENTS,
@@ -81,6 +83,7 @@ export type {
   TransportClientReconnectDelayOrDelayResolver,
   TransportClientReconnectDelayResolver,
   TransportClientReconnectTapCallback,
+  TransportClientToldEvent,
 } from './types';
 
 // types
@@ -129,11 +132,11 @@ const sleep = (
  * `[dispose]`, and `reconnect` itself, which waits between its attempts on the clock its transport
  * runs on.
  *
- * `define` receives the client being built and returns what only its transport knows — its clock,
- * `connect`, `disconnect`, `send` and `[dispose]`. Those are reached through the client, never
- * captured, so `reconnect` calls whatever `client.connect` is at the time, as a subclass override
- * would; a replacement must call the original before its first `await`, which is when `reconnect`
- * lets it past the state guard.
+ * `define` receives the client being built and the `tell` its transport calls its listeners by
+ * (spec 15.1), and returns what only its transport knows — its clock, `connect`, `disconnect`,
+ * `send` and `[dispose]`. Those are reached through the client, never captured, so `reconnect` calls
+ * whatever `client.connect` is at the time, as a subclass override would; a replacement must call
+ * the original before its first `await`, which is when `reconnect` lets it past the state guard.
  *
  * @example
  * const client = createTransportClient((client) => {
@@ -160,7 +163,8 @@ export const createTransportClient = <
   ConnectOptions extends ITransportClientConnectOptions,
 >(
   define: (
-    client: ITransportClientInternal<Socket, ConnectOptions>
+    client: ITransportClientInternal<Socket, ConnectOptions>,
+    options: ITransportClientDefineOptions
   ) => ITransportClientImplementation<ConnectOptions>
 ): ITransportClient<Socket, ConnectOptions> => {
   const emitter = createEmitter<TransportClientEventMap>();
@@ -168,6 +172,19 @@ export const createTransportClient = <
   // true only while `reconnect` calls `client.connect`, which the state guard then lets through
   let isAttempting = false;
   let lastConnectOptions: ConnectOptions | undefined;
+
+  // each listener within a guard (spec 15.1): what one throws is reported, and the transport goes
+  // on as if it returned
+  const defineOptions: ITransportClientDefineOptions = {
+    tell: (event, params) => {
+      return emitter.emitEach(event, {
+        onError: (error) => {
+          emitter.emit(ERROR_EVENT, toError(error));
+        },
+        params,
+      });
+    },
+  };
 
   const client: ITransportClientInternal<Socket, ConnectOptions> = {
     socket: null,
@@ -365,7 +382,7 @@ export const createTransportClient = <
   };
 
   // after `client` exists, since `define` closes over it; the methods above only read this when called
-  const implementation = define(client);
+  const implementation = define(client, defineOptions);
 
   return client;
 };

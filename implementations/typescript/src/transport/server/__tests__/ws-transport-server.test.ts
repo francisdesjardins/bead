@@ -309,6 +309,30 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+$/);
         expect(await greeted).toEqual([{ credential: undefined, data: 'hi' }]);
       });
+
+      test('keeps a connection whose connection listener throws, its messages heard, the throw reported with it', async () => {
+        const thrown = new Error('a connection listener that throws');
+        const reported = nextServerEvent(server, 'error');
+
+        server.once('connection', () => {
+          throw thrown;
+        });
+
+        // the listener after it, told all the same
+        const [, , connectionHandle] = await connectClient(client);
+
+        expect(await reported).toEqual([thrown, connectionHandle]);
+
+        const heard = nextServerEvent(server, 'message');
+
+        await client.send({ data: 'still here' });
+
+        expect(await heard).toEqual([
+          { credential: undefined, data: 'still here' },
+          connectionHandle,
+        ]);
+        expect(server.clients).toHaveLength(1);
+      });
     });
 
     test.describe('WSTransportServer "message" event', () => {
@@ -331,6 +355,30 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(new TextDecoder().decode(data as ArrayBuffer)).toBe('bytes');
 
         expect(server.clients[0]?.lastActivity).toBeGreaterThan(0);
+      });
+
+      test('hears the next message after a message listener throws, the throw reported with its connection', async () => {
+        const [, , connectionHandle] = await connectClient(client);
+        const thrown = new Error('a message listener that throws');
+
+        server.once('message', () => {
+          throw thrown;
+        });
+
+        const reported = nextServerEvent(server, 'error');
+        const first = nextServerEvent(server, 'message');
+
+        await client.send({ data: 'first' });
+
+        expect(await first).toEqual([{ credential: undefined, data: 'first' }, connectionHandle]);
+        expect(await reported).toEqual([thrown, connectionHandle]);
+
+        const second = nextServerEvent(server, 'message');
+
+        await client.send({ data: 'second' });
+
+        expect(await second).toEqual([{ credential: undefined, data: 'second' }, connectionHandle]);
+        expect(server.clients).toHaveLength(1);
       });
     });
 
@@ -790,6 +838,41 @@ test.describe('WSTransportServer, its handshake', () => {
     expect(server.clients).toHaveLength(0);
   });
 
+  test('refuses an upgrade that comes as it stops, 503 busy, told when to come back', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const socket = await openTcp(port);
+    const answer = { isClosed: false, text: '' };
+    const head = requestOf('GET / HTTP/1.1');
+    const cut = head.indexOf('Sec-WebSocket-Version');
+
+    socket.on('data', (chunk: Buffer) => {
+      answer.text += chunk.toString('latin1');
+    });
+    socket.on('close', () => {
+      answer.isClosed = true;
+    });
+
+    // its head in two writes, one each side of the stop: long enough for the server to start
+    // parsing the first, which keeps its connection past the stop
+    socket.write(head.slice(0, cut));
+    await sleep(100);
+    await server.stop();
+    socket.write(head.slice(cut));
+
+    await expect
+      .poll(() => {
+        return answer.isClosed;
+      })
+      .toBe(true);
+    socket.destroy();
+
+    expect(answer).toEqual(
+      refusedWith('503 Service Unavailable', { fields: ['retry-after: 1'], refusal: 'busy' })
+    );
+    expect(server.clients).toHaveLength(0);
+  });
+
   test('answers 426 to an upgrade of a version but 13 or of none, marked version-refused, naming version 13 and websocket, before its key and its origin are judged', async () => {
     await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;
@@ -906,6 +989,45 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     }
 
     expect(MAXIMUM_MESSAGE_BYTES).toBe(16_778_240);
+  });
+
+  test('closes going away a connection whose accept a stop crossed', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({
+      closeTimeout: 50,
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
+    const starting = server.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const closes: ServerEvents['close'][] = [];
+    // a peer that never answers its close holds the stop past its snapshot of the connections
+    const silent = createFakeSocket({ onClose: 'ignore' });
+
+    server.on('close', (...params) => {
+      closes.push(params);
+    });
+    fake.connect(silent, 40_000);
+
+    const stopping = server.stop();
+
+    await expect
+      .poll(() => {
+        return silent.closeCodes;
+      })
+      .toEqual([1001]);
+
+    // a WebSocketServer that delivers a connection after its close, past the snapshot
+    const late = createFakeSocket();
+    const lateHandle = fake.connect(late, 40_001);
+
+    await stopping;
+
+    expect(late.closeCodes).toEqual([1001]);
+    expect(closes).toContainEqual([false, lateHandle]);
+    expect(server.clients).toEqual([]);
+    expect(server.isClosed()).toBe(true);
   });
 
   test('is secure as its application says what stands in front of it, whatever it listens on, and by what it listens on when it says nothing', async () => {

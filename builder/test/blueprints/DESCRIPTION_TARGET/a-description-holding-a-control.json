@@ -1,0 +1,15 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/description",
+      "value": "Answers its request's payload,\u0007 a bell rung."
+    }
+  ],
+  "findings": [
+    {
+      "rule": "DESCRIPTION_TARGET",
+      "pointer": "/services/0/procedures/0/description"
+    }
+  ]
+}

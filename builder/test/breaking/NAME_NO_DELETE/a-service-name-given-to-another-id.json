@@ -1,0 +1,85 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/-",
+      "value": {
+        "failures": [],
+        "procedures": [
+          {
+            "admission": "none",
+            "failures": [],
+            "procedureId": 1,
+            "procedureKind": "request",
+            "procedureName": "ping",
+            "request": {
+              "encoding": "json"
+            },
+            "result": {
+              "encoding": "json"
+            }
+          }
+        ],
+        "reserved": {
+          "failureCodes": [],
+          "procedureIds": [],
+          "procedureNames": []
+        },
+        "serviceId": 2,
+        "serviceName": "Spare",
+        "serviceRevision": 1,
+        "deprecation": {}
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "add",
+      "path": "/reservedServices/ids/-",
+      "value": {
+        "first": 2,
+        "last": 2
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/-",
+      "value": {
+        "failures": [],
+        "procedures": [
+          {
+            "admission": "none",
+            "failures": [],
+            "procedureId": 1,
+            "procedureKind": "request",
+            "procedureName": "ping",
+            "request": {
+              "encoding": "json"
+            },
+            "result": {
+              "encoding": "json"
+            }
+          }
+        ],
+        "reserved": {
+          "failureCodes": [],
+          "procedureIds": [],
+          "procedureNames": []
+        },
+        "serviceId": 3,
+        "serviceName": "Spare",
+        "serviceRevision": 1
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_NO_DELETE",
+      "pointer": "/reservedServices/ids"
+    },
+    {
+      "rule": "NAME_NO_DELETE",
+      "pointer": "/reservedServices/names"
+    }
+  ]
+}

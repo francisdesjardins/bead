@@ -13,9 +13,9 @@ namespace Bead.Tests;
 /// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
 /// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the codec generated code makes
 /// of Google.Protobuf, then refused, or its fields those read; each value built from its form and
-/// written, to its bytes or refused. A row a row of the support matrix excuses this side from, a
-/// value no <see cref="JsonElement"/> holds, is counted and not played. The TypeScript side plays the
-/// same file.
+/// written, to its bytes or refused. An entry a row of the support matrix excuses this side from, a
+/// value no <see cref="JsonElement"/> holds or a payload Google.Protobuf reads where protobuf refuses
+/// it, is counted and not played. The TypeScript side plays the same file.
 /// </summary>
 public sealed class CodecsTests
 {
@@ -343,6 +343,38 @@ public sealed class CodecsTests
     }
 
     [Fact]
+    public void A_proto_tag_of_more_than_5_bytes_or_past_32_bits_as_Google_Protobuf_reads_it()
+    {
+        // * a tag's varint read to its 10 bytes, its low 32 bits kept, where protobuf's REQUIRED
+        // BadTag_* tests refuse it: field 2's number 7, written back in its own tag
+        foreach (var given in new[] { "90 80 80 80 80 00 07", "90 80 80 80 80 80 80 80 00 07", "90 80 80 80 40 07", "90 80 80 80 80 80 0F 07" })
+        {
+            var probe = ProbeCodec.Decode(Convert.FromHexString(given.Replace(" ", "", StringComparison.Ordinal)));
+
+            Assert.Equal(("", 7u, (Probe?)null), (probe.Text, probe.Number, probe.Child));
+            Assert.Equal(Convert.FromHexString("1007"), ProbeCodec.Encode(probe).ToArray());
+        }
+
+        // an unknown field of the number 536,870,911, written back in 5 bytes
+        var unknown = ProbeCodec.Decode(Convert.FromHexString("F8FFFFFF7F01"));
+
+        Assert.Equal(("", 0u, (Probe?)null), (unknown.Text, unknown.Number, unknown.Child));
+        Assert.Equal(Convert.FromHexString("F8FFFFFF0F01"), ProbeCodec.Encode(unknown).ToArray());
+    }
+
+    [Fact]
+    public void A_proto_length_past_32_bits_as_Google_Protobuf_reads_it()
+    {
+        // * a length's varint read to 32 bits, its fifth byte's bits past them dropped, where
+        // protobuf's REQUIRED BadLength_Varint32BitOverflow refuses it: an empty text, then the field after
+        var alone = ProbeCodec.Decode(Convert.FromHexString("0A8080808010"));
+        var followed = ProbeCodec.Decode(Convert.FromHexString("0A80808080101007"));
+
+        Assert.Equal(("", 0u, (Probe?)null), (alone.Text, alone.Number, alone.Child));
+        Assert.Equal(("", 7u, (Probe?)null), (followed.Text, followed.Number, followed.Child));
+    }
+
+    [Fact]
     public void A_proto_string_holding_a_surrogate_alone_as_Google_Protobuf_writes_it()
     {
         var probe = new Probe { Text = string.Concat("a", (char)0xD800, "b") };
@@ -352,19 +384,31 @@ public sealed class CodecsTests
     }
 
     [Fact]
-    public void Plays_every_row_but_NaN_and_Infinity_which_no_JsonElement_holds_as_a_number()
+    public void Plays_every_entry_of_the_file_but_those_a_row_of_the_matrix_excuses_this_side_from()
     {
-        var excused = Root.GetProperty("payloads").EnumerateArray().Concat(Root.GetProperty("values").EnumerateArray()).Where(IsExcused).ToList();
+        var payloads = Root.GetProperty("payloads").EnumerateArray().Where(IsExcused).ToList();
+        var values = Root.GetProperty("values").EnumerateArray().Where(IsExcused).ToList();
 
         Assert.Equal(
-            ["NaN", "Infinity"],
-            excused.Select((entry) =>
+            [
+                "a tag of 6 bytes",
+                "a tag of 9 bytes",
+                "a tag of 5 bytes past 32 bits",
+                "a tag of 7 bytes past 32 bits",
+                "a tag past 32 bits, of an unknown field",
+                "a length past 32 bits",
+                "a length past 32 bits, a field after",
+                "NaN",
+                "Infinity",
+            ],
+            payloads.Concat(values).Select((entry) =>
             {
                 return entry.GetProperty("name").GetString()!;
             }));
 
-        // * each a double no number of JSON's holds, which JsonSerializer refuses to make an element of
-        foreach (var entry in excused)
+        // * each value a double no number of JSON's holds, which JsonSerializer refuses to make an
+        // element of
+        foreach (var entry in values)
         {
             var given = DoubleOf(entry.GetProperty("value").GetProperty("double"));
 
