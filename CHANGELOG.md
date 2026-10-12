@@ -121,6 +121,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and refuses a revision lowered, or left where the contract moved.
 - `tools/release.mjs prepare` lists, among what it owes by hand, each `--except` of CI's
   `beadc breaking` step and each of decision 0006's gates owed that names the version it prepares.
+- `spec.md` 15.6 gives the order in which a server judges a request at its path, the stop placed
+  in it, and `spec/transports.json` plays it with two faults in one request; 15.7 answers the 404
+  an exchange it would look up by a well-formed token; 15.5 refuses two `Authorization` fields on
+  a `POST` that presents a token, a connect's being read by no one.
 
 ### Removed
 
@@ -157,6 +161,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   implementations. The C# side's WebSocket connection settles its write pump and a close under way
   once the connection ends, its read begun or not, and observes the close it sends a message too
   big.
+- The TypeScript side's HTTP server reads a `Content-Length` as the number its digits write: a
+  connect or a listen whose length is `00` has no body, as RFC 9110 §8.6 reads it, where it was
+  refused 400.
 
 ## [0.2.0] - 2026-10-07
 

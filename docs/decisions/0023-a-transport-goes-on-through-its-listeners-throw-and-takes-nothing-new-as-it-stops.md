@@ -89,16 +89,18 @@ error already goes.
 
 **Once its stop began, a server takes nothing new** (spec 15.2, 15.6, 15.7). Over HTTP it draws no
 connection, a connect it would take refused 503 `busy`, its `Retry-After` 1, judged where
-`maximumConnections` is judged, after the connect's own 400 and 415; and it holds none, an exchange
-that presents a well-formed token answered the 404 marked `connection-unknown`, unlooked-up and
-nothing of it handed on, as the stop answers each listen it holds, and as the exchange is answered
-once the stop closed its connection. At a WebSocket's address, an upgrade it would take is refused
-503 `busy`, its `Retry-After` 1, marked and stamped as 15.6 says, after 15.2's refusals. A request
-refused for what it is, its host, its path, its origin, its method, its type, its token's form, is
-refused so whether or not a stop began: what a request is comes before when it came, as the
-connect's own 400 comes before its 503. On the TypeScript side, Node's `shouldUpgradeCallback` says
-false once the HTTP server that received the request no longer serves, and the transport's `request`
-listener answers the refusal.
+`maximumConnections` is judged, after the connect's 415 and its own 400; and it holds none, an
+exchange that presents a well-formed token answered the 404 marked `connection-unknown`, unlooked-up
+and nothing of it handed on, as the stop answers each listen it holds, and as the exchange is
+answered once the stop closed its connection. At a WebSocket's address, an upgrade it would take is
+refused 503 `busy`, its `Retry-After` 1, marked and stamped as 15.6 says, after 15.2's refusals. A
+request refused for what it is — its host, its path, its origin, its method, its token's form, and a
+connect's type and its own 400 — is refused so whether or not a stop began: what a request is comes
+before when it came. An exchange's type, its `Authorization` and its length are judged once its
+connection is found, and a stopping server finds none: the 404 comes first. Spec 15.6 gives the
+whole order. On the TypeScript side, Node's `shouldUpgradeCallback` says false once the HTTP server
+that received the request no longer serves, and the transport's `request` listener answers the
+refusal.
 
 **A connection that registers as the stop begins is closed going away, 1001** (spec 15.3), by a
 guard at registration. No pass of the stop looks again for one: on the C# side, the host's

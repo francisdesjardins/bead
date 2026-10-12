@@ -1088,7 +1088,9 @@ stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
-15.4. HTTP's exchanges keep no connection, so the transport draws one. A `POST /bead` with no body,
+15.4. HTTP's exchanges keep no connection, so the transport draws one. A `POST /bead` with no body —
+no `Transfer-Encoding`, and no `Content-Length` or one whose number is 0, its digits read as a number
+([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)) —,
 of type `application/prs.bead` as every `POST /bead` is, and no token, connects: the server draws 16
 bytes from a cryptographic source and answers 201, the token in
 `bead-connection-token`, in base64url without padding. Each exchange after presents that token in
@@ -1117,8 +1119,10 @@ tabs. The server reads that field on a `POST` that carries a REQUEST, and no oth
 hands the router the field's value with the request, as it came, whole — its auth-scheme included —
 its surrounding whitespace removed, and none when the field is empty or absent. Two calls of one
 connection may so present two credentials, and a token is renewed without connecting again. A
-`POST /bead` with more than one `Authorization` field is refused, 400, before its body is read: the
-field is no list to combine ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)).
+`POST /bead` that presents a token with more than one `Authorization` field is refused, 400, before
+its body is read: the field is no list to combine
+([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)). A connect's is read by no
+one.
 
 15.6. A refusal of the transport's own has an empty body, and is marked in `bead-refusal`. A client
 rejects a send on a marked refusal: nothing was tried. Any other status that is not 2xx — a
@@ -1144,6 +1148,20 @@ lost.
 Every response on the path carries `cache-control: no-store` and `x-content-type-options: nosniff`,
 and so does every refusal of a WebSocket server's own.
 
+A server judges a request at its path in this order, and answers the first that applies. What HTTP
+refuses of its own, its HTTP server answers, unmarked (section 15.12); then a host the server does
+not take, 403; a path not its own, 404; an origin it does not take, 403; a method but `GET`, `POST`
+or `DELETE`, 405. A `POST` that presents no token connects: no type, or another than
+`application/prs.bead`, or a body encoded, 415; the connect's own 400; then, once its stop began,
+or past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any other request is judged
+by its token: none, or one of another form, 400; once the server's stop began, the 404 marked
+`connection-unknown`, the token not looked up; a token it does not hold, the same 404. A `DELETE`
+then ends its connection. A listen is refused 409 when its client did not say it listens, then
+400 for a body or its counts (section 15.9). A `POST` is refused 415 for its type or its
+encoding, then 400 for two `Authorization` fields, 413 for a length it declares past
+`maximumBodyBytes`, and 429 past what its connection has under way, each before its body is read;
+what its body brings is judged as it comes (section 15.5).
+
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
 exchange lost — a network that failed, an answer that could not be written, a request unanswered
 past the exchange timeout, 5 minutes by default — closes the connection at both ends, as a socket
@@ -1157,8 +1175,9 @@ A server that stops closes every connection it holds, as lost: what was under wa
 is gone as this section says. Once its stop began it draws no connection and holds none: a connect
 it would take is refused 503, `busy`, its `Retry-After` 1
 ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
-[§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), and an exchange that presents a
-token is answered the 404 marked `connection-unknown`, nothing of it handed on.
+[§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), and an exchange it would look up
+by a well-formed token is answered the 404 marked `connection-unknown`, nothing of it handed on, in
+section 15.6's order.
 
 15.8. What the server sends of its own — a notification, a request of its own, a cancel, the failure
 that ends a subscription — reaches a client that listens. The client says so at connect,

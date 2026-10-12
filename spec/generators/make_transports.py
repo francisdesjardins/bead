@@ -87,14 +87,17 @@ def lines_of(name, value):
     return [f'{name}: {each}' for each in values]
 
 
-def send(on, method, target='/bead', *, fields=None, body=None, host='{host}'):
+def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', length=None):
     """A request of HTTP/1.1, rendered to its octets: its line, its fields in their order — its host,
-    or none, or several, those given, its body's length when it has one or posts — and a socket
-    closed once answered."""
+    or none, or several, those given, its body's length when it has one or posts, or the length
+    given, written as it is — and a socket closed once answered."""
     lines = [f'{method} {target} HTTP/1.1', *lines_of('host', host)]
     lines += [f'{name}: {value}' for name, value in pairs(fields)]
 
-    if body is not None or method in ('POST', 'DELETE'):
+    # ! a length given takes the place of the one counted: two would be refused by HTTP itself
+    if length is not None:
+        lines.append(f'content-length: {length}')
+    elif body is not None or method in ('POST', 'DELETE'):
         lines.append(f'content-length: {length_of(body or "")}')
 
     lines.append('connection: close')
@@ -246,6 +249,47 @@ cases = [
         post('encoded', ECHO, fields={'content-encoding': 'gzip'}), refused('encoded', 415, 'type-refused')]),
     ('a body past its bound is refused 413, marked', ['15.6.9', '15.12.5'], {'maximumBodyBytes': 64}, [
         *drawn(), post('large', request(1, 'echo', '"' + 'x' * 60 + '"')), refused('large', 413, 'too-large')]),
+    # 15.6: a request at the path that holds two faults, answered by the first in 15.6's order
+    ('a request at the path that holds two faults is answered by the first that applies, in the order section 15.6 gives',
+     ['15.5', '15.6'], {'maximumBodyBytes': 64}, [
+         send('origin', 'POST', fields={'origin': 'https://elsewhere.test', 'bead-connection-token': 'x',
+                                        'content-type': BEAD}, body=ECHO),
+         refused('origin', 403, 'origin-refused'),
+         send('path', 'POST', '/elsewhere', fields={'bead-connection-token': 'x', 'content-type': BEAD}, body=ECHO),
+         refused('path', 404, 'path-unknown'),
+         send('method', 'PUT', fields={'bead-connection-token': 'x'}, body='A1'),
+         refused('method', 405, 'method-refused', {'allow': 'GET, POST, DELETE'}),
+         connect('typed', fields={'content-type': 'text/plain'}, body='A1'), refused('typed', 415, 'type-refused'),
+         send('untyped', 'POST', body='A1'), refused('untyped', 415, 'type-refused'),
+         send('form', 'POST', fields={'bead-connection-token': 'x', 'content-type': 'text/plain'}, body=ECHO),
+         refused('form', 400, 'malformed'),
+         send('unknown', 'POST', fields={'bead-connection-token': 'AAAAAAAAAAAAAAAAAAAAAA', 'content-type': 'text/plain'},
+              body=ECHO),
+         refused('unknown', 404, 'connection-unknown'),
+         *drawn(),
+         send('both', 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', 'text/plain'),
+                                      ('authorization', BEARER), ('authorization', BEARER)], body=ECHO),
+         refused('both', 415, 'type-refused'),
+         post('large', request(1, 'echo', '"' + 'x' * 60 + '"'),
+              fields=[('authorization', BEARER), ('authorization', BEARER)]),
+         refused('large', 400, 'malformed'),
+         send('listen', 'GET', '/bead?after=x&wait=0', fields={'bead-connection-token': '{token}'}),
+         refused('listen', 409, 'listen-undeclared'),
+         post('echo', ECHO), answered('echo', result(1, '"x"'))]),
+    # 15.5: a connect carries no request, and its Authorization is read by no one
+    ('a connect with two Authorization fields draws its connection: only a POST that presents a token is refused for them',
+     ['15.5'], None, [
+         send('connect', 'POST', fields=[('content-type', BEAD), ('authorization', BEARER), ('authorization', BEARER)]),
+         expect('connect', 201, fields={'bead-connection-token': {'capture': 'token', 'shape': 'token'}}),
+         post('echo', ECHO), answered('echo', result(1, '"x"'))]),
+    # 15.4: a Content-Length is the number its digits write (RFC 9110 §8.6), so 00 is no body
+    ('a request whose Content-Length is 00 has no body: its connect is drawn, and its listen held',
+     ['15.4', '15.9'], None, [
+         send('connect', 'POST', fields={'content-type': BEAD, 'bead-listen': '?1'}, length='00'),
+         expect('connect', 201, fields={'bead-connection-token': {'capture': 'token', 'shape': 'token'},
+                                        'bead-listen': '?1'}),
+         send('listen', 'GET', '/bead?after=0&wait=0', fields={'bead-connection-token': '{token}'}, length='00'),
+         expect('listen', 204, body='')]),
     ('a host the server does not take is refused 403, marked', ['15.6.5', '15.12'], {'hosts': ['bead.test']}, [
         connect(host='elsewhere.test'), refused('connect', 403, 'host-refused'),
         connect('taken', host='bead.test'), expect('taken', 201)]),
