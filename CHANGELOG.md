@@ -131,6 +131,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in it, and `spec/transports.json` plays it with two faults in one request; 15.7 answers the 404
   an exchange it would look up by a well-formed token; 15.5 refuses two `Authorization` fields on
   a `POST` that presents a token, a connect's being read by no one.
+- `spec.md` 15.13 states two points open in this version: a server takes every host when `hosts`
+  is not given, so a server a browser can reach names its hosts; and a WebSocket server can take
+  two sockets from one address and port as one connection.
 
 ### Removed
 

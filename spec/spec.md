@@ -36,7 +36,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 
 **Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
-written; one point is open, section 8.3.**
+written; three points are open, section 8.3 and the two of section 15.13.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
@@ -1264,6 +1264,22 @@ origin's test. A WebSocket server takes both alike on an upgrade (section 15.2).
 is its socket's; behind a proxy on the same machine, which the server is told to trust,
 `isProxyTrusted`, it is the last entry of the proxy's `X-Forwarded-For`, when that entry is an
 address.
+
+15.13. Open in this version, each closed by a decision of its own:
+
+1. A server takes every host when `hosts` is not given (section 15.12). A page that rebinds its
+   name to the address of a server on the loopback names its own `Host` and sends its own
+   `Origin`, so it reaches the server, HTTP or WebSocket, and calls what admits `none`; on the
+   loopback, which is secure (section 13.4), it is presented what the server presents. A server a
+   browser can reach names the hosts it takes as its clients' `Host` field names them, a port only
+   where a request names one. A default that takes only `localhost`, the names under `.localhost`
+   and IP literals, `hosts` compared by its `uri-host` alone, comes by a decision of its own.
+2. No two connections a transport holds are one, yet a WebSocket server can take two sockets as
+   one: two sockets from one address and port, to two of the server's addresses, are told apart
+   by nothing it reads of them, so the second takes the first's place, its session among it, and
+   the first is held by none, outside the server's bounds, its gauges and its stop, which may leave
+   it open or abort it with no close. How a transport keeps every connection it holds apart comes
+   by a decision of its own.
 
 ## 16. Services and procedures
 
