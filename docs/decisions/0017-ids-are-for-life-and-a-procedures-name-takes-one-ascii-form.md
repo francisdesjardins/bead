@@ -293,7 +293,7 @@ table by them. A builder plays `names` and `ids` as one-procedure blueprints.
 **`spec/metrics.json` pins what a registry refuses**, folded, its revision among it.
 
 **`beadc check` and `beadc breaking` hold a blueprint to section 16** and to the builder's own rules
-([0006](0006-a-rule-has-its-gate.md)'s gates owed).
+([0006](0006-a-rule-has-its-gate.md)).
 
 ## Consequences
 

@@ -378,9 +378,9 @@ blueprint and `examples/hello` to the last release that carries a blueprint, by 
 from 0.3.0; the `commits` job holds `tools/release.mjs`'s move of its version, through the root's
 tools' tests. A gate here that does not run is among 0006's gates owed.
 
-**Until 0.3.0, `beadc breaking` holds nothing in CI.** No release before it carries a blueprint;
-the step says so and passes, the gate stays owed, and the step fails from 0.3.0 on a release that
-carries none.
+**`beadc breaking` holds from 0.3.0, the first release that carries a blueprint.** No release
+before it carries one, so the step holds against 0.3.0 and the releases after it, and fails on a
+last release that carries none.
 
 ## The Tenth Man
 
