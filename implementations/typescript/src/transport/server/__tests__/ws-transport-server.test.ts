@@ -125,6 +125,11 @@ const answerOf = async (port: number, head: string) => {
   return answer;
 };
 
+// the rank a handle names
+const ordinalOf = (connectionHandle: string): number => {
+  return Number(/;ordinal=(?<ordinal>\d+)$/u.exec(connectionHandle)?.groups?.['ordinal']);
+};
+
 // where a scripted server's HTTP server listens: for real, on a port the system picked
 const SCRIPTED = { address: host, findOpenPort: true };
 
@@ -306,7 +311,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         const { isRegistered, connectionHandle } = await seen;
 
         expect(isRegistered).toBe(true);
-        expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+$/);
+        expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=\d+$/u);
         expect(await greeted).toEqual([{ credential: undefined, data: 'hi' }]);
       });
 
@@ -434,7 +439,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       test('resolves for a handle nobody holds', async () => {
         await connectClient(client);
         await expect(
-          server.send({ data: 'hello' }, 'type=WS;ip=0.0.0.0;port=1')
+          server.send({ data: 'hello' }, 'type=WS;ip=0.0.0.0;port=1;ordinal=1')
         ).resolves.toBeUndefined();
       });
     });
@@ -454,7 +459,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('resolves false for a handle nobody holds', async () => {
-        await expect(server.close('type=WS;ip=0.0.0.0;port=1')).resolves.toBe(false);
+        await expect(server.close('type=WS;ip=0.0.0.0;port=1;ordinal=1')).resolves.toBe(false);
       });
 
       test('"closeAll" closes every connection', async () => {
@@ -508,13 +513,19 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('stops twice, then starts again on a new port', async () => {
+        const [, , before] = await connectClient(client);
+        const clientClosed = nextClientEvent(client, 'close');
+
         await server.stop();
         await server.stop();
+        await clientClosed;
 
         ({ port } = await server.start({ address: host, findOpenPort: true }));
-        await connectClient(client);
+        const [, , after] = await connectClient(client);
 
         expect(server.clients).toHaveLength(1);
+        // ranked after every connection taken before the stop: no handle is given twice
+        expect([before, after].map(ordinalOf)).toEqual([1, 2]);
       });
     });
   });
@@ -616,6 +627,28 @@ test.describe('WSTransportServer, on the wire', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(server.isClosed()).toBe(true);
     socket.destroy();
+  });
+
+  test('names a client that comes over IPv4 to a dual-stack listener by its IPv4 address', async () => {
+    const dualStack = createWSTransportServer({ WebSocketServer });
+    const { port: dualPort } = await dualStack.start({ address: '::', findOpenPort: true });
+    const connection = nextServerEvent(dualStack, 'connection');
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const socket = new TrackedWsWebSocket(`ws://127.0.0.1:${String(dualPort)}`);
+
+    try {
+      await once(socket, 'open');
+
+      const [, request, connectionHandle] = await connection;
+
+      // the socket's own address, IPv4 mapped into IPv6, read as the IPv4 address it carries
+      expect(request.socket.remoteAddress).toBe('::ffff:127.0.0.1');
+      expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=1$/u);
+      expect(dualStack.clients).toMatchObject([{ address: '127.0.0.1', connectionHandle }]);
+    } finally {
+      socket.close();
+      await dualStack.stop();
+    }
   });
 
   test('delivers binary as a Buffer with binaryType "nodebuffer", and text still as a string', async () => {
@@ -1022,7 +1055,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     server.on('close', (...params) => {
       closes.push(params);
     });
-    fake.connect(silent, 40_000);
+    fake.connect(silent, { remotePort: 40_000, server });
 
     const stopping = server.stop();
 
@@ -1034,7 +1067,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     // a WebSocketServer that delivers a connection after its close, past the snapshot
     const late = createFakeSocket();
-    const lateHandle = fake.connect(late, 40_001);
+    const lateHandle = fake.connect(late, { remotePort: 40_001, server });
 
     await stopping;
 
@@ -1057,7 +1090,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       await starting;
 
       try {
-        return server.isSecure(fake.connect(createFakeSocket()));
+        return server.isSecure(fake.connect(createFakeSocket(), { server }));
       } finally {
         await server.stop();
       }
@@ -1135,7 +1168,41 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     expect(server.isClosed()).toBe(true);
   });
 
-  test('leaves the connection a newer socket took the handle of alone when the older one closes', async () => {
+  test('names each connection by its peer’s port and the rank it came at, two sockets from one address and port among them, and gives no handle twice', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const starting = server.start(SCRIPTED);
+
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const [first, second, third] = [createFakeSocket(), createFakeSocket(), createFakeSocket()];
+    // three sockets from one address and port, the first closed before the third came
+    const firstHandle = fake.connect(first, { server });
+    const secondHandle = fake.connect(second, { server });
+
+    first.terminate();
+
+    const thirdHandle = fake.connect(third, { server });
+
+    expect([firstHandle, secondHandle, thirdHandle]).toEqual([
+      'type=WS;ip=10.0.0.1;port=40000;ordinal=1',
+      'type=WS;ip=10.0.0.1;port=40000;ordinal=2',
+      'type=WS;ip=10.0.0.1;port=40000;ordinal=3',
+    ]);
+    expect(server.clients).toMatchObject([
+      { address: '10.0.0.1', connectionHandle: secondHandle, port: 40_000 },
+      { address: '10.0.0.1', connectionHandle: thirdHandle, port: 40_000 },
+    ]);
+
+    // each its own: a close reaches its socket alone, and the first's handle names none
+    await expect(server.close(firstHandle)).resolves.toBe(false);
+    await expect(server.close(secondHandle)).resolves.toBe(true);
+    expect([second.closeCodes, third.closeCodes]).toEqual([[1000], []]);
+    await server.stop();
+  });
+
+  test('closes each of two sockets from one address and port on its own, each its own close told', async () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
     const closes: unknown[] = [];
@@ -1149,18 +1216,21 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     const older = createFakeSocket();
     const newer = createFakeSocket();
-    // the same port given again: the same handle
-    const connectionHandle = fake.connect(older);
+    // the same port given again: another connection, another handle
+    const olderHandle = fake.connect(older, { server });
+    const newerHandle = fake.connect(newer, { server });
 
-    fake.connect(newer);
     older.terminate();
 
-    expect([closes, server.gauges().counts]).toEqual([[], { connections: 1 }]);
+    expect([closes, server.gauges().counts]).toEqual([[[false, olderHandle]], { connections: 1 }]);
 
     newer.terminate();
 
     expect([closes, server.gauges().counts]).toEqual([
-      [[false, connectionHandle]],
+      [
+        [false, olderHandle],
+        [false, newerHandle],
+      ],
       { connections: 0 },
     ]);
     await server.stop();
@@ -1181,7 +1251,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     const first = createFakeSocket();
     const second = createFakeSocket();
     const live = createFakeSocket();
-    const handle = fake.connect(live);
+    const handle = fake.connect(live, { server });
 
     fake.connectGone(first);
     fake.connectGone(second);
@@ -1210,7 +1280,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await starting;
 
     const silent = createFakeSocket({ onClose: 'ignore' });
-    fake.connect(silent);
+    fake.connect(silent, { server });
 
     const started = Date.now();
     await server.stop();
@@ -1234,7 +1304,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await starting;
 
     const silent = createFakeSocket({ onClose: 'ignore' });
-    const closing = server.close(fake.connect(silent));
+    const closing = server.close(fake.connect(silent, { server }));
 
     await sleep(50);
 
@@ -1260,7 +1330,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     const silent = createFakeSocket({ onClose: 'ignore' });
 
-    fake.connect(silent);
+    fake.connect(silent, { server });
     clock.tick(5);
     silent.hear('message', Buffer.from('bytes'), true);
 
@@ -1282,7 +1352,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await starting;
 
     const stubborn = createFakeSocket({ onClose: 'throw' });
-    const connectionHandle = fake.connect(stubborn);
+    const connectionHandle = fake.connect(stubborn, { server });
 
     await expect(server.close(connectionHandle)).resolves.toBe(true);
     expect(stubborn.wasTerminated).toBe(true);
@@ -1310,10 +1380,10 @@ test.describe('WSTransportServer, heartbeat', () => {
       closes.push([wasClean, connectionHandle]);
     });
 
-    fake.connect(answering, 40_001);
+    fake.connect(answering, { remotePort: 40_001, server });
 
-    const silentHandle = fake.connect(silent, 40_002);
-    const closingHandle = fake.connect(closing, 40_003);
+    const silentHandle = fake.connect(silent, { remotePort: 40_002, server });
+    const closingHandle = fake.connect(closing, { remotePort: 40_003, server });
 
     // a socket in its close handshake is sent no ping, and is dropped all the same
     (closing as { readyState: number }).readyState = 2;
@@ -1359,7 +1429,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
-    fake.connect(createFakeSocket());
+    fake.connect(createFakeSocket(), { server });
 
     expect(
       timers.armed.map(({ delay }) => {
@@ -1382,7 +1452,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
-    fake.connect(socket);
+    fake.connect(socket, { server });
 
     // no interval at all: Node would beat one of Infinity every millisecond
     expect([timers.armed, socket.pings, socket.wasTerminated]).toEqual([[], 0, false]);

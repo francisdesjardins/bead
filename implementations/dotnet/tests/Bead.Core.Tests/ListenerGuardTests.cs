@@ -8,7 +8,7 @@ public sealed class ListenerGuardTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=1";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=1;ordinal=1";
 
     // definition
 

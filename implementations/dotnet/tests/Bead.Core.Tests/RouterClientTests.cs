@@ -12,7 +12,7 @@ public sealed partial class RouterClientTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -132,7 +132,7 @@ public sealed partial class RouterClientTests
 
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return clock(JsonOf("null"))(new RequestOptions { ConnectionHandle = "type=WS;ip=127.0.0.1;port=1" }).WaitAsync(Patience, Cancelled);
+            return clock(JsonOf("null"))(new RequestOptions { ConnectionHandle = "type=WS;ip=127.0.0.1;port=1;ordinal=1" }).WaitAsync(Patience, Cancelled);
         });
         await Assert.ThrowsAsync<ArgumentException>(() =>
         {

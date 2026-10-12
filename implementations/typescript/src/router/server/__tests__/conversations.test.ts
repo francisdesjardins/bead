@@ -111,7 +111,9 @@ test("every procedure of the interop service's API is offered, on the side its k
 
 test("slow waits on its server's clock, which its router runs on, and answers once it has passed", async () => {
   const clock = createTestClock();
-  const pipe = createPipedTransports({ connectionHandle: 'type=WS;ip=127.0.0.1;port=50001' });
+  const pipe = createPipedTransports({
+    connectionHandle: 'type=WS;ip=127.0.0.1;port=50001;ordinal=1',
+  });
   using router = createRouterServer(pipe.server, { clock });
   using sessions = createSessionManager<string>({ clock });
   using caller = createRouterClient(pipe.client);

@@ -1911,6 +1911,32 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await server.stop();
   });
 
+  test('names a client that comes over IPv4 to a dual-stack listener by its IPv4 address', async () => {
+    const server = createHTTPTransportServer({
+      createServer: (listener) => {
+        return createServer(listener);
+      },
+      isProxyTrusted: true,
+    });
+    const { port } = await server.start({ address: '::', findOpenPort: true });
+    const url = `http://${host}:${String(port)}/bead`;
+
+    try {
+      const drawn = await connect(url, server);
+      // the socket's address, IPv4 mapped into IPv6, read as the loopback a proxy comes from
+      const forwarded = await post(url, { headers: { 'x-forwarded-for': '203.0.113.9' } });
+
+      expect(forwarded.status).toBe(201);
+      expect(server.clients).toMatchObject([
+        { address: host, connectionHandle: drawn.connectionHandle },
+        { address: '203.0.113.9', connectionHandle: 'type=HTTP;ip=203.0.113.9;ordinal=2' },
+      ]);
+      expect(drawn.connectionHandle).toBe('type=HTTP;ip=127.0.0.1;ordinal=1');
+    } finally {
+      await server.stop();
+    }
+  });
+
   test('puts a body together from as many pieces as it comes in, and hands on one envelope', async () => {
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted();
     const { connectionToken } = connectScripted();

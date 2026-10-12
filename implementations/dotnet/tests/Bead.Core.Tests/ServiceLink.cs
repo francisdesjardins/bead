@@ -8,7 +8,7 @@ namespace Bead.Tests;
 internal sealed class ServiceLink : IAsyncDisposable
 {
     /// <summary>The one connection's handle on the server.</summary>
-    public const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    public const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
     private readonly ClientEnd _client = new();
     private readonly ServerEnd _server = new();

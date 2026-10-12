@@ -36,6 +36,13 @@ public sealed record WebSocketTransportClientOptions
     /// them; the system's clock when none.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// What sends its opening handshakes, the platform's own when none: the tests' way to open a
+    /// socket from an address and a port of their own, as the TypeScript side's tests give their
+    /// <c>WebSocket</c>.
+    /// </summary>
+    internal HttpMessageInvoker? Invoker { get; init; }
 }
 
 /// <summary>
@@ -518,7 +525,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
             try
             {
-                await socket.ConnectAsync(UriOf(options), linked.Token);
+                await (_options.Invoker is { } invoker ? socket.ConnectAsync(UriOf(options), invoker, linked.Token) : socket.ConnectAsync(UriOf(options), linked.Token));
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
             {

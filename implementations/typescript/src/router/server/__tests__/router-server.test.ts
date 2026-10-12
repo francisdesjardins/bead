@@ -68,8 +68,8 @@ interface ISentEnvelope {
   envelope: Envelope | undefined;
 }
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: Handle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1136,7 +1136,7 @@ test.describe('createRouterServer', () => {
       const { deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
       const services = createServiceManager(router);
-      const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+      const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
 
       open(first);
       open(second);
@@ -3332,7 +3332,7 @@ test.describe('createRouterServer, credentials', () => {
 });
 
 test.describe('createRouterServer, relaying', () => {
-  const device: Handle = 'type=WS;ip=127.0.0.1;port=50100';
+  const device: Handle = 'type=WS;ip=127.0.0.1;port=50100;ordinal=1';
   const failing: IProcedure = { ...echo, procedureId: 2, procedureName: 'failing' };
   const held: IProcedure = { ...echo, procedureId: 3, procedureName: 'held' };
   const admitting: IRelayOptions = {
@@ -4298,7 +4298,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
 
   test('lets a queue go with its subscription: unsubscribed, cancelled, its session ended, its connection closed', async () => {
     const { close, deliver, resolver, router } = createPaced();
-    const third = 'type=WS;ip=127.0.0.1;port=50003';
+    const third = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
 
     using _router = router;
 
@@ -4609,7 +4609,7 @@ test.describe('createRouterServer, its metrics', () => {
     const metricsRegistry = createMetricsRegistry();
     const { close, deliver, open, transport } = createScriptedTransport();
     using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
-    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
     const droppedOf = () => {
       return countedOf(metricsRegistry).filter((line) => {
         return line.startsWith('bead_subscriptions_dropped_total');
@@ -4657,7 +4657,7 @@ test.describe('createRouterServer, its metrics', () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
-    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
     // a protocol code, a code of the procedure's own, and a code section 8 names none of
     const ending: [Handle, IFailure][] = [
       [first, SERVER_FAILURES.accessDenied],

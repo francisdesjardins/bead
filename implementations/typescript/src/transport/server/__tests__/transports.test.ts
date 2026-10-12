@@ -29,7 +29,6 @@ import { createServer } from '../../../server/server';
 import type { IServer, IServerTransportLike } from '../../../server/types';
 import { createWSServer } from '../../../server/ws-server';
 import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
-import { TRANSPORT_WS } from '../../shared/constants';
 import {
   BODY_BYTES_BUDGET,
   createHTTPTransportServer,
@@ -44,7 +43,6 @@ import {
   type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
-import { generateHandle } from '../transport-server';
 import type { ITransportServer, TransportServerConnectionHandle } from '../types';
 import { createWSTransportServer, HEARTBEAT } from '../ws-transport-server';
 import { createFakeWebSocketServer } from './fake-websocket-server';
@@ -150,7 +148,9 @@ interface IReport {
 
 /** A server of the interop service, whichever its transport, as a case plays it. */
 type ServerUnderTest = AsyncDisposable &
-  IServer<IServerTransportLike, string> & { transport: Pick<ITransportServer, 'gauges' | 'start'> };
+  IServer<IServerTransportLike, string> & {
+    transport: Pick<ITransportServer, 'clients' | 'gauges' | 'start'>;
+  };
 
 // constants
 
@@ -582,15 +582,19 @@ test.describe('the transports', () => {
 
         return exchange;
       };
-      // the handle a WebSocket's connection has on the server: the address and port it came from
+      // the handle a WebSocket's connection has on the server: the one it holds from the port the
+      // exchange's socket came from, as the C# side finds it
       const handleOf = (on: string, at: string): TransportServerConnectionHandle => {
         const { localPort } = exchangeOf(on, at);
+        const held = server.transport.clients.find(({ port: peerPort }) => {
+          return peerPort === localPort;
+        });
 
-        if (transport !== 'websocket' || localPort === undefined) {
-          throw new Error(`${at}: the exchange ${on} names no connection of its own`);
+        if (transport !== 'websocket' || localPort === undefined || held === undefined) {
+          throw new Error(`${at}: the exchange ${on} names no connection the server holds`);
         }
 
-        return generateHandle({ ip: HOST, port: localPort, type: TRANSPORT_WS });
+        return held.connectionHandle;
       };
       // what the server reported that its case did not expect: nothing, between steps
       const expectNothingReported = (when: string): void => {

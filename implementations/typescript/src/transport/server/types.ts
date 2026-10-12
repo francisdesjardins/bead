@@ -46,19 +46,14 @@ export interface ITransportServerClientAware<Socket> extends ITransportServerCli
   socket: Socket;
 }
 
-export interface ITransportServerClientHandleInfo {
-  ip: string;
-  port: number;
-  type: TRANSPORTS;
-}
-
 /**
- * A connection with no address of its own — one a transport draws, one a worker takes — named by who
- * it came from and the rank it came at.
+ * What names a connection a transport holds (spec 15.1): its type, who it came from, its peer's port
+ * when it comes on a socket of its own, and the rank its transport took it at, which none shares.
  */
-export interface ITransportServerDrawnHandleInfo {
+export interface ITransportServerHandleInfo {
   ip: string;
   ordinal: number;
+  port?: number | undefined;
   type: TRANSPORTS;
 }
 
@@ -212,14 +207,17 @@ export interface ITransportServerDefineOptions<Socket = unknown, Request = unkno
 // types
 
 /**
- * `type=WS;ip=127.0.0.1;port=50000`, a connection named by who is on the other end, which
- * {@link generateHandle} makes; or `type=HTTP;ip=127.0.0.1;ordinal=7`, one a transport that keeps no
- * connection draws, named by the rank it was drawn at, which {@link generateDrawnHandle} makes. A
- * handle is never a secret: it names a connection in reports and events, and no token enters it.
+ * What names a connection its transport holds (spec 15.1), which {@link generateHandle} writes:
+ * `type=WS;ip=127.0.0.1;port=50000;ordinal=3`, one on a socket of its own, by its peer's port and
+ * the rank its transport took it at; `type=HTTP;ip=127.0.0.1;ordinal=7`, one a transport draws, or a
+ * worker takes, by its rank alone. A transport gives none twice, so no two connections it holds
+ * share one, two sockets from one address and port among them. Its form is this implementation's,
+ * written for a reader of a trace: an application compares a handle whole. A handle is never a
+ * secret: it names a connection in reports and events, and no token enters it.
  */
 export type TransportServerConnectionHandle =
   | `type=${TRANSPORTS};ip=${string};ordinal=${number}`
-  | `type=${TRANSPORTS};ip=${string};port=${number}`;
+  | `type=${TRANSPORTS};ip=${string};port=${number};ordinal=${number}`;
 
 /** The connections by handle: what a transport registers each one in and removes it from. */
 export type TransportServerConnections<Socket> = Map<

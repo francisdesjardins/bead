@@ -22,7 +22,7 @@ import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
-import { assertHosts, assertOrigins } from './hosts-and-origins';
+import { assertHosts, assertOrigins, clientAddressOf } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   IIncomingMessageLike,
@@ -110,10 +110,10 @@ const closeOpened = (
  *
  * A request at its address is judged in the order of spec 15.2, `hosts` and `origins` among its
  * steps as the HTTP transport's (spec 15.12): 400 as HTTP answers it to a `Host` missing, repeated
- * or no host, or an absolute-form target that names none; 403 to a host it does not take; 405 to a method but `GET` or `HEAD`; 426 to a
- * request that asks no WebSocket, and to a version but 13; 400 to a malformed upgrade; 403 to an
- * `Origin` neither its own nor among `origins`; each refusal as {@link refusalOfHandshake} writes
- * it. Each message is an envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws`
+ * or no host, or to an absolute-form target that names none; 403 to a host it does not take; 405 to
+ * a method but `GET` or `HEAD`; 426 to a request that asks no WebSocket, and to a version but 13;
+ * 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among `origins`; each refusal
+ * as {@link refusalOfHandshake} writes it. Each message is an envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws`
  * closes a connection that sends a larger one with 1009.
  *
  * @example
@@ -146,6 +146,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     (server, connections, { tell }) => {
       let httpServer: Server | undefined;
       let webSocketServer: IWebSocketServerLike | undefined;
+      // the rank of the last connection taken, across its starts: no handle is given twice
+      let ordinal = 0;
 
       // resolves once `socket` has closed, dropping it when the handshake takes longer than allowed:
       // on the real clock, whatever the server's is, since it bounds the platform's own close against
@@ -246,18 +248,21 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         // read now: a socket already gone reports neither
         const { remoteAddress, remotePort } = request.socket;
 
-        // nothing tells one gone socket's handle from another's, and its close is on its way
+        // a socket gone has no peer to name, and its close is on its way
         if (remoteAddress === undefined || remotePort === undefined) {
           return (socket.terminate(), undefined);
         }
 
+        const address = clientAddressOf(remoteAddress);
+        // drawn as it is taken, never from the peer's address alone, which another socket may share
         const connectionHandle = generateHandle({
-          ip: remoteAddress,
+          ip: address,
+          ordinal: (ordinal += 1),
           port: remotePort,
           type: TRANSPORT_WS,
         });
         const connection: ITransportServerClientAware<IServerSocketLike> = {
-          address: remoteAddress,
+          address,
           connectionHandle,
           lastActivity: undefined,
           port: remotePort,
@@ -285,8 +290,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           beating.answer();
         });
 
-        // a socket whose handle a newer one took — its port given again — closes no connection: the
-        // handle names the newer one now
+        // a connection the registry no longer holds, which a stop cleared, tells no close of its own
         socket.on(CLOSE_EVENT, (code) => {
           beating.stop();
 

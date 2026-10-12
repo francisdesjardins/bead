@@ -16,7 +16,7 @@ public sealed class ServerTests : IAsyncLifetime
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -601,7 +601,7 @@ public sealed class ServerTests : IAsyncLifetime
     [Fact]
     public async Task Relays_as_its_options_say_its_own_admission_and_timeout_kept_requireSessionOrCredential_where_it_gives_none()
     {
-        const string device = "type=WS;ip=127.0.0.1;port=50002";
+        const string device = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
         var admitting = new BeforeRequest((_) =>
         {
             return true;

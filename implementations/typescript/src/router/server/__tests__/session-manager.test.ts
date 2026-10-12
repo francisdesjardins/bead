@@ -22,8 +22,8 @@ interface IUser {
   username: string;
 }
 
-const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 
 /** The next `event` within `ms`, or `undefined` when none came. */
 const nextEvent = async <K extends SESSION_MANAGER_EVENTS>(
@@ -256,7 +256,7 @@ test.describe('createSessionManager', () => {
         drawn.add(
           sessions.set(
             sessions.create(
-              `type=WS;ip=127.0.0.1;port=${String(connection)}` as TransportServerConnectionHandle
+              `type=WS;ip=127.0.0.1;port=${String(connection)};ordinal=1` as TransportServerConnectionHandle
             )
           ).sessionToken
         );
@@ -386,7 +386,7 @@ test.describe('createSessionManager', () => {
         })
       ).toEqual([first, second]);
       expect(sessions.has(second)).toBe(true);
-      expect(sessions.get('type=WS;ip=127.0.0.1;port=1')).toBeUndefined();
+      expect(sessions.get('type=WS;ip=127.0.0.1;port=1;ordinal=1')).toBeUndefined();
     });
 
     test('delete emits "deleted" and stops the timers; an unknown connection is false', async () => {

@@ -613,8 +613,8 @@ export interface IRouterServerOptions {
 /**
  * A connection of the relay's own router that a destination names: something behind the relay that
  * connected to it, which the relay asks as the server asks a client, by a command. Once that
- * connection closes, the destination is unreachable, whoever connects under the same handle next:
- * the application unregisters it, and registers the newcomer anew once it knows it.
+ * connection closes, the destination is unreachable, and no connection takes its handle again: the
+ * application unregisters it, and registers the next connection anew once it knows it.
  */
 export interface IConnectionTarget {
   connectionHandle: TransportServerConnectionHandle;

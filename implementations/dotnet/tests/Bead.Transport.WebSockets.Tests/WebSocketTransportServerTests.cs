@@ -21,9 +21,6 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 {
     // constants
 
-    // a handle the tests give every connection, as a port given again would
-    private const string Shared = "type=WS;ip=127.0.0.1;port=1";
-
     // a bearer credential, RFC 6750's own example, its auth-scheme included
     private const string Bearer = "Bearer mF_9.B5f-4.1JqM";
 
@@ -90,7 +87,12 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         await Listen();
     }
 
-    private async Task Listen()
+    private Task Listen()
+    {
+        return Listen(Loopback);
+    }
+
+    private async Task Listen(WebSocketTransportStartOptions start)
     {
         _server.Message += (message, connectionHandle) =>
         {
@@ -104,7 +106,30 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             _connections.Writer.TryWrite(connectionHandle);
         };
-        _port = (await _server.Start(Loopback, Cancelled)).Port;
+        _port = (await _server.Start(start, Cancelled)).Port;
+    }
+
+    /// <summary>Whether this platform opens two sockets from one address and port.</summary>
+    public static bool OpensTwoSocketsFromOnePort
+    {
+        get
+        {
+            return SamePort.IsOpened;
+        }
+    }
+
+    // a server of its own, listening on every address of the machine, its loopback ones among them
+    private async Task ListenEverywhere()
+    {
+        await _server.Stop();
+        _server = new WebSocketTransportServer();
+        await Listen(new WebSocketTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true });
+    }
+
+    // the rank a handle names
+    private static long OrdinalOf(string connectionHandle)
+    {
+        return long.Parse(connectionHandle.Split(";ordinal=")[1], CultureInfo.InvariantCulture);
     }
 
     // a client connected, and the handle the server gave its connection
@@ -746,7 +771,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal(new byte[] { 0xA1, 0x11, 0x00, 0x02 }, message.Bytes.ToArray());
             Assert.False(message.IsText);
             Assert.Equal(connectionHandle, handle);
-            Assert.StartsWith("type=WS;ip=127.0.0.1;port=", connectionHandle, StringComparison.Ordinal);
+            Assert.Matches(@"^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=\d+$", connectionHandle);
         }
     }
 
@@ -1089,7 +1114,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Resolves_a_send_for_a_handle_nobody_holds()
     {
-        await _server.Send(new TransportMessage(new byte[] { 1 }, false), "type=WS;ip=127.0.0.1;port=1").WaitAsync(Patience, Cancelled);
+        await _server.Send(new TransportMessage(new byte[] { 1 }, false), "type=WS;ip=127.0.0.1;port=1;ordinal=1").WaitAsync(Patience, Cancelled);
     }
 
     [Fact]
@@ -1287,7 +1312,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     public async Task Stops_at_once_when_never_started_stops_twice_then_starts_again_and_accepts()
     {
         var never = new WebSocketTransportServer();
+        var (before, beforeHandle) = await Connect();
 
+        before.Dispose();
         Assert.Same(Task.CompletedTask, never.Stop());
         Assert.Equal(ReadyState.Uninitialized, never.ReadyState);
         await _server.Stop().WaitAsync(Patience, Cancelled);
@@ -1297,9 +1324,11 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         var (client, connectionHandle) = await Connect();
 
+        // the connection taken after the restart ranked after every one before it: none given twice
         using (client)
         {
             Assert.Equal([connectionHandle], _server.ConnectionHandles);
+            Assert.True(OrdinalOf(connectionHandle) > OrdinalOf(beforeHandle), $"{beforeHandle} then {connectionHandle}");
         }
     }
 
@@ -1360,7 +1389,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Resolves_false_closing_a_handle_nobody_holds()
     {
-        Assert.False(await _server.CloseConnection("type=WS;ip=0.0.0.0;port=1").WaitAsync(Patience, Cancelled));
+        Assert.False(await _server.CloseConnection("type=WS;ip=0.0.0.0;port=1;ordinal=1").WaitAsync(Patience, Cancelled));
         Assert.True(_closes.Reader.Count == 0);
     }
 
@@ -1709,38 +1738,97 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(1), $"{watch.Elapsed}");
     }
 
-    [Fact]
-    public async Task Leaves_the_connection_a_newer_socket_took_the_handle_of_alone_when_the_older_one_closes()
+    [Fact(Skip = SamePort.Reason, SkipUnless = nameof(OpensTwoSocketsFromOnePort))]
+    public async Task Names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_two_sockets_from_one_address_and_port_among_them_and_gives_no_handle_twice()
     {
-        await Start(new WebSocketTransportServer
-        {
-            Accepted = (socket, _) =>
-            {
-                return (socket, Shared);
-            },
-        });
+        await ListenEverywhere();
 
-        var (older, _) = await Connect();
-        var (newer, connectionHandle) = await Connect();
+        // two sockets from one address and port, to two addresses of the server, then a third from
+        // it once the first is closed
+        var (first, port) = await SamePort.Connect(new IPEndPoint(IPAddress.Loopback, _port), 0);
+        var firstHandle = await Next(_connections);
+        var (second, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.2"), _port), port);
+        var secondHandle = await Next(_connections);
+
+        using (first)
+        using (second)
+        {
+            Assert.Equal(
+                (port, port),
+                (_server.Clients[0].Port, _server.Clients[1].Port));
+            Assert.Equal([firstHandle, secondHandle], HandlesOf(_server.Clients));
+            Assert.Equal(new Dictionary<string, long> { ["connections"] = 2 }, _server.Gauges().Counts);
+
+            await first.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((true, firstHandle), await Next(_closes));
+
+            var (third, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.3"), _port), port);
+            var thirdHandle = await Next(_connections);
+
+            using (third)
+            {
+                var ordinal = OrdinalOf(firstHandle);
+
+                Assert.Equal(
+                    [
+                        $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal}",
+                        $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal + 1}",
+                        $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal + 2}",
+                    ],
+                    new[] { firstHandle, secondHandle, thirdHandle });
+                Assert.Equal([secondHandle, thirdHandle], HandlesOf(_server.Clients));
+            }
+        }
+    }
+
+    [Fact(Skip = SamePort.Reason, SkipUnless = nameof(OpensTwoSocketsFromOnePort))]
+    public async Task Closes_each_of_two_sockets_from_one_address_and_port_on_its_own_each_its_own_close_told()
+    {
+        await ListenEverywhere();
+
+        var (older, port) = await SamePort.Connect(new IPEndPoint(IPAddress.Loopback, _port), 0);
+        var olderHandle = await Next(_connections);
+        var (newer, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.2"), _port), port);
+        var newerHandle = await Next(_connections);
 
         using (older)
         using (newer)
         {
-            Assert.Equal(Shared, connectionHandle);
+            Assert.NotEqual(olderHandle, newerHandle);
             await older.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
-            // a round trip on the newer: the older's end, which came first, is told by now
-            await _server.Send(new TransportMessage(new byte[] { 1 }, false), Shared).WaitAsync(Patience, Cancelled);
-            await ReceiveOf(newer);
 
-            Assert.Equal([Shared], _server.ConnectionHandles);
+            Assert.Equal((true, olderHandle), await Next(_closes));
+
+            // the newer stands, and is sent to
+            await _server.Send(new TransportMessage(new byte[] { 1 }, false), newerHandle).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(new byte[] { 1 }, (await ReceiveOf(newer)).Bytes);
+            Assert.Equal([newerHandle], _server.ConnectionHandles);
             Assert.Equal(new Dictionary<string, long> { ["connections"] = 1 }, _server.Gauges().Counts);
-            Assert.True(_closes.Reader.Count == 0);
 
             await newer.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
 
-            Assert.Equal((true, Shared), await Next(_closes));
+            Assert.Equal((true, newerHandle), await Next(_closes));
             Assert.Empty(_server.ConnectionHandles);
             Assert.Equal(new Dictionary<string, long> { ["connections"] = 0 }, _server.Gauges().Counts);
+            Assert.True(_closes.Reader.Count == 0);
+        }
+    }
+
+    [Fact]
+    public async Task Names_a_client_that_comes_over_IPv4_to_a_dual_stack_listener_by_its_IPv4_address()
+    {
+        await _server.Stop();
+        _server = new WebSocketTransportServer();
+        await Listen(new WebSocketTransportStartOptions { Address = "::", FindOpenPort = true });
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            Assert.Matches(@"^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=\d+$", connectionHandle);
+            Assert.Equal("127.0.0.1", Assert.Single(_server.Clients).Address);
         }
     }
 

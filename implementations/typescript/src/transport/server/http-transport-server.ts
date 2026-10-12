@@ -27,6 +27,7 @@ import {
   assertHosts,
   assertOrigins,
   authorityOf,
+  clientAddressOf,
   HOST_REFUSAL,
   isAuthority,
   isTakenHost,
@@ -35,7 +36,7 @@ import {
   ORIGIN_REFUSAL,
   requestTargetOf,
 } from './hosts-and-origins';
-import { createTransportServer, generateDrawnHandle } from './transport-server';
+import { createTransportServer, generateHandle } from './transport-server';
 import type {
   HTTPRequestListener,
   HTTPTransportServer,
@@ -252,7 +253,7 @@ const RESPONSE_HEADERS = Object.freeze({
 const PROTOCOL_ERROR = 0x1;
 
 // the addresses of this machine, from which a proxy in front of the transport comes
-const LOOPBACK: ReadonlySet<string> = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const LOOPBACK: ReadonlySet<string> = new Set(['127.0.0.1', '::1']);
 
 // the 404 that tells a client its connection is gone
 const UNKNOWN_CONNECTION: IEnd = Object.freeze({
@@ -535,10 +536,13 @@ export const createHTTPTransportServer = (
         return perAddress.get(address) ?? 0;
       };
 
-      // the client's address: the socket's, or, behind a proxy on this machine the transport trusts,
-      // the last one it forwarded — an address, or nothing of it is taken
+      // the client's address: the socket's, an IPv4 one mapped read as itself, or, behind a proxy on
+      // this machine the transport trusts, the last one it forwarded — an address, or nothing of it
       const addressOf = (request: IHTTPRequestLike): string | undefined => {
-        const { remoteAddress } = request.socket;
+        const remoteAddress =
+          request.socket.remoteAddress === undefined
+            ? undefined
+            : clientAddressOf(request.socket.remoteAddress);
         const forwarded = headerOf(request, 'x-forwarded-for')?.split(',').at(-1)?.trim();
 
         return isProxyTrusted &&
@@ -796,7 +800,7 @@ export const createHTTPTransportServer = (
         }
 
         const connectionToken = drawToken();
-        const connectionHandle = generateDrawnHandle({
+        const connectionHandle = generateHandle({
           ip: address,
           ordinal: (ordinal += 1),
           type: TRANSPORT_HTTP,
@@ -1108,7 +1112,7 @@ export const createHTTPTransportServer = (
         const named = authorityNamedBy(request);
 
         // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2), as HTTP answers it, unmarked; over
-        // HTTP/2, a request malformed
+        // HTTP/2, a malformed request, its stream reset
         if (named === undefined) {
           if (request.httpVersionMajor !== 1) {
             return (reset(response), undefined);

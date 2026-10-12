@@ -37,8 +37,8 @@ import type { IRelayOptions, RelayTarget } from '../types';
 
 type Handle = TransportServerConnectionHandle;
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
-const device: Handle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const device: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 
 /** What a leg B request was asked with. */
 interface IAsked {
@@ -269,7 +269,7 @@ test.describe('createRelay, credentials', () => {
   };
 
   test('answers a call leg B cannot carry DESTINATION_UNREACHABLE, nothing tried: a JWT whose aud names not its destination’s audience, or to one of none; an ELSEWHERE to one of none, or over a leg B that carries none; either in the clear', () => {
-    const plain: Handle = 'type=WS;ip=192.0.2.1;port=50003';
+    const plain: Handle = 'type=WS;ip=192.0.2.1;port=50003;ordinal=1';
     const { relay } = createCarryingRelay(
       new Map([
         [device, { carriesCredential: false, isSecure: true }],

@@ -99,7 +99,9 @@ public sealed record WebSocketTransportStartOptions
 
 /// <summary>
 /// A transport server over WebSocket connections, on Kestrel: one envelope per binary message, a
-/// connection named <c>type=WS;ip=…;port=…</c>, each pinged every <see
+/// connection named <c>type=WS;ip=…;port=…;ordinal=…</c>, by its peer's address and port and the
+/// rank it was taken at, from 1, never reset, so no handle is given twice (spec 15.1); a client
+/// over IPv4 to a dual-stack listener named by its IPv4 address; each pinged every <see
 /// cref="WebSocketTransportServerOptions.Heartbeat"/>. A text message is delivered as text, which
 /// a router reports. What goes out to one connection goes in order, one message at a time. It goes
 /// from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed,
@@ -122,7 +124,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // whether its connections are secure: as its application says what stands in front of it, or,
     // when it says nothing, bound to the loopback as it starts, since it takes no TLS of its own
     private volatile bool _isSecure;
-    // how many connections came, which ranks each: the dictionary keeps no order
+    // how many connections were taken, which ranks each, its handle by it: the dictionary keeps no order
     private long _arrivals;
     // how its events are told: what a listener throws is reported through Error, with its connection
     private readonly ListenerGuard _listeners;
@@ -178,8 +180,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     internal event Action? Stopped;
 
     /// <summary>
-    /// What a connection is made of, from the socket accepted and the handle its peer gives: the
-    /// tests' way to give one a socket of theirs, or a handle another holds.
+    /// What a connection is made of, from the socket accepted and the handle drawn for it: the
+    /// tests' way to give one a socket of theirs.
     /// </summary>
     internal Func<WebSocket, string, (WebSocket Socket, string ConnectionHandle)>? Accepted { get; init; }
 
@@ -492,19 +494,30 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var address = context.Connection.RemoteIpAddress;
         var ip = (address is { IsIPv4MappedToIPv6: true } ? address.MapToIPv4() : address)?.ToString() ?? "";
         var port = context.Connection.RemotePort;
-        var peerHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port}";
-        var (socket, connectionHandle) = Accepted?.Invoke(accepted, peerHandle) ?? (accepted, peerHandle);
+
+        // * the handle drawn as the connection is taken, by the rank it came at: the peer's address
+        // and port, which another connection may share (RFC 9293 §3.4.1), never name it alone, and
+        // its port ties it to the network's records
+        var arrival = Interlocked.Increment(ref _arrivals);
+        var drawnHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port};ordinal={arrival}";
+        var (socket, connectionHandle) = Accepted?.Invoke(accepted, drawnHandle) ?? (accepted, drawnHandle);
         var connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = new Held
         {
-            Arrival = Interlocked.Increment(ref _arrivals),
+            Arrival = arrival,
             Client = new TransportServerClient(ip, connectionHandle, null, port, TransportTypes.WebSocket),
             Closed = closed.Task,
             Connection = connection,
         };
 
-        _connections[connectionHandle] = held;
+        // ! no handle is given twice: one already held is a bug of the draw, and the socket goes
+        if (!_connections.TryAdd(connectionHandle, held))
+        {
+            socket.Abort();
+
+            throw new InvalidOperationException($"the handle {connectionHandle} names a connection already held");
+        }
 
         // ! a stop that began as this registered, past its snapshot, closes it with its own, going
         // away: its close is sent on its own, the read below driving the handshake to its end, and
@@ -535,7 +548,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             try
             {
-                // a socket whose handle a newer one took closes no connection: the handle names the newer one
+                // a connection the registry no longer holds tells no close: the stop's clear took it
                 if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
                 {
                     _listeners.Tell(Close, (socket.CloseStatus == WebSocketCloseStatus.NormalClosure, connectionHandle));

@@ -12,8 +12,8 @@ import type { ISubscriber } from '../../shared/types';
 // constants
 
 const NOW = Date.parse('2026-01-01T00:00:00Z');
-const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 const news = { procedureId: 5, serviceId: 2 };
 const other = { procedureId: 6, serviceId: 2 };
 

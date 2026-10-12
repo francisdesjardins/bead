@@ -1872,6 +1872,19 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Names_a_client_that_comes_over_IPv4_to_a_dual_stack_listener_by_its_IPv4_address()
+    {
+        await Start();
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        _port = (await _server.Start(new HttpTransportStartOptions { Address = "::", FindOpenPort = true }, Cancelled)).Port;
+
+        var drawn = await Connect();
+
+        Assert.Equal("type=HTTP;ip=127.0.0.1;ordinal=1", drawn.ConnectionHandle);
+        Assert.Equal(Host, Assert.Single(_server.Clients).Address);
+    }
+
+    [Fact]
     public async Task Answers_a_request_without_a_Host_with_two_or_with_one_that_is_no_host_400_as_HTTP_does_unmarked()
     {
         // a connect with the Host field lines given: none, two in either order, or one that is no host

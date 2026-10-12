@@ -980,10 +980,11 @@ resolving as section 9.2 says:
    of its envelopes holds behind that header: `PAYLOAD_TOO_LARGE`.
 
 14.4. A destination on a connection of the relay's own dies with that connection: once it closed,
-the destination is unreachable, whoever connects under the same handle next, until it is registered
-anew. Leg B waits for its answer as long as its destination says, and the relay's own timeout at
-most; by default, without end: the requester's own timeout governs, end to end, by its cancel. A
-cancel on leg A, or leg A's connection gone, cancels leg B, and leg A is answered nothing.
+the destination is unreachable until it is registered anew, on another connection: no connection
+takes a handle its transport gave before (section 15.1). Leg B waits for its answer as long as its
+destination says, and the relay's own timeout at most; by default, without end: the requester's own
+timeout governs, end to end, by its cancel. A cancel on leg A, or leg A's connection gone, cancels
+leg B, and leg A is answered nothing.
 
 14.5. Leg A's answer follows leg B's:
 
@@ -1020,7 +1021,14 @@ connection, it hands each envelope on once, in the order its side sent it, unles
 otherwise: HTTP keeps the outbox's order for what the server sends of its own (section 15.9), and
 none between a client's exchanges, so that a CANCEL may come before its REQUEST (section 15.5). A
 transport that keeps no order states what may overtake, and one that may hand an envelope on twice
-states what a copy is, each with what the side that receives it does of it. It reads nothing of an
+states what a copy is, each with what the side that receives it does of it. A server's transport
+names each connection it holds by a handle, which its router, its sessions and its relays name the
+connection by, and what it reports (`debugging.md` 4.1, 5.1). It draws the handle as it takes the
+connection, never from the peer's address alone, which another connection may share
+([RFC 9293 §3.4.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.4.1)), and gives none twice:
+no two connections it holds are one, and its bounds, its gauges and its stop reach each. A handle
+is no secret, and carries none (section 15.4); its form is its implementation's, written for a
+reader of a trace, and an application compares a handle whole. A transport reads nothing of an
 envelope but what this section says; what it refuses of its own is no envelope, and the router never
 sees it. A side calls each listener of its transport's events — a connection opened, an envelope, a
 listen, a close — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3): what one
@@ -1300,8 +1308,10 @@ is `*`, or neither `null` nor an origin as
 [RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2) serializes it. Since a page
 that rebinds its name to the server's address names its own `Host`, `hosts` is what refuses it,
 never the origin's test: a server a browser reaches by a name names it in `hosts`. A WebSocket
-server takes both alike on an upgrade (section 15.2). A client's address is its socket's; behind a
-proxy on the same machine, which the server is told to trust, `isProxyTrusted`, it is the last entry of the
+server takes both alike on an upgrade (section 15.2). A client's address is its socket's, an IPv4
+address an IPv6 socket carries mapped read as that IPv4 address
+([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)); behind a proxy on
+the same machine, which the server is told to trust, `isProxyTrusted`, it is the last entry of the
 proxy's `X-Forwarded-For`, when that entry is an address.
 
 ## 16. Services and procedures

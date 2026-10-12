@@ -6,7 +6,10 @@ public static class TransportTypes
     /// <summary>Over HTTP: a connection the transport draws, <c>type=HTTP;ip=…;ordinal=…</c>.</summary>
     public const string Http = "HTTP";
 
-    /// <summary>Over a WebSocket: <c>type=WS;ip=…;port=…</c>.</summary>
+    /// <summary>
+    /// Over a WebSocket: <c>type=WS;ip=…;port=…;ordinal=…</c>, a connection taken, by its peer's
+    /// port and its rank.
+    /// </summary>
     public const string WebSocket = "WS";
 }
 
