@@ -19,9 +19,10 @@ unless it misleads.
 
 **At each release, the records are brought to it.** A record is in the present, with its view on
 what is ahead: what it said was coming, and that the release carries, is stated as what holds; what
-it said of how things were leaves it; what is still ahead stays ahead. The `bead-release-records`
-workflow does it on the release branch, before the finish, and `tools/release.mjs prepare` lists it
-among what a release owes by hand.
+it said of how things were leaves it; what is still ahead stays ahead. The `bead-release-documents`
+workflow does it, for the records as for every document that states where Bead goes, on the
+release branch before the finish, and `tools/release.mjs prepare` lists it among what a release
+owes by hand.
 
 ## Where Bead goes
 

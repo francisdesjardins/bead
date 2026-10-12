@@ -703,16 +703,16 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     ]);
   });
 
-  test('it owes the records brought to the release where the tree keeps their index, and none where it does not', () => {
+  test("it owes the documents brought to the release where the tree keeps the records' index, and none where it does not", () => {
     const kept = releasing();
     write(kept, { 'docs/decisions/README.md': '# Decisions\n' });
     const owing = (root) => {
       return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
-        return line.includes('bead-release-records');
+        return line.includes('bead-release-documents');
       });
     };
     assert.deepEqual(owing(kept), [
-      'owed by hand: the records brought to 0.2.0, by the bead-release-records workflow (.claude/workflows/README.md)',
+      'owed by hand: the documents brought to 0.2.0, by the bead-release-documents workflow (.claude/workflows/README.md)',
     ]);
     assert.deepEqual(owing(releasing()), []);
   });

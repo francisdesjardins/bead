@@ -9,10 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `.claude/workflows/bead-release-records.js`: a release brings the decision records to itself, what
-  landed in the present and what is ahead kept ahead, records regrouped, renamed or renumbered where
-  that reads clearer, every citation moved with them; `tools/release.mjs prepare` lists it among what
-  a release owes by hand.
+- `.claude/workflows/bead-release-documents.js`: a release brings to itself every document that
+  states what holds and where Bead goes — the records, the spec and its companion, the READMEs, the
+  matrix, `CLAUDE.md` — what landed in the present and what is ahead kept ahead, the spec moving in
+  form alone, records regrouped, renamed or renumbered where that reads clearer, every citation moved
+  with them; `tools/release.mjs prepare` lists it among what a release owes by hand.
 
 ### Changed
 
