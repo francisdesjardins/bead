@@ -469,6 +469,8 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       idle.clear();
       listens.clear();
       connections.clear();
+      // the closes still under way settle on their own: the server asks nothing more of them
+      closing.clear();
 
       // the reverse of the order they were built in; the services hold nothing of their own
       router[Symbol.dispose]();

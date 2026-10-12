@@ -930,6 +930,27 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Counts_no_close_under_way_once_disposed()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Start(TimeSpan.FromMilliseconds(20));
+        _transport.CloseHold = release.Task;
+        _transport.Open(Handle);
+        await Advance(TimeSpan.FromMilliseconds(20));
+
+        // its close under way, its transport still on it
+        Assert.Equal([Handle], _transport.Closed);
+        Assert.Equal(1, (await Server.Gauges()).Server.Counts["closing"]);
+
+        var server = await DisposeServer();
+
+        Assert.Equal(0, (await server.Gauges()).Server.Counts["closing"]);
+
+        release.SetResult();
+    }
+
+    [Fact]
     public async Task Dispose_lets_go_of_the_transport_rejects_what_waits_forgets_the_sessions_and_stops()
     {
         Start(Timeout.InfiniteTimeSpan);

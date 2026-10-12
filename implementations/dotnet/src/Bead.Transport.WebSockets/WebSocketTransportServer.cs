@@ -511,6 +511,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
         finally
         {
+            // its end told however its read went: nothing it holds, the write pump or a close, waits
+            // on it forever
+            connection.End();
+
             try
             {
                 // a socket whose handle a newer one took closes no connection: the handle names the newer one
