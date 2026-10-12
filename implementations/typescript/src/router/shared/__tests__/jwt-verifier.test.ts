@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { type IJwtKey, type JwtAlgorithm, verifyJwt } from '../jwt-verifier';
@@ -140,6 +140,32 @@ test.describe('verifyJwt', () => {
       holds: false,
       reason: 'key',
     });
+  });
+
+  test('refuses at crit a token whose header names crit with an escape, whatever a token of its shape held before', async () => {
+    const { audience, keys, now, token } = HOLDING;
+    const [, claims = '', signature = ''] = token.split('.');
+    // * a name drawn per run, so that no header read before in this process has its shape
+    const first = `onTheLedge${randomBytes(8).toString('hex')}`;
+    const tokenOf = (header: string): string => {
+      return `${Buffer.from(header).toString('base64url')}.${claims}.${signature}`;
+    };
+
+    // V8 reads the second header's last name as the first's, each of four characters once read, the
+    // first holding a backslash
+    await verifyJwt(tokenOf(`{"${first}":0,"alg":"HS256","typ":"at+jwt","\\\\u00":1}`), {
+      audience,
+      keys,
+      now: readingOf(now),
+    });
+
+    expect(
+      await verifyJwt(tokenOf(`{"${first}":0,"alg":"HS256","typ":"at+jwt","\\u0063rit":["exp"]}`), {
+        audience,
+        keys,
+        now: readingOf(now),
+      })
+    ).toEqual({ holds: false, reason: 'crit' });
   });
 
   // ! the C# side's reading is a long, which holds no fraction: this side's type does not say so

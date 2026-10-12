@@ -121,6 +121,26 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
       { folder, path: posix }
     ).outputs
   ).toEqual([{ language: 'csharp', out: '/work/gen', messages: 'external' }]);
+
+  // ! a folder whose name opens another's is not inside it, and two outputs may read one messagesOut
+  expect(
+    read(
+      [
+        '  - language: typescript',
+        '    out: gen',
+        '  - language: typescript',
+        '    out: gen2',
+        '    messages: external',
+        '    messagesOut: msgs',
+        '  - language: typescript',
+        '    out: gen3',
+        '    importExtension: js',
+        '    messages: external',
+        '    messagesOut: msgs',
+        '',
+      ].join('\n')
+    ).outputs
+  ).toHaveLength(3);
   expect(() => {
     return parseConfig(
       'version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: csharp\n    out: gen\n    namespace: Acme\n',
@@ -163,6 +183,23 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
     [
       '  - language: typescript\n    out: gen\n  - language: typescript\n    out: ./gen\n',
       /two outputs write one folder/u,
+    ],
+    // one output inside another, either way, in each language; another's messagesOut inside one
+    [
+      '  - language: typescript\n    out: gen\n  - language: typescript\n    out: gen/web\n',
+      /outputs\[0\]\.out and outputs\[1\]\.out lie one inside the other/u,
+    ],
+    [
+      '  - language: csharp\n    out: gen/web\n    namespace: Acme\n  - language: csharp\n    out: gen\n    namespace: Acme\n',
+      /outputs\[0\]\.out and outputs\[1\]\.out lie one inside the other/u,
+    ],
+    [
+      '  - language: typescript\n    out: gen\n  - language: typescript\n    out: web\n    messages: external\n    messagesOut: gen/own\n',
+      /outputs\[0\]\.out and outputs\[1\]\.messagesOut lie one inside the other/u,
+    ],
+    [
+      '  - language: typescript\n    out: web\n    messages: external\n    messagesOut: msgs\n  - language: typescript\n    out: msgs\n',
+      /outputs\[1\]\.out and outputs\[0\]\.messagesOut lie one inside the other/u,
     ],
     ['  []\n', /outputs lists one output at least/u],
   ];

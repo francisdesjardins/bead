@@ -2,7 +2,8 @@
 
 // `beadc.yaml`, at a project's root: its `version`, its `source` — `.proto` roots, or a blueprint —
 // where `beadc blueprint` writes, and the `outputs` `beadc generate` writes, a language and a folder
-// each, TypeScript or C#. Every path stays under the folder that holds it, since the image sees nothing else; a key
+// each, TypeScript or C#. Every path stays under the folder that holds it, since the image sees
+// nothing else; no output's folder holds another's, or another's messages, nor lies in one; a key
 // beadc does not read is refused, never left unchecked. An earlier release's, which `beadc breaking`
 // compares against, is read for its `version`, its `source` and its `blueprint` alone.
 
@@ -342,6 +343,44 @@ export const parseConfig = (
     if (folders.size < outputs.length) {
       refuse('two outputs write one folder');
     }
+
+    // ! generate takes out of an output's folder, wherever under it, each file of its kinds that
+    // output does not write: no folder another output writes, or reads its messages from, lies in it
+    const others = outputs.flatMap((output, at) => {
+      return [
+        { at, key: `outputs[${String(at)}].out`, folder: output.out, written: true },
+        ...(output.language === 'typescript' && output.messagesOut !== undefined
+          ? [
+              {
+                at,
+                key: `outputs[${String(at)}].messagesOut`,
+                folder: output.messagesOut,
+                written: false,
+              },
+            ]
+          : []),
+      ];
+    });
+    // two outputs' folders one where a system folds case are left to generate, which names the
+    // sources of the files it would write at one path
+    const foldedOne = (one: string, other: string): boolean => {
+      return path.resolve(one).toLowerCase() === path.resolve(other).toLowerCase();
+    };
+
+    outputs.forEach((output, at) => {
+      for (const other of others) {
+        if (
+          other.at !== at &&
+          !(other.written && foldedOne(output.out, other.folder)) &&
+          (isInside(output.out, { target: other.folder, path }) ||
+            isInside(other.folder, { target: output.out, path }))
+        ) {
+          refuse(
+            `outputs[${String(at)}].out and ${other.key} lie one inside the other, and generate takes out of an output's folder the files of its kinds it does not write: give each a folder of its own`
+          );
+        }
+      }
+    });
 
     return { outputs };
   };

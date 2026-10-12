@@ -1065,15 +1065,31 @@ test.describe('createHTTPTransportServer', () => {
         response.headers?.['retry-after'],
         server.gauges().counts['connections'],
       ]);
+
+      // what a connect is comes before when it came: another type, then a body
+      for (const headers of [
+        { 'content-type': 'text/plain' },
+        { 'content-length': '5', 'content-type': BEAD_MEDIA_TYPE },
+      ]) {
+        const refused = fake.exchange({ headers }).response;
+
+        answers.push([refused.status, refused.headers?.[REFUSAL_HEADER]]);
+      }
     });
 
     await server.stop();
 
-    expect(answers).toEqual([[503, REFUSALS.BUSY, '1', 0]]);
+    expect(answers).toEqual([
+      [503, REFUSALS.BUSY, '1', 0],
+      [415, REFUSALS.TYPE],
+      [400, REFUSALS.MALFORMED],
+    ]);
   });
 
   test('answers the 404 marked connection-unknown an exchange that comes as it stops, its connection not yet closed, nothing handed on', async () => {
-    const { connectScripted, events, exchangeOf, fake, server } = await startScripted();
+    const { connectScripted, events, exchangeOf, fake, listenOf, server } = await startScripted({
+      origins: ['https://app.example'],
+    });
     const answers: unknown[][] = [];
 
     connectScripted();
@@ -1089,11 +1105,38 @@ test.describe('createHTTPTransportServer', () => {
 
       fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
       answers.push([isHeld, asking.response.status, asking.response.headers?.[REFUSAL_HEADER]]);
+
+      // what a request is comes before when it came; what is judged of an exchange against its
+      // connection comes after the lookup a stopping server answers, in spec 15.6's order
+      for (const { response } of [
+        exchangeOf('not-a-token'),
+        exchangeOf(second.connectionToken, { origin: 'https://elsewhere.example' }),
+        exchangeOf(second.connectionToken, { 'content-type': 'text/plain' }),
+        fake.exchange({
+          headers: {
+            authorization: ['Bearer a', 'Bearer b'],
+            'content-type': BEAD_MEDIA_TYPE,
+            [CONNECTION_TOKEN_HEADER]: second.connectionToken,
+          },
+        }),
+        exchangeOf(second.connectionToken, { 'content-length': String(2 ** 31) }),
+        listenOf(second.connectionToken, 'after=x'),
+      ]) {
+        answers.push([response.status, response.headers?.[REFUSAL_HEADER]]);
+      }
     });
 
     await server.stop();
 
-    expect(answers).toEqual([[true, 404, REFUSALS.CONNECTION_UNKNOWN]]);
+    expect(answers).toEqual([
+      [true, 404, REFUSALS.CONNECTION_UNKNOWN],
+      [400, REFUSALS.MALFORMED],
+      [403, REFUSALS.ORIGIN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+      [404, REFUSALS.CONNECTION_UNKNOWN],
+    ]);
     expect(namesOf(events, 'message')).toEqual([]);
   });
 

@@ -44,6 +44,10 @@
   ],
   "findings": [
     {
+      "rule": "PROCEDURE_NO_DELETE",
+      "pointer": "/services/0/reserved/procedureIds"
+    },
+    {
       "rule": "NAME_NO_DELETE",
       "pointer": "/services/0/reserved/procedureNames"
     }

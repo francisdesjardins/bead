@@ -322,6 +322,13 @@ the frame of every file of entries ([0004](0004-one-behaviour-in-every-language.
 that are not UTF-8, a surrogate alone, a number past a double, nesting past 64. A C# peer writes
 outside ASCII as it is, and its numbers in ECMAScript's form.
 
+**The TypeScript side reads a payload, and a token's header and claims, whose member name holds an
+escape through a reader of its own**: `JSON.parse` holds the text to JSON's grammar, and the value
+is built name by name, each scalar read by `JSON.parse` alone. V8's `JSON.parse` can hand such a
+name over as the name of an earlier object of the same shape, one holding a backslash and as long
+once read, from any connection of the process. A peer that escapes a name costs its payload's read
+up to about three times, linear in its bytes and bounded by `maximumBodyBytes`.
+
 **The author's order of members does not reach the wire.** A `curl`, a log of bytes and the DevTools
 panel's Wire view read `{"id":…,"type":…}` where the code wrote `{type, id}`; the trace of the side
 that sends keeps the value it was given, in its order (debugging 4.1, `tx`). RFC 8259 §4 says an

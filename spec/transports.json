@@ -13,7 +13,7 @@
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
-  "specVersion": "0.2.0",
+  "specVersion": "0.3.0",
   "wallClock": "2026-01-01T00:00:00Z",
   "defaults": {
     "maximumConnections": 10000,
@@ -1086,6 +1086,319 @@
             "body": ""
           },
           "on": "large"
+        }
+      ]
+    },
+    {
+      "name": "a request at the path that holds two faults is answered by the first that applies, in the order section 15.6 gives",
+      "clauses": [
+        "15.5",
+        "15.6"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumBodyBytes": 64
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\norigin: https://elsewhere.test\r\nbead-connection-token: x\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "origin"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": ""
+          },
+          "on": "origin"
+        },
+        {
+          "send": {
+            "head": "POST /elsewhere HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: x\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "path"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": ""
+          },
+          "on": "path"
+        },
+        {
+          "send": {
+            "head": "PUT /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: x\r\ncontent-length: 1\r\nconnection: close\r\n\r\n",
+            "body": "A1"
+          },
+          "on": "method"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "allow": "GET, POST, DELETE"
+            },
+            "body": ""
+          },
+          "on": "method"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: text/plain\r\ncontent-length: 1\r\nconnection: close\r\n\r\n",
+            "body": "A1"
+          },
+          "on": "typed"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "bead-refusal": "type-refused"
+            },
+            "body": ""
+          },
+          "on": "typed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-length: 1\r\nconnection: close\r\n\r\n",
+            "body": "A1"
+          },
+          "on": "untyped"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "bead-refusal": "type-refused"
+            },
+            "body": ""
+          },
+          "on": "untyped"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: x\r\ncontent-type: text/plain\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "form"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "form"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: AAAAAAAAAAAAAAAAAAAAAA\r\ncontent-type: text/plain\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "unknown"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "connection-unknown"
+            },
+            "body": ""
+          },
+          "on": "unknown"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: text/plain\r\nauthorization: Bearer mF_9.B5f-4.1JqM\r\nauthorization: Bearer mF_9.B5f-4.1JqM\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "both"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "bead-refusal": "type-refused"
+            },
+            "body": ""
+          },
+          "on": "both"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\nauthorization: Bearer mF_9.B5f-4.1JqM\r\nauthorization: Bearer mF_9.B5f-4.1JqM\r\ncontent-length: 74\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 22"
+          },
+          "on": "large"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": ""
+          },
+          "on": "large"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=x&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 409,
+            "fields": {
+              "bead-refusal": "listen-undeclared"
+            },
+            "body": ""
+          },
+          "on": "listen"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "echo"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "echo"
+        }
+      ]
+    },
+    {
+      "name": "a connect with two Authorization fields draws its connection: only a POST that presents a token is refused for them",
+      "clauses": [
+        "15.5"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nauthorization: Bearer mF_9.B5f-4.1JqM\r\nauthorization: Bearer mF_9.B5f-4.1JqM\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              }
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "echo"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "echo"
+        }
+      ]
+    },
+    {
+      "name": "a request whose Content-Length is 00 has no body: its connect is drawn, and its listen held",
+      "clauses": [
+        "15.4",
+        "15.9"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 00\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-length: 00\r\nconnection: close\r\n\r\n"
+          },
+          "on": "listen"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "listen"
         }
       ]
     },

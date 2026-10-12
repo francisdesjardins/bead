@@ -299,10 +299,11 @@ const lengthOf = (bytes: Uint8Array): Uint8Array => {
   return length;
 };
 
-// whether a request says it has a body
+// whether a request says it has a body: a length above 0, as RFC 9110 §8.6 reads its digits, or a
+// transfer coding
 const hasBody = (request: IHTTPRequestLike): boolean => {
   return (
-    (headerOf(request, 'content-length') ?? '0') !== '0' ||
+    Number(headerOf(request, 'content-length') ?? '0') > 0 ||
     headerOf(request, 'transfer-encoding') !== undefined
   );
 };

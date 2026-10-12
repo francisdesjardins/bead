@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -28,6 +29,15 @@ public sealed class PayloadsTests
     private static string RefusalOf(Func<object> coding)
     {
         return Assert.Throws<FormatException>(coding).Message;
+    }
+
+    // the names of an object read, in the order it holds them
+    private static string[] NamesOf(string json)
+    {
+        return [.. Payloads.ReadJson(Encoding.UTF8.GetBytes(json)).EnumerateObject().Select((member) =>
+        {
+            return member.Name;
+        })];
     }
 
     // definition
@@ -130,6 +140,19 @@ public sealed class PayloadsTests
     }
 
     [Fact]
+    public void Reads_a_name_that_holds_an_escape_as_its_escapes_say_whatever_an_object_of_its_shape_held_before()
+    {
+        // * the TypeScript twin's shape, its first name drawn for this run: V8's JSON.parse can read
+        // the second name as an earlier object's, each of two characters once read, the first
+        // holding a backslash
+        var drawn = $"onTheLedge{Convert.ToHexString(RandomNumberGenerator.GetBytes(8))}";
+
+        Assert.Equal([drawn, "q\\"], NamesOf($$"""{"{{drawn}}":1,"q\\":1}"""));
+        Assert.Equal([drawn, "q\""], NamesOf($$"""{"{{drawn}}":2,"q\"":2}"""));
+        Assert.Equal([drawn, "q\""], NamesOf($$"""{"{{drawn}}":3,"\u0071\"":3}"""));
+    }
+
+    [Fact]
     public void Hands_on_the_document_it_read_when_canonical_and_the_canonical_form_s_otherwise()
     {
         Assert.Equal("{\"a\":1,\"b\":[-1.5,\"x\"]}", Payloads.ReadJson("{\"a\":1,\"b\":[-1.5,\"x\"]}"u8.ToArray()).GetRawText());
@@ -137,6 +160,15 @@ public sealed class PayloadsTests
         Assert.Equal("0", Payloads.ReadJson("-0"u8.ToArray()).GetRawText());
         Assert.Equal("12345678901234567000", Payloads.ReadJson("12345678901234567890"u8.ToArray()).GetRawText());
         Assert.Equal(1, Payloads.ReadJson("1.0"u8.ToArray()).GetInt32());
+
+        // a name that holds an escape, __proto__ among them, read as its escapes say and written in
+        // its place among the canonical form's names
+        var escaped = """{"__prot\u006f__":{"a":[1,-0,1E2,"\n",true,null]},"2":false,"1":0}""";
+
+        Assert.Equal(["1", "2", "__proto__"], NamesOf(escaped));
+        Assert.Equal(
+            """{"1":0,"2":false,"__proto__":{"a":[1,0,100,"\n",true,null]}}""",
+            Payloads.ReadJson(Encoding.UTF8.GetBytes(escaped)).GetRawText());
     }
 
     [Fact]

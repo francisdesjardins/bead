@@ -74,6 +74,10 @@
   ],
   "findings": [
     {
+      "rule": "SERVICE_NO_DELETE",
+      "pointer": "/reservedServices/ids"
+    },
+    {
       "rule": "NAME_NO_DELETE",
       "pointer": "/reservedServices/names"
     }

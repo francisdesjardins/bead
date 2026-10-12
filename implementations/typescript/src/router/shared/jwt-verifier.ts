@@ -1,7 +1,7 @@
 // dependencies
 
 import { ProgrammerError } from '../../transport/shared/errors';
-import { namesOnce, STRICT_UTF8 } from './payloads';
+import { namesOnce, parseJson, STRICT_UTF8 } from './payloads';
 
 // interfaces
 
@@ -167,7 +167,7 @@ const objectOf = (part: string): Record<string, unknown> | undefined => {
   try {
     // ! a byte order mark kept as a character, so that JSON refuses it as .NET's reader does
     const text = STRICT_UTF8.decode(bytes);
-    const value: unknown = JSON.parse(text);
+    const value: unknown = parseJson(text);
 
     return isObject(value) && namesOnce(text) ? value : undefined;
   } catch {

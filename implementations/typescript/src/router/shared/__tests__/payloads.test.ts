@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { namesOnce, PAYLOAD_CODECS, payloadCodecOf } from '../payloads';
@@ -91,6 +92,38 @@ test.describe('the json codec', () => {
     expect(Object.hasOwn(read, '__proto__')).toBe(true);
     expect(Object.getPrototypeOf(read)).toBe(Object.prototype);
     expect(written(read)).toBe('{"__proto__":{"a":1},"b":2}');
+  });
+
+  test('reads a name that holds an escape as its escapes say, whatever an object of its shape held before', () => {
+    // * a name drawn per run, so that no object read before in this process has its shape
+    const first = `onTheLedge${randomBytes(8).toString('hex')}`;
+    const namesOf = (text: string): string[] => {
+      return Object.keys(PAYLOAD_CODECS.json.decode(utf8(text)) as object);
+    };
+
+    // V8 reads the second name as the first, each of two characters once read, the first holding a
+    // backslash
+    expect(namesOf(`{"${first}":1,"q${BACKSLASH}${BACKSLASH}":1}`)).toEqual([
+      first,
+      `q${BACKSLASH}`,
+    ]);
+    expect(namesOf(`{"${first}":2,"q${BACKSLASH}"":2}`)).toEqual([first, 'q"']);
+    expect(namesOf(`{"${first}":3,"${BACKSLASH}u0071${BACKSLASH}"":3}`)).toEqual([first, 'q"']);
+  });
+
+  test('builds a payload whose name holds an escape as JSON.parse builds one, a member named __proto__ its own', () => {
+    const read = PAYLOAD_CODECS.json.decode(
+      utf8(
+        `{"__prot${BACKSLASH}u006f__":{"a":[1,-0,1E2,"${BACKSLASH}n",true,null]},"2":false,"1":0}`
+      )
+    ) as object;
+
+    expect(Object.hasOwn(read, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(read)).toBe(Object.prototype);
+    expect(Object.keys(read)).toEqual(['1', '2', '__proto__']);
+    expect(written(read)).toBe(
+      `{"1":0,"2":false,"__proto__":{"a":[1,0,100,"${BACKSLASH}n",true,null]}}`
+    );
   });
 
   test('refuses what JSON has no value for, each in its own words, with a TypeError', () => {

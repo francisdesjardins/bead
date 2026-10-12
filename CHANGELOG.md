@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-12
+
 ### Added
 
 - `.claude/workflows/`: three workflows launched by name, a round of the Tenth Man, an implementation
@@ -65,8 +67,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   siblings have it.
 - `beadc breaking`: a project held to its last release by id, in two categories, `WIRE` within
   `API`, the default: 20 rules of Bead's over the two blueprints, `SERVICE_SAME_HOOKS`,
-  `NAME_NO_DELETE` and `SERVICE_REVISION` among them, and buf's over the messages of two buf
-  images, each finding `buf:`-prefixed, its rules keyed by a service's or an rpc's name excepted;
+  `NAME_NO_DELETE` and `SERVICE_REVISION` among them, `API` holding a service or a procedure gone
+  even where `WIRE` passes it, deprecated, then its id reserved; and buf's over the messages of two
+  buf images, each finding `buf:`-prefixed, its rules keyed by a service's or an rpc's name excepted;
   `--against` a folder, its committed blueprint read for Bead's rules, `-` for a tar on standard
   input, or a blueprint, `PROTO_SKIPPED` where a `.proto` side goes uncompared; `--except` waives a
   finding by its rule, scoped to its pointer or file. The wrappers' `--against-ref <ref>` pipes the
@@ -76,9 +79,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The builder's `type-check` compiles the TypeScript goldens against `@bufbuild/protobuf` 2.13.0,
   the floor their header names, installed beside the pin as an npm alias that `version.test.ts`
   holds to `PROTOBUF_FLOOR`.
+- `spec/conversations.json`: a name that holds an escape is read as its escapes say, whatever a
+  payload of its shape read on another connection held.
+- `spec/codecs.json`: protobuf's own refusals of a tag past 32 bits or of more than 5 bytes, of a
+  length past 32 bits, of an unknown varint of 11 bytes and of a record past the end of its
+  message; the support matrix states where protobuf-es, and where Google.Protobuf, reads what
+  protobuf refuses.
 
 ### Changed
 
+- The spec moves to 0.3.0 (`spec-v0.3.0`); its companion, `spec/debugging.md`, stays at 0.1.0.
 - `spec/interop-service.json` states each procedure by its name alone, in the blueprint's order:
   the generators and both sides' interop read each procedure's ids and kind in the blueprint.
 - `tools/release.mjs prepare` moves the version of every conformance file that repeats one, as
@@ -117,6 +127,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and refuses a revision lowered, or left where the contract moved.
 - `tools/release.mjs prepare` lists, among what it owes by hand, each `--except` of CI's
   `beadc breaking` step and each of decision 0006's gates owed that names the version it prepares.
+- `spec.md` 15.6 gives the order in which a server judges a request at its path, the stop placed
+  in it, and `spec/transports.json` plays it with two faults in one request; 15.7 answers the 404
+  an exchange it would look up by a well-formed token; 15.5 refuses two `Authorization` fields on
+  a `POST` that presents a token, a connect's being read by no one.
+- `spec.md` 15.13 states two points open in this version: a server takes every host when `hosts`
+  is not given, so a server a browser can reach names its hosts; and a WebSocket server can take
+  two sockets from one address and port as one connection.
 
 ### Removed
 
@@ -153,6 +170,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   implementations. The C# side's WebSocket connection settles its write pump and a close under way
   once the connection ends, its read begun or not, and observes the close it sends a message too
   big.
+- The TypeScript side's HTTP server reads a `Content-Length` as the number its digits write: a
+  connect or a listen whose length is `00` has no body, as RFC 9110 §8.6 reads it, where it was
+  refused 400.
+- The TypeScript side reads a JSON member name that holds an escape as its escapes say, in a
+  payload and in a token's header and claims, where V8's `JSON.parse` could read it as the name
+  of an earlier object of the same shape: a payload one connection sent changed how another's
+  read, and a header's `crit` written with an escape could go unseen.
 
 ## [0.2.0] - 2026-10-07
 
@@ -829,6 +853,7 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.2.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.3.0...develop
+[0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/francisdesjardins/bead/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/francisdesjardins/bead/releases/tag/v0.1.0

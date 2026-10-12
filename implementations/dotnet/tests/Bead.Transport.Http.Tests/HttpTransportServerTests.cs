@@ -1143,6 +1143,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         var (_, connectionHandle) = await Connect();
         (int Status, string? RetryAfter, string? Reason) refused = default;
+        (int Status, string? Reason)[] judged = [];
 
         // the stop under way, its connection's close told: a connect comes, Kestrel still serving
         _server.Close += (_, _) =>
@@ -1150,11 +1151,19 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             using var response = Fetch(PostOf(null, null)).GetAwaiter().GetResult();
 
             refused = ((int)response.StatusCode, HeaderOf(response, "retry-after"), HeaderOf(response, HttpTransport.RefusalHeader));
+
+            // what a connect is comes before when it came: another type, then a body
+            judged =
+            [
+                RefusalOf(With(PostOf(null, null), ("content-type", "text/plain"))).GetAwaiter().GetResult(),
+                RefusalOf(PostOf(null, [0xA1, 0x10, 0x00, 0x00, 0x00])).GetAwaiter().GetResult(),
+            ];
         };
 
         await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
 
         Assert.Equal((503, "1", HttpRefusals.Busy), refused);
+        Assert.Equal([(415, HttpRefusals.Type), (400, HttpRefusals.Malformed)], judged);
         Assert.Equal([connectionHandle], _connections);
         Assert.Equal([(false, connectionHandle)], _closes);
         Assert.Empty(_server.ConnectionHandles);
@@ -1163,13 +1172,41 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Answers_the_404_marked_connection_unknown_an_exchange_that_comes_as_it_stops_its_connection_not_yet_closed_nothing_handed_on()
     {
-        await Start();
+        await Start(new HttpTransportServerOptions { Origins = ["https://app.example"] });
 
         var first = await Connect();
         var second = await Connect();
         var others = new Dictionary<string, string> { [first.ConnectionHandle] = second.ConnectionToken, [second.ConnectionHandle] = first.ConnectionToken };
         (int Status, string? Reason)? refused = null;
+        (int Status, string? Reason)[] judged = [];
         var held = 0;
+
+        // a POST by hand, which HttpClient would not send: its head, then no body
+        async Task<(int Status, string? Reason)> ByHand(string connectionToken, string framing)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write(PostHead(connectionToken, framing));
+
+            var head = await wire.ReadHead();
+
+            return (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader));
+        }
+
+        // what a request is comes before when it came; what is judged of an exchange against its
+        // connection comes after the lookup a stopping server answers, in spec 15.6's order
+        async Task<(int Status, string? Reason)[]> Judged(string connectionToken)
+        {
+            return
+            [
+                await RefusalOf(PostOf("not-a-token", EnvelopeOf(EnvelopeKind.Request, 1))),
+                await RefusalOf(With(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)), ("origin", "https://elsewhere.example"))),
+                await RefusalOf(With(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)), ("content-type", "text/plain"))),
+                await ByHand(connectionToken, "Authorization: Bearer a\r\nAuthorization: Bearer b\r\nContent-Length: 0"),
+                await ByHand(connectionToken, "Content-Length: 2147483648"),
+                await RefusalOf(ListenOf(connectionToken, "after=x")),
+            ];
+        }
 
         // the stop under way, one connection's close told: an exchange comes on the other, which
         // the stop has not closed yet
@@ -1182,12 +1219,23 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
             held = _server.ConnectionHandles.Count;
             refused = RefusalOf(PostOf(others[connectionHandle], EnvelopeOf(EnvelopeKind.Request, 1))).GetAwaiter().GetResult();
+            judged = Judged(others[connectionHandle]).GetAwaiter().GetResult();
         };
 
         await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(1, held);
         Assert.Equal((404, HttpRefusals.ConnectionUnknown), refused);
+        Assert.Equal(
+            [
+                (400, HttpRefusals.Malformed),
+                (403, HttpRefusals.Origin),
+                (404, HttpRefusals.ConnectionUnknown),
+                (404, HttpRefusals.ConnectionUnknown),
+                (404, HttpRefusals.ConnectionUnknown),
+                (404, HttpRefusals.ConnectionUnknown),
+            ],
+            judged);
         Assert.Empty(_messages);
         Assert.Equal(2, _closes.Count);
     }

@@ -252,9 +252,10 @@ with its cases in `builder/`.
 `WIRE` within `API`: `WIRE`, a peer built from the last release still talks with one built from
 this one; `API`, besides, code written against the last release's generated API still compiles and
 means the same, and so do the metrics and filters that name a procedure. A hook a service's
-procedures name, added or gone, is `API`, since its server's options name each; a name stays its
-id's or is reserved; a revision is never lowered, and moves where its service changed, a message its
-bindings reach included. buf's own rules compare the messages of two buf images, `WIRE`'s or
+procedures name, added or gone, is `API`, since its server's options name each; a service or a
+procedure gone, deprecated, then its id reserved, passes `WIRE` and not `API`, since its generated
+code goes with it; a name stays its id's or is reserved; a revision is never lowered, and moves
+where its service changed, a message its bindings reach included. buf's own rules compare the messages of two buf images, `WIRE`'s or
 `FILE`'s, its rules keyed by a service's or an rpc's name excepted and `bead/options.proto` ignored.
 `--against` names a folder, its committed blueprint read for Bead's rules, an archive on standard
 input, or a blueprint; the earlier is read, never judged by later rules. The wrappers'
@@ -378,9 +379,9 @@ blueprint and `examples/hello` to the last release that carries a blueprint, by 
 from 0.3.0; the `commits` job holds `tools/release.mjs`'s move of its version, through the root's
 tools' tests. A gate here that does not run is among 0006's gates owed.
 
-**Until 0.3.0, `beadc breaking` holds nothing in CI.** No release before it carries a blueprint;
-the step says so and passes, the gate stays owed, and the step fails from 0.3.0 on a release that
-carries none.
+**`beadc breaking` holds from 0.3.0, the first release that carries a blueprint.** No release
+before it carries one, so the step holds against 0.3.0 and the releases after it, and fails on a
+last release that carries none.
 
 ## The Tenth Man
 
