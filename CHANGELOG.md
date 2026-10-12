@@ -114,6 +114,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   under either setting, where TS2722 refused its call.
 - A catalogue's `is` narrows to `IListedFailureError<Name>`, the failure of that name, so a false
   answer leaves a `FailureError` one, to be asked of another name, where it narrowed it to `never`.
+- beadc's refusal of a protoc missing or off its pin names the fix to whoever runs it, in a clone
+  or not: protoc's release at the pin and `BEADC_PROTOC`, or beadc's image, and no path of the
+  repository's.
 - A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
   deletes it, so nothing reaches origin before that push.
 

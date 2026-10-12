@@ -28,6 +28,7 @@ import type { IBlueprint } from './model/blueprint.ts';
 import { OPTIONS_FILE } from './roots.ts';
 import { pascalOf } from './targets/names.ts';
 import type { IGeneratedFile } from './targets/target.ts';
+import { IMAGE } from './wrappers.ts';
 
 // types
 
@@ -61,15 +62,18 @@ const WELL_KNOWN = 'google/protobuf/';
 // the pin, beside this module's folder
 const PIN = new URL('../protoc.json', import.meta.url);
 
-// what the fetch prints its path under
-const FETCH = 'node builder/tools/fetch-protoc.mjs';
-
 // a script protoc stands behind on Windows, which runs through its shell alone
 const SCRIPT = /\.(?:bat|cmd)$/iu;
 
 // helpers
 
 let pin: IProtocPin | undefined;
+
+// the fix for a protoc missing or off its pin, to whoever runs beadc, in a clone or not: the pin's
+// release and BEADC_PROTOC, or the image, which holds it; never a path of the repository's
+const fixOf = (version: string): string => {
+  return `name protoc ${version} by BEADC_PROTOC, from https://github.com/protocolbuffers/protobuf/releases/tag/v${version}, or run beadc's image, ${IMAGE}, which holds it`;
+};
 
 // the protoc beadc runs: BEADC_PROTOC's, or the path's
 const protocPath = (): string => {
@@ -155,13 +159,13 @@ export const requireProtoc = (): IFoundProtoc => {
 
   if (found === undefined) {
     throw new InputError(
-      `no protoc at ${protocPath()}, which writes the C# messages: fetch protoc ${version}, its pin, with ${FETCH} and name it by BEADC_PROTOC, or set the output's messages to external`
+      `no protoc at ${protocPath()}, which writes the C# messages, pinned to protoc ${version}: ${fixOf(version)}; or set the output's messages to external`
     );
   }
 
   if (found.version !== version) {
     throw new InputError(
-      `protoc ${found.version} at ${found.path}, where beadc is pinned to protoc ${version} (builder/protoc.json), whose C# another writes otherwise: fetch it with ${FETCH} and name it by BEADC_PROTOC`
+      `protoc ${found.version} at ${found.path}, where beadc is pinned to protoc ${version}, whose C# another writes otherwise: ${fixOf(version)}`
     );
   }
 
