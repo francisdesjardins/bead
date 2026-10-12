@@ -14,7 +14,10 @@ What a session needs beyond this file lives in `.claude/`:
   change of any size.
 
 The repository's documentation looks forward: it states what holds and where the project goes,
-in the present tense. Where something came from, and how it was before, stays out of it.
+in the present tense. Where something came from, and how it was before, stays out of it. At each
+release every document that states where Bead goes — the records, the spec, the READMEs, the
+matrix, this file — is brought to it by the `bead-release-documents` workflow: what landed in the
+present, what is ahead kept ahead, records regrouped or renumbered where that reads clearer.
 
 ## Language
 

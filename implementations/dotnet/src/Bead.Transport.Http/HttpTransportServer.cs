@@ -257,6 +257,13 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// </summary>
     internal event Action<string>? Holding;
 
+    /// <summary>
+    /// Each answer, before it is written, with its exchange's abort: the tests' way to drop its
+    /// socket in between and to wait until the server is told, where a socket that takes the
+    /// answer whole at once would win the race.
+    /// </summary>
+    internal Func<CancellationToken, Task>? Answering { get; set; }
+
     /// <summary>Where it is in its life: Uninitialized until its first start.</summary>
     public ReadyState ReadyState
     {
@@ -1316,7 +1323,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // a request's answer, once it comes: written, or how its exchange ends instead — its connection
     // gone once its request was handed on, its head goes before its exchange is cut: a request
     // handed on ran, which no refusal may deny
-    private static async Task<End?> Reply(HttpContext context, Waiting waiting)
+    private async Task<End?> Reply(HttpContext context, Waiting waiting)
     {
         var ending = await waiting.Ended.Task.WaitAsync(context.RequestAborted);
 
@@ -1340,6 +1347,11 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         if (ending.End is { } end)
         {
             return end;
+        }
+
+        if (Answering is { } answering)
+        {
+            await answering(context.RequestAborted);
         }
 
         try

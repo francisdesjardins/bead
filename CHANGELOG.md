@@ -11,6 +11,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - On the TypeScript side, `IHTTPResponseLike.stream`, through which an HTTP/2 stream is reset, and
   `IHandshakeRequestLike.url`, the target an upgrade's authority is read from, both optional.
+- `.claude/workflows/bead-release-documents.js`: a release brings to itself every document that
+  states what holds and where Bead goes — the records, the spec and its companion, the READMEs, the
+  matrix, `CLAUDE.md` — what landed in the present and what is ahead kept ahead, the spec moving in
+  form alone, records regrouped, renamed or renumbered where that reads clearer, every citation moved
+  with them; `tools/release.mjs prepare` lists it among what a release owes by hand.
 
 ### Changed
 
@@ -44,6 +49,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its version and its target, absolute-form among them.
 - The TypeScript side names a client that comes over IPv4 to a dual-stack listener by its IPv4
   address, in its handle and its address, as the C# side does.
+- A record's number names one decision within a release: between two releases, records may be
+  renumbered, and the release's CHANGELOG section maps the old numbers to the new.
 
 ### Security
 

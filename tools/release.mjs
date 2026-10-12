@@ -270,6 +270,9 @@ export const versionOf = (document, { stated, move, facts }) => {
 export const CI = '.github/workflows/ci.yml';
 export const GATES = 'docs/decisions/0006-a-rule-has-its-gate.md';
 
+// the records' index: a tree that keeps it owes its documents brought to each release
+export const RECORDS = 'docs/decisions/README.md';
+
 // each `--except` of the lines that run `beadc breaking`, as written, its quotes dropped; a line
 // continued by a backslash is read whole, and a comment is no line that runs
 export const breakingWaivers = (text) => {
@@ -582,6 +585,11 @@ export const prepare = (root, options = {}) => {
   }
   for (const gate of gatesOwedAt(readText(join(root, GATES)) ?? '', product)) {
     log(`owed by hand: decision 0006's gate owed until ${product} moves to its table: ${gate}`);
+  }
+  if (existsSync(join(root, RECORDS))) {
+    log(
+      `owed by hand: the documents brought to ${product}, by the bead-release-documents workflow (.claude/workflows/README.md)`
+    );
   }
   if (first) {
     log(`next: git add -A && git commit -m "chore(release): ${product}"`);
