@@ -581,16 +581,22 @@ description.
   warning of `check`'s;
 - `--except <RULE>@<pointer>` waives that rule's findings at an RFC 6901 pointer into the current
   blueprint, or under it at a token's boundary: `PROCEDURE_SAME_NAME@/services/0/procedures/2`. A
-  pointer the current blueprint does not resolve is refused, exit 2, so a mistyped scope never
-  waives nothing in silence; a pointer an entry's deletion or addition shifts stops matching, and
-  the finding comes back;
+  pointer the current blueprint does not resolve is refused, exit 2. A scope reaches every finding
+  of its rule at or under its pointer: a deletion's pointer is the list it is placed at, a
+  reservation's or the catalogue's, so one scope waives every deletion of its kind in that service,
+  or in the blueprint for a service's; `SERVICE_SAME_HOOKS` places all of a service's findings at
+  the service, and `PROCEDURE_FAILURE_NO_DELETE` all of a procedure's at its list; `@` alone names
+  the whole blueprint and waives as the bare rule does. A pointer is an index: an entry's deletion
+  or addition before it shifts it off the change it was written for, onto another entry's, whose
+  finding it then waives, and a scope that matches nothing passes without a word;
 - `--except buf:<RULE>` and `--except buf:<RULE>@<path>`, a `.proto` file or folder of the current
   roots, join buf's `except`, or its `ignore_only` for that rule. A rule buf does not know at its
   pin is refused, whether buf runs or not, and so is one beadc excepts always.
 
 An `API` rule under `--category WIRE`, which runs none, is refused. The repository's CI uses the
-scoped form, so a waiver kept until the next release waives the change it was written for and no
-other.
+scoped form, at the narrowest pointer that holds the change, so a waiver kept until the next release
+waives no more than its scope reaches; a waiver keyed to an entity's id, which no shift moves and
+which names one entity alone, comes in a later release.
 
 **The earlier is read, never judged.** The beadc of its release accepted it, and a later beadc may
 refuse it by a rule added since. A blueprint, given or committed, is read through its JSON, its
