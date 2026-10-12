@@ -267,7 +267,7 @@ it, and is checked there, once.
 
 **A side that keeps no names.** A constrained profile built without the trace and the metrics
 (debugging 1.2) refuses `out of its range` alone; its names are a blueprint's, which `beadc check`
-holds to their form ([0006](0006-a-rule-has-its-gate.md)'s gates owed).
+holds to their form ([0006](0006-a-rule-has-its-gate.md)).
 
 **What a peer sees.** Ids in each request, a code in each application failure, and whether a server
 holds a service or a procedure, by `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN` (9.2, step 4). Never a
