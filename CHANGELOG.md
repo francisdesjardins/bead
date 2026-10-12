@@ -61,6 +61,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A release moves an example's versions: its C# lock file's project range, held by
   `tools/check-versions.mjs`, the image its wrappers name and its blueprint's `specVersion`, which
   CI's `examples` job holds to beadc (decision 0008).
+- `Error` on the C# side's `HttpTransportServer` and `HttpTransportClient`, as their WebSocket
+  siblings have it.
 
 ### Changed
 
@@ -96,6 +98,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `InteropHandlers.cs` and its credentials in `InteropCredentials.cs`, and `InteropService.cs` is
   gone. The banned-API analyzer refuses the service manager there, and `dotnet format` leaves the
   generated folders out.
+- `spec.md` 15.1 calls each listener of a transport within a guard and reports what it throws;
+  15.2, 15.3, 15.6 and 15.7 state what a stop answers what arrives as it runs.
 
 ### Removed
 
@@ -108,6 +112,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
   deletes it, so nothing reaches origin before that push.
+- A listener of a transport's events that throws changes nothing the transport does, on both
+  implementations, server and client: the listeners after it are told, its connection is drawn,
+  its message handed on, its close done, and its throw is reported through the transport's
+  `error` with the connection. A throw no longer ends the Node process, nor answers 500 over the
+  router's answer on the C# side.
+- A stop over HTTP draws no connection and holds none from its start: a connect is refused 503
+  `busy` with its `Retry-After`, and an exchange with a token is answered 404
+  `connection-unknown`, as the stop answers each listen it holds.
+- A WebSocket server refuses an upgrade its stop crossed 503 `busy` with its `Retry-After`,
+  marked, on both implementations, where the TypeScript side left it unanswered and the C# side
+  answered it bare, and closes going away a connection that registers as it stops.
+- The C# side's server awaits its router's teardown as it disposes, and stops its transport even
+  when that teardown throws; a server counts no close under way once disposed, on both
+  implementations. The C# side's WebSocket connection settles its write pump and a close under way
+  once the connection ends, its read begun or not, and observes the close it sends a message too
+  big.
 
 ## [0.2.0] - 2026-10-07
 
