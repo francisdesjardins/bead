@@ -13,7 +13,12 @@ import {
   ReadyStateError,
   TimeoutError,
 } from '../../shared/errors';
-import { createTestClock, tcpSocketsClosed, timersUntil } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  reachedByLocalhost,
+  tcpSocketsClosed,
+  timersUntil,
+} from '../../shared/__tests__/fixtures';
 import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
@@ -1464,7 +1469,7 @@ test.describe('createHTTPTransportClient, by a name', () => {
   });
 
   test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
-    for (const address of ['127.0.0.1', '::1']) {
+    for (const address of await reachedByLocalhost()) {
       const server = createHTTPTransportServer({
         createServer: (listener) => {
           return createServer(listener);

@@ -25,6 +25,7 @@ import {
   host,
   IMPLEMENTATIONS,
   portOf,
+  reachedByLocalhost,
   sockets,
   spyIntervals,
   startServer,
@@ -1177,7 +1178,7 @@ test.describe('WSTransportClient, an upgrade refused', () => {
 
 test.describe('WSTransportClient, by a name', () => {
   test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
-    for (const address of ['127.0.0.1', '::1']) {
+    for (const address of await reachedByLocalhost()) {
       const server = createWSTransportServer({ WebSocketServer });
       const { port } = await server.start({ address, findOpenPort: true });
 
