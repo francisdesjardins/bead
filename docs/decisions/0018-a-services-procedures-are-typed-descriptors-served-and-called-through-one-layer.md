@@ -742,12 +742,19 @@ export interface IListedFailure<Name extends string = string> extends IApplicati
   readonly failureName: Name;
 }
 
+/** A failure of a catalogue, received and told by its name: an application FailureError of its service. */
+export interface IListedFailureError<Name extends string = string> extends FailureError {
+  readonly procedureAddress: IProcedureAddress;
+  readonly scope: typeof FailureScope.APPLICATION;
+  readonly [failureNameBrand]: Name;
+}
+
 /** A service's failures, by name: their codes, a failure made of one, and a failure received told as one. */
 export interface IFailureCatalogue<Name extends string> {
   readonly codes: Readonly<Record<Name, number>>;
   readonly serviceId: ServiceId;
   /** Whether `error` is the application failure `name`, received from a procedure of its service. */
-  is: (error: unknown, name: Name) => error is FailureError;
+  is: <Given extends Name>(error: unknown, name: Given) => error is IListedFailureError<Given>;
   of: <Given extends Name>(name: Given, detail?: string) => IListedFailure<Given>;
 }
 
