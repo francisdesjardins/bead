@@ -108,6 +108,10 @@ vector cannot.
   ([0004](0004-one-behaviour-in-every-language.md));
 - a check of the C# side's parameters, which no analyzer of .NET's recommended set counts
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
+- a check that a cited unit's text has not changed since its entries were written: `spec/check.py`
+  counts a unit cited once any entry names it, so a requirement added inside a cited unit passes
+  unseen; the unit's text kept with a hash, its change failing the check until its entries or the
+  matrix's list acknowledge it ([0004](0004-one-behaviour-in-every-language.md));
 - tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
   root's tools' tests, in Node's runner, would hold.
 
