@@ -1,0 +1,21 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_NO_DELETE",
+      "line": 23,
+      "column": 5
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROCEDURE_NO_DELETE",
+      "line": 23,
+      "column": 5
+    },
+    {
+      "rule": "NAME_NO_DELETE",
+      "line": 29,
+      "column": 5
+    }
+  ]
+}

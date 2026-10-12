@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -15,7 +16,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join, relative } from 'node:path';
+import { delimiter, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { expect, test } from '@playwright/test';
@@ -76,9 +77,12 @@ const PODMAN_FORMAT = '{{.Host.OS}} {{.Host.Security.Rootless}}';
 // the stand-in engine, CommonJS so that Node builds it into a single executable: it records each
 // call, a JSON array a line, in BEADC_PROBE_LOG; answers --version as its name or
 // BEADC_PROBE_VERSION says, and info with BEADC_PROBE_INFO, or exits 1 when that is "stopped"; and
-// from run writes UTF-8 on both streams and exits BEADC_PROBE_EXIT, 1 unless given
+// from run reads its standard input to its end under -i, unless BEADC_PROBE_STDIN is "ignore", its
+// sha256 and length written beside the log, then writes UTF-8 on both streams and exits
+// BEADC_PROBE_EXIT, 1 unless given
 const STAND_IN = `'use strict';
-const { appendFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const { appendFileSync, readFileSync, writeFileSync } = require('node:fs');
 const { basename } = require('node:path');
 
 const args = process.argv.slice(2);
@@ -102,15 +106,26 @@ if (args[0] === '--version') {
     process.stdout.write(info + '\\n');
   }
 } else {
+  if (args.includes('-i') && process.env.BEADC_PROBE_STDIN !== 'ignore') {
+    const bytes = readFileSync(0);
+
+    writeFileSync(
+      process.env.BEADC_PROBE_LOG + '.stdin',
+      createHash('sha256').update(bytes).digest('hex') + ' ' + bytes.length
+    );
+  }
+
   process.stdout.write(Buffer.from(${JSON.stringify(STAND_IN_STDOUT)}, 'utf8'));
   process.stderr.write(Buffer.from(${JSON.stringify(STAND_IN_STDERR)}, 'utf8'));
   process.exitCode = Number(process.env.BEADC_PROBE_EXIT ?? '1');
 }
 `;
 
-// what a run gives: the engine's calls, each as its arguments, and the bytes and the exit
+// what a run gives: the engine's calls, each as its arguments, what its run read on standard input
+// under -i, and the bytes and the exit
 interface IRun {
   readonly calls: readonly (readonly string[])[];
+  readonly stdin?: string;
   readonly stdout: string;
   readonly stderr: string;
   readonly status: number | null;
@@ -318,6 +333,11 @@ const unixLines = (text: string): string => {
   return text.replaceAll('\r\n', '\n');
 };
 
+// what the stand-in's run read on standard input, its sha256 and its length, when it read it
+const stdinOf = (log: string): { readonly stdin?: string } => {
+  return existsSync(`${log}.stdin`) ? { stdin: readFileSync(`${log}.stdin`, 'utf8') } : {};
+};
+
 const callsOf = (log: string): (readonly string[])[] => {
   return existsSync(log)
     ? readFileSync(log, 'utf8')
@@ -369,6 +389,7 @@ const runWay = (
 
       return {
         calls: callsOf(log),
+        ...stdinOf(log),
         stdout: run.stdout.toString('utf8'),
         stderr: run.stderr.toString('utf8'),
         status: run.status,
@@ -383,6 +404,7 @@ const runWay = (
 
       return {
         calls: callsOf(log),
+        ...stdinOf(log),
         stdout: run.stdout.toString('utf8'),
         stderr: run.stderr.toString('utf8'),
         status: run.status,
@@ -416,6 +438,7 @@ const runWay = (
       // ! what the wrapper writes itself goes to the process's stderr, not through 2>
       return {
         calls: callsOf(log),
+        ...stdinOf(log),
         stdout: read(out) + run.stdout.toString('utf8'),
         stderr: read(err) + run.stderr.toString('utf8'),
         status: run.status,
@@ -475,15 +498,19 @@ const callerUser = (): readonly string[] => {
     : ['--user', `${String(process.getuid?.())}:${String(process.getgid?.())}`];
 };
 
-// the run a wrapper asks of the engine, the project's root at `source`
+// the run a wrapper asks of the engine, the project's root at `source`, -i after --init where an
+// archive comes on standard input
 const runCall = (details: {
   readonly user: readonly string[];
   readonly source: string;
   readonly workdir: string;
   readonly args: readonly string[];
+  readonly interactive?: boolean;
 }): readonly string[] => {
   return [
-    ...RUN_FLAGS,
+    ...RUN_FLAGS.slice(0, 3),
+    ...(details.interactive === true ? ['-i'] : []),
+    ...RUN_FLAGS.slice(3),
     ...details.user,
     '--mount',
     `type=bind,"source=${details.source}",target=/work`,
@@ -537,6 +564,11 @@ interface ICase {
   readonly folders: () => { readonly cwd: string; readonly root: string };
   readonly args?: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
+  // the bash it runs and what its environment changes, made from the bash the test found
+  readonly shell?: (bash: string) => {
+    readonly bash: string;
+    readonly env: Readonly<Record<string, string>>;
+  };
   // what the case expects of bash's run, the folders known
   readonly expected: (folders: { readonly cwd: string; readonly root: string }) => IExpected;
 }
@@ -546,6 +578,7 @@ interface IExpected {
   readonly calls?: readonly (readonly string[])[];
   readonly info?: string;
   readonly run?: readonly string[];
+  readonly stdin?: string;
   readonly stdout?: string;
   readonly stderr?: string;
   readonly status: number;
@@ -572,6 +605,7 @@ const ranWith = (
     readonly args?: readonly string[];
     readonly workdir?: string;
     readonly info?: string;
+    readonly interactive?: boolean;
   } = {}
 ) => {
   return (folders: { readonly cwd: string; readonly root: string }): IExpected => {
@@ -582,6 +616,7 @@ const ranWith = (
         source: physicalOf(folders.root),
         workdir: details.workdir ?? '/work',
         args: details.args ?? ['version'],
+        ...(details.interactive === undefined ? {} : { interactive: details.interactive }),
       }),
       stdout: STAND_IN_STDOUT,
       stderr: STAND_IN_STDERR,
@@ -594,6 +629,146 @@ const environmentFailure = (message: string, calls: readonly (readonly string[])
   return (): IExpected => {
     return { calls, stdout: '', stderr: `beadc: ${message}\n`, status: 3 };
   };
+};
+
+// a refusal of the wrappers' own, exit 2, the engine never called
+const refusal = (message: string) => {
+  return (): IExpected => {
+    return { calls: [], stdout: '', stderr: `beadc: ${message}\n`, status: 2 };
+  };
+};
+
+// ── A project's history ───────────────────────────────────────────────────────
+
+// git in `cwd`, under a name of its own, signing off whatever the machine's settings say
+const gitIn = (cwd: string, args: readonly string[]): Buffer => {
+  const run = spawnSync(
+    'git',
+    [
+      '-c',
+      'user.name=beadc',
+      '-c',
+      'user.email=beadc@example.invalid',
+      '-c',
+      'commit.gpgsign=false',
+      '-c',
+      'tag.gpgsign=false',
+      ...args,
+    ],
+    // ! an archive outgrows spawnSync's default buffer of a mebibyte
+    { cwd, maxBuffer: 1 << 26 }
+  );
+
+  expect(run.status, `git ${args.join(' ')}: ${run.stderr.toString('utf8')}`).toBe(0);
+
+  return run.stdout;
+};
+
+/**
+ * A repository in the running test's folder: `v0.0.0` before its project, `v0.1.0` with it, a file
+ * of more than a mebibyte under it so that its archive outgrows a pipe's buffer. Run from the
+ * project's `sub`.
+ */
+const historyOf = (): { cwd: string; root: string } => {
+  const repository = test.info().outputPath('history');
+  const root = join(repository, 'project');
+
+  mkdirSync(join(root, 'sub'), { recursive: true });
+  gitIn(repository, ['init', '--quiet']);
+  writeFileSync(join(repository, 'README.md'), 'before the project\n');
+  gitIn(repository, ['add', '--all']);
+  gitIn(repository, ['commit', '--quiet', '--no-verify', '--message', 'before']);
+  gitIn(repository, ['tag', 'v0.0.0']);
+  writeFileSync(join(root, 'beadc.yaml'), 'version: 1\n');
+  writeFileSync(join(root, 'sub', 'large.txt'), 'bead\n'.repeat(1 << 18));
+  gitIn(repository, ['add', '--all']);
+  gitIn(repository, ['commit', '--quiet', '--no-verify', '--message', 'the project']);
+  gitIn(repository, ['tag', 'v0.1.0']);
+
+  return { cwd: join(root, 'sub'), root };
+};
+
+// what the stand-in reads of `bytes`: their sha256 and their length
+const digestOf = (bytes: Uint8Array): string => {
+  return `${createHash('sha256').update(bytes).digest('hex')} ${String(bytes.length)}`;
+};
+
+// the project's archive at `ref`, as git archive writes it from the project's folder
+const archiveOf = (root: string, ref: string): Buffer => {
+  return gitIn(root, ['archive', '--format=tar', ref]);
+};
+
+// what bash's run of breaking --against-ref is, the archive of `ref` on its standard input
+const archivedWith = (ref: string) => {
+  return (folders: { readonly cwd: string; readonly root: string }): IExpected => {
+    return {
+      ...ranWith(callerUser(), {
+        args: ['breaking', '--against', '-'],
+        workdir: '/work/sub',
+        interactive: true,
+      })(folders),
+      stdin: digestOf(archiveOf(folders.root, ref)),
+    };
+  };
+};
+
+// the path of pwsh's own executable, which a test that changes the path keeps on it
+const pwshPathOf = (): string => {
+  const found = spawnSync(
+    'pwsh',
+    ['-NoProfile', '-NonInteractive', '-Command', '(Get-Process -Id $PID).Path'],
+    { encoding: 'utf8' }
+  );
+
+  return found.stdout.trim();
+};
+
+/**
+ * A bash and a path without git, the stand-in and pwsh on it: on Windows, Git Bash's own bash, whose
+ * folder holds its tools and no git, where its launcher puts git's folder first; elsewhere, a folder
+ * of links to the tools beadc.sh asks for.
+ */
+const withoutGit = (bash: string): { bash: string; env: Record<string, string> } => {
+  const pwsh = dirname(pwshPathOf());
+
+  if (WINDOWS) {
+    const tools = join(bash, '..', '..', 'usr', 'bin');
+
+    return {
+      bash: join(tools, 'bash.exe'),
+      env: { [PATH_NAME]: [standInOf(), pwsh, tools].join(delimiter) },
+    };
+  }
+
+  const tools = test.info().outputPath('tools');
+
+  mkdirSync(tools, { recursive: true });
+
+  for (const name of ['uname', 'dirname', 'id']) {
+    const found = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
+
+    symlinkSync(found.stdout.trim(), join(tools, name));
+  }
+
+  const found = spawnSync('sh', ['-c', `command -v ${bash}`], { encoding: 'utf8' });
+
+  return {
+    bash: found.stdout.trim(),
+    env: { [PATH_NAME]: [standInOf(), pwsh, tools].join(delimiter) },
+  };
+};
+
+// the shell `withoutGit` gives, asserted to find no git
+const noGit = (bash: string): { bash: string; env: Record<string, string> } => {
+  const shell = withoutGit(bash);
+  const found = spawnSync(shell.bash, ['-c', 'command -v git'], {
+    env: environmentWith(shell.env),
+    encoding: 'utf8',
+  });
+
+  expect(found.stdout, 'git on a path without it').toBe('');
+
+  return shell;
 };
 
 const ARGUMENTS = ['check', 'a b', '', 'x"y', 'a\\b', 'a&b', '100%PATH%', 'a^b'];
@@ -769,6 +944,125 @@ const CASES: readonly ICase[] = [
       []
     ),
   },
+  {
+    name: '--against-ref at a tag: one engine call with -i and --against -, the archive on its standard input',
+    folders: historyOf,
+    args: ['breaking', '--against-ref', 'v0.1.0'],
+    expected: archivedWith('v0.1.0'),
+  },
+  {
+    name: '--against-ref=<ref> passes as --against-ref <ref>',
+    folders: historyOf,
+    args: ['breaking', '--against-ref=v0.1.0'],
+    expected: archivedWith('v0.1.0'),
+  },
+  {
+    name: '--against-ref before a bare --: --against - before it',
+    folders: historyOf,
+    args: ['breaking', '--against-ref', 'v0.1.0', '--', 'proto'],
+    expected: (folders) => {
+      return {
+        ...archivedWith('v0.1.0')(folders),
+        run: runCall({
+          user: callerUser(),
+          source: physicalOf(folders.root),
+          workdir: '/work/sub',
+          args: ['breaking', '--against', '-', '--', 'proto'],
+          interactive: true,
+        }),
+      };
+    },
+  },
+  {
+    name: '--against - passes -i',
+    folders: atRoot,
+    args: ['breaking', '--against', '-'],
+    expected: (folders) => {
+      return {
+        ...ranWith(callerUser(), { args: ['breaking', '--against', '-'], interactive: true })(
+          folders
+        ),
+        stdin: digestOf(new Uint8Array()),
+      };
+    },
+  },
+  {
+    name: '--against-ref and --against together, exit 2',
+    folders: historyOf,
+    args: ['breaking', '--against-ref', 'v0.1.0', '--against', 'earlier'],
+    expected: refusal('--against-ref and --against both name the earlier: give one'),
+  },
+  {
+    name: '--against-ref twice, exit 2',
+    folders: historyOf,
+    args: ['breaking', '--against-ref', 'v0.0.0', '--against-ref=v0.1.0'],
+    expected: refusal('--against-ref names one ref, once'),
+  },
+  {
+    name: '--against-ref without its ref, exit 2',
+    folders: historyOf,
+    args: ['breaking', '--against-ref'],
+    expected: refusal('--against-ref needs a ref: --against-ref <ref>'),
+  },
+  {
+    name: 'a ref that names no commit, exit 2, the engine never called',
+    folders: historyOf,
+    args: ['breaking', '--against-ref', 'v9.9.9'],
+    expected: refusal('v9.9.9 names no commit'),
+  },
+  {
+    name: "a ref without the project's folder, exit 2",
+    folders: historyOf,
+    args: ['breaking', '--against-ref', 'v0.0.0'],
+    expected: refusal('v0.0.0 holds no project'),
+  },
+  {
+    name: 'outside a git work tree, exit 2',
+    folders: () => {
+      // ! outside the repository, and no folder above it read as one
+      const folder = physicalOf(mkdtempSync(join(tmpdir(), 'beadc-no-git-')));
+
+      writeFileSync(join(folder, 'beadc.yaml'), 'version: 1\n');
+
+      return { cwd: folder, root: folder };
+    },
+    env: { GIT_CEILING_DIRECTORIES: physicalOf(tmpdir()) },
+    args: ['breaking', '--against-ref', 'v0.1.0'],
+    expected: refusal("--against-ref needs a git work tree: the project's folder is in none"),
+  },
+  {
+    name: 'no git on the path, exit 3',
+    folders: historyOf,
+    shell: noGit,
+    args: ['breaking', '--against-ref', 'v0.1.0'],
+    expected: environmentFailure('--against-ref needs git on the path', []),
+  },
+  {
+    name: 'an engine that closes the archive unread: its exit passed',
+    folders: historyOf,
+    env: { BEADC_PROBE_STDIN: 'ignore', BEADC_PROBE_EXIT: '0' },
+    args: ['breaking', '--against-ref', 'v0.1.0'],
+    expected: (folders) => {
+      const { stdin: _, ...archived } = archivedWith('v0.1.0')(folders);
+
+      return { ...archived, status: 0 };
+    },
+  },
+  {
+    name: 'an engine that closes the archive unread: its 125 made 3',
+    folders: historyOf,
+    env: { BEADC_PROBE_STDIN: 'ignore', BEADC_PROBE_EXIT: '125' },
+    args: ['breaking', '--against-ref', 'v0.1.0'],
+    expected: (folders) => {
+      const { stdin: _, ...archived } = archivedWith('v0.1.0')(folders);
+
+      return {
+        ...archived,
+        stderr: `${STAND_IN_STDERR}beadc: docker could not run ${STAND_IN_IMAGE} (exit 125)\n`,
+        status: 3,
+      };
+    },
+  },
 ];
 
 test('the wrappers are ASCII and LF, and name one image, the version wrapper and init write', () => {
@@ -825,14 +1119,15 @@ for (const each of CASES) {
     );
     test.setTimeout(60_000);
 
-    const bash = needsShells();
+    const found = needsShells();
     const folders = each.folders();
+    const { bash, env } = each.shell?.(found) ?? { bash: found, env: {} };
     const ran = sameOf(
       runEach({
         cwd: folders.cwd,
         args: each.args ?? ['version'],
         bash,
-        ...(each.env === undefined ? {} : { env: each.env }),
+        env: { ...env, ...each.env },
       })
     );
     const expected = each.expected(folders);
@@ -856,6 +1151,8 @@ for (const each of CASES) {
       expect(ran.calls[0]).toEqual(['--version']);
       expect(ran.calls[1]).toEqual(['info', '--format', expected.info ?? DOCKER_FORMAT]);
       expect(ran.calls[2]).toEqual(expected.run);
+      // * a run reads its standard input where an archive comes, and only there
+      expect(ran.stdin).toBe(expected.stdin);
     }
   });
 }
@@ -953,6 +1250,126 @@ test('a -name:value token reaches the engine split by pwsh -File and cut in a se
       way
     ).toEqual(['check', '--except=A', '--except', 'B']);
   }
+});
+
+test('--against-ref:<ref> is refused, exit 2, where pwsh -File splits it into --against-ref <ref>', () => {
+  test.setTimeout(60_000);
+
+  const bash = needsShells();
+  const folders = historyOf();
+  const env = {
+    [PATH_NAME]: `${standInOf()}${delimiter}${process.env[PATH_NAME] ?? ''}`,
+    BEADC_IMAGE: STAND_IN_IMAGE,
+    BEADC_ENGINE: undefined,
+  };
+  const args = ['breaking', '--against-ref:v0.1.0'];
+  const refused = {
+    calls: [],
+    stdout: '',
+    stderr:
+      'beadc: --against-ref:<ref> is not read: write --against-ref <ref> or --against-ref=<ref>\n',
+    status: 2,
+  };
+
+  expect(runWay(Way.BASH, { cwd: folders.cwd, args, env, bash })).toEqual(refused);
+  expect(
+    parityOf(runWay(Way.PWSH_SESSION, { cwd: folders.cwd, args, env, bash, tokens: [...args] }))
+  ).toEqual(refused);
+
+  const split = runWay(Way.PWSH_FILE, { cwd: folders.cwd, args, env, bash });
+  const archived = archivedWith('v0.1.0')(folders);
+
+  expect(split.calls[2]).toEqual(archived.run);
+  expect(split.stdin).toBe(archived.stdin);
+  expect(split.status).toBe(1);
+});
+
+test('in a session, an archive piped into beadc.ps1 is refused, exit 2, where bash and pwsh -File pass it on', () => {
+  test.setTimeout(60_000);
+
+  const bash = needsShells();
+  const folders = historyOf();
+  const scratch = test.info().outputPath('piped');
+  const log = join(scratch, 'calls.log');
+  const env = environmentWith({
+    [PATH_NAME]: `${standInOf()}${delimiter}${process.env[PATH_NAME] ?? ''}`,
+    BEADC_IMAGE: STAND_IN_IMAGE,
+    BEADC_ENGINE: undefined,
+    BEADC_PROBE_LOG: log,
+  });
+  const archive = archiveOf(folders.root, 'v0.1.0');
+  const session = join(scratch, 'session.ps1');
+
+  mkdirSync(scratch, { recursive: true });
+  writeFileSync(
+    session,
+    [
+      `Set-Location -LiteralPath ${quoted(folders.cwd)}`,
+      `& git archive --format=tar v0.1.0 | & ${quoted(filled('beadc.ps1'))} breaking --against -`,
+      'exit $LASTEXITCODE',
+      '',
+    ].join('\n')
+  );
+
+  const piped = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', session], {
+    cwd: scratch,
+    env,
+    encoding: 'utf8',
+  });
+
+  expect(piped.stderr).toBe(
+    'beadc: in a session, an archive piped to beadc.ps1 reaches it as text: name a ref by --against-ref, or pipe the archive to pwsh -File\n'
+  );
+  expect(piped.status).toBe(2);
+  expect(callsOf(log)).toEqual([]);
+
+  // * the same archive on the process's standard input, as a shell's pipe gives it
+  for (const [shell, args] of [
+    [bash, [filled('beadc.sh').replaceAll('\\', '/'), 'breaking', '--against', '-']],
+    [
+      'pwsh',
+      ['-NoProfile', '-NonInteractive', '-File', filled('beadc.ps1'), 'breaking', '--against', '-'],
+    ],
+  ] as const) {
+    rmSync(log, { force: true });
+    rmSync(`${log}.stdin`, { force: true });
+
+    const run = spawnSync(shell, args, { cwd: folders.cwd, env, input: archive });
+
+    expect(run.status, shell).toBe(1);
+    expect(callsOf(log)[2], shell).toEqual(
+      runCall({
+        user: callerUser(),
+        source: physicalOf(folders.root),
+        workdir: '/work/sub',
+        args: ['breaking', '--against', '-'],
+        interactive: true,
+      })
+    );
+    expect(stdinOf(log).stdin, shell).toBe(digestOf(archive));
+  }
+});
+
+test("in a session, --against-ref's run writes the process's streams, past the session's > and 2>", () => {
+  test.setTimeout(60_000);
+
+  const bash = needsShells();
+  const folders = historyOf();
+  const env = {
+    [PATH_NAME]: `${standInOf()}${delimiter}${process.env[PATH_NAME] ?? ''}`,
+    BEADC_IMAGE: STAND_IN_IMAGE,
+    BEADC_ENGINE: undefined,
+  };
+  const args = ['breaking', '--against-ref', 'v0.1.0'];
+  const scratch = test.info().outputPath(`run-${String(runs + 1)}`);
+  const session = runWay(Way.PWSH_SESSION, { cwd: folders.cwd, args, env, bash });
+
+  // ! the engine's bytes, whole, on the process's own streams; nothing through the session's
+  expect(readFileSync(join(scratch, 'out'), 'utf8')).toBe('');
+  expect(readFileSync(join(scratch, 'err'), 'utf8')).toBe('');
+  expect(session.stdout).toBe(STAND_IN_STDOUT);
+  expect(session.stderr).toBe(STAND_IN_STDERR);
+  expect(session.status).toBe(1);
 });
 
 test('each wrapper refuses the shell it is not written for, exit 3', () => {
@@ -1141,6 +1558,27 @@ test("each wrapper runs generate --check over the repository's beadc.yaml and ex
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(`${generated}:2: line 2 differs from what beadc generate writes\n`);
     expect(run).toEqual(off[0]);
+  }
+});
+
+test('each wrapper runs breaking --against-ref HEAD over examples/hello through the image: exit 0', () => {
+  test.setTimeout(240_000);
+
+  const bash = needsShells();
+
+  needsImage();
+
+  const runs = WAYS.map((way) => {
+    return imageRunOf(way, {
+      cwd: join(REPOSITORY, 'examples', 'hello'),
+      args: ['breaking', '--against-ref', 'HEAD'],
+      bash,
+    });
+  });
+
+  for (const run of runs) {
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(run).toEqual(runs[0]);
   }
 });
 

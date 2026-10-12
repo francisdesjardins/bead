@@ -1,0 +1,4 @@
+# The earlier of this case: PlaceOrder deprecated, which the current deletes.
+version: 1
+source:
+  proto: [proto]

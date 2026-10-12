@@ -1,0 +1,86 @@
+{
+  "category": "WIRE",
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.EchoRequest"
+          },
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Other"
+          },
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Request"
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Request"
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.EchoRequest"
+          },
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Other"
+          },
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Request"
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Other"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_MESSAGE_SWITCHED",
+      "pointer": "/services/0/procedures/0/request/message"
+    }
+  ]
+}

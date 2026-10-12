@@ -1,0 +1,20 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/procedureName",
+      "value": "eCho"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_SAME_NAME",
+      "pointer": "/services/0/procedures/0/procedureName"
+    }
+  ]
+}

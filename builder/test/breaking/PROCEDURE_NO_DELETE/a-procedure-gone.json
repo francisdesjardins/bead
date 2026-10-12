@@ -1,0 +1,23 @@
+{
+  "current": [
+    {
+      "op": "remove",
+      "path": "/services/0/procedures/7"
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROCEDURE_NO_DELETE",
+      "pointer": "/services/0/reserved/procedureIds"
+    },
+    {
+      "rule": "NAME_NO_DELETE",
+      "pointer": "/services/0/reserved/procedureNames"
+    }
+  ]
+}

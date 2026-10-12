@@ -5,16 +5,26 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { expect, test } from '@playwright/test';
 
+import { readStandardInput } from '../breaking/against.ts';
+import { extractArchive } from '../breaking/archive.ts';
+import { InputError } from '../diagnostics.ts';
+
 const BUILDER = fileURLToPath(new URL('../../', import.meta.url));
 const INTEROP = fileURLToPath(new URL('../../../spec/interop-blueprint.json', import.meta.url));
 const FIXTURES = fileURLToPath(new URL('../../test/fixtures/', import.meta.url));
 const CLI = fileURLToPath(new URL('../cli.ts', import.meta.url));
+const PAIR = 'test/breaking/buf';
+const ARCHIVE = new URL('../../test/breaking/archive/archive.tar', import.meta.url);
 
 // beadc as a user runs it: Node, src/cli.ts as written, from builder/ or the folder given, after
-// the modules `node` is given to load first
+// the modules `node` is given to load first, `input` on its standard input
 const beadc = (
   args: readonly string[],
-  options: { readonly cwd?: string; readonly imports?: readonly string[] } = {}
+  options: {
+    readonly cwd?: string;
+    readonly imports?: readonly string[];
+    readonly input?: Uint8Array;
+  } = {}
 ): { status: number | null; stdout: string; stderr: string } => {
   const run = spawnSync(
     process.execPath,
@@ -25,7 +35,11 @@ const beadc = (
       CLI,
       ...args,
     ],
-    { cwd: options.cwd ?? BUILDER, encoding: 'utf8' }
+    {
+      cwd: options.cwd ?? BUILDER,
+      encoding: 'utf8',
+      ...(options.input === undefined ? {} : { input: options.input }),
+    }
   );
 
   return { status: run.status, stdout: run.stdout, stderr: run.stderr };
@@ -107,7 +121,15 @@ test('the usage names every command, init and wrapper among them', () => {
 
   expect(run.status).toBe(2);
 
-  for (const command of ['check', 'blueprint', 'generate', 'init <name>', 'wrapper', 'version']) {
+  for (const command of [
+    'check',
+    'blueprint',
+    'generate',
+    'breaking',
+    'init <name>',
+    'wrapper',
+    'version',
+  ]) {
     expect(run.stderr).toContain(`
   ${command} `);
   }
@@ -166,7 +188,7 @@ test("node runs src/cli.ts generate, then generate --check, over a fixture's bea
   );
 });
 
-test('check, blueprint and version load no TypeScript compiler', () => {
+test('check, blueprint, breaking and version load no TypeScript compiler', () => {
   const hook = test.info().outputPath('compilers.mjs');
   const folder = interopProject();
 
@@ -208,6 +230,142 @@ test('check, blueprint and version load no TypeScript compiler', () => {
   expect(compilersOf(['check', INTEROP])).toBe('');
   expect(compilersOf(['blueprint', '--check', INTEROP])).toBe('');
   expect(compilersOf(['version'])).toBe('');
+  expect(compilersOf(['breaking', INTEROP, '--against', INTEROP])).toBe('');
   // the hook sees what generate loads: protoplugin's compiler
   expect(compilersOf(['generate'], folder)).toContain('typescript');
+});
+
+test('breaking exits 0 against itself, 1 on a finding, 0 once a scoped --except names it', () => {
+  const limited = test.info().outputPath('limited.json');
+
+  // echo states a limit, the revision moved: PROCEDURE_SAME_LIMIT alone
+  writeFileSync(
+    limited,
+    readFileSync(INTEROP, 'utf8')
+      .replace('"procedureId": 1,', '"maximumPayloadBytes": 1024,\n          "procedureId": 1,')
+      .replace('"serviceRevision": 1', '"serviceRevision": 2')
+  );
+
+  expect(beadc(['breaking', INTEROP, '--against', INTEROP]).status).toBe(0);
+
+  const found = beadc(['breaking', limited, '--against', INTEROP]);
+
+  expect(found.status).toBe(1);
+  expect(found.stdout).toMatch(
+    /#\/services\/0\/procedures\/0\/maximumPayloadBytes: error PROCEDURE_SAME_LIMIT: /u
+  );
+  expect(
+    beadc([
+      'breaking',
+      limited,
+      '--against',
+      INTEROP,
+      '--except',
+      'PROCEDURE_SAME_LIMIT@/services/0/procedures/0',
+    ]).status
+  ).toBe(0);
+  expect(
+    beadc([
+      'breaking',
+      limited,
+      '--against',
+      INTEROP,
+      '--except',
+      'PROCEDURE_SAME_LIMIT@/services/0/procedures/1',
+    ]).status
+  ).toBe(1);
+  expect(beadc(['breaking', limited, '--against', INTEROP, '--category', 'WIRE']).status).toBe(1);
+});
+
+test('breaking refuses --against missing, --category other than WIRE or API, --except of a rule it does not run and buf:<RULE> buf does not know, exit 2', () => {
+  const refused = [
+    ['breaking', INTEROP],
+    ['breaking', INTEROP, '--against', INTEROP, '--category', 'FILE'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'NAME_FORM'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'NO_SUCH_RULE'],
+    ['breaking', INTEROP, '--against', INTEROP, '--category', 'WIRE', '--except', 'NAME_NO_DELETE'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'buf:NO_SUCH_RULE'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'buf:RPC_NO_DELETE'],
+    ['breaking', INTEROP, '--against', 'no-such-earlier'],
+    ['check', INTEROP, '--against', INTEROP],
+    ['check', INTEROP, '--category', 'WIRE'],
+  ];
+
+  for (const args of refused) {
+    const run = beadc(args);
+
+    expect(run.status, args.join(' ')).toBe(2);
+    expect(run.stderr, args.join(' ')).toMatch(/^beadc: /u);
+  }
+
+  // a warning of check's, or a rule of buf's it runs, is no refusal
+  expect(
+    beadc(['breaking', INTEROP, '--against', INTEROP, '--except', 'SPEC_VERSION_NEWER']).status
+  ).toBe(0);
+  expect(
+    beadc(['breaking', INTEROP, '--against', INTEROP, '--except', 'buf:FIELD_SAME_TYPE']).status
+  ).toBe(0);
+});
+
+test("breaking over a .proto prints Bead's finding at the rpc's span and buf's at the field's", () => {
+  test.setTimeout(60_000);
+
+  const file = `${PAIR}/current/parcel/v1/parcel.proto`;
+  const pair = ['breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`];
+  const run = beadc(pair);
+  const renamed = `${file}:22:7: error PROCEDURE_SAME_NAME: `;
+  const field = `${file}:34:3: error buf:FIELD_SAME_TYPE: `;
+
+  expect(run.status).toBe(1);
+  expect(run.stdout).toContain(renamed);
+  expect(run.stdout).toContain('(at /services/0/procedures/0/procedureName)');
+  expect(run.stdout).toContain(field);
+
+  // * each waived at its scope, its pointer or its file, and the other findings kept
+  const waived = beadc([
+    ...pair,
+    '--except',
+    'buf:FIELD_SAME_TYPE@parcel/v1/parcel.proto',
+    '--except',
+    'PROCEDURE_SAME_NAME@/services/0/procedures/0',
+  ]);
+
+  expect(waived.status).toBe(1);
+  expect(waived.stdout).not.toContain(renamed);
+  expect(waived.stdout).not.toContain(field);
+  expect(waived.stdout).toContain('error NAME_NO_DELETE: ');
+  expect(waived.stdout).toContain('error buf:FIELD_NO_DELETE: ');
+  expect(beadc([...pair, '--except', 'PROCEDURE_SAME_NAME@/services/0/reserved']).stdout).toContain(
+    renamed
+  );
+  expect(beadc([...pair, '--except', 'buf:FIELD_SAME_TYPE@parcel/v1/other.proto']).status).toBe(2);
+});
+
+test('--against - reads a tar from standard input, and refuses a terminal', async () => {
+  const archive = new Uint8Array(readFileSync(ARCHIVE));
+  const folder = test.info().outputPath('current');
+
+  // the current, the archive's own blueprint: the earlier on standard input holds it too
+  extractArchive(archive, { into: folder });
+
+  const current = join(folder, 'interop-blueprint.json');
+  const cut = beadc(['breaking', current, '--against', '-'], { input: archive.subarray(0, 4096) });
+
+  expect(beadc(['breaking', current, '--against', '-'], { input: archive }).status).toBe(0);
+  expect(cut.status).toBe(2);
+  expect(cut.stderr).toMatch(/cut short/u);
+
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+
+  Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+
+  try {
+    await expect(readStandardInput()).rejects.toThrow(InputError);
+  } finally {
+    if (descriptor === undefined) {
+      Reflect.deleteProperty(process.stdin, 'isTTY');
+    } else {
+      Object.defineProperty(process.stdin, 'isTTY', descriptor);
+    }
+  }
 });

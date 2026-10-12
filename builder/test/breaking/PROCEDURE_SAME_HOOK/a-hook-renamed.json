@@ -1,0 +1,26 @@
+{
+  "current": [
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/4/admission",
+      "value": {
+        "hook": "anybody"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/serviceRevision",
+      "value": 2
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_SAME_HOOKS",
+      "pointer": "/services/0"
+    },
+    {
+      "rule": "PROCEDURE_SAME_HOOK",
+      "pointer": "/services/0/procedures/4/admission/hook"
+    }
+  ]
+}

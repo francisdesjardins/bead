@@ -10,8 +10,6 @@
     // resolution, and a bundler to run them
     "module": "ESNext",
     "moduleResolution": "bundler",
-    // TODO the runtime's call after `'on' in socket` fails without it (TS2722); its fix removes it
-    "exactOptionalPropertyTypes": true,
     // beadc's imports name their `.ts`, as the example's own do
     "allowImportingTsExtensions": true,
     // iterator helpers on `Map` and `Set`, `await using`, and `JsonWebKey`, `BodyInit` and the

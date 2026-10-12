@@ -1,0 +1,12 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROTO_SKIPPED"
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROTO_SKIPPED"
+    }
+  ]
+}

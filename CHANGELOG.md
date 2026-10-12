@@ -63,6 +63,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   CI's `examples` job holds to beadc (decision 0008).
 - `Error` on the C# side's `HttpTransportServer` and `HttpTransportClient`, as their WebSocket
   siblings have it.
+- `beadc breaking`: a project held to its last release by id, in two categories, `WIRE` within
+  `API`, the default: 20 rules of Bead's over the two blueprints, `SERVICE_SAME_HOOKS`,
+  `NAME_NO_DELETE` and `SERVICE_REVISION` among them, and buf's over the messages of two buf
+  images, each finding `buf:`-prefixed, its rules keyed by a service's or an rpc's name excepted;
+  `--against` a folder, its committed blueprint read for Bead's rules, `-` for a tar on standard
+  input, or a blueprint, `PROTO_SKIPPED` where a `.proto` side goes uncompared; `--except` waives a
+  finding by its rule, scoped to its pointer or file. The wrappers' `--against-ref <ref>` pipes the
+  project's `git archive` at that ref into the run. CI holds the interop's blueprint and
+  `examples/hello` against the last release that carries a blueprint, from 0.3.0 (decisions 0017
+  and 0022).
+- The builder's `type-check` compiles the TypeScript goldens against `@bufbuild/protobuf` 2.13.0,
+  the floor their header names, installed beside the pin as an npm alias that `version.test.ts`
+  holds to `PROTOBUF_FLOOR`.
 
 ### Changed
 
@@ -100,6 +113,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   generated folders out.
 - `spec.md` 15.1 calls each listener of a transport within a guard and reports what it throws;
   15.2, 15.3, 15.6 and 15.7 state what a stop answers what arrives as it runs.
+- Spec 16.8 and 16.9: `beadc breaking` holds ids and names for life against the last release,
+  and refuses a revision lowered, or left where the contract moved.
+- `tools/release.mjs prepare` lists, among what it owes by hand, each `--except` of CI's
+  `beadc breaking` step and each of decision 0006's gates owed that names the version it prepares.
 
 ### Removed
 
@@ -110,6 +127,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript side compiles under a consumer's `strict` without `exactOptionalPropertyTypes`:
+  the WebSocket client's heartbeat guards the methods it calls by their value, which narrows them
+  under either setting, where TS2722 refused its call.
+- A catalogue's `is` narrows to `IListedFailureError<Name>`, the failure of that name, so a false
+  answer leaves a `FailureError` one, to be asked of another name, where it narrowed it to `never`.
+- beadc's refusal of a protoc missing or off its pin names the fix to whoever runs it, in a clone
+  or not: protoc's release at the pin and `BEADC_PROTOC`, or beadc's image, and no path of the
+  repository's.
 - A release finishes with `--keepremote`, its branch kept on origin, and the one push `tag` prints
   deletes it, so nothing reaches origin before that push.
 - A listener of a transport's events that throws changes nothing the transport does, on both

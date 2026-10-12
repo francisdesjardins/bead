@@ -119,6 +119,5 @@ From source, the TypeScript runtime is its `.ts` files, which a consumer's compi
 the consumer's options. [`typescript/tsconfig.consumer.json`](typescript/tsconfig.consumer.json)
 is all a consumer must set, and `yarn check` compiles the example under it: `strict`;
 `moduleResolution: bundler`, since the runtime's imports name no extension, and a bundler to run
-them, esbuild here; `exactOptionalPropertyTypes`; and the libraries `ESNext.Iterator`,
-`ESNext.Disposable` and `DOM`. The C# half needs none of it: a project or a package compiles the
-runtime under its own rules.
+them, esbuild here; and the libraries `ESNext.Iterator`, `ESNext.Disposable` and `DOM`. The C# half
+needs none of it: a project or a package compiles the runtime under its own rules.

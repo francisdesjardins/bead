@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_SAME_KIND",
+      "line": 58,
+      "column": 18
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROCEDURE_SAME_KIND",
+      "line": 58,
+      "column": 18
+    }
+  ]
+}

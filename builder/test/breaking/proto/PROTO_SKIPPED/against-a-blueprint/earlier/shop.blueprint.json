@@ -1,0 +1,214 @@
+{
+  "format": "bead-blueprint/1",
+  "proto": {
+    "files": [
+      {
+        "package": "shop.v1",
+        "path": "shop/v1/shop.proto"
+      }
+    ],
+    "messages": [
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.ConfirmOrderRequest"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.ConfirmOrderResponse"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.GetBalanceRequest"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.GetBalanceResponse"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.GetPriceRequest"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.GetPriceResponse"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.PlaceOrderRequest"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.PlaceOrderResponse"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.Stock"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.WatchStockRequest"
+      },
+      {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.WatchStockResponse"
+      }
+    ]
+  },
+  "requires": [],
+  "reservedServices": {
+    "ids": [
+      {
+        "first": 9,
+        "last": 9
+      }
+    ],
+    "names": ["Till"]
+  },
+  "services": [
+    {
+      "description": "Sells what the shop holds.",
+      "failures": [
+        {
+          "code": 1,
+          "description": "No such item.",
+          "failureName": "UNKNOWN_ITEM"
+        },
+        {
+          "code": 2,
+          "description": "The shop is closed.",
+          "failureName": "CLOSED"
+        }
+      ],
+      "procedures": [
+        {
+          "admission": "none",
+          "description": "Gives an item's price.",
+          "failures": ["UNKNOWN_ITEM"],
+          "maximumPayloadBytes": 4096,
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "getPrice",
+          "request": {
+            "encoding": "proto",
+            "message": "shop.v1.GetPriceRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "shop.v1.GetPriceResponse"
+          }
+        },
+        {
+          "admission": {
+            "hook": "member"
+          },
+          "description": "Watches an item's stock, a Stock a change, for a member.",
+          "failures": ["UNKNOWN_ITEM", "CLOSED"],
+          "notification": {
+            "encoding": "proto",
+            "message": "shop.v1.Stock"
+          },
+          "procedureId": 2,
+          "procedureKind": "notifies",
+          "procedureName": "watchStock",
+          "request": {
+            "encoding": "proto",
+            "message": "shop.v1.WatchStockRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "shop.v1.WatchStockResponse"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Asks the client to confirm an order: a command the client answers.",
+          "failures": [],
+          "procedureId": 3,
+          "procedureKind": "command",
+          "procedureName": "confirmOrder",
+          "request": {
+            "encoding": "proto",
+            "message": "shop.v1.ConfirmOrderRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "shop.v1.ConfirmOrderResponse"
+          }
+        },
+        {
+          "admission": "session",
+          "description": "Places an order, for a caller with a session.",
+          "failures": [],
+          "procedureId": 4,
+          "procedureKind": "request",
+          "procedureName": "placeOrder",
+          "request": {
+            "encoding": "proto",
+            "message": "shop.v1.PlaceOrderRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "shop.v1.PlaceOrderResponse"
+          }
+        }
+      ],
+      "proto": {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.ShopService"
+      },
+      "reserved": {
+        "failureCodes": [
+          {
+            "first": 9,
+            "last": 9
+          }
+        ],
+        "procedureIds": [
+          {
+            "first": 9,
+            "last": 10
+          }
+        ],
+        "procedureNames": ["refund"]
+      },
+      "serviceId": 1,
+      "serviceName": "Shop",
+      "serviceRevision": 1
+    },
+    {
+      "description": "Keeps the shop's accounts.",
+      "failures": [],
+      "procedures": [
+        {
+          "admission": "none",
+          "description": "Gives the shop's balance.",
+          "failures": [],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "getBalance",
+          "request": {
+            "encoding": "proto",
+            "message": "shop.v1.GetBalanceRequest"
+          },
+          "result": {
+            "encoding": "proto",
+            "message": "shop.v1.GetBalanceResponse"
+          }
+        }
+      ],
+      "proto": {
+        "file": "shop/v1/shop.proto",
+        "fullName": "shop.v1.LedgerService"
+      },
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 2,
+      "serviceName": "Ledger",
+      "serviceRevision": 1
+    }
+  ],
+  "specVersion": "0.2.0"
+}

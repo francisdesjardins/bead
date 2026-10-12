@@ -1300,13 +1300,14 @@ long as it runs. A side that counts its calls MUST refuse a declaration that doe
 later release, or be reserved, and never be declared for another: so a peer built against an earlier
 release never calls an id that now means another procedure, and within a service a name never comes
 to count another procedure. Between two releases of the definitions a builder generates a side from,
-the builder's `beadc breaking` is to hold it, a gate decision 0006 owes; nothing holds it across
-definitions, nor on a side written by hand.
+the builder's `beadc breaking` holds it, against the last release that carries them; nothing holds
+it across definitions, nor on a side written by hand.
 
 16.9. A service's revision counts the releases of its contract, from 1, and does not travel. It
 SHOULD move once in a release whose contract differs from the release before, however much moved,
-and never back, as `beadc breaking` is to hold it (section 16.8). A side holds 0 for a procedure it
-knows no revision of, a relay's leg B (section 14.2), and declares none at 0.
+and never back; `beadc breaking` refuses one lowered, or left where the contract moved
+(section 16.8). A side holds 0 for a procedure it knows no revision of, a relay's leg B
+(section 14.2), and declares none at 0.
 
 16.10. A side MUST refuse a declaration as it is made, never on a call, for the first of these
 reasons that applies, before any reason of its own; a declaration refused declares nothing:

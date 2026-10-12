@@ -1,0 +1,148 @@
+syntax = "proto3";
+
+package shop.v1;
+
+import "bead/options.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+  reserved_services: [
+    {first: 9}
+  ]
+  reserved_service_names: ["Till"]
+};
+
+// Sells what the shop holds.
+service ShopService {
+  option (bead.service) = {
+    id: 1
+    revision: 2
+    failures: "ShopFailure"
+    reserved_ids: [
+      {
+        first: 9
+        last: 10
+      }
+    ]
+    reserved_names: ["refund"]
+  };
+
+  // Gives an item's price.
+  rpc GetPrice(GetPriceRequest) returns (GetPriceResponse) {
+    option (bead.procedure) = {
+      id: 1
+      maximum_payload_bytes: 4096
+      failures: ["SHOP_FAILURE_UNKNOWN_ITEM"]
+    };
+  }
+
+  // Watches an item's stock, a Stock a change, for a member.
+  rpc WatchStock(WatchStockRequest) returns (WatchStockResponse) {
+    option (bead.procedure) = {
+      id: 2
+      notifies: {message: "shop.v1.Stock"}
+      admission: {hook: "member"}
+      failures: [
+        "SHOP_FAILURE_UNKNOWN_ITEM",
+        "SHOP_FAILURE_CLOSED"
+      ]
+    };
+  }
+
+  // Asks the client to confirm an order: a command the client answers.
+  rpc ConfirmOrder(ConfirmOrderRequest) returns (ConfirmOrderResponse) {
+    option (bead.procedure) = {
+      id: 3
+      command: {}
+    };
+  }
+
+  // Places an order, for a caller with a session.
+  rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse) {
+    option (bead.procedure) = {
+      id: 4
+      admission: {
+        session: {}
+      }
+    };
+  }
+}
+
+// Keeps the shop's accounts.
+service LedgerService {
+  option (bead.service) = {
+    id: 2
+    revision: 1
+  };
+
+  // Gives the shop's balance.
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}
+
+// The item to price.
+message GetPriceRequest {
+  string item = 1;
+  string currency = 2;
+}
+
+// Its price, in cents.
+message GetPriceResponse {
+  int64 cents = 1;
+}
+
+// The item to watch.
+message WatchStockRequest {
+  string item = 1;
+}
+
+// The stock when the watch began.
+message WatchStockResponse {
+  int32 count = 1;
+}
+
+// One change of an item's stock.
+message Stock {
+  int32 count = 1;
+}
+
+// The order to confirm.
+message ConfirmOrderRequest {
+  string order = 1;
+}
+
+// Whether the client confirms it.
+message ConfirmOrderResponse {
+  bool confirmed = 1;
+}
+
+// The items to order.
+message PlaceOrderRequest {
+  repeated string items = 1;
+}
+
+// The order placed.
+message PlaceOrderResponse {
+  string order = 1;
+}
+
+// Nothing to ask.
+message GetBalanceRequest {}
+
+// The balance, in cents.
+message GetBalanceResponse {
+  int64 cents = 1;
+}
+
+// What a shop answers instead.
+enum ShopFailure {
+  reserved 9;
+  SHOP_FAILURE_UNSPECIFIED = 0;
+  // No such item.
+  SHOP_FAILURE_UNKNOWN_ITEM = 1;
+  // The shop is closed.
+  SHOP_FAILURE_CLOSED = 2;
+}

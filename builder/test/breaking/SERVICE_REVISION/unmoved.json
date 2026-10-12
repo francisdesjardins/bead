@@ -1,0 +1,27 @@
+{
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/-",
+      "value": {
+        "admission": "none",
+        "failures": [],
+        "procedureId": 19,
+        "procedureKind": "request",
+        "procedureName": "greet",
+        "request": {
+          "encoding": "json"
+        },
+        "result": {
+          "encoding": "json"
+        }
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_REVISION",
+      "pointer": "/services/0/serviceRevision"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  bufDiagnosticOf,
   diagnosticOf,
   ErrorFormat,
   formatDiagnostic,
@@ -53,4 +54,31 @@ test("escapes a pointer's tokens, and tells an error from a warning", () => {
   expect(
     hasError([diagnosticOf('SERVICE_SKIPPED', { message: 'skipped', place: { file: 'a.proto' } })])
   ).toBe(false);
+});
+
+test("a breaking finding on a .proto ends its line with its pointer, and buf's is named buf:", () => {
+  const renamed = diagnosticOf('PROCEDURE_SAME_NAME', {
+    message: 'procedure 1 echo is repeat now',
+    place: {
+      file: 'proto/x/v1/x.proto',
+      line: 22,
+      column: 7,
+      pointer: '/services/0/procedures/0/procedureName',
+    },
+  });
+  const field = bufDiagnosticOf('FIELD_SAME_TYPE', {
+    message: 'Field "1" changed type.',
+    place: { file: 'proto/x/v1/x.proto', line: 34, column: 3 },
+  });
+
+  expect(formatDiagnostic(renamed, ErrorFormat.TEXT)).toBe(
+    'proto/x/v1/x.proto:22:7: error PROCEDURE_SAME_NAME: procedure 1 echo is repeat now (at /services/0/procedures/0/procedureName)'
+  );
+  expect(formatDiagnostic(renamed, ErrorFormat.GITHUB)).toBe(
+    '::error file=proto/x/v1/x.proto,line=22,col=7,title=PROCEDURE_SAME_NAME::procedure 1 echo is repeat now (at /services/0/procedures/0/procedureName)'
+  );
+  expect(formatDiagnostic(field, ErrorFormat.TEXT)).toBe(
+    'proto/x/v1/x.proto:34:3: error buf:FIELD_SAME_TYPE: Field "1" changed type.'
+  );
+  expect(hasError([field])).toBe(true);
 });

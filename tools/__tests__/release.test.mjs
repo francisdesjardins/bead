@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 import { MODES, documentOf, gatherReleases } from '../check-versions.mjs';
 import {
+  breakingWaivers,
+  gatesOwedAt,
   localDay,
   prepare,
   resolveMove,
@@ -40,6 +42,35 @@ const changelog = (unreleased) => {
     `[0.1.0]: ${REPOSITORY}/releases/tag/v0.1.0\n`,
   ].join('');
 };
+
+// CI's breaking step with two waivers, one on a line a backslash continues, beside a comment and
+// another command's --except, which waive nothing of breaking's
+const CI_STEP = [
+  '      # beadc breaking, against the last release: --except NOT_A_WAIVER',
+  '      - run: |',
+  '          node builder/src/cli.ts check --except SPEC_VERSION_NEWER spec/interop-blueprint.json',
+  '          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - \\',
+  "            --except 'PROCEDURE_SAME_NAME@/services/0/procedures/2' --error-format github",
+  '          git archive --format=tar "$tag" | ./beadc.sh breaking --against - --except=buf:FIELD_SAME_TYPE@hello/v1',
+  '',
+].join('\n');
+
+// 0006's gates owed, one of them owed until 0.2.0
+const GATES_OWED = [
+  '## Consequences',
+  '',
+  "**Gates owed**, the one list a gate's landing edits, moving its rule to the table above:",
+  '',
+  "- a check of the C# side's parameters",
+  '  ([0007](0007-csharp.md));',
+  "- `beadc breaking`, which holds a blueprint to the last release's",
+  '  ([0017](0017-ids.md)): its step stands in the `builder` job, owed until 0.2.0, the first',
+  '  release that carries a blueprint;',
+  '- a gate owed until 10.2.0.',
+  '',
+  '**The hooks copy two gates.** Nothing owed until 0.2.0 here.',
+  '',
+].join('\n');
 
 // ── Texts ─────────────────────────────────────────────────────────────────────
 
@@ -151,6 +182,20 @@ describe('texts', () => {
         branch: 'hotfix/0.1.0',
       });
     }, /\[0\.1\.0\] stands elsewhere than right below \[Unreleased\]/);
+  });
+
+  test("the breaking step's waivers, and 0006's gates owed that name a version", () => {
+    assert.deepEqual(breakingWaivers(CI_STEP), [
+      'PROCEDURE_SAME_NAME@/services/0/procedures/2',
+      'buf:FIELD_SAME_TYPE@hello/v1',
+    ]);
+    assert.deepEqual(breakingWaivers('run: node builder/src/cli.ts breaking --against -\n'), []);
+    assert.deepEqual(gatesOwedAt(GATES_OWED, '0.2.0'), [
+      "`beadc breaking`, which holds a blueprint to the last release's",
+    ]);
+    assert.deepEqual(gatesOwedAt(GATES_OWED, '10.2.0'), ['a gate owed until 10.2.0']);
+    assert.deepEqual(gatesOwedAt(GATES_OWED, '0.3.0'), []);
+    assert.deepEqual(gatesOwedAt('# 0006\n', '0.2.0'), []);
   });
 });
 
@@ -637,6 +682,25 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     assert.equal(day('America/Toronto'), '2026-10-07');
     assert.equal(day('UTC'), '2026-10-08');
     assert.match(localDay(new Date()), /^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("it lists each waiver of CI's breaking step, and each of 0006's gates owed that names it", () => {
+    const root = releasing();
+    write(root, {
+      '.github/workflows/ci.yml': CI_STEP,
+      // ! a Windows tool writes CRLF in the working tree: the record is read with LF
+      'docs/decisions/0006-a-rule-has-its-gate.md': GATES_OWED.replaceAll('\n', '\r\n'),
+    });
+    const { logged } = prepared(root, { moves: { spec: 'minor' } });
+    const owed = logged.filter((line) => {
+      return line.startsWith('owed by hand: ');
+    });
+    assert.deepEqual(owed, [
+      "owed by hand: the [0.2.0] line on the spec's 0.2.0 (spec-v0.2.0)",
+      "owed by hand: --except PROCEDURE_SAME_NAME@/services/0/procedures/2, a waiver of CI's beadc breaking step, which v0.2.0 makes moot: take it out of .github/workflows/ci.yml on develop once v0.2.0 is pushed",
+      "owed by hand: --except buf:FIELD_SAME_TYPE@hello/v1, a waiver of CI's beadc breaking step, which v0.2.0 makes moot: take it out of .github/workflows/ci.yml on develop once v0.2.0 is pushed",
+      "owed by hand: decision 0006's gate owed until 0.2.0 moves to its table: `beadc breaking`, which holds a blueprint to the last release's",
+    ]);
   });
 
   test('--dry-run prints the plan and writes nothing', () => {

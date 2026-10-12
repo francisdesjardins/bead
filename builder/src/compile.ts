@@ -3,7 +3,8 @@
 // A project's `.proto` roots compiled by buf, as the TypeScript side runs it: buf from npm, under the
 // Node that runs beadc, `build` with a configuration of beadc's own naming its options' root first
 // and the project's roots after it, imports and source info included, into a FileDescriptorSet
-// (decision 0022). buf's messages are printed as they came, and exit 2.
+// (decision 0022), or into buf's image, whose files mark the imports, for `beadc breaking`. buf's
+// messages are printed as they came, and exit 2.
 
 // dependencies
 
@@ -65,11 +66,13 @@ const moduleOf = (ancestor: string, folder: string): string => {
 /**
  * Compiles `roots`, folders of `.proto` files, beadc's options' root before them, into a
  * FileDescriptorSet with its imports and its source info; `files`, when given, the files of the
- * roots to build, by path. Throws an {@link InputError} holding buf's messages when it refuses.
+ * roots to build, by path; `image`, into buf's image instead, a set whose files mark the imports,
+ * which the front end reads as a set. Throws an {@link InputError} holding buf's messages when it
+ * refuses.
  */
 export const compile = (
   roots: readonly string[],
-  options: { readonly files?: readonly string[] } = {}
+  options: { readonly files?: readonly string[]; readonly image?: boolean } = {}
 ): Uint8Array => {
   const folders = [OPTIONS_ROOT, ...roots].map((folder) => {
     return resolve(folder);
@@ -95,7 +98,7 @@ export const compile = (
         ancestor,
         '--config',
         JSON.stringify(config),
-        '--as-file-descriptor-set',
+        ...(options.image === true ? [] : ['--as-file-descriptor-set']),
         '-o',
         '-',
         ...paths,

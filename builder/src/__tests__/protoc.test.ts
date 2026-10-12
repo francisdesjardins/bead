@@ -182,6 +182,7 @@ test('looks for no protoc for a blueprint of native bindings, and exits 2 naming
   const comments = checked(FIXTURES, ['bead/comments/v1/comments.proto']);
   const messages = checked(MESSAGES);
   const nowhere = join(test.info().outputPath('nowhere'), 'protoc');
+  const pinned = protocPin().version;
 
   withProtoc(nowhere, () => {
     expect(generateCSharpMessages(comments.set, { blueprint: comments.blueprint })).toEqual([]);
@@ -191,7 +192,7 @@ test('looks for no protoc for a blueprint of native bindings, and exits 2 naming
     expect(() => {
       return generateCSharpMessages(messages.set, { blueprint: messages.blueprint });
     }).toThrow(
-      `no protoc at ${nowhere}, which writes the C# messages: fetch protoc ${protocPin().version}, its pin, with node builder/tools/fetch-protoc.mjs and name it by BEADC_PROTOC, or set the output's messages to external`
+      `no protoc at ${nowhere}, which writes the C# messages, pinned to protoc ${pinned}: name protoc ${pinned} by BEADC_PROTOC, from https://github.com/protocolbuffers/protobuf/releases/tag/v${pinned}, or run beadc's image, ghcr.io/francisdesjardins/beadc, which holds it; or set the output's messages to external`
     );
   });
 });
@@ -281,16 +282,17 @@ test("protoc's refusal is beadc's exit 2, in protoc's words", () => {
   });
 });
 
-test('refuses a protoc of another version than its pin, naming both and the fetch', () => {
+test('refuses a protoc of another version than its pin, naming both and the fix', () => {
   const stub = stubProtoc(test.info().outputPath('stub'), { version: '35.1' });
   const messages = checked(MESSAGES);
+  const pinned = protocPin().version;
 
   withProtoc(stub, () => {
     expect(findProtoc()).toEqual({ path: stub, version: '35.1' });
     expect(() => {
       return generateCSharpMessages(messages.set, { blueprint: messages.blueprint });
     }).toThrow(
-      `protoc 35.1 at ${stub}, where beadc is pinned to protoc ${protocPin().version} (builder/protoc.json), whose C# another writes otherwise: fetch it with node builder/tools/fetch-protoc.mjs and name it by BEADC_PROTOC`
+      `protoc 35.1 at ${stub}, where beadc is pinned to protoc ${pinned}, whose C# another writes otherwise: name protoc ${pinned} by BEADC_PROTOC, from https://github.com/protocolbuffers/protobuf/releases/tag/v${pinned}, or run beadc's image, ghcr.io/francisdesjardins/beadc, which holds it`
     );
   });
 });
