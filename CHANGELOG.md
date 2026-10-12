@@ -23,6 +23,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   matrix, `CLAUDE.md` — what landed in the present and what is ahead kept ahead, the spec moving in
   form alone, records regrouped, renamed or renumbered where that reads clearer, every citation moved
   with them; `tools/release.mjs prepare` lists it among what a release owes by hand.
+- `docs/support.md`'s "Leveled down": each place where every side keeps to what one platform can do
+  though a standard allows more, with the standard, what forces it, what would lift it and the tests
+  that hold it on each side.
 
 ### Changed
 
