@@ -49,13 +49,21 @@ const ENCODER = new TextEncoder();
 const DEPTH = 64;
 
 // the characters a scan of a JSON text reads, by their codes
+const TAB = 0x09;
+const LINE_FEED = 0x0a;
+const CARRIAGE_RETURN = 0x0d;
+const SPACE = 0x20;
 const QUOTE = 0x22;
 const COMMA = 0x2c;
+const MINUS = 0x2d;
 const DIGIT_ZERO = 0x30;
 const DIGIT_NINE = 0x39;
 const OPEN_ARRAY = 0x5b;
 const BACKSLASH = 0x5c;
 const CLOSE_ARRAY = 0x5d;
+const LETTER_F = 0x66;
+const LETTER_N = 0x6e;
+const LETTER_T = 0x74;
 const OPEN_OBJECT = 0x7b;
 const CLOSE_OBJECT = 0x7d;
 const BYTE_ORDER_MARK = 0xfeff;
@@ -147,15 +155,12 @@ const settle = (value: unknown): unknown => {
   return value;
 };
 
-/**
- * Whether every object of `text`, a JSON text already parsed, names each member once, by a
- * well-formed name, its names compared once their escapes are read: `JSON.parse` keeps the last of
- * two, and .NET's reader both.
- */
-export const namesOnce = (text: string): boolean => {
+/** What a scan of `text`, a JSON text already parsed, finds of its objects' names. */
+const scanNames = (text: string): { isEscaped: boolean; isOnce: boolean } => {
   // each open object's names, undefined for an array
   const scopes: (Set<string> | undefined)[] = [];
   let expectsName = false;
+  let hasEscape = false;
 
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
@@ -177,9 +182,10 @@ export const namesOnce = (text: string): boolean => {
           : text.slice(index + 1, end);
 
         if (!name.isWellFormed() || names.has(name)) {
-          return false;
+          return { isEscaped: hasEscape || isEscaped, isOnce: false };
         }
 
+        hasEscape ||= isEscaped;
         names.add(name);
         expectsName = false;
       }
@@ -196,7 +202,118 @@ export const namesOnce = (text: string): boolean => {
     }
   }
 
-  return true;
+  return { isEscaped: hasEscape, isOnce: true };
+};
+
+/**
+ * Whether every object of `text`, a JSON text already parsed, names each member once, by a
+ * well-formed name, its names compared once their escapes are read: `JSON.parse` keeps the last of
+ * two, and .NET's reader both.
+ */
+export const namesOnce = (text: string): boolean => {
+  return scanNames(text).isOnce;
+};
+
+/** Whether `code` opens a number or a literal. */
+const isScalarStart = (code: number): boolean => {
+  return (
+    code === MINUS ||
+    (code >= DIGIT_ZERO && code <= DIGIT_NINE) ||
+    code === LETTER_F ||
+    code === LETTER_N ||
+    code === LETTER_T
+  );
+};
+
+/** Whether `code` ends a number or a literal: what may follow one in a JSON text. */
+const endsScalar = (code: number): boolean => {
+  return (
+    code === COMMA ||
+    code === CLOSE_ARRAY ||
+    code === CLOSE_OBJECT ||
+    code === SPACE ||
+    code === TAB ||
+    code === LINE_FEED ||
+    code === CARRIAGE_RETURN
+  );
+};
+
+/**
+ * The value of `text`, a JSON text `JSON.parse` took, built in the order of its text: each string,
+ * number and literal read by `JSON.parse` alone, each object made of `Object`'s prototype and each
+ * member defined as its own, one named `__proto__` among them. A walk with a stack of its own.
+ */
+const buildJson = (text: string): unknown => {
+  // each open array or object, and for an object the name its next value takes
+  const open: { container: unknown[] | Record<string, unknown>; name: string | undefined }[] = [];
+  let root: unknown;
+
+  const place = (value: unknown): void => {
+    const top = open.at(-1);
+
+    if (top === undefined) {
+      root = value;
+    } else if (Array.isArray(top.container)) {
+      top.container.push(value);
+    } else {
+      // ! defined, never assigned: an assignment to __proto__ would set the object's prototype
+      Object.defineProperty(top.container, top.name ?? '', {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true,
+      });
+      top.name = undefined;
+    }
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+
+    if (code === QUOTE) {
+      const end = endOfString(text, index);
+      const read = JSON.parse(text.slice(index, end + 1)) as string;
+      const top = open.at(-1);
+
+      if (top !== undefined && !Array.isArray(top.container) && top.name === undefined) {
+        top.name = read;
+      } else {
+        place(read);
+      }
+
+      index = end;
+    } else if (code === OPEN_OBJECT || code === OPEN_ARRAY) {
+      const container = code === OPEN_OBJECT ? {} : [];
+
+      place(container);
+      open.push({ container, name: undefined });
+    } else if (code === CLOSE_OBJECT || code === CLOSE_ARRAY) {
+      open.pop();
+    } else if (isScalarStart(code)) {
+      let end = index + 1;
+
+      while (end < text.length && !endsScalar(text.charCodeAt(end))) {
+        end += 1;
+      }
+
+      place(JSON.parse(text.slice(index, end)));
+      index = end - 1;
+    }
+  }
+
+  return root;
+};
+
+/**
+ * The value of `text`, a JSON text, as `JSON.parse` reads it: built by Bead's own reader when a
+ * member's name holds an escape, which V8 can read as the name of an earlier object of the same
+ * shape, one holding a backslash and as long once read. Throws what `JSON.parse` throws.
+ */
+export const parseJson = (text: string): unknown => {
+  const value: unknown = JSON.parse(text);
+
+  // * the parse holds the text to JSON's grammar; only the names it hands on are in doubt
+  return scanNames(text).isEscaped ? buildJson(text) : value;
 };
 
 /**
@@ -229,9 +346,12 @@ const readJson = (bytes: Uint8Array): JsonValue => {
     });
   }
 
-  value = settle(value);
+  const names = scanNames(text);
 
-  if (!namesOnce(text)) {
+  // ! V8 can read a name that holds an escape as an earlier object's: such a payload is built again
+  value = settle(names.isEscaped ? buildJson(text) : value);
+
+  if (!names.isOnce) {
     throw new SyntaxError('the payload names a member twice');
   }
 

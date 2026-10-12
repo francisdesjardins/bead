@@ -79,6 +79,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The builder's `type-check` compiles the TypeScript goldens against `@bufbuild/protobuf` 2.13.0,
   the floor their header names, installed beside the pin as an npm alias that `version.test.ts`
   holds to `PROTOBUF_FLOOR`.
+- `spec/conversations.json`: a name that holds an escape is read as its escapes say, whatever a
+  payload of its shape read on another connection held.
 
 ### Changed
 
@@ -164,6 +166,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side's HTTP server reads a `Content-Length` as the number its digits write: a
   connect or a listen whose length is `00` has no body, as RFC 9110 §8.6 reads it, where it was
   refused 400.
+- The TypeScript side reads a JSON member name that holds an escape as its escapes say, in a
+  payload and in a token's header and claims, where V8's `JSON.parse` could read it as the name
+  of an earlier object of the same shape: a payload one connection sent changed how another's
+  read, and a header's `crit` written with an escape could go unseen.
 
 ## [0.2.0] - 2026-10-07
 

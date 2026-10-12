@@ -308,6 +308,45 @@
       ]
     },
     {
+      "name": "a name that holds an escape is read as its escapes say, whatever a payload of its shape read on another connection held",
+      "clauses": [
+        "17.6",
+        "17.8"
+      ],
+      "steps": [
+        {
+          "open": "first"
+        },
+        {
+          "open": "second"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 7B 22 6F 6E 54 68 65 53 69 6C 6C 22 3A 31 2C 22 78 5C 5C 22 3A 31 7D",
+          "on": "first"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "7B 22 6F 6E 54 68 65 53 69 6C 6C 22 3A 31 2C 22 78 5C 5C 22 3A 31 7D"
+          },
+          "on": "first"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 7B 22 6F 6E 54 68 65 53 69 6C 6C 22 3A 32 2C 22 78 5C 22 22 3A 32 7D",
+          "on": "second"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "7B 22 6F 6E 54 68 65 53 69 6C 6C 22 3A 32 2C 22 78 5C 22 22 3A 32 7D"
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
       "name": "a payload that starts with a byte order mark is answered PAYLOAD_UNDECODABLE",
       "clauses": [
         "17.2.1",

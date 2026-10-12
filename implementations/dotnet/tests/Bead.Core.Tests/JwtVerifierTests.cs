@@ -233,6 +233,28 @@ public sealed class JwtVerifierTests
     }
 
     [Fact]
+    public async Task Refuses_at_crit_a_token_whose_header_names_crit_with_an_escape_whatever_a_token_of_its_shape_held_before()
+    {
+        var vector = Vectors.Of("jwtVerdicts", Holding);
+        var parts = vector.GetProperty("token").GetString()!.Split('.');
+
+        // * the TypeScript twin's shape, its first name drawn for this run
+        var first = $"onTheLedge{Convert.ToHexString(RandomNumberGenerator.GetBytes(8))}";
+        var headed = (string header) =>
+        {
+            return $"{Base64Url.EncodeToString(Encoding.UTF8.GetBytes(header))}.{parts[1]}.{parts[2]}";
+        };
+
+        // V8's JSON.parse can read the second header's last name as the first's, each of four
+        // characters once read, the first holding a backslash
+        await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\\u00":1}"""), PropsOf(vector));
+
+        Assert.Equal(
+            JwtRefusal.Crit,
+            (await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\u0063rit":["exp"]}"""), PropsOf(vector))).Reason);
+    }
+
+    [Fact]
     public async Task Throws_for_an_audience_that_is_not_well_formed_Unicode()
     {
         var vector = Vectors.Of("jwtVerdicts", Holding);
