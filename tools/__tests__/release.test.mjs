@@ -703,6 +703,20 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     ]);
   });
 
+  test('it owes the records brought to the release where the tree keeps their index, and none where it does not', () => {
+    const kept = releasing();
+    write(kept, { 'docs/decisions/README.md': '# Decisions\n' });
+    const owing = (root) => {
+      return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
+        return line.includes('bead-release-records');
+      });
+    };
+    assert.deepEqual(owing(kept), [
+      'owed by hand: the records brought to 0.2.0, by the bead-release-records workflow (.claude/workflows/README.md)',
+    ]);
+    assert.deepEqual(owing(releasing()), []);
+  });
+
   test('--dry-run prints the plan and writes nothing', () => {
     const root = releasing();
     const { plan, ran, logged } = prepared(root, { moves: { spec: 'minor' }, dryRun: true });
