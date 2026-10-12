@@ -990,6 +990,44 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own_and_refuses_403_any_other_host_an_empty_one_and_none_before_its_method_and_its_upgrade()
+    {
+        // the targets in absolute-form of the judgement's twin, on the wire: Kestrel answers 400 a
+        // scheme not in lower case before the judgement runs, as it answers any other target it does
+        // not read (docs/support.md, "Leveled down")
+        foreach (var hosts in new[] { null, [], new[] { "bead.test" } })
+        {
+            await Start(new WebSocketTransportServerOptions { Hosts = hosts });
+
+            // a target in absolute-form names the authority, its Host ignored but for being one
+            foreach (var taken in new[]
+            {
+                HandshakeOf("GET http://127.0.0.1:8080/ HTTP/1.1", "Origin: http://127.0.0.1:8080"),
+                HandshakeOf("GET http://localhost/ HTTP/1.1", "Host: bad host"),
+            })
+            {
+                using var tcp = await OpenTcp();
+                var stream = tcp.GetStream();
+
+                await stream.WriteAsync(taken, Cancelled);
+                await ReadHead(stream);
+            }
+
+            var refused = await AnswerOf(HandshakeOf("GET http://rebind.example/ HTTP/1.1", "Host: 127.0.0.1"));
+
+            Assert.Equal((403, WebSocketRefusals.Host), (refused.Status, refused.Fields.GetValueOrDefault("bead-refusal")));
+
+            // what HTTP refuses of its own, first, unmarked
+            foreach (var target in new[] { "http://a%41.test/", "http:///", "HTTP://127.0.0.1/", "ftp://127.0.0.1/", "http://localhost:/", "http://user@localhost/" })
+            {
+                var answer = await AnswerOf(HandshakeOf($"GET {target} HTTP/1.1"));
+
+                Assert.Equal((target, 400, false), (target, answer.Status, answer.Fields.ContainsKey("bead-refusal")));
+            }
+        }
+    }
+
+    [Fact]
     public async Task Takes_an_upgrade_whose_Upgrade_lists_websocket_in_any_case_in_one_field_line_or_several_whose_Connection_names_upgrade_among_other_tokens_with_no_content()
     {
         await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
