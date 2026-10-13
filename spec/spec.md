@@ -682,9 +682,12 @@ client knows none fails before it goes, with `SESSION_REQUIRED`, and withdraws n
 be given a credential to present by default: a `JWT`, or an `ELSEWHERE` with what its transport
 carries beside each request (section 15.1). Every call presents it but one that gives its own, or
 none: a call may present none, whatever the default. A default is withdrawn once a call that
-presented it is refused `SESSION_REQUIRED`, whatever relays the refusal crossed: the client presents
-none by default from then on, and tells its application, by the credential's scheme alone, so the
-call that renews it goes out without it. A refusal withdraws the default only while it is still the
+presented it is refused `SESSION_REQUIRED`, whatever relays the refusal crossed: from then on, until
+its application gives it a default again, or none, the client fails before it goes each call that
+would present it, with `SESSION_REQUIRED`, and withdraws nothing, as it fails a call that asks for a
+session it does not know; and it tells its application, by the credential's scheme alone. A call
+that presents its own credential, or none, goes: a call that needs no identity presents none, given,
+and so does the call that renews it. A refusal withdraws the default only while it is still the
 credential its call presented, the same scheme and the same bytes: a default given other bytes since
 is kept, and one set again to the same bytes is withdrawn with it; and a failure that ends a
 subscription its server had answered (section 13.6) withdraws nothing, even one that comes before

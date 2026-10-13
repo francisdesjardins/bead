@@ -745,7 +745,8 @@ test.describe('createRouterClient', () => {
       }
     });
 
-    test('withdraws its default once a call that presented it is refused SESSION_REQUIRED: the next call presents none, and credentialWithdrawn fires once, its scheme alone', async () => {
+    // spec 13.4
+    test('withdraws its default once a call that presented it is refused SESSION_REQUIRED: the next call that would present it fails before it goes, SESSION_REQUIRED, nothing sent, and credentialWithdrawn fires once, its scheme alone', async () => {
       const scripted = createScriptedTransport();
       using router = createRouterClient(scripted.transport, { credential: JWT });
       const withdrawn: unknown[][] = [];
@@ -765,17 +766,86 @@ test.describe('createRouterClient', () => {
       });
       await expect(alike).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
 
-      const next = router.request(new Uint8Array(0), { options, procedure: service });
-
-      scripted.deliver(resultOf(5));
-      await next;
+      // never to its connection's session, nor to none, in silence: it fails, and withdraws nothing
+      await expect(
+        router.request(new Uint8Array(0), { options, procedure: service })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        detail: 'the default credential was withdrawn',
+        origin: 'local',
+        side: 'client',
+      });
 
       expect(withdrawn).toEqual([[CredentialScheme.JWT]]);
-      expect(router.credential).toBeUndefined();
+      expect([router.credential, router.isCredentialWithdrawn]).toEqual([undefined, true]);
       expect(presentedOf(scripted)).toEqual([
         [1, JWT, undefined],
         [3, JWT, undefined],
+      ]);
+    });
+
+    // spec 13.4
+    test('after a withdrawal, a call that gives its own credential or NONE goes, and a default given again, or none given, ends the withdrawal', async () => {
+      const scripted = createScriptedTransport();
+      using router = createRouterClient(scripted.transport, { credential: JWT });
+      const withdrawn: unknown[][] = [];
+
+      router.on('credentialWithdrawn', (...told) => {
+        withdrawn.push(told);
+      });
+
+      expect(router.isCredentialWithdrawn).toBe(false);
+
+      const refused = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(sessionRequiredOf(1));
+      await expect(refused).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      expect(router.isCredentialWithdrawn).toBe(true);
+
+      // its own credential, or none, given: the renewal goes, and the withdrawal stays
+      const calls = [RENEWED_JWT, { scheme: CredentialScheme.NONE }].map((credential) => {
+        return router.request(new Uint8Array(0), {
+          options: { ...options, credential },
+          procedure: service,
+        });
+      });
+
+      scripted.deliver(resultOf(3));
+      scripted.deliver(resultOf(5));
+      await Promise.all(calls);
+      expect(router.isCredentialWithdrawn).toBe(true);
+
+      // a default given again ends it
+      router.credential = RENEWED_JWT;
+      expect(router.isCredentialWithdrawn).toBe(false);
+
+      const renewed = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(resultOf(7));
+      await renewed;
+
+      // withdrawn again, then none given, in writing: calls present none, and go
+      const refusedAgain = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(sessionRequiredOf(9));
+      await expect(refusedAgain).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      expect(router.isCredentialWithdrawn).toBe(true);
+      router.credential = undefined;
+      expect(router.isCredentialWithdrawn).toBe(false);
+
+      const anonymous = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(resultOf(11));
+      await anonymous;
+
+      expect(withdrawn).toEqual([[CredentialScheme.JWT], [CredentialScheme.JWT]]);
+      expect(presentedOf(scripted)).toEqual([
+        [1, JWT, undefined],
+        [3, RENEWED_JWT, undefined],
         [5, undefined, undefined],
+        [7, RENEWED_JWT, undefined],
+        [9, RENEWED_JWT, undefined],
+        [11, undefined, undefined],
       ]);
     });
 
@@ -801,6 +871,18 @@ test.describe('createRouterClient', () => {
 
       expect(withdrawn).toEqual([[CredentialScheme.ELSEWHERE]]);
       expect(router.credential).toBeUndefined();
+      // the next call that would present it fails alike, before it goes
+      await expect(
+        router.request(new Uint8Array(0), {
+          options: { ...options, destinationId: 7 },
+          procedure: service,
+        })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        destinationId: 7,
+        origin: 'local',
+      });
+      expect(scripted.sent).toHaveLength(1);
     });
 
     test('withdraws nothing, and fires nothing, on the refusal of a call that presented a default since given anew', async () => {

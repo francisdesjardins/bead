@@ -91,7 +91,8 @@ public sealed record RouterClientOptions
     /// The credential every call presents but one that gives its own (spec 13.4): a
     /// <see cref="Credential.Jwt"/>, or an <see cref="Credential.Elsewhere(string)"/> with what its
     /// transport carries; <see cref="RouterClient.Credential"/> reads it and gives it anew. OPAQUE,
-    /// which a call asks for alone, is an <see cref="ArgumentException"/>.
+    /// which a call asks for alone, is an <see cref="ArgumentException"/>. Once withdrawn, a call that
+    /// would present it fails before it goes until it is given again, or none is.
     /// </summary>
     public Credential? Credential { get; init; }
 
@@ -127,8 +128,9 @@ public sealed record RouterClientOptions
 /// requests, its commands, with the resolvers registered, each in the session its credential
 /// resolves to against the one learned, or by its credentials. A call presents its own credential,
 /// or the client's by default, which a SESSION_REQUIRED answering a call that presented it withdraws,
-/// telling <see cref="CredentialWithdrawn"/>; one its transport cannot carry, or would carry off
-/// the machine in the clear, fails before it goes, DESTINATION_UNREACHABLE.
+/// telling <see cref="CredentialWithdrawn"/>: a call that would present it then fails before it goes,
+/// SESSION_REQUIRED, until a default, or none, is given again. One its transport cannot carry, or
+/// would carry off the machine in the clear, fails before it goes, DESTINATION_UNREACHABLE.
 /// A notification's callbacks run in the order the notifications came, never on the router's
 /// scheduler. A connection that closes, or that a reconnection replaces, takes with it what still
 /// waits, the session and the notifications.
@@ -163,9 +165,11 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     // what resolves a command's JWT and ELSEWHERE, from its credentials
     private readonly CredentialResolver _resolver;
 
-    // the credential presented by default, read and given anew from any thread, and withdrawn
+    // the credential presented by default, read and given anew from any thread, and withdrawn: once
+    // withdrawn, until given again, a call that would present it fails before it goes
     private readonly Lock _credentialGate = new();
     private Credential? _credential;
+    private bool _isCredentialWithdrawn;
 
     /// <summary>
     /// A client's router over <paramref name="transport"/>, on its transport's clock: one given that
@@ -216,8 +220,11 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     /// <summary>
     /// A credential presented by default was withdrawn (spec 13.4): a call that presented it was
     /// refused SESSION_REQUIRED, whatever relays the refusal crossed, while it was still the default.
-    /// Calls present none by default from then on, so the call that renews it goes out without it.
-    /// It carries the credential's scheme alone, never its bytes.
+    /// From then on, until <see cref="Credential"/> is given again, a credential or none, a call that
+    /// would present it fails before it goes, SESSION_REQUIRED, nothing sent, and never falls to
+    /// another session or to none in silence; a call that gives its own, <see cref="Bead.Credential.None"/>
+    /// among them, goes, as the call that renews it does. It carries the credential's scheme alone,
+    /// never its bytes.
     /// </summary>
     public event Action<CredentialScheme>? CredentialWithdrawn;
 
@@ -268,9 +275,10 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     /// <summary>
     /// The credential every call presents but one that gives its own: a
     /// <see cref="Bead.Credential.Jwt"/>, or an <see cref="Bead.Credential.Elsewhere(string)"/> with
-    /// what its transport carries; none presents none. Given anew, it renews it. OPAQUE, which a call
-    /// asks for alone, is an <see cref="ArgumentException"/>, and so is a JWT under limits that hold
-    /// a chunk's envelope or an envelope under 1,024 bytes (spec 12.2).
+    /// what its transport carries; none presents none. Given anew, it renews it, and ends a
+    /// withdrawal, as none given does: going on without one is written. OPAQUE, which a call asks for
+    /// alone, is an <see cref="ArgumentException"/>, and so is a JWT under limits that hold a chunk's
+    /// envelope or an envelope under 1,024 bytes (spec 12.2).
     /// </summary>
     public Credential? Credential
     {
@@ -299,6 +307,22 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             lock (_credentialGate)
             {
                 _credential = value;
+                _isCredentialWithdrawn = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether the default credential was withdrawn (spec 13.4), and not given again since: a call
+    /// that would present it then fails before it goes, SESSION_REQUIRED.
+    /// </summary>
+    public bool IsCredentialWithdrawn
+    {
+        get
+        {
+            lock (_credentialGate)
+            {
+                return _isCredentialWithdrawn;
             }
         }
     }
@@ -483,7 +507,30 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         ArgumentNullException.ThrowIfNull(request);
 
         // a call that gives no credential of its own presents the default, as it is now
-        var byDefault = request.Options.Credential is null ? Credential : null;
+        Credential? byDefault = null;
+        var isWithdrawn = false;
+
+        if (request.Options.Credential is null)
+        {
+            lock (_credentialGate)
+            {
+                (byDefault, isWithdrawn) = (_credential, _isCredentialWithdrawn);
+            }
+        }
+
+        // ! fails closed: a default withdrawn never falls to the connection's session, or to none,
+        // in silence; it fails before it goes, withdrawing nothing, until one is given again
+        if (isWithdrawn)
+        {
+            return Task.FromException<RouterResult>(new FailureException(
+                Failure.OfProtocol(ProtocolCode.SessionRequired, "the default credential was withdrawn"),
+                new FailureException.Raised(FailureOrigin.Local, RouterSide.Client))
+            {
+                DestinationId = request.Options.DestinationId,
+                ProcedureAddress = request.Procedure.Address,
+            });
+        }
+
         var options = byDefault is null ? request.Options : request.Options with { Credential = byDefault };
         var core = new CoreRequest
         {
@@ -517,8 +564,8 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     // a call that presented the default, answered SESSION_REQUIRED whatever relays it crossed,
-    // withdraws it while it is still the default: calls present none by default from then on, and
-    // the application is told its scheme, once
+    // withdraws it while it is still the default: a call that would present it fails before it goes
+    // from then on, until one is given again, and the application is told its scheme, once
     private async Task<RouterResult> Withdrawing(Task<RouterResult> call, Credential? presented)
     {
         if (presented is not { } byDefault)
@@ -542,7 +589,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
                 if (isWithdrawn)
                 {
-                    _credential = null;
+                    (_credential, _isCredentialWithdrawn) = (null, true);
                 }
             }
 
