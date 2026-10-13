@@ -9,7 +9,7 @@
     "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
-    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
+    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and trustedProxies, the HTTP server's; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
@@ -3483,7 +3483,7 @@
       ]
     },
     {
-      "name": "past the connections one address holds, behind a proxy trusted, a connect is refused 503",
+      "name": "past the connections one address holds, behind a proxy it names, a connect is refused 503",
       "clauses": [
         "15.6.13",
         "15.12",
@@ -3492,7 +3492,9 @@
       "transport": "http",
       "options": {
         "maximumConnectionsPerAddress": 1,
-        "isProxyTrusted": true
+        "trustedProxies": [
+          "127.0.0.1"
+        ]
       },
       "steps": [
         {
@@ -3545,6 +3547,374 @@
             "status": 201
           },
           "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "an X-Forwarded-For from a socket no trustedProxies entry holds is not read: every client behind that proxy is its address, past whose bound a connect is refused 503",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "192.0.2.0/24"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "behind proxies it names, the client is the rightmost X-Forwarded-For entry none of them holds, what a client wrote to its left never read",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.0/8",
+          "10.0.0.0/8"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.7, 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 203.0.113.9, 198.51.100.7, 10.0.0.6\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "198.51.100.7",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.8\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "an X-Forwarded-For entry that is no address ends the walk at the proxy that wrote it",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.1",
+          "10.0.0.0/8"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: evil, 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "10.0.0.5",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "a refusal behind a proxy it names tells the client's address, and its port the proxy's connection's",
+      "clauses": [
+        "15.6.5",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "trustedProxies": [
+          "127.0.0.1"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 203.0.113.9\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "203.0.113.9",
+              "port": "{port}"
+            }
+          },
+          "on": "rebound"
+        }
+      ]
+    },
+    {
+      "name": "an X-Forwarded-For entry is read in RFC 7239's node forms, its port dropped, and held in one form, an IPv4-mapped one as IPv4 and IPv6 as RFC 5952 writes it; a zone, a name or unknown ends the walk at the proxy",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.1"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.7:51234\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "ported"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "ported"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: ::ffff:192.0.2.7\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "mapped"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "192.0.2.7",
+              "port": "{port}"
+            }
+          },
+          "on": "mapped"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: [2001:DB8::1]:443\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "bracketed"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "bracketed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 2001:db8:0:0:0:0:0:1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "expanded"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "2001:db8::1",
+              "port": "{port}"
+            }
+          },
+          "on": "expanded"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: [2001:db8::3]\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "portless"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "portless"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 2001:db8::2%eth0\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "zoned"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "zoned"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: unknown\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "unknown"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "unknown"
         }
       ]
     },

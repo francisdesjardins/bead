@@ -6,6 +6,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 
 from bounds import DEFAULTS
 from spec_version import spec_version
@@ -200,6 +201,8 @@ def preflight(on, method, *, origin=PAGE, fields=None, target='/bead', host='{ho
 
 # a bearer credential, RFC 6750's own example, its auth-scheme included
 BEARER = 'Bearer mF_9.B5f-4.1JqM'
+# what a 503 busy carries besides its mark
+BUSY = {'retry-after': {'shape': 'delay-seconds'}}
 # what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 5)
 NO_CREDENTIAL = 'no credential came'
 
@@ -489,12 +492,43 @@ cases = [
      ['15.6.13', '15.12.1'], {'maximumConnections': 1}, [
          *drawn('first'), connect('second'),
          refused('second', 503, 'busy', {'retry-after': {'shape': 'delay-seconds'}})]),
-    ('past the connections one address holds, behind a proxy trusted, a connect is refused 503',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'isProxyTrusted': True}, [
+    ('past the connections one address holds, behind a proxy it names, a connect is refused 503',
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1']}, [
          connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
-         refused('second', 503, 'busy', {'retry-after': {'shape': 'delay-seconds'}}),
+         refused('second', 503, 'busy', BUSY),
          connect('other', fields={'x-forwarded-for': '192.0.2.2'}), expect('other', 201)]),
+    # 15.12: the client's address, walked from the right past each proxy a server names, every
+    # runner's socket on 127.0.0.1
+    ('an X-Forwarded-For from a socket no trustedProxies entry holds is not read: every client behind that proxy is its address, past whose bound a connect is refused 503',
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['192.0.2.0/24']}, [
+         connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '192.0.2.2'}), refused('second', 503, 'busy', BUSY)]),
+    ('behind proxies it names, the client is the rightmost X-Forwarded-For entry none of them holds, what a client wrote to its left never read',
+     ['15.6.13', '15.12', '15.12.2'],
+     {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.0/8', '10.0.0.0/8']}, [
+         connect('first', fields={'x-forwarded-for': '198.51.100.7, 10.0.0.5'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '203.0.113.9, 198.51.100.7, 10.0.0.6'}),
+         refused('second', 503, 'busy', BUSY),
+         connect('other', fields={'x-forwarded-for': '198.51.100.8'}), expect('other', 201)]),
+    ('an X-Forwarded-For entry that is no address ends the walk at the proxy that wrote it',
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1', '10.0.0.0/8']}, [
+         connect('first', fields={'x-forwarded-for': 'evil, 10.0.0.5'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '10.0.0.5'}), refused('second', 503, 'busy', BUSY)]),
+    ('a refusal behind a proxy it names tells the client\'s address, and its port the proxy\'s connection\'s',
+     ['15.6.5', '15.12', '15.12.2'], {'trustedProxies': ['127.0.0.1']}, [
+         connect('rebound', host='rebind.example', fields={'x-forwarded-for': '203.0.113.9'}),
+         refused('rebound', 403, 'host-refused')]),
+    ('an X-Forwarded-For entry is read in RFC 7239\'s node forms, its port dropped, and held in one form, an IPv4-mapped one as IPv4 and IPv6 as RFC 5952 writes it; a zone, a name or unknown ends the walk at the proxy',
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1']}, [
+         connect('ported', fields={'x-forwarded-for': '192.0.2.7:51234'}), expect('ported', 201),
+         connect('mapped', fields={'x-forwarded-for': '::ffff:192.0.2.7'}), refused('mapped', 503, 'busy', BUSY),
+         connect('bracketed', fields={'x-forwarded-for': '[2001:DB8::1]:443'}), expect('bracketed', 201),
+         connect('expanded', fields={'x-forwarded-for': '2001:db8:0:0:0:0:0:1'}),
+         refused('expanded', 503, 'busy', BUSY),
+         connect('portless', fields={'x-forwarded-for': '[2001:db8::3]'}), expect('portless', 201),
+         connect('zoned', fields={'x-forwarded-for': '2001:db8::2%eth0'}), expect('zoned', 201),
+         connect('unknown', fields={'x-forwarded-for': 'unknown'}), refused('unknown', 503, 'busy', BUSY)]),
     ('past the requests waiting on one connection, a request is refused 429, marked',
      ['15.6.12', '15.12.3'], {'maximumWaitingExchanges': 1}, [
          *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
@@ -1041,12 +1075,60 @@ def field_lines(head, name):
     return [line.split(': ', 1)[1] for line in head.split('\r\n')[1:] if line.lower().startswith(name + ': ')]
 
 
+def address_of_entry(entry):
+    """An X-Forwarded-For entry read as spec 15.12 reads one, in its one form, or None for an entry
+    that is no address: a bare IPv4 address, or an IPv6 address without a zone, bare or in brackets,
+    each with or without its port (RFC 7239 §6's node unquoted), the port dropped; an IPv4-mapped
+    address as its IPv4 address, an IPv6 one as RFC 5952 §4 writes it. Python's parser takes a zone
+    and neither brackets nor a port, so the grammar is read here."""
+    entry = entry.strip(' \t')
+
+    if '%' in entry:
+        return None
+
+    bracketed = re.fullmatch(r'\[([^\[\]]+)\](?::[0-9]{1,5})?', entry)
+    ported = re.fullmatch(r'([0-9.]+):[0-9]{1,5}', entry)
+    text_, family = (bracketed[1], 6) if bracketed else (ported[1], 4) if ported else (entry, None)
+
+    try:
+        address = ipaddress.ip_address(text_)
+    except ValueError:
+        return None
+
+    if family is not None and address.version != family:
+        return None
+
+    if address.version == 6 and address.ipv4_mapped is not None:
+        return str(address.ipv4_mapped)
+
+    return address.compressed
+
+
+def client_address_of(head, options):
+    """The client's address (spec 15.12): the socket's, 127.0.0.1, where every runner serves and
+    connects, then, while the address reached is one trustedProxies holds, the next X-Forwarded-For
+    entry from the right, its lines joined by ", ", when it is an address."""
+    networks = [ipaddress.ip_network(entry) for entry in (options or {}).get('trustedProxies', [])]
+    lines = field_lines(head, 'x-forwarded-for')
+    entries = ', '.join(lines).split(',') if lines else []
+    address = '127.0.0.1'
+
+    while entries and any(ipaddress.ip_address(address) in network for network in networks):
+        read = address_of_entry(entries.pop())
+
+        if read is None:
+            break
+
+        address = read
+
+    return address
+
+
 def told_of(head, status, reason, options):
     """What a server's transport tells of a refusal it judges of its own (spec 15.1), from the
     request it refused: the authority as it came, an absolute-form target's before its Host (spec
-    15.12); the Origin's lines joined by ", "; the client's address, the socket's, 127.0.0.1, where
-    every runner serves and connects, or behind a proxy trusted the last X-Forwarded-For entry when it
-    is an address; and its port, {port}, the local port of the socket the step sent from."""
+    15.12); the Origin's lines joined by ", "; the client's address, walked past the proxies the
+    server names; and its port, {port}, the local port of the socket the step sent from."""
     target = head.split('\r\n', 1)[0].split(' ')[1]
     hosts = field_lines(head, 'host')
 
@@ -1058,14 +1140,7 @@ def told_of(head, status, reason, options):
         authority = hosts[0] if hosts else None
 
     origins = field_lines(head, 'origin')
-    address = '127.0.0.1'
-    forwarded = ', '.join(field_lines(head, 'x-forwarded-for')).split(',')[-1].strip()
-
-    if (options or {}).get('isProxyTrusted') and forwarded:
-        try:
-            address = str(ipaddress.ip_address(forwarded))
-        except ValueError:
-            pass
+    address = client_address_of(head, options)
 
     return {'status': status, 'reason': reason, 'authority': authority,
             'origin': ', '.join(origins) if origins else None, 'address': address, 'port': '{port}'}
@@ -1110,7 +1185,7 @@ document = {
         'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
-        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
+        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and trustedProxies, the HTTP server\'s; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],

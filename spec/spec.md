@@ -1441,12 +1441,32 @@ is `*` or `null`, or not an origin as
 that rebinds its name to the server's address names its own `Host`, `hosts` is what refuses it,
 and, under `*`, the origin's test, which takes no origin as the server's own by a host it did not
 name: a server a browser reaches by a name names it in `hosts`. A WebSocket
-server takes both alike on an upgrade (section 15.2). A client's address is its socket's, an IPv4
-address an IPv6 socket carries mapped read as that IPv4 address
-([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)); behind a proxy on
-the same machine, which the server is told to trust, `isProxyTrusted`, it is the last entry of the
-proxy's `X-Forwarded-For`, when that entry is an address. Its port is the socket's, the proxy's
-connection's behind a proxy.
+server takes both alike on an upgrade (section 15.2).
+
+A client's address is its socket's, an IPv4 address an IPv6 socket carries mapped read as that IPv4
+address ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)). An HTTP
+server may be told the proxies it trusts, `trustedProxies`, each an IP address in the form a server
+listens on, or a network, that address followed by `/` and its prefix's length
+([RFC 4632 §3.1](https://www.rfc-editor.org/rfc/rfc4632#section-3.1),
+[RFC 4291 §2.3](https://www.rfc-editor.org/rfc/rfc4291#section-2.3)), from 1, its bits past the
+prefix zero; none when not given, the loopback among them. A server is refused as it is built any
+other entry: a name, and a network of prefix 0, which would trust what every client writes. While
+the address reached is one it trusts, the next entry of the request's `X-Forwarded-For`, its lines
+joined by ", " ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)) and read
+from the right, is the client's, when that entry is an address: an IPv4 address, or an IPv6
+address without a zone, bare, or as [RFC 7239 §6](https://www.rfc-editor.org/rfc/rfc7239#section-6)
+writes a node unquoted — an IPv4 address followed by `:` and a port, an IPv6 address in brackets,
+followed or not by `:` and a port — its port dropped. Any other entry, a zone, a name or `unknown`
+among them, or the field's end, ends the walk. Every address so read is held in one form, for its
+bound, its handle and its refusals: an IPv4-mapped address as that IPv4 address, an IPv6 address in
+the text [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952#section-4) recommends, hexadecimal
+throughout. Its port is the socket's, the nearest proxy's connection's behind one. A server reads no
+`Forwarded` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)), which a proxy that writes
+`X-Forwarded-For` would pass on as its client wrote it
+([§8.1](https://www.rfc-editor.org/rfc/rfc7239#section-8.1)). A proxy it is not told of is a client
+as any other: its clients are its address, which its bound per address counts and its refusals
+tell. A bound by address counts as one the users behind one NAT, and as many the addresses of one
+IPv6 network. A WebSocket server reads no `X-Forwarded-For`.
 
 A server listens on the IPv4 loopback, `127.0.0.1`
 ([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), unless it is given an

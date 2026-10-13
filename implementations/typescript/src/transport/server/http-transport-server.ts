@@ -2,7 +2,6 @@
 
 // dependencies
 
-import { isIP } from 'node:net';
 import {
   AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
@@ -32,7 +31,6 @@ import {
   assertListeningAddress,
   assertOrigins,
   authorityOf,
-  clientAddressOf,
   hasVisibleFields,
   HOST_REFUSAL,
   isAuthority,
@@ -46,6 +44,7 @@ import {
   requestTargetOf,
 } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
+import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import type {
   HTTPRequestListener,
   HTTPTransportServer,
@@ -271,9 +270,6 @@ const PREFLIGHT = Object.freeze({
 
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
 const PROTOCOL_ERROR = 0x1;
-
-// the addresses of this machine, from which a proxy in front of the transport comes
-const LOOPBACK: ReadonlySet<string> = new Set(['127.0.0.1', '::1']);
 
 // the 404 that tells a client its connection is gone
 const UNKNOWN_CONNECTION: IEnd = Object.freeze({
@@ -564,7 +560,6 @@ export const createHTTPTransportServer = (
     exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
     hosts,
     inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
-    isProxyTrusted = false,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
     maximumConnections = MAXIMUM_CONNECTIONS,
     maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
@@ -574,6 +569,7 @@ export const createHTTPTransportServer = (
     origins = [],
     pathname = PATHNAME,
     secure,
+    trustedProxies,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
@@ -587,6 +583,7 @@ export const createHTTPTransportServer = (
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
   assertHosts(hosts);
   assertOrigins(origins);
+  const proxies = trustedProxiesOf(trustedProxies);
 
   // what the transport keeps of each connection, by handle
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
@@ -608,22 +605,18 @@ export const createHTTPTransportServer = (
         return perAddress.get(address) ?? 0;
       };
 
-      // the client's address: the socket's, an IPv4 one mapped read as itself, or, behind a proxy on
-      // this machine the transport trusts, the last one it forwarded — an address, or nothing of it
+      // the client's address: the socket's, in the one form, or, behind proxies the transport
+      // trusts, the rightmost `X-Forwarded-For` entry none of them holds (spec 15.12)
       const addressOf = (request: IHTTPRequestLike): string | undefined => {
-        const remoteAddress =
-          request.socket.remoteAddress === undefined
-            ? undefined
-            : clientAddressOf(request.socket.remoteAddress);
-        const forwarded = headerOf(request, 'x-forwarded-for')?.split(',').at(-1)?.trim();
+        const { remoteAddress } = request.socket;
+        const lines = linesOf(request, 'x-forwarded-for');
 
-        return isProxyTrusted &&
-          remoteAddress !== undefined &&
-          LOOPBACK.has(remoteAddress) &&
-          forwarded !== undefined &&
-          isIP(forwarded) !== 0
-          ? forwarded
-          : remoteAddress;
+        return remoteAddress === undefined
+          ? undefined
+          : clientAddressOf(remoteAddress, {
+              forwarded: lines.length === 0 ? undefined : lines.join(', '),
+              trustedProxies: proxies,
+            });
       };
 
       // ends an exchange the transport answers itself, telling a refusal once written (spec 15.1);
@@ -1392,6 +1385,7 @@ export const createHTTPTransportServer = (
         gauges: () => {
           const kept = {
             buriedCallIds: 0,
+            largestAddressConnections: 0,
             largestOutboxBytes: 0,
             listens: 0,
             outboxBytes: 0,
@@ -1408,10 +1402,17 @@ export const createHTTPTransportServer = (
             kept.waitingExchanges += connection.waiting.size;
           }
 
+          // * the busiest address, under its ceiling: a proxy left off `trustedProxies` holds every
+          // connection, and the health warns before its first 503
+          for (const held of perAddress.values()) {
+            kept.largestAddressConnections = Math.max(kept.largestAddressConnections, held);
+          }
+
           return gaugesOf({
             ceilings: {
               bodyBytes: bodyBytesBudget,
               connections: maximumConnections,
+              largestAddressConnections: maximumConnectionsPerAddress,
               largestOutboxBytes: maximumOutboxBytes,
             },
             connectionHandles: drawn.keys(),

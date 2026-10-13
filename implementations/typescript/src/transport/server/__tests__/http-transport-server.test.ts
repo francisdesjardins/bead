@@ -15,6 +15,7 @@ import {
   LIMIT_DEFAULTS,
   RESERVATION_MILLISECONDS,
 } from '../../../router/shared/constants';
+import { healthOf, layerGaugesOf } from '../../../server/health';
 import { CancelError, ProgrammerError } from '../../shared/errors';
 import { createTestClock, tcpSocketsClosed, timersBy } from '../../shared/__tests__/fixtures';
 import {
@@ -30,6 +31,7 @@ import {
   LISTEN_HEADER,
   MAXIMUM_BODY_BYTES,
   MAXIMUM_CONNECTIONS,
+  MAXIMUM_CONNECTIONS_PER_ADDRESS,
   MAXIMUM_OUTBOX_BYTES,
   MAXIMUM_WAIT,
   REFUSAL_HEADER,
@@ -2107,10 +2109,11 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await server.stop();
   });
 
-  test('takes a proxy’s last forwarded address when told to, and bounds the connections of each address', async () => {
+  // spec 15.12
+  test('takes a client’s address from X-Forwarded-For only from a proxy it names, and bounds the connections of each address', async () => {
     const { connectScripted, fake, server } = await startScripted({
-      isProxyTrusted: true,
       maximumConnectionsPerAddress: 1,
+      trustedProxies: ['127.0.0.1'],
     });
     const behind = { remoteAddress: '127.0.0.1', remotePort: 40_001 };
     const drawOf = (forwarded: string, socket = behind) => {
@@ -2128,7 +2131,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ]);
     // one address, one connection
     expect(drawOf('198.51.100.7')[0]).toBe(503);
-    // what is no address is not taken, nor what a peer not on this machine forwards
+    // what is no address is not taken, nor what a peer it does not name forwards
     expect(drawOf('evil;ordinal=1')).toEqual([201, 'type=HTTP;ip=127.0.0.1;ordinal=2']);
     expect(drawOf('192.0.2.1', { remoteAddress: '10.0.0.3', remotePort: 1 })).toEqual([
       201,
@@ -2145,19 +2148,73 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await server.stop();
   });
 
+  // spec 15.12
+  test('gauges the connections its busiest address holds against maximumConnectionsPerAddress, which its health warns on at 80%', async () => {
+    const { connectScripted, fake, server } = await startScripted({
+      maximumConnectionsPerAddress: 5,
+    });
+    const none = { anomalies: [], ceilings: {}, counts: {}, orphans: 0 };
+    // a proxy no trustedProxies entry holds: every client behind it is its address
+    const proxy = '10.0.0.3';
+    let remotePort = 40_000;
+    const draw = (remoteAddress: string) => {
+      remotePort += 1;
+      connectScripted({ socket: { remoteAddress, remotePort } });
+    };
+    const checkOf = () => {
+      const gauges = server.gauges();
+
+      return healthOf({
+        router: none,
+        server: none,
+        sessions: none,
+        transport: layerGaugesOf(gauges, gauges.connectionHandles),
+      }).checks['transport:largestAddressConnections'];
+    };
+
+    expect([
+      server.gauges().counts['largestAddressConnections'],
+      server.gauges().ceilings['largestAddressConnections'],
+    ]).toEqual([0, 5]);
+
+    for (const remoteAddress of [proxy, proxy, proxy, '10.0.0.4']) {
+      draw(remoteAddress);
+    }
+
+    expect(checkOf()).toEqual([{ observedValue: 3, output: '3 of 5', status: 'pass' }]);
+    // the busiest address at 80% of its ceiling warns, before its first 503
+    draw(proxy);
+    expect(checkOf()).toEqual([{ observedValue: 4, output: '4 of 5', status: 'warn' }]);
+    draw(proxy);
+
+    const { response } = fake.exchange({
+      headers: { 'content-type': BEAD_MEDIA_TYPE },
+      socket: { remoteAddress: proxy, remotePort: 1 },
+    });
+
+    expect([response.status, response.headers?.[REFUSAL_HEADER], checkOf()]).toEqual([
+      503,
+      REFUSALS.BUSY,
+      [{ observedValue: 5, output: '5 of 5', status: 'warn' }],
+    ]);
+    await server.stop();
+    expect(server.gauges().counts['largestAddressConnections']).toBe(0);
+  });
+
   test('names a client that comes over IPv4 to a dual-stack listener by its IPv4 address', async () => {
     const server = createHTTPTransportServer({
       createServer: (listener) => {
         return createServer(listener);
       },
-      isProxyTrusted: true,
+      trustedProxies: ['127.0.0.1'],
     });
     const { port } = await server.start({ address: '::', findOpenPort: true });
     const url = `http://${host}:${String(port)}/bead`;
 
     try {
       const drawn = await connect(url, server);
-      // the socket's address, IPv4 mapped into IPv6, read as the loopback a proxy comes from
+      // the socket's address, IPv4 mapped into IPv6, read as the loopback the proxy it names comes
+      // from
       const forwarded = await post(url, { headers: { 'x-forwarded-for': '203.0.113.9' } });
 
       expect(forwarded.status).toBe(201);
@@ -3184,6 +3241,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       ceilings: {
         bodyBytes: BODY_BYTES_BUDGET,
         connections: MAXIMUM_CONNECTIONS,
+        largestAddressConnections: MAXIMUM_CONNECTIONS_PER_ADDRESS,
         largestOutboxBytes: 64,
       },
       connectionHandles: new Set([
@@ -3198,6 +3256,7 @@ test.describe('createHTTPTransportServer, listening', () => {
         buriedCallIds: 1,
         connections: 4,
         http2Sessions: 0,
+        largestAddressConnections: 3,
         largestOutboxBytes: 20,
         listens: 1,
         outboxBytes: 28,
@@ -3214,6 +3273,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       addresses: 0,
       bodyBytes: 0,
       connections: 0,
+      largestAddressConnections: 0,
       listens: 0,
       outboxBytes: 0,
       waitingExchanges: 0,
@@ -3638,7 +3698,7 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     }
 
     // on the wire, the port its client's socket came from, and the address of the loopback
-    await using started = await startTransport({ isProxyTrusted: true });
+    await using started = await startTransport({ trustedProxies: ['127.0.0.1'] });
     const wire = refusalsOf(started.server);
     const port = Number(new URL(started.url).port);
     const { answer, localPort } = await rawAnswerOf(port, rawConnectOf('rebind.example'));

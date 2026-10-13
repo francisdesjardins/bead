@@ -47,9 +47,6 @@ const IP_LITERAL = /^\[(?<literal>[^\]]*)\]$/u;
 const DEC_OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)';
 const IPV4_ADDRESS = new RegExp(`^${DEC_OCTET}(?:\\.${DEC_OCTET}){3}$`, 'u');
 
-// an IPv4 address an IPv6 socket carries mapped, as Node writes it (RFC 4291 §2.5.5.2)
-const IPV4_MAPPED = /^::ffff:(?<ipv4>\d{1,3}(?:\.\d{1,3}){3})$/iu;
-
 // a port of one digit at least
 const PORT = /^\d+$/u;
 
@@ -136,14 +133,6 @@ const isTakenByEveryServer = (host: string): boolean => {
 };
 
 // definition
-
-/**
- * A client's address as its socket gives it (spec 15.12), an IPv4 address an IPv6 socket carries
- * mapped, `::ffff:a.b.c.d`, read as that IPv4 address (RFC 4291 §2.5.5.2).
- */
-export const clientAddressOf = (socketAddress: string): string => {
-  return IPV4_MAPPED.exec(socketAddress)?.groups?.['ipv4'] ?? socketAddress;
-};
 
 /**
  * Whether `value` is RFC 3986's `IPv4address`, four `dec-octet` with no leading zero: by the

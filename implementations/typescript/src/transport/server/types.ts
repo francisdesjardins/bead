@@ -53,8 +53,9 @@ export interface ITransportServerClient {
  */
 export interface ITransportServerRefusal {
   /**
-   * The client's address, as `clients` reports one (spec 15.12): behind a proxy the transport
-   * trusts, the last it forwarded; `undefined` for a socket already gone.
+   * The client's address, as `clients` reports one (spec 15.12): over HTTP, the `X-Forwarded-For`
+   * entry reached past the proxies its `trustedProxies` names, else the socket's, in its one form;
+   * `undefined` for a socket already gone.
    */
   address: string | undefined;
   /**
@@ -64,7 +65,7 @@ export interface ITransportServerRefusal {
   authority: string | undefined;
   /** Its `Origin` as it came, its field lines joined by `, `; `undefined` when it sends none. */
   origin: string | undefined;
-  /** The client's port, as `clients` reports one: behind a proxy, its connection's. */
+  /** The client's port, as `clients` reports one: behind a proxy it trusts, the nearest one's. */
   port: number;
   /** The mark it was refused with, its `bead-refusal`: `host-refused`, `busy`… */
   reason: string;
@@ -586,12 +587,6 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * session's own timers still count what the client says. Defaults to {@link INACTIVITY_TIMEOUT}.
    */
   inactivityTimeout?: number | undefined;
-  /**
-   * Whether the address in `x-forwarded-for` — its last one — is taken for the client's, when the
-   * request comes from this machine: a proxy in front of the transport. The socket's address, when
-   * not.
-   */
-  isProxyTrusted?: boolean | undefined;
   /** The largest body, in bytes: an envelope's limit. Defaults to {@link MAXIMUM_BODY_BYTES}. */
   maximumBodyBytes?: number | undefined;
   /**
@@ -644,6 +639,19 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * loopback address.
    */
   secure?: boolean | undefined;
+  /**
+   * The proxies whose `X-Forwarded-For` the transport believes (spec 15.12): each an IP address in
+   * the form a server listens on, or a network, that address, `/` and its prefix's length (RFC 4632
+   * §3.1, RFC 4291 §2.3), from 1, its bits past the prefix zero. While the address reached is one
+   * they hold, the field's next entry from the right is the client's, when it is an address — bare,
+   * or as RFC 7239 §6 writes a node, its port dropped — held in one form, IPv4-mapped as IPv4 and
+   * IPv6 as RFC 5952 writes it. A proxy not listed is a client as any other, every client behind it
+   * its address: a told `busy` naming it, or a `largestAddressConnections` near its ceiling, is a
+   * proxy to list. None, when not given, the loopback among them. A name, and a network of prefix 0,
+   * which would trust what every client writes, are a {@link ProgrammerError} as the server is
+   * built, as is any other entry. `Forwarded` is never read.
+   */
+  trustedProxies?: readonly string[] | undefined;
 }
 
 // types

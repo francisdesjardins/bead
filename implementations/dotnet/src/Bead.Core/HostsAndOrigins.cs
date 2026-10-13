@@ -65,9 +65,14 @@ internal static class HostsAndOrigins
         });
     }
 
-    // whether what stands between an IP-literal's brackets is RFC 3986's IPv6address
-    private static bool IsIPv6Address(string text)
+    /// <summary>
+    /// Whether a string is RFC 3986's <c>IPv6address</c>, what stands between an IP-literal's
+    /// brackets: never a zone nor a prefix length, which the platform's parser takes.
+    /// </summary>
+    public static bool IsIPv6Address(string text)
     {
+        ArgumentNullException.ThrowIfNull(text);
+
         // ! the platform's parser takes a zone or a prefix length, which RFC 3986 does not: hex
         // digits, colons and dots alone reach it
         return text.Length > 0

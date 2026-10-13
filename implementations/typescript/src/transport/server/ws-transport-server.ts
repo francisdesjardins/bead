@@ -23,13 +23,9 @@ import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
-import {
-  assertHosts,
-  assertListeningAddress,
-  assertOrigins,
-  clientAddressOf,
-} from './hosts-and-origins';
+import { assertHosts, assertListeningAddress, assertOrigins } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
+import { clientAddressOf } from './trusted-proxies';
 import type {
   IIncomingMessageLike,
   IServerSocketLike,
