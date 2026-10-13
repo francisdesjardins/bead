@@ -176,12 +176,19 @@ reading ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). Ea
 names it as its envelopes do, `callId` and `connectionHandle`, `server` on a client: a call made
 once its router drew its id, which the router's `request` hands its manager through `onCallId`,
 `OnCallId`; a request received by its header's. The manager tells a call's `tx` step from its own
-flow once it holds the id, never from its router's turn. A call refused before its id is drawn
-names none, and neither does a notification, sent or heard (debugging 4.1, 4.2, 4.4). An error on a
-`tx` step says its `tx` did not go out, and why, for an answer as for a notification: an answer its
-router could not send is told again at its start with its error, and a resolver that failed before
-it answered tells a step of no answer with what it failed with; the `PROCEDURE_FAILED` that goes in
-their place is the envelopes' to tell. A call answered nothing tells no failure (debugging 4.2,
+flow once it holds the id, never from its router's turn. A call refused before its id is drawn names
+none, and neither does a notification, sent or heard (debugging 4.1, 4.2, 4.4). An error on a `tx`
+step says its `tx` did not go out, and why, for an answer as for a notification: an answer its
+router could not send is told again at its start with its error; an answer to a request its router
+already answered in its resolver's place, its subscription's queue past its bounds (spec 11.10), is
+told once, as its resolver answers, with the failure its router answered, which the router holds for
+its manager from the moment it answers in the resolver's place, `answeredOf`, `AnsweredOf`; and a
+resolver that failed before it answered tells a step of no answer with what it failed with. On the
+C# side, an answer that goes to its router as that router answers in the resolver's place, on its
+own thread, is told again at its start with the router's failure, as one its router could not send
+is. What goes in their place, `PROCEDURE_FAILED` or the router's own failure, is the envelopes' to
+tell. So a span a bridge makes of the step takes its status from what the call returned, as
+OpenTelemetry's RPC conventions set it. A call answered nothing tells no failure (debugging 4.2,
 4.3).
 
 **A listener's error never changes a call** (debugging 2.2 and 2.3). It is reported, as spec 9.0
@@ -225,15 +232,20 @@ has its reason:
   a family means something (debugging 8 and 10);
 - **client and server are a call's roles**, as OpenTelemetry's span kinds are: `bead_client_*`
   counts the calls a side makes, and `bead_server_*` those it answers, whatever the side;
-- **in flight is started less handled**, exact at each exposition, and no gauge is kept besides: it
-  would read that same difference at the scrape, and miss what started and ended between two
-  (debugging 8.5);
+- **in flight is started less handled**, exact within each series at its reading, and no gauge is
+  kept besides: it would read that same difference at the scrape, and miss what started and ended
+  between two (debugging 8.5). A registry reads each series' counts once, its handled before its
+  started, and writes every line of it from that reading, so its `_count` is the sum of its handled
+  counts (debugging 11.2); across series, a side that counts from several threads reads each at its
+  own instant, as Prometheus's client libraries collect;
 - **a value a label does not know is `_OTHER`**, on every label, `code` included, as OpenTelemetry's
   `rpc.method` and `error.type` spell it; no label is ever a connection, a session, a call id, a
   destination or a credential (debugging 8);
 - **a procedure is keyed by its address, and the registry holds one name for it**: a declaration
   that names an address it holds under another name, or a name its service holds at another address,
-  is refused as it is made, as a resolver registered twice is, never on a call (debugging 7.3);
+  is refused as it is made, as a resolver registered twice is, never on a call; one of its service
+  at another revision takes the same series, since no label carries a revision and Prometheus
+  identifies a series by its name and its labels (debugging 7.3);
 - **each family's procedures have a ceiling**, `maximumProcedures`, 1,000 by default, and a
   declaration past it is refused as it is made, so `_OTHER` means a value not known, never a bound
   reached (debugging 7.4);
@@ -321,9 +333,14 @@ pass it: a declaration past the ceiling is refused as the side is built. Each fa
 of the codes its exits can end with, and no series waits at 0 for a code its exits never reach.
 
 **A declaration can be refused.** A resolver registered, or a requester made, under a name the
-registry holds at another address, at an address it holds under another name, or at another revision
-of a service it holds, is refused as the side is built, and so is one off section 16, by its router
-([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)).
+registry holds at another address, or at an address it holds under another name, is refused as the
+side is built, and so is one off section 16, by its router
+([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)). Two revisions of one
+service in one process, two generated copies of it say, count into the same series.
+
+**One reading costs a series' counts copied.** The C# side copies each series' counts into a
+snapshot at each exposition while its threads go on counting, and writes the series' lines from it;
+the TypeScript side reads on one thread, so its reading is one already.
 
 **Latency is not split by outcome.** A histogram carries no `outcome`, which would multiply its
 series by its five or six outcomes: a burst of quick refusals lowers its quantiles, and the handled
@@ -358,7 +375,7 @@ supervision link or a relay's, is the C side's to decide.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-five rounds. Its objections, each with the answer that holds:
+six rounds. Its objections, each with the answer that holds:
 
 ### The first round
 
@@ -420,3 +437,17 @@ five rounds. Its objections, each with the answer that holds:
 | The notifying side's new row rests on no clause, and `dropSubscriptions` sends a protocol code that a resolver's answer refuses                                                 | Accepted in part: spec 11.7, item 2, names the failure an application ends a subscription with, and debugging 10.3's row cites it. `dropSubscriptions`, `DropSubscriptions`, takes every code, as the side that hears receives one, spec 8.1 reading a code it does not name as a number: the notifying side's series take the 24 codes, `_OTHER` among them, made at 0 as its procedure is declared, with no record of the series made. Refusing a protocol code section 8 does not name, as a resolver's answer is refused one, is weighed and left.                                                                       |
 | A closure made for every request, while nobody listens, breaks debugging 3.1                                                                                                    | Accepted: no closure a request makes; each step is told behind the check that someone listens, the C# side building its answer's step in a method of its own, outside its asynchronous send, so that a request allocates nothing more, its gate's pin unmoved.                                                                                                                                                                                                                                                                                                                                                               |
 | A guard that reads a string's tokens alone misses an f-string's literal text, which Python's tokenizer gives apart                                                              | Accepted: the debug filters' generator holds every string it writes to ASCII, a character outside it as its escape, reading an f-string's and a t-string's literal parts where its tokenizer has them; an entry that names a code point holds it, and so does each fixture whose comment names one, by its index.                                                                                                                                                                                                                                                                                                            |
+
+### On the companion's 0.2.0
+
+The round that [0004](0004-one-behaviour-in-every-language.md),
+[0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md),
+[0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)
+and
+[0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)
+share, at xhigh effort, met the trace's failure answered in a resolver's place, the one reading of
+each series and the series a second revision counts into, and put no objection to them; its
+objections are those records'. Each of the three rests on a standard, and none was put to the user:
+a span's status set from the status its call returned, OpenTelemetry's RPC conventions; each metric
+collected at its own instant, Prometheus's client libraries; and a series identified by its name and
+its labels, Prometheus's.

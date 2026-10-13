@@ -63,35 +63,24 @@ public sealed class MetricsRegistryTests
 
     // spec 16.7
     [Fact]
-    public void Refuses_a_name_its_service_holds_at_another_address_in_another_case_and_a_service_at_another_revision_declaring_nothing()
+    public void Refuses_a_name_its_service_holds_at_another_address_in_another_case_declaring_nothing()
     {
         var registry = new MetricsRegistry();
         var server = registry.Give(RouterSide.Server);
-
-        string RefusalOf(Action declare)
-        {
-            return Assert.Throws<ArgumentException>(declare).Message;
-        }
 
         server.DeclareResolver(Echo with { ProcedureName = "getHTTPStatus" }, false);
 
         Assert.Equal(
             "a metrics registry holds \"getHTTPStatus\" at 1/1: \"getHttpStatus\" at 1/2 is its name at another address (Parameter 'procedure')",
-            RefusalOf(() =>
+            Assert.Throws<ArgumentException>(() =>
             {
                 server.DeclareRequester(Echo with { ProcedureId = 2, ProcedureName = "getHttpStatus" });
-            }));
-        Assert.Equal(
-            "a metrics registry holds service 1 at revision 1: \"fail\" at 1/2, revision 2, is another revision of its service (Parameter 'procedure')",
-            RefusalOf(() =>
-            {
-                server.DeclareResolver(Echo with { ProcedureId = 2, ProcedureName = "fail", ServiceRevision = 2 }, false);
-            }));
+            }).Message);
 
-        // refused, each declared nothing: the address takes another name at its service's revision,
-        // and another service holds the name at a revision of its own
+        // refused, it declared nothing: the address takes another name, and another service holds
+        // the name
         server.DeclareResolver(Echo with { ProcedureId = 2, ProcedureName = "fail" }, false);
-        server.DeclareResolver(Echo with { ServiceId = 2, ProcedureName = "getHttpStatus", ServiceRevision = 2 }, false);
+        server.DeclareResolver(Echo with { ServiceId = 2, ProcedureName = "getHttpStatus" }, false);
         Assert.Equal(
             [
                 "bead_server_call_started_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\"} 0",
@@ -102,6 +91,126 @@ public sealed class MetricsRegistryTests
             {
                 return line.StartsWith("bead_server_call_started_total{service=\"", StringComparison.Ordinal) && !line.Contains("_OTHER", StringComparison.Ordinal);
             }));
+    }
+
+    // spec 16.7
+    [Fact]
+    public void Counts_a_service_declared_at_a_second_revision_into_its_series()
+    {
+        var registry = new MetricsRegistry();
+        var first = registry.Give(RouterSide.Server);
+        var second = registry.Give(RouterSide.Server);
+        var client = registry.Give(RouterSide.Client);
+
+        // an address the registry holds, at another revision on another router, takes its series; a
+        // third revision of the service, at an address of its own, a series of its own
+        var echo = first.DeclareResolver(Echo, false);
+        var revised = second.DeclareResolver(Echo with { ServiceRevision = 2 }, false);
+        var fail = client.DeclareRequester(Echo with { ProcedureId = 2, ProcedureName = "fail", ServiceRevision = 3 });
+
+        Assert.Same(echo.Calls, revised.Calls);
+
+        echo.Calls.Start();
+        revised.Calls.Start();
+        fail.Start();
+
+        Assert.Equal(
+            [
+                "bead_client_call_started_total{service=\"1\",procedure=\"fail\",type=\"request\"} 1",
+                "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 2",
+            ],
+            registry.Exposition().Text.Split('\n').Where((line) =>
+            {
+                return line.Contains("_call_started_total{service=\"1\"", StringComparison.Ordinal);
+            }));
+    }
+
+    // debugging 8.5 and 11.2
+    [Fact]
+    public async Task Writes_each_series_from_one_reading_of_its_counts()
+    {
+        const int Threads = 4;
+        const int Readings = 200;
+
+        var registry = new MetricsRegistry();
+        var calls = registry.Give(RouterSide.Client).DeclareRequester(Echo);
+        var failed = (CallOutcome.Failure, (Failure?)Failure.OfApplication(1));
+        using var running = new CountdownEvent(Threads);
+        using var read = new CancellationTokenSource();
+
+        // * its calls counted from several threads for as long as it reads, each ending in its own
+        // bucket and column, by turns
+        var counting = Task.WhenAll(Enumerable.Range(0, Threads).Select((_) =>
+        {
+            return Task.Factory.StartNew(
+                () =>
+                {
+                    running.Signal();
+
+                    for (var call = 0; !read.IsCancellationRequested; call += 1)
+                    {
+                        calls.Start();
+                        calls.End(call % 2 == 0 ? (CallOutcome.Result, null) : failed, call % 1_000);
+                    }
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+        }));
+
+        Assert.True(running.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+
+        for (var reading = 0; reading < Readings; reading += 1)
+        {
+            HoldsOneReading(registry.Exposition().Text);
+        }
+
+        await read.CancelAsync();
+        await counting.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // once nobody counts, every call started ended
+        var (started, handled) = HoldsOneReading(registry.Exposition().Text);
+
+        Assert.True(started > 0);
+        Assert.Equal(started, handled);
+    }
+
+    // what one reading of the echo series holds, its started count and the sum of its handled
+    // counts: its started count never below its handled counts, its _count and its +Inf bucket their
+    // sum, and its buckets rising to it
+    private static (long Started, long Handled) HoldsOneReading(string text)
+    {
+        const string Labels = "{service=\"1\",procedure=\"echo\",type=\"request\"";
+
+        long CountOf(string line)
+        {
+            return long.Parse(line[(line.LastIndexOf(' ') + 1)..], System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var lines = text.Split('\n');
+        var started = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_started_total{Labels}", StringComparison.Ordinal);
+        }).Select(CountOf).Single();
+        var handled = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_handled_total{Labels}", StringComparison.Ordinal);
+        }).Sum(CountOf);
+        var buckets = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_duration_seconds_bucket{Labels}", StringComparison.Ordinal);
+        }).Select(CountOf).ToList();
+        var count = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_duration_seconds_count{Labels}", StringComparison.Ordinal);
+        }).Select(CountOf).Single();
+
+        Assert.True(started >= handled, $"started {started}, below its handled counts' {handled}");
+        Assert.Equal(handled, count);
+        Assert.Equal(handled, buckets[^1]);
+        Assert.Equal(buckets.Order(), buckets);
+
+        return (started, handled);
     }
 
     [Fact]
@@ -141,7 +250,7 @@ public sealed class MetricsRegistryTests
 
     // spec 16.7
     [Fact]
-    public void A_router_refuses_a_resolver_its_registry_refuses_registering_nothing_and_a_manager_a_requester_as_it_is_made_its_names_folded_and_its_service_at_one_revision()
+    public void A_router_refuses_a_resolver_its_registry_refuses_registering_nothing_and_a_manager_a_requester_as_it_is_made_its_names_folded()
     {
         var registry = new MetricsRegistry();
 
@@ -165,17 +274,6 @@ public sealed class MetricsRegistryTests
         });
 
         Assert.Contains("is its name at another address", renamed.Message, StringComparison.Ordinal);
-
-        // its service at another revision
-        var revised = Assert.Throws<ArgumentException>(() =>
-        {
-            services.GetRequestResolver(Echo with { ProcedureId = 3, ProcedureName = "slow", ServiceRevision = 4 }, dependencies)((_, response) =>
-            {
-                return response.Answer("slow");
-            });
-        });
-
-        Assert.Contains("is another revision of its service", revised.Message, StringComparison.Ordinal);
 
         // registered nothing: its address is free, for its own name
         services.GetRequestResolver(Echo with { ProcedureId = 2, ProcedureName = "twice" }, dependencies)((_, response) =>

@@ -616,6 +616,9 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       return transport;
     },
 
+    answeredOf: (request) => {
+      return core.answeredOf(request);
+    },
     declareRequester: (procedure) => {
       checkDeclaration(procedure);
       checkProcedureKind(procedure, 'server-requester');

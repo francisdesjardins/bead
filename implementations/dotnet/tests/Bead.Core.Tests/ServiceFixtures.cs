@@ -316,6 +316,11 @@ internal sealed class InterceptingRouter(IRouterLike router) : IRouterLike
         return router.Subscribe(target);
     }
 
+    public Failure? AnsweredOf(AnswerTarget target)
+    {
+        return router.AnsweredOf(target);
+    }
+
     public bool HasNotification(INotificationLike notification)
     {
         return router.HasNotification(notification);

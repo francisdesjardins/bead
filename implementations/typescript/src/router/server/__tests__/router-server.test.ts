@@ -4091,7 +4091,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
       return answersOf(scripted.sent.splice(0));
     };
 
-    return { ...scripted, errors, release, resolver, router, sentSince };
+    return { ...scripted, errors, release, resolver, router, sentSince, services };
   };
 
   /** The queued counts of `router`'s gauges. */
@@ -4273,6 +4273,57 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     expect(sentSince()).toEqual([[first, EnvelopeKind.NOTIFICATION, 5, 'd']]);
     expect(router.notifications.subscriptions()).toEqual([
       { callId: 5, connectionHandle: first, procedureId: 5, serviceId: 2 },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  // debugging 4.2
+  test('tells the failure its router answered in the resolver’s place', async () => {
+    const { deliver, errors, release, resolver, router, sentSince, services } = createPaced({
+      pacing: { maximumQueuedNotifications: 1 },
+    });
+    // the steps of the call in flight: their direction, what came in and went out, and why
+    const told: unknown[][] = [];
+
+    using _router = router;
+
+    services.on('debug', (error, { callId, direction, rx, tx }) => {
+      if (callId === 3) {
+        told.push([
+          direction,
+          rx,
+          tx,
+          error instanceof FailureError ? [error.code, error.detail, error.side] : error,
+        ]);
+      }
+    });
+    deliver(first, pacedOf(3, text.encode('hold')));
+    await sleep(0);
+
+    for (const word of ['a', 'b', 'c']) {
+      await resolver.notify(word);
+    }
+
+    release();
+    await sleep(0);
+
+    // its resolver's answer goes nowhere, told once with the failure that went in its place
+    expect(sentSince()).toEqual([
+      [first, EnvelopeKind.NOTIFICATION, 3, 'a'],
+      [first, 'failure', 3, ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect(told).toEqual([
+      ['rx', 'hold', undefined, null],
+      [
+        'tx',
+        'hold',
+        'ok',
+        [
+          ProtocolCode.CAPACITY_EXCEEDED,
+          'the notifications queued for call 3 went past their bounds',
+          'server',
+        ],
+      ],
     ]);
     expect(errors).toEqual([]);
   });
@@ -4708,7 +4759,7 @@ test.describe('createRouterServer, its metrics', () => {
   });
 
   // spec 16.7
-  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded and its service at one revision', () => {
+  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded', () => {
     const { transport } = createScriptedTransport();
     using router = createRouterServer(transport, {
       clock: createTestClock(),
@@ -4729,15 +4780,6 @@ test.describe('createRouterServer, its metrics', () => {
     }).toThrow(
       new ProgrammerError(
         'the metrics registry holds "echo" at 2/1, and is given "eCHO" at 2/2: its name at another address'
-      )
-    );
-
-    // its service at another revision
-    expect(() => {
-      resolve({ ...echo, procedureId: 3, procedureName: 'slow', serviceRevision: 4 });
-    }).toThrow(
-      new ProgrammerError(
-        'the metrics registry holds service 2 at revision 3, and is given 2/3 at revision 4: another revision of its service'
       )
     );
 

@@ -165,6 +165,9 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
     clock,
     failures: failureTableOf(side),
 
+    answeredOf: () => {
+      return undefined;
+    },
     declareRequester: (procedure) => {
       calls.declareRequester.push(procedure.procedureName);
 

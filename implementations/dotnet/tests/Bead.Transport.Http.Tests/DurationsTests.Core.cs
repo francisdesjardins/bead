@@ -616,6 +616,11 @@ public sealed partial class DurationsTests
             return Task.FromResult(target.Header.CallId);
         }
 
+        public Failure? AnsweredOf(AnswerTarget target)
+        {
+            return null;
+        }
+
         public bool HasNotification(INotificationLike notification)
         {
             return false;

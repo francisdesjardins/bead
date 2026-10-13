@@ -80,7 +80,6 @@ const {
 const REASONS: readonly string[] = [
   'another name at its address',
   'its name at another address',
-  'another revision of its service',
   'past the ceiling',
 ];
 

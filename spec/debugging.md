@@ -119,11 +119,14 @@ them, since its call may still read what it changed.
 
 A `tx` step with an error says that its `tx` did not go out, and why: a notification that could not
 go; an answer its router could not send, past its limit say, told again at its start with what its
-router refused it with; or none, from a resolver that failed before it answered, with what it failed
-with. A request whose answer did not go is answered `PROCEDURE_FAILED` in its place (`spec.md` 9.5,
-12.1), which the trace of envelopes tells (5.1). A call cancelled, gone with its connection, or
-whose router was disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a
-resolver that fails once it answered.
+router refused it with; an answer to a request its router already answered in its resolver's place,
+as its subscription's queue went past its bounds (`spec.md` 11.10), told once, as its resolver
+answers, with the failure its router answered it with; or none, from a resolver that failed before
+it answered, with what it failed with. A request whose answer did not go is answered
+`PROCEDURE_FAILED` in its place (`spec.md` 9.5, 12.1), unless its router answered it first, which
+the trace of envelopes tells (5.1). A call cancelled, gone with its connection, or whose router was
+disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a resolver that fails
+once it answered.
 
 4.3. A request refused by its admission, or whose admission fails, answered `PROCEDURE_FAILED`
 (`spec.md` 9.2, step 5), or whose payload does not decode, is not traced: no step of it was told,
@@ -244,17 +247,18 @@ and the clients that build a router pass on. One registry given to two routers s
 3. as a notification is registered, on the side that hears, to the notification families.
 
 7.3. A registry keys a procedure by its address, its service id and its procedure id, whichever
-families declare it, and holds one name for it and one revision for its service: a declaration of
-an address it holds under the same name takes the same series. A router refuses first what
-`spec.md` section 16.10 refuses. A side MUST refuse a declaration as it is made, never on a call, as
-it refuses a resolver registered twice, for the first of these reasons that applies, in their order:
+families declare it, and holds one name for it: a declaration of an address it holds under the same
+name takes the same series, and so does one of its service at another revision, which no label
+carries (section 8.1), as Prometheus identifies a series by its name and its labels. A router
+refuses first what `spec.md` section 16.10 refuses. A side MUST refuse a declaration as it is made,
+never on a call, as it refuses a resolver registered twice, for the first of these reasons that
+applies, in their order:
 
-| Reason                            | A declaration that names                                                       |
-| --------------------------------- | ------------------------------------------------------------------------------ |
-| `another name at its address`     | an address the registry holds under another name, one by `spec.md` 16.6 or not |
-| `its name at another address`     | a name its service holds at another address, the two one by `spec.md` 16.6     |
-| `another revision of its service` | a service the registry holds at another revision                               |
-| `past the ceiling`                | one procedure more than its families name at most (7.4)                        |
+| Reason                        | A declaration that names                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `another name at its address` | an address the registry holds under another name, one by `spec.md` 16.6 or not |
+| `its name at another address` | a name its service holds at another address, the two one by `spec.md` 16.6     |
+| `past the ceiling`            | one procedure more than its families name at most (7.4)                        |
 
 A declaration refused declares nothing.
 
@@ -342,10 +346,13 @@ dropped by a failure: a protocol code by its name in section 8 of `spec.md`, `AC
 section 8 names none of, `_OTHER`; a procedure's own failure, `application`. A label left out is
 written nowhere, as Prometheus reads an empty one.
 
-8.5. What is under way is a family's started count less its handled counts, exact at each
-exposition: a family's `_handled_total` is written, and its counts read, before its
-`_started_total`, as their names order them, so the difference never reads below 0. No gauge is
-kept besides.
+8.5. What is under way is a started count less the handled counts of its `service`, `procedure` and
+`type`, exact within each series at its reading: a registry reads the counts of each `service`,
+`procedure` and `type` of a role once, its handled counts before its started count, and writes each
+of their lines from that one reading, so the difference never reads below 0. Across series, a side
+that counts from several threads reads each at its own instant, as Prometheus's client libraries
+collect. A family's `_handled_total` is written before its `_started_total`, as their names order
+them. No gauge is kept besides.
 
 ## 9. The gates
 
@@ -471,7 +478,7 @@ binary fraction drops no microsecond, 0.3 ms less 0.2 ms reading 100 µs; the C#
 ticks over 10.
 
 11.2. Every call that ends is observed, whatever its outcome, so a series' `_count` is the sum of
-its handled counts.
+its handled counts, each series at one reading (section 8.5).
 
 11.3. The buckets are A66's, its 0 included: 41 bounds and `+Inf`, 42 buckets, from 0 to 100 s. A
 duration of _d_ µs falls in every bucket whose bound, in microseconds, is _d_ or more: an integer

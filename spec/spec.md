@@ -1488,9 +1488,11 @@ lower-case one, compared character by character, and nothing else changed: `getH
 16.7. A side SHOULD declare each address — a service id and a procedure id — under one name,
 written the same each time, even where another spelling is one name by section 16.6; each name of a
 service at one address, two names one by section 16.6; and each service at one revision, for as
-long as it runs. A side that counts its calls MUST refuse a declaration that does not
-(`debugging.md` section 7.3). A filter's word reaches the procedures of its name in every service
-(`debugging.md` section 6.5).
+long as it runs. A side that counts its calls MUST refuse a declaration of an address under another
+name, or of a name of its service at another address (`debugging.md` section 7.3); one of a service
+at another revision counts into its series, which no label tells apart (`debugging.md` section
+8.1). A filter's word reaches the procedures of its name in every service (`debugging.md` section
+6.5).
 
 16.8. Within a service, an id or a name a release declared SHOULD stay its declaration's in every
 later release, or be reserved, and never be declared for another: so a peer built against an earlier

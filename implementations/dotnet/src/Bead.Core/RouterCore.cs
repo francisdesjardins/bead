@@ -79,6 +79,11 @@ public sealed class RouterCore : IDisposable
     // the handler each request was routed to, by the very header dispatched
     private readonly ConditionalWeakTable<RequestHeader, IRequestHandler> _handlers = [];
 
+    // the failure each request dispatched was answered with, by the very header dispatched: one its
+    // router answered in its resolver's place, which its resolver's answer tells (spec/debugging.md
+    // 4.2); read from the resolver's thread
+    private readonly ConditionalWeakTable<RequestHeader, Failure> _failuresAnswered = [];
+
     // what it counts through, at its gates: its router's; none when its router was given no registry
     private readonly RouterSeries? _metrics;
 
@@ -934,6 +939,11 @@ public sealed class RouterCore : IDisposable
 
         // its answer going out: a second goes nowhere, and this one closes the call once done
         _answeringCalls.Answer(target);
+
+        if (answering is not null && response.Failure is { } answeredWith)
+        {
+            _failuresAnswered.AddOrUpdate(header, answeredWith);
+        }
 
         try
         {
@@ -2316,6 +2326,19 @@ public sealed class RouterCore : IDisposable
         {
             return Deliver(envelope, connectionHandle);
         });
+    }
+
+    /// <summary>
+    /// The failure the call of a request this side dispatched was answered with, kept once its call
+    /// closed: so its resolver, answering after it, finds the failure its router answered in its
+    /// place. None for a request answered otherwise, not yet answered, or never dispatched. From any
+    /// thread.
+    /// </summary>
+    public Failure? AnsweredOf(AnswerTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target.Header);
+
+        return _failuresAnswered.TryGetValue(target.Header, out var failure) ? failure : null;
     }
 
     /// <summary>Whether the call of a request is still to be answered; on the core's scheduler alone.</summary>

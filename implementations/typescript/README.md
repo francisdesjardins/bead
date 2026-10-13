@@ -976,10 +976,12 @@ and came in, decoded and copied; and what it failed with, a failure by its code,
 detail. A call made and its answer, a request received once admitted and decoded and the answer it
 sends, a notification sent or heard: each is a step. An error on a `tx` step says its `tx` did not
 go out, and why: a notification that could not go; an answer its router could not send, told again
-at its start with what its router refused it with; or none, from a resolver that failed before it
-answered, with what it failed with. The `PROCEDURE_FAILED` that goes in their place is the
-envelopes' to tell, and a call answered nothing — cancelled, gone with its connection, its router
-disposed — tells no failure. Each router's own `debug` tells each envelope
+at its start with what its router refused it with; an answer to a request its router already
+answered in its resolver's place, as its subscription's queue went past its bounds, told once with
+the failure its router answered, which its router's `answeredOf` gives the manager; or none, from a
+resolver that failed before it answered, with what it failed with. The `PROCEDURE_FAILED` that goes
+in their place is the envelopes' to tell, and a call answered nothing — cancelled, gone with its
+connection, its router disposed — tells no failure. Each router's own `debug` tells each envelope
 (section 5), out once it is written within its bound, in once it reads: its direction, its
 connection — `server` on a client — and a copy of its header, which carries its credential's scheme
 in place of its credential.
@@ -1056,10 +1058,10 @@ given to two routers sums them. It counts what its side declares: each resolver 
 notification registered, and each requester made — `getRequest`'s, `getCommand`'s, a
 notification's — which the service manager declares to its router through `declareRequester` as it
 makes it, each of its calls carrying the series the declaration gave back. The registry keys a
-procedure by its address and holds one name for it, and one revision for each service: a
-declaration of an address it holds under another name, of a name its service holds at another
-address — two names one when they are equal once their ASCII letters are read in one case (spec
-16.6) — or of a service at another revision than it holds, is a `ProgrammerError` as it is made,
+procedure by its address and holds one name for it; a service declared at another revision counts
+into the same series, which no label tells apart. A declaration of an address it holds under
+another name, or of a name its service holds at another address — two names one when they are equal
+once their ASCII letters are read in one case (spec 16.6) — is a `ProgrammerError` as it is made,
 never on a call, and so is one past `maximumProcedures`, the procedures each group of families names
 at most, 1,000 by default. Its router refuses first, whatever its registry, a declaration off
 section 16: an id or a revision out of its range, a procedure's name off its form, or a procedure
@@ -1086,11 +1088,12 @@ commands among them, and `bead_server_*` those it answers. A series is labelled 
 service's id in decimal, and `procedure`, its name; a call's, by its `type`, `request` or
 `command`; a call ended, by its `outcome` — `result`, `failure`, `timeout`, `cancelled`, `closed` or
 `error` — and a failure by its `code`: the protocol's name for it, `application` for a procedure's
-own, `_OTHER` for one the protocol names none of. What is under way is a family's started count less
-its handled counts, exact at each exposition, and no gauge is kept besides. A duration is whole
-microseconds, in the 42 buckets of gRPC's A66, from 0 to 100 s, each bound written as Prometheus 3
-stores it. Node reads its monotonic clock finer than a microsecond; a browser coarsens it to 100 µs,
-or 5 µs once cross-origin isolated, and the buckets under that hold zeros.
+own, `_OTHER` for one the protocol names none of. What is under way is a series' started count less
+its handled counts, each series written from one reading of its counts, so the difference never
+reads below 0 and its `_count` is the sum of its handled counts; no gauge is kept besides. A
+duration is whole microseconds, in the 42 buckets of gRPC's A66, from 0 to 100 s, each bound written
+as Prometheus 3 stores it. Node reads its monotonic clock finer than a microsecond; a browser
+coarsens it to 100 µs, or 5 µs once cross-origin isolated, and the buckets under that hold zeros.
 
 `exposition()` writes every series the registry holds in the Prometheus text format 0.0.4, and gives
 its media type with it: `{ contentType, text }`, `contentType` being `METRICS_CONTENT_TYPE`,

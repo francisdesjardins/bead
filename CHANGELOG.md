@@ -214,6 +214,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A server's transport, as the server gives it, carries `error` and `refusal` alike, so an
   application hears both through `server.transport`, `server.Transport`, whichever transport it
   built: `IServerTransportLike` gains `error` and `refusal`, and `IServerTransport` gains `Error`.
+- A router tells its service manager the failure it answered a request with in its resolver's
+  place: `IRouterLike` gains `answeredOf`, `AnsweredOf` on the C# side, which a router of the
+  application's own implements (decision 0013).
 
 ### Removed
 
@@ -257,6 +260,19 @@ archive` writing a submodule as an empty folder.
 - `debugging.md` 8.1 names where its families part from OpenTelemetry's RPC conventions, and the
   shape their `_handled_total` families take; each of its references to a unit of `spec.md` names
   it.
+- The C# exposition reads each series' counts once, its handled before its started, and writes the
+  series' lines from that reading, so its `_count` is the sum of its handled counts and its started
+  never below them at every exposition; `debugging.md` 8.5 and 11.2 state each series at one
+  reading, and across series each at its own instant (decision 0013).
+- The trace tells the failure a router answered in the resolver's place: a `tx` step whose request
+  its router already answered, its subscription's queue past its bounds, carries the
+  `CAPACITY_EXCEEDED` it answered, where it told an answer with no error (`debugging.md` 4.2;
+  decision 0013).
+- A registry counts a service declared at a second revision into its series, where it refused it:
+  `spec.md` 16.7's MUST holds one name an address and one address a name, its SHOULD one revision a
+  service, and `debugging.md` 7.3 no longer refuses `another revision of its service`, its
+  `past the ceiling` now 7.3.3. `metrics.json` plays a service at three revisions on three routers,
+  and its schema drops the reason (decision 0017).
 
 ### Security
 

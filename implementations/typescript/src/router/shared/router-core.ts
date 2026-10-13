@@ -427,6 +427,9 @@ export const createRouterCore = <Handle extends string>(
   // the call's session each request was admitted in, by the very header dispatched, for what its
   // answer does first
   const callSessions = new WeakMap<IRequestHeader, ICallSession>();
+  // the failure each request dispatched was answered with, by the very header dispatched: one its
+  // router answered in its resolver's place, which its resolver's answer tells (debugging 4.2)
+  const failuresAnswered = new WeakMap<IRequestHeader, IFailure>();
 
   let isDisposed = false;
 
@@ -1015,6 +1018,10 @@ export const createRouterCore = <Handle extends string>(
 
     // its answer going out: a second goes nowhere, and this one closes the call once done
     answeringCalls.answer({ connectionHandle, header });
+
+    if (controller !== undefined && response.failure !== undefined) {
+      failuresAnswered.set(header, response.failure);
+    }
 
     // a whole answer ends its call as its transport has it
     const ending =
@@ -1901,6 +1908,10 @@ export const createRouterCore = <Handle extends string>(
     },
     get limits() {
       return limits;
+    },
+
+    answeredOf: ({ header }) => {
+      return failuresAnswered.get(header);
     },
 
     cancel,
