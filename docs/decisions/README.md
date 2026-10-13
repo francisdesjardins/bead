@@ -87,6 +87,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 | [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                    | A transport draws each connection's handle, and gives none twice                                                                        | accepted |
 | [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)         | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII             | accepted |
 | [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)               | An HTTP server answers CORS to the origins it names, and to no other                                                                    | accepted |
+| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                | accepted |
 
 ### Time
 

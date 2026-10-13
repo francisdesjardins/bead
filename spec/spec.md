@@ -41,7 +41,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0025](../docs/decisions/0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md): a
   connection's handle, section 15;
 - [0027](../docs/decisions/0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md):
-  CORS over HTTP, to the origins a server names, section 15.
+  CORS over HTTP, to the origins a server names, section 15;
+- [0029](../docs/decisions/0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md): a
+  listen's cursor and wait in fields, section 15.9.
 
 **Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is

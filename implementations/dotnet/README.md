@@ -97,6 +97,9 @@ A field value that holds a control character other than HTAB, or a character pas
 answered 400 unmarked before anything else of the request is judged, at both transports, as HTTP
 answers a malformed field (spec 15.12): Kestrel refuses an octet that is no UTF-8 and takes a
 control character, which the transport refuses; over HTTP/2, its stream reset, `PROTOCOL_ERROR`.
+So is one whose value starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed
+over HTTP/2, where Kestrel hands it on and the transport resets its stream; over HTTP/1.1 the parser
+strips it first (RFC 9110 §5.5).
 
 A request names its authority by its target when the target is in absolute-form, `http://` or
 `https://` in lower case, its `Host` judged as one field line alone, which an HTTP/1.0 request may
@@ -130,9 +133,14 @@ them taking every page that sends it and, over HTTP, letting each read every ans
 no `Origin` comes from no page, and is taken.
 
 Over HTTP, the server answers CORS to the origins `Origins` names and to no other (spec 15.12):
-their preflight is answered, allowing `Authorization` and any other field, and every answer to them
-names their origin and exposes every field, so a page of a listed origin connects, calls, listens
-and presents `ELSEWHERE` in `Authorization`. No answer carries `Access-Control-Allow-Credentials`:
+their preflight is answered, allowing `Authorization`, the fields it asks for and any other
+field — `access-control-allow-headers` naming `authorization`, then its
+`Access-Control-Request-Headers` as they came, its lines joined by `", "`, then `*`, so a browser
+that caches names and no wildcard keeps the answer too — and every answer to them names their
+origin and exposes every field, so a page of a listed origin connects, calls, listens and presents
+`ELSEWHERE` in `Authorization`. Every exchange of a connection goes to its one URL, a listen's
+cursor and wait in `bead-after` and `bead-wait`, which a browser's preflight cache keys, so a page
+preflights its connection's opening and not each listen. No answer carries `Access-Control-Allow-Credentials`:
 no cookie goes across origins, and a `fetch` given to the TypeScript side's client must not use
 `credentials: 'include'`. A gateway in front that answers CORS for the path stops, or replaces the
 fields rather than appends them, once the server lists the origin: two `Access-Control-Allow-Origin`

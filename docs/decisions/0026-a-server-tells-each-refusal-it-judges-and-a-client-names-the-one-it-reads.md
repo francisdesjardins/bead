@@ -117,16 +117,19 @@ argument as the handle when it is a string, `''` otherwise, as the C# guard read
 event's argument `as string`; the C# `Error` carries the empty handle for a `Refusal` listener's
 throw alone, never for the server's own failure.
 
-**A request's field values are visible ASCII, spaces and tabs** (spec 15.12): one that holds a
-control character other than HTAB, DEL among them, or an octet past ASCII is answered 400 unmarked
-over HTTP/1.1, its stream reset over HTTP/2, before the transport judges anything else of it, at
-both transports. Under [0004](0004-one-behaviour-in-every-language.md)'s rule, where one side takes
-Y and the other Y and Z, every one takes Y: Y is what both servers take. Each side writes the 400
-its server does not, the C# side for a control character Kestrel took, the TypeScript side for an
-octet past ASCII Node took, as its server writes its own, with none of the fields every response on
-the path carries
-([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)). So
-every string a refusal carries is printable, and the same on both sides.
+**A request's field values are visible ASCII, spaces and tabs, and none at either end of a value**
+(spec 15.12; [RFC 9113 §8.2.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.1)): one that
+holds a control character other than HTAB, DEL among them, or an octet past ASCII is answered 400
+unmarked over HTTP/1.1, its stream reset over HTTP/2, before the transport judges anything else of
+it, at both transports; one that starts or ends with a space or a tab has its stream reset over
+HTTP/2 alike, HTTP/1.1's parsers stripping that whitespace first
+([0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)). Under
+[0004](0004-one-behaviour-in-every-language.md)'s rule, where one side takes Y and the other Y and
+Z, every one takes Y: Y is what both servers take. Each side writes the 400 its server does not, the
+C# side for a control character Kestrel took, the TypeScript side for an octet past ASCII Node took,
+as its server writes its own, with none of the fields every response on the path carries
+([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)). So every
+string a refusal carries is printable, and the same on both sides.
 
 **A client names the status and the reason of a refusal it reads** (spec 15.6): the HTTP connect,
 "the server drew no connection: {status} {reason}", an unmarked status by its number alone; the
@@ -154,12 +157,13 @@ since a token guessed is a request refused; the operator reads the restart's ech
 **A request holding a control character in a field, which the C# side took, or an octet past ASCII,
 which the TypeScript side took, is refused 400 on both.**
 
-**Over HTTP/2, each platform answers part of it before its transport reads the request**:
-Node's HTTP/2 parser, nghttp2, drops a field whose value holds a control character, so the
-TypeScript side's transport judges the request without it, where the C# side's resets the stream;
-Kestrel ends the session, `GOAWAY`, on an octet that is no UTF-8, where the TypeScript side's
-transport resets the stream. A platform row of `docs/support.md` names both; neither takes a
-request past what one without the field would be.
+**Over HTTP/2, each platform answers part of it before its transport reads the request**: Node's
+HTTP/2 parser, nghttp2, drops a field whose value holds a control character, so the TypeScript
+side's transport judges the request without it, where the C# side's resets the stream, and so does
+it drop a value padded at either end unless the application's `createServer` is given
+`strictFieldWhitespaceValidation: false`; Kestrel ends the session, `GOAWAY`, on an octet that is no
+UTF-8, where the TypeScript side's transport resets the stream. A platform row of `docs/support.md`
+names both; neither takes a request past what one without the field would be.
 
 **A page's WebSocket still learns nothing but its close**: its server's tell is what says why.
 
@@ -183,7 +187,9 @@ connect named with its reason. `docs/support.md` names them.
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 one round, which
 [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) shares for
-the address a server listens on. Its objections, each with the answer that holds:
+the address a server listens on; a field value's ends met it in
+[0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)'s round, which keeps its
+objections and answers. Its objections, each with the answer that holds:
 
 ### On a refusal told and the default listening address
 

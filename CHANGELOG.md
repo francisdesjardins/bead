@@ -50,10 +50,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `clean` in `beadc.yaml`, buf's opt-in removal of what `generate` no longer writes.
 - An HTTP server answers CORS to the origins `origins`, `Origins`, names, and to no other, on both
   sides: their preflight is answered 204, `Access-Control-Allow-Methods: GET, POST, DELETE`,
-  `Access-Control-Allow-Headers: authorization, *`, `Access-Control-Max-Age: 7200`; every answer to
-  them once their origin is judged names it and exposes every field. A page of a listed origin now
-  connects, calls and listens over HTTP, as it did over WebSocket, its tracing's fields among its
-  requests, and presents `ELSEWHERE` in `Authorization`, which HTTP alone carries (spec 15.12;
+  `Access-Control-Allow-Headers` naming `Authorization` and the names the preflight asks, then `*`,
+  so a browser that caches no wildcard keeps the answer, `Access-Control-Max-Age: 7200`; every
+  answer to them once their origin is judged names it and exposes every field. A page of a listed
+  origin now connects, calls and listens over HTTP, as it did over WebSocket, its tracing's fields
+  among its requests, and presents `ELSEWHERE` in `Authorization`, which HTTP alone carries (spec 15.12;
   decision 0027).
 - `yarn test:browser`, on the TypeScript side, in a Playwright config of its own: a page Chromium
   loads from another origin calls each side's interop server over HTTP with the bundled HTTP client,
@@ -140,6 +141,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `OPTIONS` that is no preflight, and `null`; its steps of HTTP's own 400 hold it to none of the
   path's fields, over HTTP and at a WebSocket's address, and an upgrade from a taken origin to none
   of CORS's.
+- A listen over HTTP carries its cursor and its wait in the fields `bead-after` and `bead-wait`, at
+  the connection's one URL, on both sides; a listen without `bead-after` is refused 400
+  `malformed`, and no exchange's query is read. A page of another origin preflights its
+  connection's opening, not every batch (spec 15.9; decision 0029).
+- `bead-after`, `bead-wait`, `bead-listen` and `bead-sequence` are read as RFC 9651 Items, their
+  parameters ignored.
+- `spec.md` 15.9 states the listen's fields and their grammar, 15.8 `bead-listen` as an Item, 15.6's
+  400 a listen without `bead-after`, and 15.12 a field value's ends and the preflight's
+  `Access-Control-Allow-Headers`. `transports.json` writes every listen's counts in its fields and
+  adds two cases over HTTP, a count in two field lines or as a list, and a listen without
+  `bead-after` whatever its target holds; the case of a count that does not parse widens to RFC
+  9651's grammar, its parameters ignored, and `bead-listen`'s case to a parameter.
 
 - `--except <RULE>@<scope>` names a finding's subject of the rule's kind; a pointer is refused, and
   so is `--except WAIVER_UNUSED`. `SERVICE_SAME_HOOKS` finds once a hook, and `RESERVED_NO_DELETE`'s
@@ -165,6 +178,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Over HTTP/2, a request whose field value starts or ends with a space or a tab is malformed on both
+  sides, its stream reset `PROTOCOL_ERROR` (RFC 9113 §8.2.1); the C# side took it and read the
+  value padded.
 - On the C# side, HTTP's own 400 at an HTTP server's path carries no `Cache-Control` nor
   `X-Content-Type-Options`, as the TypeScript side's, Node's and Kestrel's own never did.
 - A `.proto` message marked `deprecated` no longer fails a C# consumer's build through beadc's file,
