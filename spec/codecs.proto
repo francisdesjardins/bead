@@ -1,13 +1,22 @@
 // The fixed message the proto rows of spec/codecs.json read and write, as each side's stock
 // generator writes its code.
-syntax = "proto3";
+edition = "2023";
 
 package bead.codecs.v1;
 
+// text and number as proto3 reads them: one not given reads as unset
+option features.field_presence = IMPLICIT;
+
 // A string, a number and a message of its own kind: what a proto row reads, refuses, or writes,
-// and how deep it nests.
+// and how deep it nests. Then the records protobuf frames otherwise: a packed run, a repeated
+// fixed32, a map's entries, and a group. Their numbers start at 10, leaving 4 to 6, 9 and 15 to the
+// rows that read a field Probe does not declare.
 message Probe {
   string text = 1;
   uint32 number = 2;
   Probe child = 3;
+  repeated uint32 counts = 10;
+  repeated fixed32 stamps = 11;
+  map<string, Probe> children = 12;
+  Probe delimited = 13 [features.message_encoding = DELIMITED];
 }
